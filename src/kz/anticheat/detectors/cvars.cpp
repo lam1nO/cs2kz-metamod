@@ -13,10 +13,19 @@
 
 CConVarRef<bool> sv_cheats("sv_cheats");
 
+// cybershoke: master-switch анти-чита. 0 = детекторы не запускаются (разрешены
+// помощник-бинды: нуллы/-w; раны пишутся локально), для non-global "нуб"-серверов.
+// По умолчанию 1 = поведение upstream. Серверный cvar (не sv_cheats-сёлдж).
+CConVar<bool> kz_anticheat("kz_anticheat", FCVAR_NONE, "Run cs2kz anti-cheat detectors (0 = off; allow assist binds on non-global servers)", true);
+
 // Checks for sv_cheats protected commands will only kick in after this delay
 
 bool KZAnticheatService::ShouldRunDetections() const
 {
+	if (!kz_anticheat.Get())
+	{
+		return false;
+	}
 	if (!sv_cheats.IsValidRef() || !sv_cheats.IsConVarDataAvailable())
 	{
 		return true;
