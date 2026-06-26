@@ -177,10 +177,16 @@ void KZTimerModeService::OnStopTouchGround()
 	Vector velocity;
 	this->player->GetVelocity(&velocity);
 
-	// Перф (субтиковое окно sv_bhop_time_window выставляет базовый KZPlayer; перф сами не
-	// детектируем): только скорость — gokz TweakJump режет горизонталь до PERF_SPEED_CAP.
-	if (this->player->inPerf)
+	// Под legacy-прыжком (sv_legacy_jump=true) базовый KZPlayer inPerf НЕ ставит (он делает это
+	// только для modern/subtick). Поэтому детектим перф сами по времени на земле — как CKZ.
+	// Высоту полной 55.83 на бхопе даёт сам legacy-прыжок движка; здесь — только скорость и
+	// перф-высота (выравнивание origin для консистентности jumpstats).
+	f32 timeOnGround = this->player->takeoffTime - this->player->landingTime;
+	if (timeOnGround <= KZT_PERF_WINDOW && !this->player->possibleLadderHop)
 	{
+		this->player->inPerf = true;
+
+		// gokz TweakJump: режем горизонталь до PERF_SPEED_CAP (KZTimer-механика, не CKZ-логарифм).
 		f32 horizSpeed = velocity.Length2D();
 		if (horizSpeed > PERF_SPEED_CAP)
 		{
@@ -193,13 +199,8 @@ void KZTimerModeService::OnStopTouchGround()
 		// takeoffVelocity обновляем при КАЖДОМ перфе (после возможного cap),
 		// иначе при скорости ≤380 jumpstats получает устаревшее значение.
 		this->player->takeoffVelocity = velocity;
-	}
 
-	// Высоту тейкоффа нормализуем по земле на КАЖДОМ прыжке, не только на перфе: gokz полагался
-	// на движок CS:GO, а в CS2 без этого бхопы вне перф-окна (1/128) стартуют ниже → апекс ниже
-	// ваниллы. Гейт jumped — только прыжок, не падение с уступа.
-	if (this->player->jumped)
-	{
+		// Перф-высота: выровнять origin.z по поверхности земли (консистентность jumpstats, как CKZ).
 		Vector origin;
 		this->player->GetOrigin(&origin);
 		origin.z = this->player->GetGroundPosition();

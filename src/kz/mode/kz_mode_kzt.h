@@ -18,6 +18,10 @@
 #define PRE_VELMOD_MAX 1.104f // Max prestrafe velocity modifier: 250 * 1.104 = 276 u/s
 // Bhop related — gokz TweakJump: cap horizontal speed at perf to 380 u/s
 #define PERF_SPEED_CAP 380.0f
+// Perf window under legacy jump: jump within this much time after landing = perf.
+// Mode detects perf itself (base sets inPerf only for modern jump). Starting value
+// matches CKZ (BH_PERF_WINDOW); final tuning — Task 10.
+#define KZT_PERF_WINDOW 0.02f
 // Misc
 #define DUCK_SPEED_NORMAL  8.0f
 #define DUCK_SPEED_MINIMUM 6.0234375f // Equal to if you just ducked/unducked for the first time in a while
@@ -118,12 +122,11 @@ class KZTimerModeService : public KZModeService
 		(int)0,               // mp_solid_teammates
 		(int)0,               // mp_solid_enemies
 		(bool)false,          // sv_subtick_movement_view_angles
-		(bool)false,          // sv_legacy_jump       (KZT: modern/subtick jump, not legacy)
-		// Starting value; empirical tuning in Task 10.
-		// CS:GO KZTimer perf ≈ one grounded 128-tick frame (1/128 s).
-		// cs2kz window is symmetric ±(w/2) around the subtick landing point
-		// (kz_player.cpp:828-840), so we seed at 1/128 and adjust after live validation.
-		(float)0.0078125f     // sv_bhop_time_window  (= 1/128; final value: Task 10)
+		// KZT: legacy (тиковый) прыжок — даёт стабильную высоту 55.83 и на бхопе (как CKZ).
+		// Под ним база inPerf по субтиковому окну НЕ ставит — режим детектит перф сам по
+		// timeOnGround <= KZT_PERF_WINDOW (см. OnStopTouchGround).
+		(bool)true,           // sv_legacy_jump
+		(float)0.0078125f     // sv_bhop_time_window  (под legacy не используется базой; перф — по KZT_PERF_WINDOW)
 	};
 	static_assert(KZ_ARRAYSIZE(modeCvarValues) == MODECVAR_COUNT, "Array modeCvarValues length is not the same as MODECVAR_COUNT!");
 
