@@ -16,10 +16,8 @@
 #define SPEED_NORMAL 250.0f
 // KZTimer prestrafe: tick-counter velMod model (ported from gokz CalcPrestrafeVelMod)
 #define PRE_VELMOD_MAX 1.104f // Max prestrafe velocity modifier: 250 * 1.104 = 276 u/s
-// Bhop related
-#define BH_PERF_WINDOW                  0.02f // Any jump performed after landing will be a perf for this much time
-#define BH_BASE_MULTIPLIER              51.5f // Multiplier for how much speed would a perf gain in ideal scenario
-#define BH_LANDING_DECREMENT_MULTIPLIER 75.0f // How much would a non real perf impact the takeoff speed
+// Bhop related — gokz TweakJump: cap horizontal speed at perf to 380 u/s
+#define PERF_SPEED_CAP 380.0f
 // Misc
 #define DUCK_SPEED_NORMAL  8.0f
 #define DUCK_SPEED_MINIMUM 6.0234375f // Equal to if you just ducked/unducked for the first time in a while

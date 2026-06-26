@@ -173,38 +173,35 @@ void KZTimerModeService::OnStopTouchGround()
 	{
 		return;
 	}
+
+	// inPerf уже выставлен базовым KZPlayer::OnStopTouchGround по субтиковому окну
+	// sv_bhop_time_window (modern jump, sv_legacy_jump=false). Не детектируем перф сами.
+	if (!this->player->inPerf)
+	{
+		return;
+	}
+
 	Vector velocity;
 	this->player->GetVelocity(&velocity);
 
-	f32 timeOnGround = this->player->takeoffTime - this->player->landingTime;
-	// Perf
-	if (timeOnGround <= BH_PERF_WINDOW && !this->player->possibleLadderHop)
+	// gokz TweakJump: обрезать горизонтальную скорость до PERF_SPEED_CAP при перфе.
+	f32 horizSpeed = velocity.Length2D();
+	if (horizSpeed > PERF_SPEED_CAP)
 	{
-		this->player->inPerf = true;
-		// Perf speed
-		Vector2D landingVelocity2D(this->player->landingVelocity.x, this->player->landingVelocity.y);
-		landingVelocity2D.NormalizeInPlace();
-		f32 prestrafeMaxSpeed = SPEED_NORMAL * this->effectivePreVelMod;
-		float newSpeed = MAX(this->player->landingVelocity.Length2D(), this->player->takeoffVelocity.Length2D());
-		if (newSpeed > prestrafeMaxSpeed)
-		{
-			newSpeed = MIN(newSpeed, (BH_BASE_MULTIPLIER - timeOnGround * BH_LANDING_DECREMENT_MULTIPLIER) * log(newSpeed)
-				- (BH_BASE_MULTIPLIER * log(SPEED_NORMAL * PRE_VELMOD_MAX) - SPEED_NORMAL * PRE_VELMOD_MAX));
-			// Make sure it doesn't go lower than the prestrafe speed.
-			newSpeed = MAX(newSpeed, prestrafeMaxSpeed);
-		}
-		velocity.x = newSpeed * landingVelocity2D.x;
-		velocity.y = newSpeed * landingVelocity2D.y;
+		// Масштабируем горизонтальные компоненты, сохраняя направление.
+		f32 scale = PERF_SPEED_CAP / horizSpeed;
+		velocity.x *= scale;
+		velocity.y *= scale;
 		this->player->SetVelocity(velocity);
 		this->player->takeoffVelocity = velocity;
-
-		// Perf height
-		Vector origin;
-		this->player->GetOrigin(&origin);
-		origin.z = this->player->GetGroundPosition();
-		this->player->SetOrigin(origin);
-		this->player->takeoffOrigin = origin;
 	}
+
+	// Перф-высота: выровнять origin.z по поверхности земли (CS2-консистентность).
+	Vector origin;
+	this->player->GetOrigin(&origin);
+	origin.z = this->player->GetGroundPosition();
+	this->player->SetOrigin(origin);
+	this->player->takeoffOrigin = origin;
 }
 
 void KZTimerModeService::OnStartTouchGround()
