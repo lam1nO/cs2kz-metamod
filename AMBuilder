@@ -264,7 +264,47 @@ def configure_ckz(sdk, cxx):
     os.path.join(builder.sourcePath, 'src', 'kz', 'mode', 'kz_mode_ckz.cpp'),
   ]
   return ckz_binary
-  
+
+def configure_kzt(sdk, cxx):
+  kzt_binary = MMSPlugin.HL2Library(builder, cxx, f"{MMSPlugin.metadata['name']}-mode-kzt", sdk)
+
+  if kzt_binary.compiler.family == 'gcc' or kzt_binary.compiler.family == 'clang':
+    kzt_binary.compiler.defines += ['_GLIBCXX_USE_CXX11_ABI=0']
+
+  if kzt_binary.compiler.family == 'clang':
+    kzt_binary.compiler.cxxflags += ['-Wno-register', '-frtti', '-Wno-invalid-offsetof', '-Wno-parentheses']
+
+  kzt_binary.compiler.cxxincludes += [
+      os.path.join(builder.sourcePath, 'src'),
+      os.path.join(builder.sourcePath, 'hl2sdk-cs2'),
+      os.path.join(builder.sourcePath, 'hl2sdk-cs2', 'public', 'entity2'),
+      os.path.join(builder.sourcePath, 'hl2sdk-cs2', 'game', 'server'),
+  ]
+
+  if kzt_binary.compiler.target.platform == 'linux':
+    kzt_binary.compiler.postlink += [
+      os.path.join(sdk['path'], 'lib', 'linux64', 'mathlib.a'),
+    ]
+    kzt_binary.sources += [
+      'src/utils/plat_linux.cpp'
+      ]
+  elif kzt_binary.compiler.target.platform == 'windows':
+    kzt_binary.compiler.postlink += [
+      os.path.join(sdk['path'], 'lib', 'public', 'win64', 'mathlib.lib'),
+    ]
+    kzt_binary.sources += [
+      'src/utils/plat_win.cpp'
+      ]
+
+  kzt_binary.sources += [
+    os.path.join(sdk['path'], 'entity2', 'entityidentity.cpp'),
+    os.path.join(sdk['path'], 'entity2', 'entitysystem.cpp'),
+    os.path.join(builder.sourcePath, 'src', 'utils', 'schema.cpp'),
+    os.path.join(builder.sourcePath, 'src', 'utils', 'gameconfig.cpp'),
+    os.path.join(builder.sourcePath, 'src', 'kz', 'mode', 'kz_mode_kzt.cpp'),
+  ]
+  return kzt_binary
+
 def configure_abh(sdk, cxx):
   abh_binary = MMSPlugin.HL2Library(builder, cxx, f"{MMSPlugin.metadata['name']}-style-autobhop", sdk)
 
@@ -395,6 +435,7 @@ cxx = MMSPlugin.sdk_target.cxx
 binary = configure_main(sdk_target, sdk, cxx)
 # Mode binaries
 ckz_binary = configure_ckz(sdk, cxx)
+kzt_binary = configure_kzt(sdk, cxx)
 # Style binaries
 abh_binary = configure_abh(sdk, cxx)
 lgj_binary = configure_lgj(sdk, cxx)
@@ -404,6 +445,7 @@ protoc_builder = get_proto_builder(builder, sdk_target, sdk)
 
 binary.custom = [protoc_builder]
 ckz_binary.custom = [protoc_builder]
+kzt_binary.custom = [protoc_builder]
 abh_binary.custom = [protoc_builder]
 lgj_binary.custom = [protoc_builder]
 aud_binary.custom = [protoc_builder]
@@ -411,6 +453,7 @@ aud_binary.custom = [protoc_builder]
 # We have to split nodes here because they will be put into different folders.
 nodes = builder.Add(binary)
 mode_nodes = builder.Add(ckz_binary)
+kzt_nodes = builder.Add(kzt_binary)
 abh_nodes = builder.Add(abh_binary)
 lgj_nodes = builder.Add(lgj_binary)
 aud_nodes = builder.Add(aud_binary)
@@ -425,7 +468,7 @@ if builder.options.generator == 'vs':
 
 
 MMSPlugin.binaries += [nodes]
-MMSPlugin.mode_binaries += [mode_nodes]
+MMSPlugin.mode_binaries += [mode_nodes, kzt_nodes]
 MMSPlugin.style_binaries += [abh_nodes, lgj_nodes, aud_nodes]
 
 # vim: filetype=python expandtab shiftwidth=2 tabstop=8 textwidth=99
