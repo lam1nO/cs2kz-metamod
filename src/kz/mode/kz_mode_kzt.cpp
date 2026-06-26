@@ -104,11 +104,10 @@ void KZTimerModeService::Reset()
 	this->forcedUnduck = {};
 	this->postProcessMovementZSpeed = {};
 
-	this->angleHistory.RemoveAll();
-	this->leftPreRatio = {};
-	this->rightPreRatio = {};
-	this->bonusSpeed = {};
-	this->maxPre = {};
+	this->preVelMod = 1.0f;
+	this->effectivePreVelMod = 1.0f;
+	this->preTickCounter = {};
+	this->preVelModLastChange = {};
 
 	this->didTPM = {};
 	this->overrideTPM = {};
@@ -176,7 +175,6 @@ void KZTimerModeService::OnStopTouchGround()
 	}
 	Vector velocity;
 	this->player->GetVelocity(&velocity);
-	f32 speed = velocity.Length2D();
 
 	f32 timeOnGround = this->player->takeoffTime - this->player->landingTime;
 	// Perf
@@ -186,12 +184,14 @@ void KZTimerModeService::OnStopTouchGround()
 		// Perf speed
 		Vector2D landingVelocity2D(this->player->landingVelocity.x, this->player->landingVelocity.y);
 		landingVelocity2D.NormalizeInPlace();
+		f32 prestrafeMaxSpeed = SPEED_NORMAL * this->effectivePreVelMod;
 		float newSpeed = MAX(this->player->landingVelocity.Length2D(), this->player->takeoffVelocity.Length2D());
-		if (newSpeed > SPEED_NORMAL + this->GetPrestrafeGain())
+		if (newSpeed > prestrafeMaxSpeed)
 		{
-			newSpeed = MIN(newSpeed, (BH_BASE_MULTIPLIER - timeOnGround * BH_LANDING_DECREMENT_MULTIPLIER) * log(newSpeed) - BH_NORMALIZE_FACTOR);
-			// Make sure it doesn't go lower than the ground speed.
-			newSpeed = MAX(newSpeed, SPEED_NORMAL + this->GetPrestrafeGain());
+			newSpeed = MIN(newSpeed, (BH_BASE_MULTIPLIER - timeOnGround * BH_LANDING_DECREMENT_MULTIPLIER) * log(newSpeed)
+				- (BH_BASE_MULTIPLIER * log(SPEED_NORMAL * PRE_VELMOD_MAX) - SPEED_NORMAL * PRE_VELMOD_MAX));
+			// Make sure it doesn't go lower than the prestrafe speed.
+			newSpeed = MAX(newSpeed, prestrafeMaxSpeed);
 		}
 		velocity.x = newSpeed * landingVelocity2D.x;
 		velocity.y = newSpeed * landingVelocity2D.y;
@@ -306,14 +306,15 @@ void KZTimerModeService::OnProcessMovement()
 	this->RemoveCrouchJumpBind();
 	this->ReduceDuckSlowdown();
 	this->InterpolateViewAngles();
-	this->UpdateAngleHistory();
-	this->CalcPrestrafe();
+	// Update prestrafe velMod each movement tick; capture effective value for this tick
+	this->effectivePreVelMod = this->CalcPrestrafeVelMod();
 }
 
 void KZTimerModeService::OnPlayerMove()
 {
 	this->originalMaxSpeed = this->player->currentMoveData->m_flMaxSpeed;
-	this->player->currentMoveData->m_flMaxSpeed = SPEED_NORMAL + this->GetPrestrafeGain();
+	// Apply KZTimer prestrafe: effective ground max speed = SPEED_NORMAL * effectivePreVelMod
+	this->player->currentMoveData->m_flMaxSpeed = SPEED_NORMAL * this->effectivePreVelMod;
 }
 
 void KZTimerModeService::OnProcessMovementPost()
@@ -329,7 +330,7 @@ void KZTimerModeService::OnProcessMovementPost()
 	{
 		this->lastValidPlane = vec3_origin;
 	}
-	f32 velMod = this->originalMaxSpeed >= 0 ? (SPEED_NORMAL + this->GetPrestrafeGain()) / this->originalMaxSpeed : 1.0f;
+	f32 velMod = this->originalMaxSpeed > 0.0f ? (SPEED_NORMAL * this->effectivePreVelMod) / this->originalMaxSpeed : 1.0f;
 	if (this->player->GetPlayerPawn()->m_flVelocityModifier() != velMod)
 	{
 		this->player->GetPlayerPawn()->m_flVelocityModifier(velMod);
@@ -403,151 +404,130 @@ void KZTimerModeService::ReduceDuckSlowdown()
 	}
 }
 
-void KZTimerModeService::UpdateAngleHistory()
+// Ported from gokz CalcPrestrafeVelMod (KZTimerGlobal).
+// Returns the current prestrafe velocity modifier; also updates this->preVelMod.
+// Must be called once per movement tick in OnProcessMovement.
+f32 KZTimerModeService::CalcPrestrafeVelMod()
 {
-	CMoveData *mv = this->player->currentMoveData;
-	u32 oldEntries = 0;
-	FOR_EACH_VEC(this->angleHistory, i)
+	bool onGround = (this->player->GetPlayerPawn()->m_fFlags & FL_ONGROUND) != 0;
+	f32 curtime = g_pKZUtils->GetGlobals()->curtime;
+
+	if (!onGround)
 	{
-		if (this->angleHistory[i].when + PS_TURN_RATE_WINDOW < g_pKZUtils->GetGlobals()->curtime)
+		return this->preVelMod;
+	}
+
+	TurnState turning = this->player->GetTurning();
+
+	if (turning == TURN_NONE)
+	{
+		if (curtime - this->preVelModLastChange > 0.2f)
 		{
-			oldEntries++;
-			continue;
+			this->preVelMod = 1.0f;
+			this->preVelModLastChange = curtime;
 		}
-		break;
+		else if (this->preVelMod > PRE_VELMOD_MAX + 0.007f)
+		{
+			// Return without committing — intentional per gokz source
+			return PRE_VELMOD_MAX - 0.001f;
+		}
 	}
-	this->angleHistory.RemoveMultipleFromHead(oldEntries);
-	if ((this->player->GetPlayerPawn()->m_fFlags & FL_ONGROUND) == 0)
+	else if ((this->player->IsButtonPressed(IN_MOVELEFT) || this->player->IsButtonPressed(IN_MOVERIGHT))
+		&& this->player->currentMoveData->m_vecVelocity.Length2D() > 248.9f)
 	{
-		return;
+		f32 increment = (this->preVelMod > 1.04f) ? 0.001f : 0.0009f;
+
+		bool forwards = this->GetClientMovingDirection() > 0.0f;
+
+		bool goodSync = (this->player->IsButtonPressed(IN_MOVERIGHT) && turning == TURN_RIGHT)
+			|| (turning == TURN_LEFT && !forwards)
+			|| (this->player->IsButtonPressed(IN_MOVELEFT) && turning == TURN_LEFT)
+			|| (turning == TURN_RIGHT && !forwards);
+
+		if (goodSync)
+		{
+			this->preTickCounter++;
+
+			if (this->preTickCounter < 75)
+			{
+				this->preVelMod += increment;
+				if (this->preVelMod > PRE_VELMOD_MAX)
+				{
+					if (this->preVelMod > PRE_VELMOD_MAX + 0.007f)
+					{
+						this->preVelMod = PRE_VELMOD_MAX - 0.001f;
+					}
+					else
+					{
+						this->preVelMod -= 0.007f;
+					}
+				}
+				// Double increment — intentional in gokz source, preserved 1:1
+				this->preVelMod += increment;
+			}
+			else
+			{
+				this->preVelMod -= 0.0045f;
+				this->preTickCounter -= 2;
+
+				if (this->preVelMod < 1.0f)
+				{
+					this->preVelMod = 1.0f;
+					this->preTickCounter = 0;
+				}
+			}
+		}
+		else
+		{
+			this->preVelMod -= 0.04f;
+
+			if (this->preVelMod < 1.0f)
+			{
+				this->preVelMod = 1.0f;
+			}
+		}
+
+		this->preVelModLastChange = curtime;
 	}
-
-	AngleHistory *angHist = this->angleHistory.AddToTailGetPtr();
-	angHist->when = g_pKZUtils->GetGlobals()->curtime;
-	angHist->duration = g_pKZUtils->GetGlobals()->frametime;
-
-	// Not turning if velocity is null.
-	if (mv->m_vecVelocity.Length2D() == 0)
+	else
 	{
-		angHist->rate = 0;
-		return;
+		// Has strafing inputs but below speed threshold, or no strafing input
+		this->preTickCounter = 0;
+		// Return without committing — intentional per gokz source
+		return 1.0f;
 	}
 
-	// Copying from WalkMove
-	Vector forward, right, up;
-	AngleVectors(mv->m_vecViewAngles, &forward, &right, &up);
+	return this->preVelMod;
+}
 
-	f32 fmove = mv->m_flForwardMove;
-	f32 smove = -mv->m_flSideMove;
+// Ported from gokz GetClientMovingDirection (KZTimerGlobal).
+// Returns dot product of normalized velocity and normalized view direction.
+// Positive = moving forwards relative to view; negative = backwards.
+f32 KZTimerModeService::GetClientMovingDirection()
+{
+	Vector velocity;
+	this->player->GetVelocity(&velocity);
 
-	if (forward[2] != 0)
+	QAngle eyeAngles;
+	this->player->GetAngles(&eyeAngles);
+
+	// Clamp pitch to ±70 degrees, as in the gokz original
+	if (eyeAngles.x > 70.0f)
 	{
-		forward[2] = 0;
-		forward = g_pKZUtils->NormalizeVector(forward);
+		eyeAngles.x = 70.0f;
 	}
-
-	if (right[2] != 0)
+	if (eyeAngles.x < -70.0f)
 	{
-		right[2] = 0;
-		right = g_pKZUtils->NormalizeVector(right);
+		eyeAngles.x = -70.0f;
 	}
 
-	Vector wishdir;
-	for (int i = 0; i < 2; i++)
-	{
-		wishdir[i] = forward[i] * fmove + right[i] * smove;
-	}
-	wishdir[2] = 0;
+	Vector viewDir;
+	AngleVectors(eyeAngles, &viewDir, nullptr, nullptr);
 
-	wishdir = g_pKZUtils->NormalizeVector(wishdir);
-
-	if (wishdir.Length() == 0)
-	{
-		angHist->rate = 0;
-		return;
-	}
-
-	Vector velocity = mv->m_vecVelocity;
-	velocity[2] = 0;
 	velocity = g_pKZUtils->NormalizeVector(velocity);
-	QAngle accelAngle;
-	QAngle velAngle;
-	VectorAngles(wishdir, accelAngle);
-	VectorAngles(velocity, velAngle);
-	accelAngle.y = g_pKZUtils->NormalizeDeg(accelAngle.y);
-	velAngle.y = g_pKZUtils->NormalizeDeg(velAngle.y);
-	angHist->rate = g_pKZUtils->GetAngleDifference(velAngle.y, accelAngle.y, 180.0, true);
-}
+	viewDir = g_pKZUtils->NormalizeVector(viewDir);
 
-void KZTimerModeService::CalcPrestrafe()
-{
-	f32 totalDuration = 0;
-	f32 sumWeightedAngles = 0;
-	FOR_EACH_VEC(this->angleHistory, i)
-	{
-		sumWeightedAngles += this->angleHistory[i].rate * this->angleHistory[i].duration;
-		totalDuration += this->angleHistory[i].duration;
-	}
-	f32 averageRate;
-	if (totalDuration == 0)
-	{
-		averageRate = 0;
-	}
-	else
-	{
-		averageRate = sumWeightedAngles / totalDuration;
-	}
-
-	f32 rewardRate = Clamp(fabs(averageRate) / PS_MAX_REWARD_RATE, 0.0f, 1.0f) * g_pKZUtils->GetGlobals()->frametime;
-	f32 punishRate = 0.0f;
-	if (this->player->landingTime + PS_LANDING_GRACE_PERIOD < g_pKZUtils->GetGlobals()->curtime)
-	{
-		punishRate = g_pKZUtils->GetGlobals()->frametime * PS_DECREMENT_RATIO;
-	}
-
-	if (this->player->GetPlayerPawn()->m_fFlags & FL_ONGROUND)
-	{
-		// Prevent instant full pre from crouched prestrafe.
-		Vector velocity;
-		this->player->GetVelocity(&velocity);
-
-		f32 currentPreRatio;
-		if (velocity.Length2D() <= 0.0f)
-		{
-			currentPreRatio = 0.0f;
-		}
-		else
-		{
-			currentPreRatio = pow(this->bonusSpeed / PS_SPEED_MAX * SPEED_NORMAL / velocity.Length2D(), 1 / PS_RATIO_TO_SPEED) * PS_MAX_PS_TIME;
-		}
-
-		this->leftPreRatio = MIN(this->leftPreRatio, currentPreRatio);
-		this->rightPreRatio = MIN(this->rightPreRatio, currentPreRatio);
-
-		this->leftPreRatio += averageRate > PS_MIN_REWARD_RATE ? rewardRate : -punishRate;
-		this->rightPreRatio += averageRate < -PS_MIN_REWARD_RATE ? rewardRate : -punishRate;
-		this->leftPreRatio = Clamp(leftPreRatio, 0.0f, PS_MAX_PS_TIME);
-		this->rightPreRatio = Clamp(rightPreRatio, 0.0f, PS_MAX_PS_TIME);
-		this->bonusSpeed = this->GetPrestrafeGain() / SPEED_NORMAL * velocity.Length2D();
-	}
-	else
-	{
-		rewardRate = g_pKZUtils->GetGlobals()->frametime;
-		// Raise both left and right pre to the same value as the player is in the air.
-		if (this->leftPreRatio < this->rightPreRatio)
-		{
-			this->leftPreRatio = Clamp(this->leftPreRatio + rewardRate, 0.0f, rightPreRatio);
-		}
-		else
-		{
-			this->rightPreRatio = Clamp(this->rightPreRatio + rewardRate, 0.0f, leftPreRatio);
-		}
-	}
-}
-
-f32 KZTimerModeService::GetPrestrafeGain()
-{
-	return PS_SPEED_MAX * pow(MAX(this->leftPreRatio, this->rightPreRatio) / PS_MAX_PS_TIME, PS_RATIO_TO_SPEED);
+	return DotProduct(velocity, viewDir);
 }
 
 void KZTimerModeService::CheckVelocityQuantization()
@@ -1006,7 +986,17 @@ void KZTimerModeService::OnAirMove()
 void KZTimerModeService::OnAirMovePost()
 {
 	this->airMoving = false;
-	this->player->currentMoveData->m_flMaxSpeed = SPEED_NORMAL + this->GetPrestrafeGain();
+	this->player->currentMoveData->m_flMaxSpeed = SPEED_NORMAL * this->effectivePreVelMod;
+}
+
+// KZTimer air acceleration: normalize wishspeed by effectivePreVelMod to prevent double-prestrafe.
+// Ported from gokz DHooks_OnAirAccelerate_Pre.
+void KZTimerModeService::OnAirAccelerate(Vector &wishdir, f32 &wishspeed, f32 &accel)
+{
+	if (this->effectivePreVelMod > 1.0f)
+	{
+		wishspeed /= this->effectivePreVelMod;
+	}
 }
 
 void KZTimerModeService::OnWaterMove()
@@ -1016,7 +1006,7 @@ void KZTimerModeService::OnWaterMove()
 
 void KZTimerModeService::OnWaterMovePost()
 {
-	this->player->currentMoveData->m_flMaxSpeed = SPEED_NORMAL + this->GetPrestrafeGain();
+	this->player->currentMoveData->m_flMaxSpeed = SPEED_NORMAL * this->effectivePreVelMod;
 }
 
 void KZTimerModeService::OnTeleport(const Vector *newPosition, const QAngle *newAngles, const Vector *newVelocity)
