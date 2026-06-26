@@ -193,8 +193,10 @@ void KZTimerModeService::OnStopTouchGround()
 		velocity.x *= scale;
 		velocity.y *= scale;
 		this->player->SetVelocity(velocity);
-		this->player->takeoffVelocity = velocity;
 	}
+	// takeoffVelocity обновляем при КАЖДОМ перфе (после возможного cap),
+	// иначе при скорости ≤380 jumpstats получает устаревшее значение.
+	this->player->takeoffVelocity = velocity;
 
 	// Перф-высота: выровнять origin.z по поверхности земли (CS2-консистентность).
 	Vector origin;
