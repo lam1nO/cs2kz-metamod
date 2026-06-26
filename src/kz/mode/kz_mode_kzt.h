@@ -19,9 +19,9 @@
 // Bhop related — gokz TweakJump: cap horizontal speed at perf to 380 u/s
 #define PERF_SPEED_CAP 380.0f
 // Perf window under legacy jump: jump within this much time after landing = perf.
-// Mode detects perf itself (base sets inPerf only for modern jump). Starting value
-// matches CKZ (BH_PERF_WINDOW); final tuning — Task 10.
-#define KZT_PERF_WINDOW 0.02f
+// Mode detects perf itself (base sets inPerf only for modern jump). 1/128 s = ~один
+// 128-tick кадр после приземления — строгий KZTimer-перф (важное условие режима).
+#define KZT_PERF_WINDOW 0.0078125f // 1/128
 // Misc
 #define DUCK_SPEED_NORMAL  8.0f
 #define DUCK_SPEED_MINIMUM 6.0234375f // Equal to if you just ducked/unducked for the first time in a while
