@@ -174,36 +174,38 @@ void KZTimerModeService::OnStopTouchGround()
 		return;
 	}
 
-	// inPerf уже выставлен базовым KZPlayer::OnStopTouchGround по субтиковому окну
-	// sv_bhop_time_window (modern jump, sv_legacy_jump=false). Не детектируем перф сами.
-	if (!this->player->inPerf)
-	{
-		return;
-	}
-
 	Vector velocity;
 	this->player->GetVelocity(&velocity);
 
-	// gokz TweakJump: обрезать горизонтальную скорость до PERF_SPEED_CAP при перфе.
-	f32 horizSpeed = velocity.Length2D();
-	if (horizSpeed > PERF_SPEED_CAP)
+	// Перф (субтиковое окно sv_bhop_time_window выставляет базовый KZPlayer; перф сами не
+	// детектируем): только скорость — gokz TweakJump режет горизонталь до PERF_SPEED_CAP.
+	if (this->player->inPerf)
 	{
-		// Масштабируем горизонтальные компоненты, сохраняя направление.
-		f32 scale = PERF_SPEED_CAP / horizSpeed;
-		velocity.x *= scale;
-		velocity.y *= scale;
-		this->player->SetVelocity(velocity);
+		f32 horizSpeed = velocity.Length2D();
+		if (horizSpeed > PERF_SPEED_CAP)
+		{
+			// Масштабируем горизонтальные компоненты, сохраняя направление.
+			f32 scale = PERF_SPEED_CAP / horizSpeed;
+			velocity.x *= scale;
+			velocity.y *= scale;
+			this->player->SetVelocity(velocity);
+		}
+		// takeoffVelocity обновляем при КАЖДОМ перфе (после возможного cap),
+		// иначе при скорости ≤380 jumpstats получает устаревшее значение.
+		this->player->takeoffVelocity = velocity;
 	}
-	// takeoffVelocity обновляем при КАЖДОМ перфе (после возможного cap),
-	// иначе при скорости ≤380 jumpstats получает устаревшее значение.
-	this->player->takeoffVelocity = velocity;
 
-	// Перф-высота: выровнять origin.z по поверхности земли (CS2-консистентность).
-	Vector origin;
-	this->player->GetOrigin(&origin);
-	origin.z = this->player->GetGroundPosition();
-	this->player->SetOrigin(origin);
-	this->player->takeoffOrigin = origin;
+	// Высоту тейкоффа нормализуем по земле на КАЖДОМ прыжке, не только на перфе: gokz полагался
+	// на движок CS:GO, а в CS2 без этого бхопы вне перф-окна (1/128) стартуют ниже → апекс ниже
+	// ваниллы. Гейт jumped — только прыжок, не падение с уступа.
+	if (this->player->jumped)
+	{
+		Vector origin;
+		this->player->GetOrigin(&origin);
+		origin.z = this->player->GetGroundPosition();
+		this->player->SetOrigin(origin);
+		this->player->takeoffOrigin = origin;
+	}
 }
 
 void KZTimerModeService::OnStartTouchGround()
