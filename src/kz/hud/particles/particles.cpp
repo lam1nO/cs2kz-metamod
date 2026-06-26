@@ -8,7 +8,12 @@
 #include "utils/simplecmds.h"
 #include "utils/gamesystem.h"
 
+#include <vendor/mm-cs2menus/src/public/ics2menus.h>
+
 #include "tier0/memdbgon.h"
+
+// Меню-движок cs2menus (определён в kz_hud.cpp); может быть nullptr, если плагин не загружен.
+extern ICS2Menus *g_pMenus;
 
 // === Particle asset paths ============================================================
 
@@ -915,6 +920,109 @@ void KZHUDService::PrintMHUDSummary()
 	// clang-format on
 }
 
+// === Интерактивное меню kz_mhud (cs2menus) ==========================================
+
+// Описание одного тумблера меню: текст пункта, ключ pref, дефолт и lang-ключи enabled/disabled.
+// info-тег пункта = prefKey, по нему в колбэке находим строку и зовём MHUDToggle.
+struct MHUDMenuToggle
+{
+	const char *label;       // отображаемое название (без перевода — текст пункта меню)
+	const char *prefKey;     // ключ bool-pref и одновременно info-тег пункта
+	bool defaultValue;       // дефолт pref
+	const char *enabledKey;  // lang-ключ при включении
+	const char *disabledKey; // lang-ключ при выключении
+};
+
+// Таблица тумблеров. Порядок = порядок пунктов в меню.
+// Ключи/дефолты/lang-ключи синхронны с PrintMHUDSummary.
+static const MHUDMenuToggle s_mhudToggles[] = {
+	{"Speed",        "mhudSpeedEnabled",    false, "MHUD - Speed Enabled",         "MHUD - Speed Disabled"        },
+	{"Pre-speed",    "mhudPrespeedEnabled", false, "MHUD - Prespeed Enabled",      "MHUD - Prespeed Disabled"     },
+	{"Timer",        "mhudTimerEnabled",    false, "MHUD - Timer Enabled",         "MHUD - Timer Disabled"        },
+	{"Timer detail", "mhudTimerDetailed",   true,  "MHUD - Timer Detail Enabled",  "MHUD - Timer Detail Disabled" },
+	{"Keys",         "mhudKeysEnabled",     false, "MHUD - Keys Enabled",          "MHUD - Keys Disabled"         },
+	{"Keys overlap", "mhudKeysOverlap",     true,  "MHUD - Keys Overlap Enabled",  "MHUD - Keys Overlap Disabled" },
+	{"Outline",      "mhudOutline",         true,  "MHUD - Outline Enabled",       "MHUD - Outline Disabled"      },
+};
+
+// Колбэк выбора пункта. На главном потоке; НЕ трогаем меню-API (lock держится → дедлок).
+// Игрока резолвим по slot, по info-тегу (prefKey) переключаем pref и печатаем результат.
+static_function void OnMHUDMenuSelect(MenuHandle menu, int slot, int item)
+{
+	KZPlayer *p = g_pKZPlayerManager->ToPlayer(CPlayerSlot(slot));
+	if (!p)
+	{
+		return;
+	}
+	const char *key = g_pMenus->GetItemInfo(menu, item);
+	if (!key || !key[0])
+	{
+		return;
+	}
+	for (const auto &t : s_mhudToggles)
+	{
+		if (KZ_STREQ(key, t.prefKey))
+		{
+			MHUDToggle(p, t.prefKey, t.defaultValue, t.enabledKey, t.disabledKey);
+			return;
+		}
+	}
+	// Меню само закроется (SetCloseOnSelect=true); повторный !mhud покажет свежее состояние.
+}
+
+void KZHUDService::OpenMHUDMenu()
+{
+	// Гейт доступности (нужен MAM): поведение как в no-arg ветке SCMD.
+	if (!IsMHUDAvailable())
+	{
+		this->player->languageService->PrintChat(true, false, "MHUD - Unavailable");
+		return;
+	}
+	// Меню-движок не загружен → старое текстовое поведение.
+	if (g_pMenus == nullptr)
+	{
+		this->PrintMHUDSummary();
+		return;
+	}
+
+	int slot = this->player->GetPlayerSlot().Get();
+
+	// Лайфтайм: один хэндл на слот. Мы в контексте команды (не в колбэке) — безопасно пересоздавать.
+	static MenuHandle s_mhudMenu[MAXPLAYERS + 1] = {};
+	if (slot < 0 || slot > MAXPLAYERS)
+	{
+		return;
+	}
+	if (s_mhudMenu[slot] != kInvalidMenuHandle)
+	{
+		g_pMenus->DestroyMenu(s_mhudMenu[slot]);
+		s_mhudMenu[slot] = kInvalidMenuHandle;
+	}
+
+	MenuHandle m = g_pMenus->CreateMenu(MenuType::Default, "MHUD", &OnMHUDMenuSelect);
+	if (m == kInvalidMenuHandle)
+	{
+		// Не удалось создать меню — фолбэк на сводку.
+		this->PrintMHUDSummary();
+		return;
+	}
+
+	auto *opts = this->player->optionService;
+	for (const auto &t : s_mhudToggles)
+	{
+		bool on = opts->GetPreferenceBool(t.prefKey, t.defaultValue);
+		char text[64];
+		V_snprintf(text, sizeof(text), "%s: %s", t.label, on ? "on" : "off");
+		g_pMenus->AddItem(m, text, t.prefKey, false);
+	}
+
+	// Закрываем меню после выбора: избегаем stale-текста и rebuild-в-колбэке.
+	g_pMenus->SetCloseOnSelect(m, true);
+
+	s_mhudMenu[slot] = m;
+	g_pMenus->DisplayMenu(m, slot, 0);
+}
+
 // Hierarchy:
 //   kz_mhud                                  → full summary
 //   kz_mhud speed                            → toggle speed
@@ -933,15 +1041,10 @@ SCMD(kz_mhud, SCFL_HUD | SCFL_PREFERENCE)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	bool mhudAvail = KZHUDService::IsMHUDAvailable();
 
-	// kz_mhud → full summary
+	// kz_mhud → интерактивное меню (гейт доступности и фолбэк — внутри OpenMHUDMenu).
 	if (args->ArgC() < 2)
 	{
-		if (!mhudAvail)
-		{
-			player->languageService->PrintChat(true, false, "MHUD - Unavailable");
-			return MRES_SUPERCEDE;
-		}
-		player->hudService->PrintMHUDSummary();
+		player->hudService->OpenMHUDMenu();
 		return MRES_SUPERCEDE;
 	}
 

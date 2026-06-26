@@ -101,6 +101,10 @@ public:
 	// kz_mhud — prints a summary of all MHUD settings.
 	void PrintMHUDSummary();
 
+	// kz_mhud (без аргументов) — интерактивное меню тумблеров через cs2menus.
+	// Фолбэк на PrintMHUDSummary(), если меню-движок недоступен.
+	void OpenMHUDMenu();
+
 private:
 	std::string GetSpeedText(const char *language = KZ_DEFAULT_LANGUAGE);
 	std::string GetKeyText(const char *language = KZ_DEFAULT_LANGUAGE);
