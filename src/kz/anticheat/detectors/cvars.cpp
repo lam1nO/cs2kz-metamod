@@ -18,6 +18,13 @@ CConVarRef<bool> sv_cheats("sv_cheats");
 // По умолчанию 1 = поведение upstream. Серверный cvar (не sv_cheats-сёлдж).
 CConVar<bool> kz_anticheat("kz_anticheat", FCVAR_NONE, "Run cs2kz anti-cheat detectors (0 = off; allow assist binds on non-global servers)", true);
 
+// Мастер-свитч анти-чита (чистый вкл/выкл, без sv_cheats-задержки ShouldRunDetections).
+// Гейтит и детекторы, и анти-чит предупреждения в чате.
+bool KZAnticheatService::IsEnabled()
+{
+	return kz_anticheat.Get();
+}
+
 // Checks for sv_cheats protected commands will only kick in after this delay
 
 bool KZAnticheatService::ShouldRunDetections() const

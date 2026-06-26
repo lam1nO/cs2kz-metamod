@@ -188,6 +188,11 @@ void KZAnticheatService::OnClientSetup(bool isBanned)
 
 f64 KZAnticheatService::PrintWarning(CPlayerUserId userID)
 {
+	// non-global (kz_anticheat 0): не показываем анти-чит предупреждение (SOCD/скрипты — шум).
+	if (!IsEnabled())
+	{
+		return 0.0;
+	}
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
 	if (player && !player->anticheatService->printedCheaterMessage)
 	{
@@ -206,6 +211,10 @@ f64 KZAnticheatService::PrintWarning(CPlayerUserId userID)
 
 void KZAnticheatService::PrintCheaterMessage()
 {
+	if (!IsEnabled())
+	{
+		return;
+	}
 	if (this->isBanned && this->canPrintCheaterMessage && !this->printedCheaterMessage)
 	{
 		this->player->languageService->PrintChat(true, false, "Cheater Warning");

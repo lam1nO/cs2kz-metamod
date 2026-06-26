@@ -140,6 +140,7 @@ public:
 	bool isBanned = false;
 	void ClearDetectionBuffers();
 	bool ShouldRunDetections() const;
+	static bool IsEnabled(); // мастер-свитч kz_anticheat (для гейта предупреждений/детекторов)
 	static f64 PrintWarning(CPlayerUserId userID);
 
 	bool canPrintCheaterMessage = false;
