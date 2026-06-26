@@ -926,7 +926,9 @@ void KZPlayer::UpdatePlayerModelAlpha()
 		return;
 	}
 	Color ogColor = pawn->m_clrRender();
-	bool hideLegs = this->optionService->GetPreferenceBool("hideLegs");
+	// Дефолт скрытия ног — ВКЛ: свежий игрок без сохранённого выбора заходит со скрытыми ногами
+	// (мешают обзору вниз в KZ). Кто хочет — вернёт через !hidelegs. Заданный выбор не трогается.
+	bool hideLegs = this->optionService->GetPreferenceBool("hideLegs", true);
 	if (hideLegs && pawn->m_clrRender().a() == 255)
 	{
 		pawn->m_clrRender(Color(255, 255, 255, 254));
@@ -944,7 +946,8 @@ bool KZPlayer::JustTeleported(f32 threshold)
 
 void KZPlayer::ToggleHideLegs()
 {
-	this->optionService->SetPreferenceBool("hideLegs", !this->optionService->GetPreferenceBool("hideLegs", false));
+	// Дефолт true (как в apply-сайте): первый !hidelegs у свежего игрока ПОКАЗЫВАЕТ ноги.
+	this->optionService->SetPreferenceBool("hideLegs", !this->optionService->GetPreferenceBool("hideLegs", true));
 }
 
 void KZPlayer::PlayErrorSound()
