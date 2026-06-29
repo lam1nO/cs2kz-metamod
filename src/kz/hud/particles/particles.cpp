@@ -945,8 +945,9 @@ static const MHUDMenuToggle s_mhudToggles[] = {
 	{"Outline",      "mhudOutline",         true,  "MHUD - Outline Enabled",       "MHUD - Outline Disabled"      },
 };
 
-// Колбэк выбора пункта. На главном потоке; НЕ трогаем меню-API (lock держится → дедлок).
-// Игрока резолвим по slot, по info-тегу (prefKey) переключаем pref и печатаем результат.
+// Колбэк выбора пункта. На главном потоке; lock cs2menus НЕ держится в момент колбэка,
+// поэтому SetItemText безопасен. Игрока резолвим по slot, по info-тегу (prefKey)
+// переключаем pref, обновляем текст пункта вживую и печатаем результат.
 static_function void OnMHUDMenuSelect(MenuHandle menu, int slot, int item)
 {
 	KZPlayer *p = g_pKZPlayerManager->ToPlayer(CPlayerSlot(slot));
@@ -964,10 +965,15 @@ static_function void OnMHUDMenuSelect(MenuHandle menu, int slot, int item)
 		if (KZ_STREQ(key, t.prefKey))
 		{
 			MHUDToggle(p, t.prefKey, t.defaultValue, t.enabledKey, t.disabledKey);
+			// Обновляем текст пункта вживую — меню остаётся открытым (SetCloseOnSelect=false),
+			// cs2menus перерисует строку сразу после возврата из колбэка.
+			bool nowOn = p->optionService->GetPreferenceBool(t.prefKey, t.defaultValue);
+			char newText[64];
+			V_snprintf(newText, sizeof(newText), "%s: %s", t.label, nowOn ? "on" : "off");
+			g_pMenus->SetItemText(menu, item, newText);
 			return;
 		}
 	}
-	// Меню само закроется (SetCloseOnSelect=true); повторный !mhud покажет свежее состояние.
 }
 
 void KZHUDService::OpenMHUDMenu()
@@ -1016,8 +1022,8 @@ void KZHUDService::OpenMHUDMenu()
 		g_pMenus->AddItem(m, text, t.prefKey, false);
 	}
 
-	// Закрываем меню после выбора: избегаем stale-текста и rebuild-в-колбэке.
-	g_pMenus->SetCloseOnSelect(m, true);
+	// Не закрываем меню после выбора: колбэк обновляет текст пункта вживую через SetItemText.
+	g_pMenus->SetCloseOnSelect(m, false);
 
 	s_mhudMenu[slot] = m;
 	g_pMenus->DisplayMenu(m, slot, 0);
