@@ -1,4 +1,5 @@
 #include "submission.h"
+#include "cyb_emitter.h"
 #include "kz/db/kz_db.h"
 #include "kz/anticheat/kz_anticheat.h"
 #include "kz/global/kz_global.h"
@@ -149,6 +150,9 @@ RunSubmission::RunSubmission(KZPlayer *player)
 		this->local = false;
 		this->global = false;
 	}
+
+	// Отправляем ран в Cyber-инджест (fail-open, не влияет на local/global submit)
+	CybEmitter::Emit(*this);
 
 	// Snapshot previous global PBs for diff display
 	if (global)
