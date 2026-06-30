@@ -349,6 +349,12 @@ META_RES scmd::OnDispatchConCommand(ConCommandRef cmd, const CCommandContext &ct
 				}
 			}
 		}
+		// Любое сообщение с чат-триггером (!cmd) не показываем в чате — даже если
+		// команда не нашлась (тайпо/неизвестная). Подавляется и у автора (cyber).
+		if (args[1][0] == SCMD_CHAT_TRIGGER)
+		{
+			return MRES_SUPERCEDE;
+		}
 	}
 	else // Are we overriding a console command?
 	{
