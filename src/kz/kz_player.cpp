@@ -145,11 +145,9 @@ void KZPlayer::OnPlayerActive()
 	this->optionService->OnPlayerActive();
 	this->recordingService->EnsureCircularRecorderInitialized();
 
-	if (!this->IsFakeClient() && !this->IsCSTV())
-	{
-		this->languageService->PrintChat(true, false, "Beta Join Warning");
-		this->languageService->PrintChat(true, false, "Tip - website");
-	}
+	// Серверный шум в чате на коннекте отключён (cyber): бета-предупреждение
+	// ("Beta Join Warning") и ссылка на сайт ("Tip - website") не относятся
+	// к нашему проекту и убраны как лишний спам.
 }
 
 void KZPlayer::OnPlayerFullyConnect()
@@ -893,10 +891,8 @@ void KZPlayer::DisableTurnbinds()
 		angles.y = this->lastValidYaw;
 		// NOTE(GameChaos): Using SetAngles, which uses Teleport makes player movement really weird
 		g_pKZUtils->SnapViewAngles(pawn, angles);
-		if (!this->oldUsingTurnbinds)
-		{
-			this->languageService->PrintChat(true, false, "Turnbinds Disabled");
-		}
+		// Уведомление "Turnbinds Disabled" в чат убрано (cyber): сама блокировка
+		// turnbind'ов сохранена, но текстовый спам — лишний серверный шум.
 	}
 	else
 	{

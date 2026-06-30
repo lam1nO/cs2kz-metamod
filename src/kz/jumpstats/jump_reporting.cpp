@@ -355,25 +355,17 @@ void KZJumpstatsService::BroadcastJumpToChat(KZPlayer *target, Jump *jump)
 	{
 		return;
 	}
-	const char *jumpColor = distanceTierColors[tier];
-
 	DistanceTier broadcastTier = static_cast<DistanceTier>(target->optionService->GetPreferenceInt(
 		"jsBroadcastMinTier", KZOptionService::GetOptionInt("defaultJSBroadcastMinTier", DistanceTier_Ownage)));
 	bool broadcastEnabled = broadcastTier != DistanceTier_None;
 	bool validBroadcastTier = tier >= broadcastTier;
 	if (broadcastEnabled && validBroadcastTier)
 	{
-		// clang-format off
-		target->languageService->PrintChat(true, false, "Broadcast Jumpstat Chat Report", 
-			jump->GetJumpPlayer()->GetName(), 
-			jumpColor,
-			jump->GetDistance(),
-			jumpTypeStr[jump->GetReportJumpType()],
-			jump->GetJumpPlayer()->modeService->GetModeName()
-		);
+		// Бродкаст джампстата в чат отключён (cyber): дальний прыжок другого игрока
+		// больше не печатается всем в чат как серверный спам. Звук и запись в консоль
+		// оставлены — это не чат-шум и завязаны на личные настройки получателя.
 		KZJumpstatsService::PrintJumpToConsole(target, jump);
 		KZJumpstatsService::PlayJumpstatSound(target, jump, true);
-		// clang-format on
 	}
 }
 
