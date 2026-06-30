@@ -21,6 +21,16 @@ private:
 	f64 timerStoppedTime {};
 	f64 currentTimeWhenTimerStopped {};
 
+	// Источник данных для particle-MHUD. При спектировании = наблюдаемый игрок,
+	// так его HUD дублируется спектатору. nullptr → данные самого игрока.
+	KZPlayer *mhudSource {};
+
+	// Игрок, чьи данные/настройки читает MHUD (наблюдаемый при спектировании).
+	KZPlayer *MHUDSource()
+	{
+		return mhudSource ? mhudSource : this->player;
+	}
+
 public:
 	virtual void Reset() override;
 	static void Init();
@@ -79,7 +89,8 @@ public:
 			   && g_pKZUtils->GetServerGlobals()->curtime - timerStoppedTime < KZ_HUD_TIMER_STOPPED_GRACE_TIME;
 	}
 
-	void UpdateParticles();
+	// source = игрок-источник данных (наблюдаемый при спектировании); nullptr → сам игрок.
+	void UpdateParticles(KZPlayer *source = nullptr);
 
 	// Destroy all active MHUD particles (e.g. on death or disconnect).
 	void DestroyAllParticles();
@@ -110,6 +121,11 @@ private:
 	std::string GetKeyText(const char *language = KZ_DEFAULT_LANGUAGE);
 	std::string GetCheckpointText(const char *language = KZ_DEFAULT_LANGUAGE);
 	std::string GetTimerText(const char *language = KZ_DEFAULT_LANGUAGE);
+
+	// Версия C: единый HTML-center HUD (крупная скорость, ряд клавиш, CP/TP, время|стейдж).
+	// Вызывается на hudService источника данных (наблюдаемого при спектировании).
+	// suppress* — элементы, дублируемые particle-MHUD, чтобы не рисовать их дважды.
+	std::string BuildVersionCHud(bool suppressSpeed, bool suppressTimer, bool suppressKeys, const char *language);
 
 	// Control point mapping:
 	// 16 = RGB tint | 17X = sequence | 17Y = scale | 18X = X offset | 18Y = Y offset

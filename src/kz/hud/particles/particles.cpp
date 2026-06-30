@@ -73,7 +73,7 @@ static_function Color UnpackColor(i64 packed)
 
 Color KZHUDService::GetMHUDColorPref(const char *name, const Color &defaultColor)
 {
-	i64 packed = this->player->optionService->GetPreferenceInt(name, PackColor(defaultColor));
+	i64 packed = this->MHUDSource()->optionService->GetPreferenceInt(name, PackColor(defaultColor));
 	return UnpackColor(packed);
 }
 
@@ -172,37 +172,37 @@ void KZHUDService::OnClientDisconnect()
 
 bool KZHUDService::IsMHUDSpeedEnabled()
 {
-	return this->player->optionService->GetPreferenceBool("mhudSpeedEnabled", false);
+	return this->MHUDSource()->optionService->GetPreferenceBool("mhudSpeedEnabled", false);
 }
 
 bool KZHUDService::IsMHUDTimerEnabled()
 {
-	return this->player->optionService->GetPreferenceBool("mhudTimerEnabled", false);
+	return this->MHUDSource()->optionService->GetPreferenceBool("mhudTimerEnabled", false);
 }
 
 bool KZHUDService::IsMHUDKeysEnabled()
 {
-	return this->player->optionService->GetPreferenceBool("mhudKeysEnabled", false);
+	return this->MHUDSource()->optionService->GetPreferenceBool("mhudKeysEnabled", false);
 }
 
 bool KZHUDService::IsMHUDTimerDetailed()
 {
-	return this->player->optionService->GetPreferenceBool("mhudTimerDetailed", true);
+	return this->MHUDSource()->optionService->GetPreferenceBool("mhudTimerDetailed", true);
 }
 
 bool KZHUDService::IsMHUDKeysOverlapEnabled()
 {
-	return this->player->optionService->GetPreferenceBool("mhudKeysOverlap", true);
+	return this->MHUDSource()->optionService->GetPreferenceBool("mhudKeysOverlap", true);
 }
 
 bool KZHUDService::IsMHUDPrespeedEnabled()
 {
-	return this->player->optionService->GetPreferenceBool("mhudPrespeedEnabled", false);
+	return this->MHUDSource()->optionService->GetPreferenceBool("mhudPrespeedEnabled", false);
 }
 
 bool KZHUDService::IsMHUDOutlineEnabled()
 {
-	return this->player->optionService->GetPreferenceBool("mhudOutline", true);
+	return this->MHUDSource()->optionService->GetPreferenceBool("mhudOutline", true);
 }
 
 // === Speed + prespeed ===============================================================
@@ -292,15 +292,15 @@ void KZHUDService::UpdateMHUDSpeed()
 
 	const Color baseColor = this->GetMHUDColorPref("mhudSpeedColor", MHUD_DEF_BASE_COLOR);
 	const Color prespeedBaseColor = this->GetMHUDColorPref("mhudPrespeedColor", MHUD_DEF_BASE_COLOR);
-	const f32 speedOffsetX = (f32)this->player->optionService->GetPreferenceFloat("mhudSpeedOffsetX", MHUD_DEF_SPEED_OFFSET_X);
-	const f32 speedOffsetY = (f32)this->player->optionService->GetPreferenceFloat("mhudSpeedOffsetY", MHUD_DEF_SPEED_OFFSET_Y);
-	const f32 speedScale = (f32)this->player->optionService->GetPreferenceFloat("mhudSpeedScale", MHUD_DEF_SPEED_SCALE);
-	const f32 prespeedOffsetX = (f32)this->player->optionService->GetPreferenceFloat("mhudPrespeedOffsetX", MHUD_DEF_PRESPEED_OFFSET_X);
-	const f32 prespeedOffsetY = (f32)this->player->optionService->GetPreferenceFloat("mhudPrespeedOffsetY", MHUD_DEF_PRESPEED_OFFSET_Y);
-	const f32 prespeedScale = (f32)this->player->optionService->GetPreferenceFloat("mhudPrespeedScale", MHUD_DEF_PRESPEED_SCALE);
+	const f32 speedOffsetX = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudSpeedOffsetX", MHUD_DEF_SPEED_OFFSET_X);
+	const f32 speedOffsetY = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudSpeedOffsetY", MHUD_DEF_SPEED_OFFSET_Y);
+	const f32 speedScale = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudSpeedScale", MHUD_DEF_SPEED_SCALE);
+	const f32 prespeedOffsetX = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudPrespeedOffsetX", MHUD_DEF_PRESPEED_OFFSET_X);
+	const f32 prespeedOffsetY = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudPrespeedOffsetY", MHUD_DEF_PRESPEED_OFFSET_Y);
+	const f32 prespeedScale = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudPrespeedScale", MHUD_DEF_PRESPEED_SCALE);
 
 	// Lazy-create.
-	const char *font = this->player->optionService->GetPreferenceStr("mhudFont", AVAILABLE_FONTS[0]);
+	const char *font = this->MHUDSource()->optionService->GetPreferenceStr("mhudFont", AVAILABLE_FONTS[0]);
 	char fontLower[64];
 	V_strncpy(fontLower, font, sizeof(fontLower));
 	V_strlower(fontLower);
@@ -330,16 +330,17 @@ void KZHUDService::UpdateMHUDSpeed()
 		}
 	}
 
+	KZPlayer *src = this->MHUDSource();
 	Vector velocity, baseVelocity;
-	this->player->GetVelocity(&velocity);
-	this->player->GetBaseVelocity(&baseVelocity);
+	src->GetVelocity(&velocity);
+	src->GetBaseVelocity(&baseVelocity);
 	velocity += baseVelocity;
 
-	bool useTakeoff = !((this->player->GetPlayerPawn()->m_fFlags() & FL_ONGROUND
-						 && g_pKZUtils->GetServerGlobals()->curtime - this->player->landingTime > KZ_HUD_ON_GROUND_THRESHOLD)
-						|| (this->player->GetPlayerPawn()->m_MoveType() == MOVETYPE_LADDER && !player->IsButtonPressed(IN_JUMP)));
+	bool useTakeoff = !((src->GetPlayerPawn()->m_fFlags() & FL_ONGROUND
+						 && g_pKZUtils->GetServerGlobals()->curtime - src->landingTime > KZ_HUD_ON_GROUND_THRESHOLD)
+						|| (src->GetPlayerPawn()->m_MoveType() == MOVETYPE_LADDER && !src->IsButtonPressed(IN_JUMP)));
 
-	this->SetMHUDSpeedParticleVelocity(velocity, useTakeoff ? &this->player->takeoffVelocity : nullptr);
+	this->SetMHUDSpeedParticleVelocity(velocity, useTakeoff ? &src->takeoffVelocity : nullptr);
 
 	// === Color selection ==========================================================
 	// Current speed: CJ tint only (no perf indicator — prespeed handles that).
@@ -348,25 +349,25 @@ void KZHUDService::UpdateMHUDSpeed()
 	const Color jumpbugColor = this->GetMHUDColorPref("mhudPrespeedJumpbugColor", MHUD_DEF_JUMPBUG_COLOR);
 	const Color cjColor = this->GetMHUDColorPref("mhudSpeedCjColor", MHUD_DEF_CJ_COLOR);
 
-	bool perfing = this->player->IsPerfing() && !this->player->possibleLadderHop && !this->player->takeoffFromLadder;
+	bool perfing = src->IsPerfing() && !src->possibleLadderHop && !src->takeoffFromLadder;
 
-	const Color speedColor = useTakeoff && this->crouchJumping ? cjColor : baseColor;
+	const Color speedColor = useTakeoff && src->hudService->crouchJumping ? cjColor : baseColor;
 	SetParticleTint(this->speedParticles[0].Get(), speedColor);
 	SetParticleTint(this->speedParticles[1].Get(), speedColor);
 
-	const Color prespeedColor = perfing ? (this->fromDuckbug ? jumpbugColor : perfColor) : prespeedBaseColor;
+	const Color prespeedColor = perfing ? (src->hudService->fromDuckbug ? jumpbugColor : perfColor) : prespeedBaseColor;
 	SetParticleTint(this->prespeedParticles[0].Get(), prespeedColor);
 	SetParticleTint(this->prespeedParticles[1].Get(), prespeedColor);
 }
 
 void KZHUDService::SetMHUDSpeedParticleVelocity(const Vector &speed, const Vector *prespeed)
 {
-	const f32 speedOffsetX = (f32)this->player->optionService->GetPreferenceFloat("mhudSpeedOffsetX", MHUD_DEF_SPEED_OFFSET_X);
-	const f32 speedOffsetY = (f32)this->player->optionService->GetPreferenceFloat("mhudSpeedOffsetY", MHUD_DEF_SPEED_OFFSET_Y);
-	const f32 speedScale = (f32)this->player->optionService->GetPreferenceFloat("mhudSpeedScale", MHUD_DEF_SPEED_SCALE);
-	const f32 prespeedOffsetX = (f32)this->player->optionService->GetPreferenceFloat("mhudPrespeedOffsetX", MHUD_DEF_PRESPEED_OFFSET_X);
-	const f32 prespeedOffsetY = (f32)this->player->optionService->GetPreferenceFloat("mhudPrespeedOffsetY", MHUD_DEF_PRESPEED_OFFSET_Y);
-	const f32 prespeedScale = (f32)this->player->optionService->GetPreferenceFloat("mhudPrespeedScale", MHUD_DEF_PRESPEED_SCALE);
+	const f32 speedOffsetX = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudSpeedOffsetX", MHUD_DEF_SPEED_OFFSET_X);
+	const f32 speedOffsetY = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudSpeedOffsetY", MHUD_DEF_SPEED_OFFSET_Y);
+	const f32 speedScale = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudSpeedScale", MHUD_DEF_SPEED_SCALE);
+	const f32 prespeedOffsetX = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudPrespeedOffsetX", MHUD_DEF_PRESPEED_OFFSET_X);
+	const f32 prespeedOffsetY = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudPrespeedOffsetY", MHUD_DEF_PRESPEED_OFFSET_Y);
+	const f32 prespeedScale = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudPrespeedScale", MHUD_DEF_PRESPEED_SCALE);
 
 	if (this->speedParticles[0] && this->speedParticles[1])
 	{
@@ -452,10 +453,10 @@ void KZHUDService::CheckMHUDTimerParticles()
 	}
 
 	const Color tpColor = this->GetMHUDColorPref("mhudTimerTpColor", MHUD_DEF_TIMER_TP_COLOR);
-	const f32 offsetY = (f32)this->player->optionService->GetPreferenceFloat("mhudTimerOffsetY", MHUD_DEF_TIMER_OFFSET_Y);
-	const f32 scale = (f32)this->player->optionService->GetPreferenceFloat("mhudTimerScale", MHUD_DEF_TIMER_SCALE);
+	const f32 offsetY = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudTimerOffsetY", MHUD_DEF_TIMER_OFFSET_Y);
+	const f32 scale = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudTimerScale", MHUD_DEF_TIMER_SCALE);
 	char numbersPath[256], delimPath[256], fontLower[64];
-	const char *font = this->player->optionService->GetPreferenceStr("mhudFont", AVAILABLE_FONTS[0]);
+	const char *font = this->MHUDSource()->optionService->GetPreferenceStr("mhudFont", AVAILABLE_FONTS[0]);
 	V_strncpy(fontLower, font, sizeof(fontLower));
 	V_strlower(fontLower);
 	bool outline = this->IsMHUDOutlineEnabled();
@@ -495,9 +496,10 @@ void KZHUDService::UpdateMHUDTimer()
 		return; // Disabled or creation failed.
 	}
 
+	KZPlayer *src = this->MHUDSource();
 	// Determine whether to display anything at all.
-	bool timerRunning = this->player->timerService->GetTimerRunning();
-	bool showAfterStop = this->ShouldShowTimerAfterStop();
+	bool timerRunning = src->timerService->GetTimerRunning();
+	bool showAfterStop = src->hudService->ShouldShowTimerAfterStop();
 	if (!timerRunning && !showAfterStop)
 	{
 		for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(this->timerTextParticles); i++)
@@ -518,14 +520,14 @@ void KZHUDService::UpdateMHUDTimer()
 		return;
 	}
 
-	f64 time = timerRunning ? this->player->timerService->GetTime() : this->currentTimeWhenTimerStopped;
+	f64 time = timerRunning ? src->timerService->GetTime() : src->hudService->currentTimeWhenTimerStopped;
 	if (time < 0.0)
 	{
 		time = 0.0;
 	}
 
 	bool detailed = this->IsMHUDTimerDetailed();
-	bool paused = this->player->timerService->GetPaused();
+	bool paused = src->timerService->GetPaused();
 
 	// Choose layout.
 	i32 totalSeconds = (i32)time;
@@ -601,9 +603,9 @@ void KZHUDService::UpdateMHUDTimer()
 		numDelimiters = 1;
 	}
 
-	const f32 offsetX = (f32)this->player->optionService->GetPreferenceFloat("mhudTimerOffsetX", MHUD_DEF_TIMER_OFFSET_X);
-	const f32 offsetY = (f32)this->player->optionService->GetPreferenceFloat("mhudTimerOffsetY", MHUD_DEF_TIMER_OFFSET_Y);
-	const f32 scale = (f32)this->player->optionService->GetPreferenceFloat("mhudTimerScale", MHUD_DEF_TIMER_SCALE);
+	const f32 offsetX = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudTimerOffsetX", MHUD_DEF_TIMER_OFFSET_X);
+	const f32 offsetY = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudTimerOffsetY", MHUD_DEF_TIMER_OFFSET_Y);
+	const f32 scale = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudTimerScale", MHUD_DEF_TIMER_SCALE);
 
 	// Center the active pairs around offsetX.
 	// Formula: pair i of N visible pairs → (2i − (N−1)) × half_step
@@ -666,7 +668,7 @@ void KZHUDService::UpdateMHUDTimer()
 	{
 		color = this->GetMHUDColorPref("mhudTimerPausedColor", MHUD_DEF_TIMER_PAUSED_COLOR);
 	}
-	else if (this->player->checkpointService->GetTeleportCount() > 0)
+	else if (src->checkpointService->GetTeleportCount() > 0)
 	{
 		color = this->GetMHUDColorPref("mhudTimerTpColor", MHUD_DEF_TIMER_TP_COLOR);
 	}
@@ -699,11 +701,11 @@ void KZHUDService::CheckMHUDKeyParticle()
 	}
 
 	const Color color = this->GetMHUDColorPref("mhudKeysColor", MHUD_DEF_BASE_COLOR);
-	const f32 offsetX = (f32)this->player->optionService->GetPreferenceFloat("mhudKeysOffsetX", MHUD_DEF_KEYS_OFFSET_X);
-	const f32 offsetY = (f32)this->player->optionService->GetPreferenceFloat("mhudKeysOffsetY", MHUD_DEF_KEYS_OFFSET_Y);
-	const f32 scale = (f32)this->player->optionService->GetPreferenceFloat("mhudKeysScale", MHUD_DEF_KEYS_SCALE);
+	const f32 offsetX = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudKeysOffsetX", MHUD_DEF_KEYS_OFFSET_X);
+	const f32 offsetY = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudKeysOffsetY", MHUD_DEF_KEYS_OFFSET_Y);
+	const f32 scale = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudKeysScale", MHUD_DEF_KEYS_SCALE);
 	char inputsPath[256];
-	const char *font = this->player->optionService->GetPreferenceStr("mhudFont", AVAILABLE_FONTS[0]);
+	const char *font = this->MHUDSource()->optionService->GetPreferenceStr("mhudFont", AVAILABLE_FONTS[0]);
 	char fontLower[64];
 	V_strncpy(fontLower, font, sizeof(fontLower));
 	V_strlower(fontLower);
@@ -722,37 +724,38 @@ void KZHUDService::UpdateMHUDKeys()
 		return;
 	}
 
+	KZPlayer *src = this->MHUDSource();
 	u8 mask = 0;
-	if (this->player->IsButtonPressed(IN_FORWARD))
+	if (src->IsButtonPressed(IN_FORWARD))
 	{
 		mask |= Forward;
 	}
-	if (this->player->IsButtonPressed(IN_MOVELEFT))
+	if (src->IsButtonPressed(IN_MOVELEFT))
 	{
 		mask |= Left;
 	}
-	if (this->player->IsButtonPressed(IN_BACK))
+	if (src->IsButtonPressed(IN_BACK))
 	{
 		mask |= Back;
 	}
-	if (this->player->IsButtonPressed(IN_MOVERIGHT))
+	if (src->IsButtonPressed(IN_MOVERIGHT))
 	{
 		mask |= Right;
 	}
 	// Use jumpedThisTick so the J flashes only when the player actually jumped
 	// this tick, matching the existing panel HUD semantics.
-	if (this->jumpedThisTick || this->player->IsButtonPressed(IN_JUMP))
+	if (src->hudService->jumpedThisTick || src->IsButtonPressed(IN_JUMP))
 	{
 		mask |= Jump;
 	}
-	if (this->player->IsButtonPressed(IN_DUCK))
+	if (src->IsButtonPressed(IN_DUCK))
 	{
 		mask |= Duck;
 	}
 
-	const f32 offsetX = (f32)this->player->optionService->GetPreferenceFloat("mhudKeysOffsetX", MHUD_DEF_KEYS_OFFSET_X);
-	const f32 offsetY = (f32)this->player->optionService->GetPreferenceFloat("mhudKeysOffsetY", MHUD_DEF_KEYS_OFFSET_Y);
-	const f32 scale = (f32)this->player->optionService->GetPreferenceFloat("mhudKeysScale", MHUD_DEF_KEYS_SCALE);
+	const f32 offsetX = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudKeysOffsetX", MHUD_DEF_KEYS_OFFSET_X);
+	const f32 offsetY = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudKeysOffsetY", MHUD_DEF_KEYS_OFFSET_Y);
+	const f32 scale = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudKeysScale", MHUD_DEF_KEYS_SCALE);
 
 	CParticleSystem *p = this->keysParticle.Get();
 	p->SetControlPointValue(17, Vector((f32)mask, scale, 0.0f));
@@ -767,11 +770,16 @@ void KZHUDService::UpdateMHUDKeys()
 	SetParticleTint(p, tint);
 }
 
-void KZHUDService::UpdateParticles()
+void KZHUDService::UpdateParticles(KZPlayer *source)
 {
+	// Particle-entity'ы принадлежат this (получателю), но все данные/настройки
+	// читаются из mhudSource: при спектировании это наблюдаемый игрок, поэтому
+	// спектатор видит такой же particle-MHUD, как у наблюдаемого, а не свои нули.
+	this->mhudSource = (source && source != this->player) ? source : nullptr;
 	this->UpdateMHUDSpeed();
 	this->UpdateMHUDTimer();
 	this->UpdateMHUDKeys();
+	this->mhudSource = nullptr;
 }
 
 // === Command helpers ================================================================
@@ -1013,7 +1021,7 @@ void KZHUDService::OpenMHUDMenu()
 		return;
 	}
 
-	auto *opts = this->player->optionService;
+	auto *opts = this->MHUDSource()->optionService;
 	for (const auto &t : s_mhudToggles)
 	{
 		bool on = opts->GetPreferenceBool(t.prefKey, t.defaultValue);

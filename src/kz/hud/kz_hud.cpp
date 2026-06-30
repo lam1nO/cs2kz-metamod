@@ -211,13 +211,130 @@ std::string KZHUDService::GetTimerText(const char *language)
 	return std::string("");
 }
 
+// --- Версия C: палитра HUD (см. artifacts_from_outside/MovementHud.cs) ---
+#define KZ_HUD_C_ACCENT "#3AA0F5" // активная клавиша / время
+#define KZ_HUD_C_WHITE  "#FFFFFF" // скорость / основные числа
+#define KZ_HUD_C_DIM    "#5B616D" // неактивная клавиша / разделители / стейдж
+#define KZ_HUD_C_MUTED  "#9AA3AF" // подписи (U/S, CP, TP)
+
+std::string KZHUDService::BuildVersionCHud(bool suppressSpeed, bool suppressTimer, bool suppressKeys, const char *language)
+{
+	const bool isReplay = KZ::replaysystem::IsReplayBot(this->player);
+	char buf[512];
+
+	// Накапливаем строки в html, разделяя <br> только между непустыми (без висячих тегов).
+	std::string html;
+	auto addLine = [&](const std::string &line)
+	{
+		if (!html.empty())
+		{
+			html += "<br>";
+		}
+		html += line;
+	};
+
+	// --- 1. Скорость: крупное число + подпись U/S, при отрыве — престрейф-скорость
+	//        в перф/CJ-цвете (логика как в GetSpeedText). ---
+	if (!suppressSpeed)
+	{
+		Vector velocity, baseVelocity;
+		this->player->GetVelocity(&velocity);
+		this->player->GetBaseVelocity(&baseVelocity);
+		velocity += baseVelocity;
+		i32 speed = RoundFloatToInt(velocity.Length2D());
+
+		bool onGroundSettled = (this->player->GetPlayerPawn()->m_fFlags() & FL_ONGROUND
+								&& g_pKZUtils->GetServerGlobals()->curtime - this->player->landingTime > KZ_HUD_ON_GROUND_THRESHOLD)
+							   || (this->player->GetPlayerPawn()->m_MoveType() == MOVETYPE_LADDER && !this->player->IsButtonPressed(IN_JUMP));
+
+		std::string takeoff;
+		if (!onGroundSettled)
+		{
+			const Color baseCol = this->GetMHUDColorPref("mhudSpeedColor", Color(0xFF, 0xFF, 0xFF, 0xFF));
+			const Color perfCol = this->GetMHUDColorPref("mhudPrespeedPerfColor", Color(0x40, 0xFF, 0x40, 0xFF));
+			const Color jumpbugCol = this->GetMHUDColorPref("mhudPrespeedJumpbugColor", Color(0xFF, 0xFF, 0x20, 0xFF));
+			Color tintCol = baseCol;
+			if (this->player->IsPerfing() && !this->player->possibleLadderHop && !this->player->takeoffFromLadder)
+			{
+				tintCol = this->fromDuckbug ? jumpbugCol : perfCol;
+			}
+			char tk[96];
+			V_snprintf(tk, sizeof(tk), " <font color='#%02x%02x%02x'>(%d)</font>", tintCol.r(), tintCol.g(), tintCol.b(),
+					   RoundFloatToInt(this->player->takeoffVelocity.Length2D()));
+			takeoff = tk;
+			if (this->crouchJumping)
+			{
+				takeoff += " <font color='" KZ_HUD_C_ACCENT "'>C</font>";
+			}
+		}
+		V_snprintf(buf, sizeof(buf), "<font color='" KZ_HUD_C_WHITE "'>%d</font> <font color='" KZ_HUD_C_MUTED "'>U/S</font>%s", speed,
+				   takeoff.c_str());
+		addLine(buf);
+	}
+
+	// --- 2. Ряд клавиш W A S D  J C (активная — accent, неактивная — dim) ---
+	if (!suppressKeys)
+	{
+		auto key = [&](const char *label, bool down)
+		{
+			char k[64];
+			V_snprintf(k, sizeof(k), "<font color='%s'>%s</font>", down ? KZ_HUD_C_ACCENT : KZ_HUD_C_DIM, label);
+			return std::string(k);
+		};
+		bool jump = this->jumpedThisTick || this->player->IsButtonPressed(IN_JUMP);
+		std::string row = key("W", this->player->IsButtonPressed(IN_FORWARD)) + " " + key("A", this->player->IsButtonPressed(IN_MOVELEFT))
+						  + " " + key("S", this->player->IsButtonPressed(IN_BACK)) + " " + key("D", this->player->IsButtonPressed(IN_MOVERIGHT))
+						  + "&#160;&#160;" + key("J", jump) + " " + key("C", this->player->IsButtonPressed(IN_DUCK));
+		addLine(row);
+	}
+
+	// --- 3. CP/TP в стиле версии C (раньше — серый Alert-бар) ---
+	{
+		i32 cpIndex = isReplay ? KZ::replaysystem::GetCurrentCpIndex() : this->player->checkpointService->GetCurrentCpIndex();
+		i32 cpCount = isReplay ? KZ::replaysystem::GetCheckpointCount() : this->player->checkpointService->GetCheckpointCount();
+		i32 tpCount = isReplay ? KZ::replaysystem::GetTeleportCount() : (i32)this->player->checkpointService->GetTeleportCount();
+		V_snprintf(buf, sizeof(buf),
+				   "<font color='" KZ_HUD_C_MUTED "'>CP</font> <font color='" KZ_HUD_C_WHITE "'>%d/%d</font> "
+				   "<font color='" KZ_HUD_C_DIM "'>|</font> <font color='" KZ_HUD_C_MUTED "'>TP</font> <font color='" KZ_HUD_C_WHITE "'>%d</font>",
+				   cpIndex, cpCount, tpCount);
+		addLine(buf);
+	}
+
+	// --- 4. Время | STAGE n/total (время — accent, стейдж — dim) ---
+	if (!suppressTimer)
+	{
+		std::string timer = this->GetTimerText(language);
+		if (!timer.empty())
+		{
+			std::string stage;
+			if (!isReplay)
+			{
+				const KZCourseDescriptor *course = this->player->timerService->GetCourse();
+				if (course && course->stageCount > 0)
+				{
+					char st[64];
+					V_snprintf(st, sizeof(st), " <font color='" KZ_HUD_C_DIM "'>| STAGE %d/%d</font>", this->player->timerService->GetCurrentStage(),
+							   course->stageCount);
+					stage = st;
+				}
+			}
+			V_snprintf(buf, sizeof(buf), "<font color='" KZ_HUD_C_ACCENT "'>%s</font>%s", timer.c_str(), stage.c_str());
+			addLine(buf);
+		}
+	}
+
+	return html;
+}
+
 void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 {
 	// Only update/show particles for alive players when MHUD is available.
 	bool useParticles = target->IsAlive() && KZHUDService::IsMHUDAvailable();
 	if (useParticles)
 	{
-		target->hudService->UpdateParticles();
+		// player = источник данных (наблюдаемый при спектировании). Particle-MHUD
+		// спектатора рисуется по данным наблюдаемого, а не по своим нулям.
+		target->hudService->UpdateParticles(player);
 	}
 	else
 	{
@@ -236,24 +353,20 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	const char *language = target->languageService->GetLanguage();
 
 	// Per-element panel suppression: only active when the particle HUD is live.
-	bool suppressSpeed = useParticles && target->hudService->IsMHUDSpeedEnabled();
-	bool suppressTimer = useParticles && target->hudService->IsMHUDTimerEnabled();
-	bool suppressKeys = useParticles && target->hudService->IsMHUDKeysEnabled();
-
-	std::string keyText = suppressKeys ? std::string("") : player->hudService->GetKeyText(language);
-	std::string checkpointText = player->hudService->GetCheckpointText(language);
-	std::string timerText = suppressTimer ? std::string("") : player->hudService->GetTimerText(language);
-	std::string speedText = suppressSpeed ? std::string("") : player->hudService->GetSpeedText(language);
+	// Флаги читаем у источника (наблюдаемого) — particle-MHUD рисуется по его настройкам,
+	// поэтому и текстовые строки прячем по тем же флагам, иначе будет двойной рендер.
+	bool suppressSpeed = useParticles && player->hudService->IsMHUDSpeedEnabled();
+	bool suppressTimer = useParticles && player->hudService->IsMHUDTimerEnabled();
+	bool suppressKeys = useParticles && player->hudService->IsMHUDKeysEnabled();
 
 	bool compact = target->hudService->IsCompactPanel();
 
-	std::string centerText = "";
 	std::string htmlText = "";
-	std::string alertText = KZLanguageService::PrepareMessageWithLang(language, "HUD - Alert Text", keyText.c_str(), checkpointText.c_str(),
-																	  timerText.c_str(), speedText.c_str());
 
 	if (compact)
 	{
+		std::string timerText = suppressTimer ? std::string("") : player->hudService->GetTimerText(language);
+		std::string speedText = suppressSpeed ? std::string("") : player->hudService->GetSpeedText(language);
 		if (!timerText.empty() && !speedText.empty())
 		{
 			htmlText = timerText + "<br>" + speedText;
@@ -265,36 +378,13 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	}
 	else
 	{
-		centerText = KZLanguageService::PrepareMessageWithLang(language, "HUD - Center Text", keyText.c_str(), checkpointText.c_str(),
-															   timerText.c_str(), speedText.c_str());
-		htmlText = KZLanguageService::PrepareMessageWithLang(language, "HUD - Html Center Text", keyText.c_str(), checkpointText.c_str(),
-															 timerText.c_str(), speedText.c_str());
+		// Единый HUD версии C (скорость / клавиши / CP-TP / время|стейдж) одним
+		// HTML-center-блоком. Серого PrintAlert/PrintCentre-бара для CP/TP больше нет.
+		htmlText = player->hudService->BuildVersionCHud(suppressSpeed, suppressTimer, suppressKeys, language);
 	}
 
-	centerText = centerText.substr(0, centerText.find_last_not_of('\n') + 1);
-	alertText = alertText.substr(0, alertText.find_last_not_of('\n') + 1);
 	htmlText = htmlText.substr(0, htmlText.find_last_not_of('\n') + 1);
 
-	// Strip leading/trailing <br> tags left behind by suppressed MHUD elements.
-	const std::string brTag = "<br>";
-	while (htmlText.find(brTag) == 0)
-	{
-		htmlText.erase(0, brTag.size());
-	}
-	while (htmlText.size() >= brTag.size() && htmlText.rfind(brTag) == htmlText.size() - brTag.size())
-	{
-		htmlText.erase(htmlText.size() - brTag.size());
-	}
-
-	// Remove trailing newlines just in case a line is empty.
-	if (!centerText.empty())
-	{
-		target->PrintCentre(false, false, centerText.c_str());
-	}
-	if (!alertText.empty())
-	{
-		target->PrintAlert(false, false, alertText.c_str());
-	}
 	if (!htmlText.empty())
 	{
 		target->PrintHTMLCentre(false, false, htmlText.c_str());

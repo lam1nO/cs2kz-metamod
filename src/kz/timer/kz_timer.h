@@ -268,6 +268,12 @@ public:
 		return KZ::course::GetCourse(currentCourseGUID);
 	}
 
+	// Текущий достигнутый стейдж в забеге (для HUD-строки "STAGE n/total").
+	i32 GetCurrentStage()
+	{
+		return currentStage;
+	}
+
 	void SetCourse(u32 courseGUID)
 	{
 		currentCourseGUID = courseGUID;
