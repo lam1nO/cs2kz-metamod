@@ -64,7 +64,9 @@ public:
 	}
 
 	// Jumpstats
-	virtual DistanceTier GetDistanceTier(JumpType jumpType, f32 distance) = 0;
+	// takeoffSpeed — скорость отрыва (prespeed) прыжка; используется KZT для выбора
+	// lowpre-набора порогов (prespeed < катофф → lowpre). < 0 → без lowpre-гейта.
+	virtual DistanceTier GetDistanceTier(JumpType jumpType, f32 distance, f32 takeoffSpeed = -1.0f) = 0;
 	virtual const CVValue_t *GetModeConVarValues() = 0;
 
 	// Movement hooks

@@ -143,7 +143,12 @@ bool KZTimerModeService::EnableWaterFix()
 	return this->player->IsButtonPressed(IN_JUMP);
 }
 
-DistanceTier KZTimerModeService::GetDistanceTier(JumpType jumpType, f32 distance)
+// Катофф prespeed (скорость отрыва): ниже → lowpre-набор порогов. Совпадает с gokz
+// AdjustLowpreJumptypes (BH<360 → lowpre bhop, WJ<300 → lowpre weirdjump).
+#define KZT_LOWPRE_CUTOFF_BHOP 360.0f
+#define KZT_LOWPRE_CUTOFF_WJ   300.0f
+
+DistanceTier KZTimerModeService::GetDistanceTier(JumpType jumpType, f32 distance, f32 takeoffSpeed)
 {
 	// No tiers given for 'Invalid' jumps.
 	if (jumpType == JumpType_Invalid || jumpType == JumpType_FullInvalid || jumpType == JumpType_Fall || jumpType == JumpType_Other
@@ -152,9 +157,25 @@ DistanceTier KZTimerModeService::GetDistanceTier(JumpType jumpType, f32 distance
 		return DistanceTier_None;
 	}
 
+	// Выбор набора порогов: [0] нормальные / [1] lowpre. Гейт по prespeed (takeoffSpeed).
+	// takeoffSpeed < 0 (не передан) → нормальный набор. Lowpre-катофф — только для типов,
+	// у которых [1] отличается от [0] (BH/MBH/JB → 360, WJ → 300); прочие: [1]==[0].
+	i32 lowpre = 0;
+	if (takeoffSpeed >= 0.0f)
+	{
+		if (jumpType == JumpType_Bhop || jumpType == JumpType_MultiBhop || jumpType == JumpType_Jumpbug)
+		{
+			lowpre = (takeoffSpeed < KZT_LOWPRE_CUTOFF_BHOP) ? 1 : 0;
+		}
+		else if (jumpType == JumpType_WeirdJump)
+		{
+			lowpre = (takeoffSpeed < KZT_LOWPRE_CUTOFF_WJ) ? 1 : 0;
+		}
+	}
+
 	// Get highest tier distance that the jump beats
 	DistanceTier tier = DistanceTier_None;
-	while (tier + 1 < DISTANCETIER_COUNT && distance >= distanceTiers[jumpType][tier])
+	while (tier + 1 < DISTANCETIER_COUNT && distance >= distanceTiers[jumpType][lowpre][tier])
 	{
 		tier = (DistanceTier)(tier + 1);
 	}

@@ -80,14 +80,27 @@ class KZTimerModeService : public KZModeService
 {
 	using KZModeService::KZModeService;
 
-	f32 distanceTiers[JUMPTYPE_COUNT - 3][DISTANCETIER_COUNT] = {
-		{217.0f, 265.0f, 270.0f, 275.0f, 280.0f, 284.0f}, // LJ
-		{217.0f, 275.0f, 280.0f, 287.0f, 292.0f, 295.0f}, // BH
-		{217.0f, 275.0f, 280.0f, 287.0f, 292.0f, 295.0f}, // MBH
-		{217.0f, 275.0f, 280.0f, 287.0f, 292.0f, 295.0f}, // WJ
-		{120.0f, 160.0f, 170.0f, 180.0f, 190.0f, 200.0f}, // LAJ
-		{217.0f, 260.0f, 265.0f, 270.0f, 275.0f, 278.0f}, // LAH
-		{217.0f, 275.0f, 280.0f, 287.0f, 292.0f, 295.0f}, // JB
+	// Пороги ДИСТАНЦИИ (u) по типу прыжка × [0]=нормальные / [1]=lowpre × тир.
+	// Метрика дистанции НЕ меняется (канон). Ось lowpre выбирается по prespeed (takeoffSpeed):
+	// prespeed >= катофф → [0], иначе → [1]. Катофф: BH/MBH/JB = 360, WJ = 300 (см. .cpp).
+	// Пороги сверены с refs/gokz kztimer distance-тирами — достижимо: KZT-перф даёт до ~380
+	// спида, бхопы реально доходят до 340–360+ по дистанции.
+	// Тир Meh = 0.0 (по ТЗ «meh 0–…»), т.е. любой валидный прыжок ≥ Meh. Типы без lowpre — [1]==[0].
+	f32 distanceTiers[JUMPTYPE_COUNT - 3][2][DISTANCETIER_COUNT] = {
+		// LJ — без lowpre
+		{{217.0f, 265.0f, 270.0f, 275.0f, 280.0f, 284.0f}, {217.0f, 265.0f, 270.0f, 275.0f, 280.0f, 284.0f}},
+		// BH: normal meh0/imp340/perf345/god350/own355/wreck360 ; lowpre 0/325/330/335/340/345
+		{{0.0f, 340.0f, 345.0f, 350.0f, 355.0f, 360.0f}, {0.0f, 325.0f, 330.0f, 335.0f, 340.0f, 345.0f}},
+		// MBH: как BH
+		{{0.0f, 340.0f, 345.0f, 350.0f, 355.0f, 360.0f}, {0.0f, 325.0f, 330.0f, 335.0f, 340.0f, 345.0f}},
+		// WJ: normal 0/300/305/310/315/320 ; lowpre 0/280/285/290/295/300
+		{{0.0f, 300.0f, 305.0f, 310.0f, 315.0f, 320.0f}, {0.0f, 280.0f, 285.0f, 290.0f, 295.0f, 300.0f}},
+		// LAJ — без lowpre
+		{{120.0f, 160.0f, 170.0f, 180.0f, 190.0f, 200.0f}, {120.0f, 160.0f, 170.0f, 180.0f, 190.0f, 200.0f}},
+		// LAH — без lowpre
+		{{217.0f, 260.0f, 265.0f, 270.0f, 275.0f, 278.0f}, {217.0f, 260.0f, 265.0f, 270.0f, 275.0f, 278.0f}},
+		// JB: пороги bhop (normal+lowpre) по ТЗ
+		{{0.0f, 340.0f, 345.0f, 350.0f, 355.0f, 360.0f}, {0.0f, 325.0f, 330.0f, 335.0f, 340.0f, 345.0f}},
 	};
 
 	static inline CVValue_t modeCvarValues[] = {
@@ -163,7 +176,7 @@ public:
 
 	virtual bool EnableWaterFix() override;
 
-	virtual DistanceTier GetDistanceTier(JumpType jumpType, f32 distance) override;
+	virtual DistanceTier GetDistanceTier(JumpType jumpType, f32 distance, f32 takeoffSpeed = -1.0f) override;
 	virtual const CVValue_t *GetModeConVarValues() override;
 
 	virtual void OnPhysicsSimulate() override;

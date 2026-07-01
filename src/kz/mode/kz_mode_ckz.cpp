@@ -144,8 +144,9 @@ bool KZClassicModeService::EnableWaterFix()
 	return this->player->IsButtonPressed(IN_JUMP);
 }
 
-DistanceTier KZClassicModeService::GetDistanceTier(JumpType jumpType, f32 distance)
+DistanceTier KZClassicModeService::GetDistanceTier(JumpType jumpType, f32 distance, f32 takeoffSpeed)
 {
+	(void)takeoffSpeed; // classic: без lowpre-гейта
 	// No tiers given for 'Invalid' jumps.
 	if (jumpType == JumpType_Invalid || jumpType == JumpType_FullInvalid || jumpType == JumpType_Fall || jumpType == JumpType_Other
 		|| distance > 500.0f)

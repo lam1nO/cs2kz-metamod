@@ -15,8 +15,9 @@ const char *KZVanillaModeService::GetModeShortName()
 	return "VNL";
 }
 
-DistanceTier KZVanillaModeService::GetDistanceTier(JumpType jumpType, f32 distance)
+DistanceTier KZVanillaModeService::GetDistanceTier(JumpType jumpType, f32 distance, f32 takeoffSpeed)
 {
+	(void)takeoffSpeed; // vanilla: без lowpre-гейта
 	// No tiers given for 'Invalid' jumps.
 	// clang-format off
 	if (jumpType == JumpType_Invalid

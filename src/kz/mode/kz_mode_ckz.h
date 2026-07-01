@@ -180,7 +180,7 @@ public:
 
 	virtual bool EnableWaterFix() override;
 
-	virtual DistanceTier GetDistanceTier(JumpType jumpType, f32 distance) override;
+	virtual DistanceTier GetDistanceTier(JumpType jumpType, f32 distance, f32 takeoffSpeed = -1.0f) override;
 	virtual const CVValue_t *GetModeConVarValues() override;
 
 	virtual void OnPhysicsSimulate() override;

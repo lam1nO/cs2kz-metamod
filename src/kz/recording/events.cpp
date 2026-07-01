@@ -276,7 +276,7 @@ void KZRecordingService::OnJumpFinish(Jump *jump)
 	this->circularRecording->jumps.push_back(rpJump);
 
 	// Only write the jump if it's ownage or better to save storage for run replays.
-	if (jump->IsValid() && jump->GetJumpPlayer()->modeService->GetDistanceTier(jump->jumpType, jump->GetDistance()) >= DistanceTier_Ownage)
+	if (jump->IsValid() && jump->GetJumpPlayer()->modeService->GetDistanceTier(jump->jumpType, jump->GetDistance(), jump->GetTakeoffSpeed()) >= DistanceTier_Ownage)
 	{
 		this->PushToRecorders(rpJump, RecorderType::Run);
 	}
@@ -284,7 +284,7 @@ void KZRecordingService::OnJumpFinish(Jump *jump)
 	this->PushToRecorders(rpJump, RecorderType::Jump);
 	// Create a new jump recorder if the jump is good enough.
 	if (jump->IsValid() && jump->GetOffset() >= -JS_EPSILON
-		&& jump->GetJumpPlayer()->modeService->GetDistanceTier(jump->jumpType, jump->GetDistance()) >= kz_replay_recording_min_jump_tier.Get())
+		&& jump->GetJumpPlayer()->modeService->GetDistanceTier(jump->jumpType, jump->GetDistance(), jump->GetTakeoffSpeed()) >= kz_replay_recording_min_jump_tier.Get())
 	{
 		this->jumpRecorders.push_back(JumpRecorder(jump));
 		this->jumpRecorders.back().uuid = this->lastJumpUUID;

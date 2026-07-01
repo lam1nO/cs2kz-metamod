@@ -62,7 +62,7 @@ public:
 	virtual void Reset() override;
 	virtual const char *GetModeName() override;
 	virtual const char *GetModeShortName() override;
-	virtual DistanceTier GetDistanceTier(JumpType jumpType, f32 distance) override;
+	virtual DistanceTier GetDistanceTier(JumpType jumpType, f32 distance, f32 takeoffSpeed = -1.0f) override;
 	virtual const CVValue_t *GetModeConVarValues() override;
 
 	// Triggerfix

@@ -11,7 +11,7 @@ void RpJumpStats::FromJump(RpJumpStats &stats, Jump *jump)
 	stats.overall.serverTick = jump->serverTick;
 	if (jump->IsValid() && jump->player->styleServices.Count() == 0)
 	{
-		stats.overall.distanceTier = jump->player->modeService->GetDistanceTier(jump->GetJumpType(), jump->GetDistance());
+		stats.overall.distanceTier = jump->player->modeService->GetDistanceTier(jump->GetJumpType(), jump->GetDistance(), jump->GetTakeoffSpeed());
 	}
 	stats.overall.takeoffOrigin[0] = jump->takeoffOrigin.x;
 	stats.overall.takeoffOrigin[1] = jump->takeoffOrigin.y;
