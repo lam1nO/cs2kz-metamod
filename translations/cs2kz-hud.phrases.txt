@@ -271,6 +271,20 @@
 		"ua"		"{grey}Використання: {default}kz_panel <compact>{grey}."
 	}
 
+	"MHUD - Master Enabled"
+	{
+		"en"		"{grey}MHUD master is {green}enabled{grey} (default HUD hidden, only enabled elements shown)."
+		"chi"		"{grey}MHUD 主开关已 {green}启用{grey} (隐藏默认 HUD, 仅显示已启用的元素)."
+		"ru"		"{grey}Мастер-режим MHUD {green}включён{grey} (дефолтный HUD скрыт, показаны только включённые элементы)."
+		"ua"		"{grey}Майстер-режим MHUD {green}увімкнено{grey} (типовий HUD приховано, показано лише увімкнені елементи)."
+	}
+	"MHUD - Master Disabled"
+	{
+		"en"		"{grey}MHUD master is {darkred}disabled{grey} (default HUD shown)."
+		"chi"		"{grey}MHUD 主开关已 {darkred}禁用{grey} (显示默认 HUD)."
+		"ru"		"{grey}Мастер-режим MHUD {darkred}выключен{grey} (показан дефолтный HUD)."
+		"ua"		"{grey}Майстер-режим MHUD {darkred}вимкнено{grey} (показано типовий HUD)."
+	}
 	"MHUD - Speed Enabled"
 	{
 		"en"		"{grey}Speed is currently {green}enabled."
@@ -354,6 +368,20 @@
 		"chi"		"{grey}按键冲突显示已 {darkred}禁用."
 		"ru"		"{grey}Наложение (overlap) кнопок {darkred}выключено."
 		"ua"		"{grey}Накладання (overlap) клавіш {darkred}вимкнено."
+	}
+	"MHUD - CP/TP Enabled"
+	{
+		"en"		"{grey}CP/TP is currently {green}enabled."
+		"chi"		"{grey}CP/TP 显示已 {green}启用."
+		"ru"		"{grey}Отображение CP/TP {green}включено."
+		"ua"		"{grey}Відображення CP/TP {green}увімкнено."
+	}
+	"MHUD - CP/TP Disabled"
+	{
+		"en"		"{grey}CP/TP is currently {darkred}disabled."
+		"chi"		"{grey}CP/TP 显示已 {darkred}禁用."
+		"ru"		"{grey}Отображение CP/TP {darkred}выключено."
+		"ua"		"{grey}Відображення CP/TP {darkred}вимкнено."
 	}
 	"MHUD - Speed Offset Set"
 	{

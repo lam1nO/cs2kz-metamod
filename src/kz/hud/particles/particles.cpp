@@ -73,7 +73,8 @@ static_function Color UnpackColor(i64 packed)
 
 Color KZHUDService::GetMHUDColorPref(const char *name, const Color &defaultColor)
 {
-	i64 packed = this->MHUDSource()->optionService->GetPreferenceInt(name, PackColor(defaultColor));
+	// Цвета — настройка: источник настроек (сам игрок / спектатор), не данные.
+	i64 packed = this->MHUDSettingsSource()->optionService->GetPreferenceInt(name, PackColor(defaultColor));
 	return UnpackColor(packed);
 }
 
@@ -170,39 +171,51 @@ void KZHUDService::OnClientDisconnect()
 
 // === Preferences ====================================================================
 
+// Все тумблеры/раскладка — НАСТРОЙКИ: читаем из источника настроек (сам игрок/спектатор),
+// а не из данных наблюдаемого. Иначе у спектатора «прыгал» бы HUD при смене цели.
+bool KZHUDService::IsMHUDMasterEnabled()
+{
+	return this->MHUDSettingsSource()->optionService->GetPreferenceBool("mhudMaster", false);
+}
+
 bool KZHUDService::IsMHUDSpeedEnabled()
 {
-	return this->MHUDSource()->optionService->GetPreferenceBool("mhudSpeedEnabled", false);
+	return this->MHUDSettingsSource()->optionService->GetPreferenceBool("mhudSpeedEnabled", false);
 }
 
 bool KZHUDService::IsMHUDTimerEnabled()
 {
-	return this->MHUDSource()->optionService->GetPreferenceBool("mhudTimerEnabled", false);
+	return this->MHUDSettingsSource()->optionService->GetPreferenceBool("mhudTimerEnabled", false);
 }
 
 bool KZHUDService::IsMHUDKeysEnabled()
 {
-	return this->MHUDSource()->optionService->GetPreferenceBool("mhudKeysEnabled", false);
+	return this->MHUDSettingsSource()->optionService->GetPreferenceBool("mhudKeysEnabled", false);
+}
+
+bool KZHUDService::IsMHUDCpTpEnabled()
+{
+	return this->MHUDSettingsSource()->optionService->GetPreferenceBool("mhudCpTpEnabled", true);
 }
 
 bool KZHUDService::IsMHUDTimerDetailed()
 {
-	return this->MHUDSource()->optionService->GetPreferenceBool("mhudTimerDetailed", true);
+	return this->MHUDSettingsSource()->optionService->GetPreferenceBool("mhudTimerDetailed", true);
 }
 
 bool KZHUDService::IsMHUDKeysOverlapEnabled()
 {
-	return this->MHUDSource()->optionService->GetPreferenceBool("mhudKeysOverlap", true);
+	return this->MHUDSettingsSource()->optionService->GetPreferenceBool("mhudKeysOverlap", true);
 }
 
 bool KZHUDService::IsMHUDPrespeedEnabled()
 {
-	return this->MHUDSource()->optionService->GetPreferenceBool("mhudPrespeedEnabled", false);
+	return this->MHUDSettingsSource()->optionService->GetPreferenceBool("mhudPrespeedEnabled", false);
 }
 
 bool KZHUDService::IsMHUDOutlineEnabled()
 {
-	return this->MHUDSource()->optionService->GetPreferenceBool("mhudOutline", true);
+	return this->MHUDSettingsSource()->optionService->GetPreferenceBool("mhudOutline", true);
 }
 
 // === Speed + prespeed ===============================================================
@@ -292,15 +305,15 @@ void KZHUDService::UpdateMHUDSpeed()
 
 	const Color baseColor = this->GetMHUDColorPref("mhudSpeedColor", MHUD_DEF_BASE_COLOR);
 	const Color prespeedBaseColor = this->GetMHUDColorPref("mhudPrespeedColor", MHUD_DEF_BASE_COLOR);
-	const f32 speedOffsetX = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudSpeedOffsetX", MHUD_DEF_SPEED_OFFSET_X);
-	const f32 speedOffsetY = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudSpeedOffsetY", MHUD_DEF_SPEED_OFFSET_Y);
-	const f32 speedScale = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudSpeedScale", MHUD_DEF_SPEED_SCALE);
-	const f32 prespeedOffsetX = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudPrespeedOffsetX", MHUD_DEF_PRESPEED_OFFSET_X);
-	const f32 prespeedOffsetY = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudPrespeedOffsetY", MHUD_DEF_PRESPEED_OFFSET_Y);
-	const f32 prespeedScale = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudPrespeedScale", MHUD_DEF_PRESPEED_SCALE);
+	const f32 speedOffsetX = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudSpeedOffsetX", MHUD_DEF_SPEED_OFFSET_X);
+	const f32 speedOffsetY = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudSpeedOffsetY", MHUD_DEF_SPEED_OFFSET_Y);
+	const f32 speedScale = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudSpeedScale", MHUD_DEF_SPEED_SCALE);
+	const f32 prespeedOffsetX = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudPrespeedOffsetX", MHUD_DEF_PRESPEED_OFFSET_X);
+	const f32 prespeedOffsetY = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudPrespeedOffsetY", MHUD_DEF_PRESPEED_OFFSET_Y);
+	const f32 prespeedScale = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudPrespeedScale", MHUD_DEF_PRESPEED_SCALE);
 
 	// Lazy-create.
-	const char *font = this->MHUDSource()->optionService->GetPreferenceStr("mhudFont", AVAILABLE_FONTS[0]);
+	const char *font = this->MHUDSettingsSource()->optionService->GetPreferenceStr("mhudFont", AVAILABLE_FONTS[0]);
 	char fontLower[64];
 	V_strncpy(fontLower, font, sizeof(fontLower));
 	V_strlower(fontLower);
@@ -330,7 +343,7 @@ void KZHUDService::UpdateMHUDSpeed()
 		}
 	}
 
-	KZPlayer *src = this->MHUDSource();
+	KZPlayer *src = this->MHUDDataSource();
 	Vector velocity, baseVelocity;
 	src->GetVelocity(&velocity);
 	src->GetBaseVelocity(&baseVelocity);
@@ -362,12 +375,12 @@ void KZHUDService::UpdateMHUDSpeed()
 
 void KZHUDService::SetMHUDSpeedParticleVelocity(const Vector &speed, const Vector *prespeed)
 {
-	const f32 speedOffsetX = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudSpeedOffsetX", MHUD_DEF_SPEED_OFFSET_X);
-	const f32 speedOffsetY = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudSpeedOffsetY", MHUD_DEF_SPEED_OFFSET_Y);
-	const f32 speedScale = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudSpeedScale", MHUD_DEF_SPEED_SCALE);
-	const f32 prespeedOffsetX = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudPrespeedOffsetX", MHUD_DEF_PRESPEED_OFFSET_X);
-	const f32 prespeedOffsetY = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudPrespeedOffsetY", MHUD_DEF_PRESPEED_OFFSET_Y);
-	const f32 prespeedScale = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudPrespeedScale", MHUD_DEF_PRESPEED_SCALE);
+	const f32 speedOffsetX = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudSpeedOffsetX", MHUD_DEF_SPEED_OFFSET_X);
+	const f32 speedOffsetY = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudSpeedOffsetY", MHUD_DEF_SPEED_OFFSET_Y);
+	const f32 speedScale = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudSpeedScale", MHUD_DEF_SPEED_SCALE);
+	const f32 prespeedOffsetX = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudPrespeedOffsetX", MHUD_DEF_PRESPEED_OFFSET_X);
+	const f32 prespeedOffsetY = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudPrespeedOffsetY", MHUD_DEF_PRESPEED_OFFSET_Y);
+	const f32 prespeedScale = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudPrespeedScale", MHUD_DEF_PRESPEED_SCALE);
 
 	if (this->speedParticles[0] && this->speedParticles[1])
 	{
@@ -453,10 +466,10 @@ void KZHUDService::CheckMHUDTimerParticles()
 	}
 
 	const Color tpColor = this->GetMHUDColorPref("mhudTimerTpColor", MHUD_DEF_TIMER_TP_COLOR);
-	const f32 offsetY = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudTimerOffsetY", MHUD_DEF_TIMER_OFFSET_Y);
-	const f32 scale = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudTimerScale", MHUD_DEF_TIMER_SCALE);
+	const f32 offsetY = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudTimerOffsetY", MHUD_DEF_TIMER_OFFSET_Y);
+	const f32 scale = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudTimerScale", MHUD_DEF_TIMER_SCALE);
 	char numbersPath[256], delimPath[256], fontLower[64];
-	const char *font = this->MHUDSource()->optionService->GetPreferenceStr("mhudFont", AVAILABLE_FONTS[0]);
+	const char *font = this->MHUDSettingsSource()->optionService->GetPreferenceStr("mhudFont", AVAILABLE_FONTS[0]);
 	V_strncpy(fontLower, font, sizeof(fontLower));
 	V_strlower(fontLower);
 	bool outline = this->IsMHUDOutlineEnabled();
@@ -496,7 +509,7 @@ void KZHUDService::UpdateMHUDTimer()
 		return; // Disabled or creation failed.
 	}
 
-	KZPlayer *src = this->MHUDSource();
+	KZPlayer *src = this->MHUDDataSource();
 	// Determine whether to display anything at all.
 	bool timerRunning = src->timerService->GetTimerRunning();
 	bool showAfterStop = src->hudService->ShouldShowTimerAfterStop();
@@ -603,9 +616,9 @@ void KZHUDService::UpdateMHUDTimer()
 		numDelimiters = 1;
 	}
 
-	const f32 offsetX = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudTimerOffsetX", MHUD_DEF_TIMER_OFFSET_X);
-	const f32 offsetY = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudTimerOffsetY", MHUD_DEF_TIMER_OFFSET_Y);
-	const f32 scale = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudTimerScale", MHUD_DEF_TIMER_SCALE);
+	const f32 offsetX = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudTimerOffsetX", MHUD_DEF_TIMER_OFFSET_X);
+	const f32 offsetY = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudTimerOffsetY", MHUD_DEF_TIMER_OFFSET_Y);
+	const f32 scale = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudTimerScale", MHUD_DEF_TIMER_SCALE);
 
 	// Center the active pairs around offsetX.
 	// Formula: pair i of N visible pairs → (2i − (N−1)) × half_step
@@ -701,11 +714,11 @@ void KZHUDService::CheckMHUDKeyParticle()
 	}
 
 	const Color color = this->GetMHUDColorPref("mhudKeysColor", MHUD_DEF_BASE_COLOR);
-	const f32 offsetX = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudKeysOffsetX", MHUD_DEF_KEYS_OFFSET_X);
-	const f32 offsetY = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudKeysOffsetY", MHUD_DEF_KEYS_OFFSET_Y);
-	const f32 scale = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudKeysScale", MHUD_DEF_KEYS_SCALE);
+	const f32 offsetX = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudKeysOffsetX", MHUD_DEF_KEYS_OFFSET_X);
+	const f32 offsetY = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudKeysOffsetY", MHUD_DEF_KEYS_OFFSET_Y);
+	const f32 scale = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudKeysScale", MHUD_DEF_KEYS_SCALE);
 	char inputsPath[256];
-	const char *font = this->MHUDSource()->optionService->GetPreferenceStr("mhudFont", AVAILABLE_FONTS[0]);
+	const char *font = this->MHUDSettingsSource()->optionService->GetPreferenceStr("mhudFont", AVAILABLE_FONTS[0]);
 	char fontLower[64];
 	V_strncpy(fontLower, font, sizeof(fontLower));
 	V_strlower(fontLower);
@@ -724,7 +737,7 @@ void KZHUDService::UpdateMHUDKeys()
 		return;
 	}
 
-	KZPlayer *src = this->MHUDSource();
+	KZPlayer *src = this->MHUDDataSource();
 	u8 mask = 0;
 	if (src->IsButtonPressed(IN_FORWARD))
 	{
@@ -753,9 +766,9 @@ void KZHUDService::UpdateMHUDKeys()
 		mask |= Duck;
 	}
 
-	const f32 offsetX = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudKeysOffsetX", MHUD_DEF_KEYS_OFFSET_X);
-	const f32 offsetY = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudKeysOffsetY", MHUD_DEF_KEYS_OFFSET_Y);
-	const f32 scale = (f32)this->MHUDSource()->optionService->GetPreferenceFloat("mhudKeysScale", MHUD_DEF_KEYS_SCALE);
+	const f32 offsetX = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudKeysOffsetX", MHUD_DEF_KEYS_OFFSET_X);
+	const f32 offsetY = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudKeysOffsetY", MHUD_DEF_KEYS_OFFSET_Y);
+	const f32 scale = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudKeysScale", MHUD_DEF_KEYS_SCALE);
 
 	CParticleSystem *p = this->keysParticle.Get();
 	p->SetControlPointValue(17, Vector((f32)mask, scale, 0.0f));
@@ -772,9 +785,10 @@ void KZHUDService::UpdateMHUDKeys()
 
 void KZHUDService::UpdateParticles(KZPlayer *source)
 {
-	// Particle-entity'ы принадлежат this (получателю), но все данные/настройки
-	// читаются из mhudSource: при спектировании это наблюдаемый игрок, поэтому
-	// спектатор видит такой же particle-MHUD, как у наблюдаемого, а не свои нули.
+	// Particle-entity'ы принадлежат this (получателю). ДАННЫЕ (скорость/клавиши/таймер)
+	// читаются из mhudSource (наблюдаемый при спектировании), НАСТРОЙКИ (тумблеры/цвета/
+	// раскладка/шрифт) — из this->player. Так у спектатора СВОЙ particle-MHUD-конфиг,
+	// но с данными того, за кем он следит; при смене цели раскладка не «прыгает».
 	this->mhudSource = (source && source != this->player) ? source : nullptr;
 	this->UpdateMHUDSpeed();
 	this->UpdateMHUDTimer();
@@ -917,12 +931,14 @@ void KZHUDService::PrintMHUDSummary()
 	auto *opts = p->optionService;
 	auto *lang = p->languageService;
 	// clang-format off
+	lang->PrintChat(true, false, opts->GetPreferenceBool("mhudMaster", false) ? "MHUD - Master Enabled" : "MHUD - Master Disabled");
 	lang->PrintChat(true, false, opts->GetPreferenceBool("mhudSpeedEnabled", false) ? "MHUD - Speed Enabled" : "MHUD - Speed Disabled");
 	lang->PrintChat(true, false, opts->GetPreferenceBool("mhudPrespeedEnabled", false) ? "MHUD - Prespeed Enabled" : "MHUD - Prespeed Disabled");
 	lang->PrintChat(true, false, opts->GetPreferenceBool("mhudTimerEnabled", false) ? "MHUD - Timer Enabled" : "MHUD - Timer Disabled");
 	lang->PrintChat(true, false, opts->GetPreferenceBool("mhudTimerDetailed", true) ? "MHUD - Timer Detail Enabled" : "MHUD - Timer Detail Disabled");
 	lang->PrintChat(true, false, opts->GetPreferenceBool("mhudKeysEnabled", false) ? "MHUD - Keys Enabled" : "MHUD - Keys Disabled");
 	lang->PrintChat(true, false, opts->GetPreferenceBool("mhudKeysOverlap", true) ? "MHUD - Keys Overlap Enabled" : "MHUD - Keys Overlap Disabled");
+	lang->PrintChat(true, false, opts->GetPreferenceBool("mhudCpTpEnabled", true) ? "MHUD - CP/TP Enabled" : "MHUD - CP/TP Disabled");
 	lang->PrintChat(true, false, opts->GetPreferenceBool("mhudOutline", true) ? "MHUD - Outline Enabled" : "MHUD - Outline Disabled");
 	lang->PrintChat(true, false, "MHUD - Font", opts->GetPreferenceStr("mhudFont", AVAILABLE_FONTS[0]));
 	// clang-format on
@@ -944,13 +960,15 @@ struct MHUDMenuToggle
 // Таблица тумблеров. Порядок = порядок пунктов в меню.
 // Ключи/дефолты/lang-ключи синхронны с PrintMHUDSummary.
 static const MHUDMenuToggle s_mhudToggles[] = {
-	{"Speed",        "mhudSpeedEnabled",    false, "MHUD - Speed Enabled",         "MHUD - Speed Disabled"        },
-	{"Pre-speed",    "mhudPrespeedEnabled", false, "MHUD - Prespeed Enabled",      "MHUD - Prespeed Disabled"     },
-	{"Timer",        "mhudTimerEnabled",    false, "MHUD - Timer Enabled",         "MHUD - Timer Disabled"        },
-	{"Timer detail", "mhudTimerDetailed",   true,  "MHUD - Timer Detail Enabled",  "MHUD - Timer Detail Disabled" },
-	{"Keys",         "mhudKeysEnabled",     false, "MHUD - Keys Enabled",          "MHUD - Keys Disabled"         },
-	{"Keys overlap", "mhudKeysOverlap",     true,  "MHUD - Keys Overlap Enabled",  "MHUD - Keys Overlap Disabled" },
-	{"Outline",      "mhudOutline",         true,  "MHUD - Outline Enabled",       "MHUD - Outline Disabled"      },
+	{"Master (hide default HUD)", "mhudMaster",          false, "MHUD - Master Enabled",        "MHUD - Master Disabled"       },
+	{"Speed",                     "mhudSpeedEnabled",    false, "MHUD - Speed Enabled",         "MHUD - Speed Disabled"        },
+	{"Pre-speed",                 "mhudPrespeedEnabled", false, "MHUD - Prespeed Enabled",      "MHUD - Prespeed Disabled"     },
+	{"Timer",                     "mhudTimerEnabled",    false, "MHUD - Timer Enabled",         "MHUD - Timer Disabled"        },
+	{"Timer detail",              "mhudTimerDetailed",   true,  "MHUD - Timer Detail Enabled",  "MHUD - Timer Detail Disabled" },
+	{"Keys",                      "mhudKeysEnabled",     false, "MHUD - Keys Enabled",          "MHUD - Keys Disabled"         },
+	{"Keys overlap",              "mhudKeysOverlap",     true,  "MHUD - Keys Overlap Enabled",  "MHUD - Keys Overlap Disabled" },
+	{"CP/TP",                     "mhudCpTpEnabled",     true,  "MHUD - CP/TP Enabled",         "MHUD - CP/TP Disabled"        },
+	{"Outline",                   "mhudOutline",         true,  "MHUD - Outline Enabled",       "MHUD - Outline Disabled"      },
 };
 
 // Колбэк выбора пункта. На главном потоке; lock cs2menus НЕ держится в момент колбэка,
@@ -1021,7 +1039,7 @@ void KZHUDService::OpenMHUDMenu()
 		return;
 	}
 
-	auto *opts = this->MHUDSource()->optionService;
+	auto *opts = this->MHUDSettingsSource()->optionService;
 	for (const auto &t : s_mhudToggles)
 	{
 		bool on = opts->GetPreferenceBool(t.prefKey, t.defaultValue);
@@ -1038,7 +1056,9 @@ void KZHUDService::OpenMHUDMenu()
 }
 
 // Hierarchy:
-//   kz_mhud                                  → full summary
+//   kz_mhud                                  → interactive toggle menu (fallback: summary)
+//   kz_mhud master                           → toggle master (hide default HUD, show only enabled)
+//   kz_mhud cptp                             → toggle CP/TP element (HTML)
 //   kz_mhud speed                            → toggle speed
 //   kz_mhud speed offset [x y]               → show/set X,Y offset
 //   kz_mhud speed scale [v]                  → show/set scale
@@ -1065,7 +1085,16 @@ SCMD(kz_mhud, SCFL_HUD | SCFL_PREFERENCE)
 	const char *element = args->Arg(1);
 	const char *prop = args->ArgC() >= 3 ? args->Arg(2) : nullptr;
 
-	if (KZ_STREQI(element, "speed"))
+	// Мастер-тумблер и CP/TP работают на HTML-рендере, MAM не требуется.
+	if (KZ_STREQI(element, "master"))
+	{
+		MHUDToggle(player, "mhudMaster", false, "MHUD - Master Enabled", "MHUD - Master Disabled");
+	}
+	else if (KZ_STREQI(element, "cptp"))
+	{
+		MHUDToggle(player, "mhudCpTpEnabled", true, "MHUD - CP/TP Enabled", "MHUD - CP/TP Disabled");
+	}
+	else if (KZ_STREQI(element, "speed"))
 	{
 		if (!prop)
 		{

@@ -217,9 +217,14 @@ std::string KZHUDService::GetTimerText(const char *language)
 #define KZ_HUD_C_DIM    "#5B616D" // неактивная клавиша / разделители / стейдж
 #define KZ_HUD_C_MUTED  "#9AA3AF" // подписи (U/S, CP, TP)
 
-std::string KZHUDService::BuildVersionCHud(bool suppressSpeed, bool suppressTimer, bool suppressKeys, const char *language)
+std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSpeed, bool suppressTimer, bool suppressKeys, bool masterMode,
+										   const char *language)
 {
-	const bool isReplay = KZ::replaysystem::IsReplayBot(this->player);
+	// Данные (скорость/клавиши/таймер/CP-TP) — из dataSource (наблюдаемый при спектировании).
+	// Настройки (тумблеры/цвета) — из this (сам игрок/спектатор): своя раскладка, чужие данные.
+	// В мастер-режиме элемент рисуется, только если его per-element тумблер ВКЛ (opt-in).
+	// В обычном — как раньше: рисуем всё, кроме suppress* (дублируемого particle-MHUD).
+	const bool isReplay = KZ::replaysystem::IsReplayBot(dataSource);
 	char buf[512];
 
 	// Накапливаем строки в html, разделяя <br> только между непустыми (без висячих тегов).
@@ -233,19 +238,27 @@ std::string KZHUDService::BuildVersionCHud(bool suppressSpeed, bool suppressTime
 		html += line;
 	};
 
+	// В мастер-режиме показываем элемент только при включённом тумблере И если его не
+	// рисует particle-MHUD (suppress*), иначе двойной рендер. Вне мастера — как раньше.
+	// CP/TP particle-путём не рисуется (только HTML), поэтому suppress к нему не применяется.
+	bool showSpeed = masterMode ? (this->IsMHUDSpeedEnabled() && !suppressSpeed) : !suppressSpeed;
+	bool showKeys = masterMode ? (this->IsMHUDKeysEnabled() && !suppressKeys) : !suppressKeys;
+	bool showTimer = masterMode ? (this->IsMHUDTimerEnabled() && !suppressTimer) : !suppressTimer;
+	bool showCpTp = masterMode ? this->IsMHUDCpTpEnabled() : true;
+
 	// --- 1. Скорость: крупное число + подпись U/S, при отрыве — престрейф-скорость
 	//        в перф/CJ-цвете (логика как в GetSpeedText). ---
-	if (!suppressSpeed)
+	if (showSpeed)
 	{
 		Vector velocity, baseVelocity;
-		this->player->GetVelocity(&velocity);
-		this->player->GetBaseVelocity(&baseVelocity);
+		dataSource->GetVelocity(&velocity);
+		dataSource->GetBaseVelocity(&baseVelocity);
 		velocity += baseVelocity;
 		i32 speed = RoundFloatToInt(velocity.Length2D());
 
-		bool onGroundSettled = (this->player->GetPlayerPawn()->m_fFlags() & FL_ONGROUND
-								&& g_pKZUtils->GetServerGlobals()->curtime - this->player->landingTime > KZ_HUD_ON_GROUND_THRESHOLD)
-							   || (this->player->GetPlayerPawn()->m_MoveType() == MOVETYPE_LADDER && !this->player->IsButtonPressed(IN_JUMP));
+		bool onGroundSettled = (dataSource->GetPlayerPawn()->m_fFlags() & FL_ONGROUND
+								&& g_pKZUtils->GetServerGlobals()->curtime - dataSource->landingTime > KZ_HUD_ON_GROUND_THRESHOLD)
+							   || (dataSource->GetPlayerPawn()->m_MoveType() == MOVETYPE_LADDER && !dataSource->IsButtonPressed(IN_JUMP));
 
 		std::string takeoff;
 		if (!onGroundSettled)
@@ -254,15 +267,15 @@ std::string KZHUDService::BuildVersionCHud(bool suppressSpeed, bool suppressTime
 			const Color perfCol = this->GetMHUDColorPref("mhudPrespeedPerfColor", Color(0x40, 0xFF, 0x40, 0xFF));
 			const Color jumpbugCol = this->GetMHUDColorPref("mhudPrespeedJumpbugColor", Color(0xFF, 0xFF, 0x20, 0xFF));
 			Color tintCol = baseCol;
-			if (this->player->IsPerfing() && !this->player->possibleLadderHop && !this->player->takeoffFromLadder)
+			if (dataSource->IsPerfing() && !dataSource->possibleLadderHop && !dataSource->takeoffFromLadder)
 			{
-				tintCol = this->fromDuckbug ? jumpbugCol : perfCol;
+				tintCol = dataSource->hudService->fromDuckbug ? jumpbugCol : perfCol;
 			}
 			char tk[96];
 			V_snprintf(tk, sizeof(tk), " <font color='#%02x%02x%02x'>(%d)</font>", tintCol.r(), tintCol.g(), tintCol.b(),
-					   RoundFloatToInt(this->player->takeoffVelocity.Length2D()));
+					   RoundFloatToInt(dataSource->takeoffVelocity.Length2D()));
 			takeoff = tk;
-			if (this->crouchJumping)
+			if (dataSource->hudService->crouchJumping)
 			{
 				takeoff += " <font color='" KZ_HUD_C_ACCENT "'>C</font>";
 			}
@@ -273,7 +286,7 @@ std::string KZHUDService::BuildVersionCHud(bool suppressSpeed, bool suppressTime
 	}
 
 	// --- 2. Ряд клавиш W A S D  J C (активная — accent, неактивная — dim) ---
-	if (!suppressKeys)
+	if (showKeys)
 	{
 		auto key = [&](const char *label, bool down)
 		{
@@ -281,18 +294,19 @@ std::string KZHUDService::BuildVersionCHud(bool suppressSpeed, bool suppressTime
 			V_snprintf(k, sizeof(k), "<font color='%s'>%s</font>", down ? KZ_HUD_C_ACCENT : KZ_HUD_C_DIM, label);
 			return std::string(k);
 		};
-		bool jump = this->jumpedThisTick || this->player->IsButtonPressed(IN_JUMP);
-		std::string row = key("W", this->player->IsButtonPressed(IN_FORWARD)) + " " + key("A", this->player->IsButtonPressed(IN_MOVELEFT))
-						  + " " + key("S", this->player->IsButtonPressed(IN_BACK)) + " " + key("D", this->player->IsButtonPressed(IN_MOVERIGHT))
-						  + "&#160;&#160;" + key("J", jump) + " " + key("C", this->player->IsButtonPressed(IN_DUCK));
+		bool jump = dataSource->hudService->jumpedThisTick || dataSource->IsButtonPressed(IN_JUMP);
+		std::string row = key("W", dataSource->IsButtonPressed(IN_FORWARD)) + " " + key("A", dataSource->IsButtonPressed(IN_MOVELEFT)) + " "
+						  + key("S", dataSource->IsButtonPressed(IN_BACK)) + " " + key("D", dataSource->IsButtonPressed(IN_MOVERIGHT))
+						  + "&#160;&#160;" + key("J", jump) + " " + key("C", dataSource->IsButtonPressed(IN_DUCK));
 		addLine(row);
 	}
 
-	// --- 3. CP/TP в стиле версии C (раньше — серый Alert-бар) ---
+	// --- 3. CP/TP в стиле версии C (per-element тумблер mhudCpTpEnabled) ---
+	if (showCpTp)
 	{
-		i32 cpIndex = isReplay ? KZ::replaysystem::GetCurrentCpIndex() : this->player->checkpointService->GetCurrentCpIndex();
-		i32 cpCount = isReplay ? KZ::replaysystem::GetCheckpointCount() : this->player->checkpointService->GetCheckpointCount();
-		i32 tpCount = isReplay ? KZ::replaysystem::GetTeleportCount() : (i32)this->player->checkpointService->GetTeleportCount();
+		i32 cpIndex = isReplay ? KZ::replaysystem::GetCurrentCpIndex() : dataSource->checkpointService->GetCurrentCpIndex();
+		i32 cpCount = isReplay ? KZ::replaysystem::GetCheckpointCount() : dataSource->checkpointService->GetCheckpointCount();
+		i32 tpCount = isReplay ? KZ::replaysystem::GetTeleportCount() : (i32)dataSource->checkpointService->GetTeleportCount();
 		V_snprintf(buf, sizeof(buf),
 				   "<font color='" KZ_HUD_C_MUTED "'>CP</font> <font color='" KZ_HUD_C_WHITE "'>%d/%d</font> "
 				   "<font color='" KZ_HUD_C_DIM "'>|</font> <font color='" KZ_HUD_C_MUTED "'>TP</font> <font color='" KZ_HUD_C_WHITE "'>%d</font>",
@@ -301,19 +315,19 @@ std::string KZHUDService::BuildVersionCHud(bool suppressSpeed, bool suppressTime
 	}
 
 	// --- 4. Время | STAGE n/total (время — accent, стейдж — dim) ---
-	if (!suppressTimer)
+	if (showTimer)
 	{
-		std::string timer = this->GetTimerText(language);
+		std::string timer = dataSource->hudService->GetTimerText(language);
 		if (!timer.empty())
 		{
 			std::string stage;
 			if (!isReplay)
 			{
-				const KZCourseDescriptor *course = this->player->timerService->GetCourse();
+				const KZCourseDescriptor *course = dataSource->timerService->GetCourse();
 				if (course && course->stageCount > 0)
 				{
 					char st[64];
-					V_snprintf(st, sizeof(st), " <font color='" KZ_HUD_C_DIM "'>| STAGE %d/%d</font>", this->player->timerService->GetCurrentStage(),
+					V_snprintf(st, sizeof(st), " <font color='" KZ_HUD_C_DIM "'>| STAGE %d/%d</font>", dataSource->timerService->GetCurrentStage(),
 							   course->stageCount);
 					stage = st;
 				}
@@ -352,18 +366,26 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	}
 	const char *language = target->languageService->GetLanguage();
 
-	// Per-element panel suppression: only active when the particle HUD is live.
-	// Флаги читаем у источника (наблюдаемого) — particle-MHUD рисуется по его настройкам,
-	// поэтому и текстовые строки прячем по тем же флагам, иначе будет двойной рендер.
-	bool suppressSpeed = useParticles && player->hudService->IsMHUDSpeedEnabled();
-	bool suppressTimer = useParticles && player->hudService->IsMHUDTimerEnabled();
-	bool suppressKeys = useParticles && player->hudService->IsMHUDKeysEnabled();
+	// Настройки берём у получателя (target = сам игрок / спектатор), данные — у player
+	// (наблюдаемого при спектировании). Так спектатор видит СВОЙ HUD-конфиг, но с данными
+	// того, за кем следит.
+	KZHUDService *cfg = target->hudService;
 
-	bool compact = target->hudService->IsCompactPanel();
+	// Per-element panel suppression: only active when the particle HUD is live.
+	// particle-MHUD рисует элемент по настройкам получателя → HTML-строку того же
+	// элемента прячем, иначе двойной рендер.
+	bool suppressSpeed = useParticles && cfg->IsMHUDSpeedEnabled();
+	bool suppressTimer = useParticles && cfg->IsMHUDTimerEnabled();
+	bool suppressKeys = useParticles && cfg->IsMHUDKeysEnabled();
+
+	// Мастер-тумблер: гасим весь дефолтный HUD, показываем только включённые тумблеры.
+	bool masterMode = cfg->IsMHUDMasterEnabled();
+
+	bool compact = cfg->IsCompactPanel();
 
 	std::string htmlText = "";
 
-	if (compact)
+	if (compact && !masterMode)
 	{
 		std::string timerText = suppressTimer ? std::string("") : player->hudService->GetTimerText(language);
 		std::string speedText = suppressSpeed ? std::string("") : player->hudService->GetSpeedText(language);
@@ -379,8 +401,8 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	else
 	{
 		// Единый HUD версии C (скорость / клавиши / CP-TP / время|стейдж) одним
-		// HTML-center-блоком. Серого PrintAlert/PrintCentre-бара для CP/TP больше нет.
-		htmlText = player->hudService->BuildVersionCHud(suppressSpeed, suppressTimer, suppressKeys, language);
+		// HTML-center-блоком. Настройки — cfg (получатель), данные — player (наблюдаемый).
+		htmlText = cfg->BuildVersionCHud(player, suppressSpeed, suppressTimer, suppressKeys, masterMode, language);
 	}
 
 	htmlText = htmlText.substr(0, htmlText.find_last_not_of('\n') + 1);

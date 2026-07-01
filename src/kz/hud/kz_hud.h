@@ -21,14 +21,23 @@ private:
 	f64 timerStoppedTime {};
 	f64 currentTimeWhenTimerStopped {};
 
-	// Источник данных для particle-MHUD. При спектировании = наблюдаемый игрок,
-	// так его HUD дублируется спектатору. nullptr → данные самого игрока.
+	// Источник ДАННЫХ для MHUD (скорость/клавиши/таймер/CP-TP). При спектировании =
+	// наблюдаемый игрок; nullptr → данные самого игрока.
+	// ВАЖНО: это ТОЛЬКО источник данных. Источник НАСТРОЕК (тумблеры/цвета/раскладка) —
+	// всегда this->player (сам игрок / спектатор), см. MHUDDataSource() vs this->player.
 	KZPlayer *mhudSource {};
 
-	// Игрок, чьи данные/настройки читает MHUD (наблюдаемый при спектировании).
-	KZPlayer *MHUDSource()
+	// Игрок, чьи ДАННЫЕ читает MHUD (наблюдаемый при спектировании, иначе сам игрок).
+	KZPlayer *MHUDDataSource()
 	{
 		return mhudSource ? mhudSource : this->player;
+	}
+
+	// Игрок, чьи НАСТРОЙКИ (тумблеры/цвета/раскладка) читает MHUD — ВСЕГДА сам игрок
+	// (спектатор при спектировании). Так у спектатора своя раскладка по чужим данным.
+	KZPlayer *MHUDSettingsSource()
+	{
+		return this->player;
 	}
 
 public:
@@ -100,11 +109,16 @@ public:
 	// CheckTransmit support (see kz_quiet.cpp).
 	bool OwnsParticle(const CEntityHandle &handle) const;
 
+	// Мастер-тумблер mhud: ON → дефолтный cs2kz-HUD гасится целиком, рисуются ТОЛЬКО
+	// включённые per-element тумблеры (скорость/клавиши/время/CP-TP). OFF → HUD как раньше.
+	bool IsMHUDMasterEnabled();
+
 	// Per-element enable flags (also consulted for panel suppression).
 	bool IsMHUDSpeedEnabled();
 	bool IsMHUDPrespeedEnabled();
 	bool IsMHUDTimerEnabled();
 	bool IsMHUDKeysEnabled();
+	bool IsMHUDCpTpEnabled();
 	bool IsMHUDTimerDetailed();
 	bool IsMHUDKeysOverlapEnabled();
 	bool IsMHUDOutlineEnabled();
@@ -123,9 +137,12 @@ private:
 	std::string GetTimerText(const char *language = KZ_DEFAULT_LANGUAGE);
 
 	// Версия C: единый HTML-center HUD (крупная скорость, ряд клавиш, CP/TP, время|стейдж).
-	// Вызывается на hudService источника данных (наблюдаемого при спектировании).
+	// Вызывается на hudService ПОЛУЧАТЕЛЯ (спектатора): настройки берутся из this->player,
+	// данные — из dataSource (наблюдаемый при спектировании; == this->player в норме).
 	// suppress* — элементы, дублируемые particle-MHUD, чтобы не рисовать их дважды.
-	std::string BuildVersionCHud(bool suppressSpeed, bool suppressTimer, bool suppressKeys, const char *language);
+	// masterMode — мастер-тумблер: показываем ТОЛЬКО включённые per-element тумблеры.
+	std::string BuildVersionCHud(KZPlayer *dataSource, bool suppressSpeed, bool suppressTimer, bool suppressKeys, bool masterMode,
+								 const char *language);
 
 	// Control point mapping:
 	// 16 = RGB tint | 17X = sequence | 17Y = scale | 18X = X offset | 18Y = Y offset
