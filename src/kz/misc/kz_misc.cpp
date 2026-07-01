@@ -516,9 +516,11 @@ void KZ::misc::ProcessConCommand(ConCommandRef cmd, const CCommandContext &ctx, 
 			wrappedInQuotes = true;
 			p += 1;
 		}
-		if (argLen < 1 || args[1][0] == SCMD_CHAT_SILENT_TRIGGER)
+		if (argLen < 1 || args[1][0] == SCMD_CHAT_SILENT_TRIGGER || args[1][0] == SCMD_CHAT_TRIGGER)
 		{
-			// arg is too short!
+			// arg is too short, silent (/) command, or chat-trigger (!) command —
+			// не ре-броадкастим: silent/! -команды скрыты у всех. Само `say` доезжает
+			// до CSSharp (ProcessConCommand не суперсидит), так что !maps/!mcustom работают.
 			return;
 		}
 
