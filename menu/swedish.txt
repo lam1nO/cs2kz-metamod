@@ -120,49 +120,49 @@
 				{
 					"hotkey"	"1"
 					"label"		"Skapa Justerad Startposition"
-					"cmd"		"kz_ssp; radio2"
+					"cmd"		"kz_ssp"
 				}
 
 				"Clear Custom Start Position"
 				{
 					"hotkey"	"2"
 					"label"		"Rensa Justerad Startposition"
-					"cmd"		"kz_csp; radio2"
+					"cmd"		"kz_csp"
 				}
 
 				"Hide"
 				{
 					"hotkey"	"3"
 					"label"		"Visa/Dölj Andra Spelare"
-					"cmd"		"kz_hide; radio2"
+					"cmd"		"kz_hide"
 				}
 
 				"Hide Weapon"
 				{
 					"hotkey"	"4"
 					"label"		"Visa/Dölj Vapen"
-					"cmd"		"kz_hideweapon; radio2"
+					"cmd"		"kz_hideweapon"
 				}
 
 				"Hide Legs"
 				{
 					"hotkey"	"5"
 					"label"		"Visa/Dölj Ben"
-					"cmd"		"kz_hidelegs; radio2"
+					"cmd"		"kz_hidelegs"
 				}
 
 				"Toggle Jumpstats"
 				{
 					"hotkey"	"6"
 					"label"		"Toggla Jumpstats"
-					"cmd"		"kz_togglejs; radio2"
+					"cmd"		"kz_togglejs"
 				}
 
 				"Toggle Jumpstats Always"
 				{
 					"hotkey"	"7"
 					"label"		"Toggla Alla Jumpstats"
-					"cmd"		"kz_jsalways; radio2"
+					"cmd"		"kz_jsalways"
 				}
 			}
 		}

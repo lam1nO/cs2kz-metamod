@@ -118,49 +118,49 @@
 				{
 					"hotkey"	"1"
 					"label"		"Iestatīt pielāgoto starta pozīciju"
-					"cmd"		"kz_ssp; radio2"
+					"cmd"		"kz_ssp"
 				}
 
 				"Clear Custom Start Position"
 				{
 					"hotkey"	"2"
 					"label"		"Notīrīt pielāgoto starta pozīciju"
-					"cmd"		"kz_csp; radio2"
+					"cmd"		"kz_csp"
 				}
 
 				"Hide"
 				{
 					"hotkey"	"3"
 					"label"		"Parādīt/Slēpt citus spēlētājus"
-					"cmd"		"kz_hide; radio2"
+					"cmd"		"kz_hide"
 				}
 
 				"Hide Weapon"
 				{
 					"hotkey"	"4"
 					"label"		"Parādīt/Slēpt ieročus"
-					"cmd"		"kz_hideweapon; radio2"
+					"cmd"		"kz_hideweapon"
 				}
 
 				"Hide Legs"
 				{
 					"hotkey"	"5"
 					"label"		"Parādīt/Slēpt kājas"
-					"cmd"		"kz_hidelegs; radio2"
+					"cmd"		"kz_hidelegs"
 				}
 
 				"Toggle Jumpstats"
 				{
 					"hotkey"	"6"
 					"label"		"Ieslēgt/Izslēgt Jumpstats Display"
-					"cmd"		"kz_togglejs; radio2"
+					"cmd"		"kz_togglejs"
 				}
 
 				"Toggle Jumpstats Always"
 				{
 					"hotkey"	"7"
 					"label"		"Ieslēgt/Izslēgt Jumpstats vienmēr"
-					"cmd"		"kz_jsalways; radio2"
+					"cmd"		"kz_jsalways"
 				}
 			}
 		}

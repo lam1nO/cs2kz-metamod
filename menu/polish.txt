@@ -118,49 +118,49 @@
 				{
 					"hotkey"	"1"
 					"label"		"Ustaw pozycję startową"
-					"cmd"		"kz_ssp; radio2"
+					"cmd"		"kz_ssp"
 				}
 
 				"Clear Custom Start Position"
 				{
 					"hotkey"	"2"
 					"label"		"Usuń pozycję startową"
-					"cmd"		"kz_csp; radio2"
+					"cmd"		"kz_csp"
 				}
 
 				"Hide"
 				{
 					"hotkey"	"3"
 					"label"		"Pokaż/Ukryj innych graczy"
-					"cmd"		"kz_hide; radio2"
+					"cmd"		"kz_hide"
 				}
 
 				"Hide Weapon"
 				{
 					"hotkey"	"4"
 					"label"		"Pokaż/Ukryj broń"
-					"cmd"		"kz_hideweapon; radio2"
+					"cmd"		"kz_hideweapon"
 				}
 
 				"Hide Legs"
 				{
 					"hotkey"	"5"
 					"label"		"Pokaż/Ukryj nogi"
-					"cmd"		"kz_hidelegs; radio2"
+					"cmd"		"kz_hidelegs"
 				}
 
 				"Toggle Jumpstats"
 				{
 					"hotkey"	"6"
 					"label"		"Wł./Wył. Jumpstaty"
-					"cmd"		"kz_togglejs; radio2"
+					"cmd"		"kz_togglejs"
 				}
 
 				"Toggle Jumpstats Always"
 				{
 					"hotkey"	"7"
 					"label"		"Zawsze pokazuj Jumpstaty"
-					"cmd"		"kz_jsalways; radio2"
+					"cmd"		"kz_jsalways"
 				}
 			}
 		}

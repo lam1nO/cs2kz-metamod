@@ -118,49 +118,49 @@
 				{
 					"hotkey"	"1"
 					"label"		"设置自定义起点"
-					"cmd"		"kz_ssp; radio2"
+					"cmd"		"kz_ssp"
 				}
 
 				"Clear Custom Start Position"
 				{
 					"hotkey"	"2"
 					"label"		"清除自定义起点"
-					"cmd"		"kz_csp; radio2"
+					"cmd"		"kz_csp"
 				}
 
 				"Hide"
 				{
 					"hotkey"	"3"
 					"label"		"显示/隐藏其他玩家"
-					"cmd"		"kz_hide; radio2"
+					"cmd"		"kz_hide"
 				}
 
 				"Hide Weapon"
 				{
 					"hotkey"	"4"
 					"label"		"显示/隐藏武器"
-					"cmd"		"kz_hideweapon; radio2"
+					"cmd"		"kz_hideweapon"
 				}
 
 				"Hide Legs"
 				{
 					"hotkey"	"5"
 					"label"		"显示/隐藏腿部"
-					"cmd"		"kz_hidelegs; radio2"
+					"cmd"		"kz_hidelegs"
 				}
 
 				"Toggle Jumpstats"
 				{
 					"hotkey"	"6"
 					"label"		"切换跳跃数据展示"
-					"cmd"		"kz_togglejs; radio2"
+					"cmd"		"kz_togglejs"
 				}
 
 				"Toggle Jumpstats Always"
 				{
 					"hotkey"	"7"
 					"label"		"切换总是显示跳跃数据"
-					"cmd"		"kz_jsalways; radio2"
+					"cmd"		"kz_jsalways"
 				}
 			}
 		}
