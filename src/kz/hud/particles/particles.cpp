@@ -171,26 +171,57 @@ void KZHUDService::OnClientDisconnect()
 
 // === Preferences ====================================================================
 
+// === Тип худа (hudType) ============================================================
+
+int KZHUDService::GetHudType()
+{
+	// Читаем из настроек источника (сам игрок / спектатор).
+	// Миграция: если hudType не задан и mhudMaster=true (старый конфиг) → возвращаем 1 (MHUD).
+	auto *opts = this->MHUDSettingsSource()->optionService;
+	int stored = opts->GetPreferenceInt("hudType", -1);
+	if (stored == -1)
+	{
+		// Первый запрос — мигрируем из mhudMaster.
+		bool legacyMaster = opts->GetPreferenceBool("mhudMaster", false);
+		int migrated = legacyMaster ? 1 : 0;
+		opts->SetPreferenceInt("hudType", migrated);
+		return migrated;
+	}
+	return stored;
+}
+
+void KZHUDService::SetHudType(int type)
+{
+	this->MHUDSettingsSource()->optionService->SetPreferenceInt("hudType", type);
+	// При смене типа уничтожаем все particle'ы, чтобы корректно переключить состояние.
+	this->DestroyAllParticles();
+}
+
+// === Preferences ====================================================================
+
 // Все тумблеры/раскладка — НАСТРОЙКИ: читаем из источника настроек (сам игрок/спектатор),
 // а не из данных наблюдаемого. Иначе у спектатора «прыгал» бы HUD при смене цели.
 bool KZHUDService::IsMHUDMasterEnabled()
 {
-	return this->MHUDSettingsSource()->optionService->GetPreferenceBool("mhudMaster", false);
+	// Теперь мастер-тумблер = hudType==1.
+	return this->GetHudType() == 1;
 }
 
+// Per-element тумблеры — общие для обоих типов худа (Стандартный и MHUD).
+// Дефолты видимости элементов = true (все показываются при первом входе).
 bool KZHUDService::IsMHUDSpeedEnabled()
 {
-	return this->MHUDSettingsSource()->optionService->GetPreferenceBool("mhudSpeedEnabled", false);
+	return this->MHUDSettingsSource()->optionService->GetPreferenceBool("mhudSpeedEnabled", true);
 }
 
 bool KZHUDService::IsMHUDTimerEnabled()
 {
-	return this->MHUDSettingsSource()->optionService->GetPreferenceBool("mhudTimerEnabled", false);
+	return this->MHUDSettingsSource()->optionService->GetPreferenceBool("mhudTimerEnabled", true);
 }
 
 bool KZHUDService::IsMHUDKeysEnabled()
 {
-	return this->MHUDSettingsSource()->optionService->GetPreferenceBool("mhudKeysEnabled", false);
+	return this->MHUDSettingsSource()->optionService->GetPreferenceBool("mhudKeysEnabled", true);
 }
 
 bool KZHUDService::IsMHUDCpTpEnabled()
@@ -210,7 +241,7 @@ bool KZHUDService::IsMHUDKeysOverlapEnabled()
 
 bool KZHUDService::IsMHUDPrespeedEnabled()
 {
-	return this->MHUDSettingsSource()->optionService->GetPreferenceBool("mhudPrespeedEnabled", false);
+	return this->MHUDSettingsSource()->optionService->GetPreferenceBool("mhudPrespeedEnabled", true);
 }
 
 bool KZHUDService::IsMHUDOutlineEnabled()
@@ -886,7 +917,8 @@ static_function void ResetElementPrefs(KZPlayer *p, MHUDElement element)
 	switch (element)
 	{
 		case MHUDElement::Speed:
-			p->optionService->SetPreferenceBool("mhudSpeedEnabled", false);
+			// Дефолт Enabled=true (элемент виден при первом входе).
+			p->optionService->SetPreferenceBool("mhudSpeedEnabled", true);
 			p->optionService->SetPreferenceFloat("mhudSpeedOffsetX", MHUD_DEF_SPEED_OFFSET_X);
 			p->optionService->SetPreferenceFloat("mhudSpeedOffsetY", MHUD_DEF_SPEED_OFFSET_Y);
 			p->optionService->SetPreferenceFloat("mhudSpeedScale", MHUD_DEF_SPEED_SCALE);
@@ -894,7 +926,7 @@ static_function void ResetElementPrefs(KZPlayer *p, MHUDElement element)
 			p->optionService->SetPreferenceInt("mhudSpeedCjColor", PackColor(MHUD_DEF_CJ_COLOR));
 			break;
 		case MHUDElement::Prespeed:
-			p->optionService->SetPreferenceBool("mhudPrespeedEnabled", false);
+			p->optionService->SetPreferenceBool("mhudPrespeedEnabled", true);
 			p->optionService->SetPreferenceFloat("mhudPrespeedOffsetX", MHUD_DEF_PRESPEED_OFFSET_X);
 			p->optionService->SetPreferenceFloat("mhudPrespeedOffsetY", MHUD_DEF_PRESPEED_OFFSET_Y);
 			p->optionService->SetPreferenceFloat("mhudPrespeedScale", MHUD_DEF_PRESPEED_SCALE);
@@ -903,7 +935,7 @@ static_function void ResetElementPrefs(KZPlayer *p, MHUDElement element)
 			p->optionService->SetPreferenceInt("mhudPrespeedJumpbugColor", PackColor(MHUD_DEF_JUMPBUG_COLOR));
 			break;
 		case MHUDElement::Timer:
-			p->optionService->SetPreferenceBool("mhudTimerEnabled", false);
+			p->optionService->SetPreferenceBool("mhudTimerEnabled", true);
 			p->optionService->SetPreferenceBool("mhudTimerDetailed", true);
 			p->optionService->SetPreferenceFloat("mhudTimerOffsetX", MHUD_DEF_TIMER_OFFSET_X);
 			p->optionService->SetPreferenceFloat("mhudTimerOffsetY", MHUD_DEF_TIMER_OFFSET_Y);
@@ -914,7 +946,7 @@ static_function void ResetElementPrefs(KZPlayer *p, MHUDElement element)
 			p->optionService->SetPreferenceInt("mhudTimerStoppedColor", PackColor(MHUD_DEF_TIMER_STOPPED_COLOR));
 			break;
 		case MHUDElement::Keys:
-			p->optionService->SetPreferenceBool("mhudKeysEnabled", false);
+			p->optionService->SetPreferenceBool("mhudKeysEnabled", true);
 			p->optionService->SetPreferenceBool("mhudKeysOverlap", true);
 			p->optionService->SetPreferenceFloat("mhudKeysOffsetX", MHUD_DEF_KEYS_OFFSET_X);
 			p->optionService->SetPreferenceFloat("mhudKeysOffsetY", MHUD_DEF_KEYS_OFFSET_Y);
@@ -925,56 +957,63 @@ static_function void ResetElementPrefs(KZPlayer *p, MHUDElement element)
 	}
 }
 
-void KZHUDService::PrintMHUDSummary()
+void KZHUDService::PrintHUDSummary()
 {
 	auto *p = this->player;
 	auto *opts = p->optionService;
 	auto *lang = p->languageService;
+	int hudType = this->GetHudType();
 	// clang-format off
-	lang->PrintChat(true, false, opts->GetPreferenceBool("mhudMaster", false) ? "MHUD - Master Enabled" : "MHUD - Master Disabled");
-	lang->PrintChat(true, false, opts->GetPreferenceBool("mhudSpeedEnabled", false) ? "MHUD - Speed Enabled" : "MHUD - Speed Disabled");
-	lang->PrintChat(true, false, opts->GetPreferenceBool("mhudPrespeedEnabled", false) ? "MHUD - Prespeed Enabled" : "MHUD - Prespeed Disabled");
-	lang->PrintChat(true, false, opts->GetPreferenceBool("mhudTimerEnabled", false) ? "MHUD - Timer Enabled" : "MHUD - Timer Disabled");
-	lang->PrintChat(true, false, opts->GetPreferenceBool("mhudTimerDetailed", true) ? "MHUD - Timer Detail Enabled" : "MHUD - Timer Detail Disabled");
-	lang->PrintChat(true, false, opts->GetPreferenceBool("mhudKeysEnabled", false) ? "MHUD - Keys Enabled" : "MHUD - Keys Disabled");
-	lang->PrintChat(true, false, opts->GetPreferenceBool("mhudKeysOverlap", true) ? "MHUD - Keys Overlap Enabled" : "MHUD - Keys Overlap Disabled");
-	lang->PrintChat(true, false, opts->GetPreferenceBool("mhudCpTpEnabled", true) ? "MHUD - CP/TP Enabled" : "MHUD - CP/TP Disabled");
-	lang->PrintChat(true, false, opts->GetPreferenceBool("mhudOutline", true) ? "MHUD - Outline Enabled" : "MHUD - Outline Disabled");
+	lang->PrintChat(true, false, hudType == 1 ? "HUD - Type MHUD" : "HUD - Type Standard");
+	lang->PrintChat(true, false, opts->GetPreferenceBool("mhudSpeedEnabled",    true) ? "MHUD - Speed Enabled"        : "MHUD - Speed Disabled");
+	lang->PrintChat(true, false, opts->GetPreferenceBool("mhudPrespeedEnabled", true) ? "MHUD - Prespeed Enabled"     : "MHUD - Prespeed Disabled");
+	lang->PrintChat(true, false, opts->GetPreferenceBool("mhudTimerEnabled",    true) ? "MHUD - Timer Enabled"        : "MHUD - Timer Disabled");
+	lang->PrintChat(true, false, opts->GetPreferenceBool("mhudTimerDetailed",   true) ? "MHUD - Timer Detail Enabled" : "MHUD - Timer Detail Disabled");
+	lang->PrintChat(true, false, opts->GetPreferenceBool("mhudKeysEnabled",     true) ? "MHUD - Keys Enabled"         : "MHUD - Keys Disabled");
+	lang->PrintChat(true, false, opts->GetPreferenceBool("mhudKeysOverlap",     true) ? "MHUD - Keys Overlap Enabled" : "MHUD - Keys Overlap Disabled");
+	lang->PrintChat(true, false, opts->GetPreferenceBool("mhudCpTpEnabled",     true) ? "MHUD - CP/TP Enabled"        : "MHUD - CP/TP Disabled");
+	lang->PrintChat(true, false, opts->GetPreferenceBool("mhudOutline",         true) ? "MHUD - Outline Enabled"      : "MHUD - Outline Disabled");
 	lang->PrintChat(true, false, "MHUD - Font", opts->GetPreferenceStr("mhudFont", AVAILABLE_FONTS[0]));
 	// clang-format on
 }
 
-// === Интерактивное меню kz_mhud (cs2menus) ==========================================
-
-// Описание одного тумблера меню: текст пункта, ключ pref, дефолт и lang-ключи enabled/disabled.
-// info-тег пункта = prefKey, по нему в колбэке находим строку и зовём MHUDToggle.
-struct MHUDMenuToggle
+// Алиас для обратной совместимости kz_mhud без аргументов.
+void KZHUDService::OpenMHUDMenu()
 {
-	const char *label;       // отображаемое название (без перевода — текст пункта меню)
-	const char *prefKey;     // ключ bool-pref и одновременно info-тег пункта
-	bool defaultValue;       // дефолт pref
-	const char *enabledKey;  // lang-ключ при включении
-	const char *disabledKey; // lang-ключ при выключении
+	this->OpenHUDMenu();
+}
+
+// === Интерактивное меню kz_hud (cs2menus) ==========================================
+
+// Пункт меню тумблер: label в меню, prefKey bool, дефолт, lang-ключи включения/выключения.
+// info-тег пункта = prefKey — по нему колбэк находит нужную строку.
+struct HUDMenuToggle
+{
+	const char *label;
+	const char *prefKey;
+	bool defaultValue;
+	const char *enabledKey;
+	const char *disabledKey;
 };
 
-// Таблица тумблеров. Порядок = порядок пунктов в меню.
-// Ключи/дефолты/lang-ключи синхронны с PrintMHUDSummary.
-static const MHUDMenuToggle s_mhudToggles[] = {
-	{"Master (hide default HUD)", "mhudMaster",          false, "MHUD - Master Enabled",        "MHUD - Master Disabled"       },
-	{"Speed",                     "mhudSpeedEnabled",    false, "MHUD - Speed Enabled",         "MHUD - Speed Disabled"        },
-	{"Pre-speed",                 "mhudPrespeedEnabled", false, "MHUD - Prespeed Enabled",      "MHUD - Prespeed Disabled"     },
-	{"Timer",                     "mhudTimerEnabled",    false, "MHUD - Timer Enabled",         "MHUD - Timer Disabled"        },
-	{"Timer detail",              "mhudTimerDetailed",   true,  "MHUD - Timer Detail Enabled",  "MHUD - Timer Detail Disabled" },
-	{"Keys",                      "mhudKeysEnabled",     false, "MHUD - Keys Enabled",          "MHUD - Keys Disabled"         },
-	{"Keys overlap",              "mhudKeysOverlap",     true,  "MHUD - Keys Overlap Enabled",  "MHUD - Keys Overlap Disabled" },
-	{"CP/TP",                     "mhudCpTpEnabled",     true,  "MHUD - CP/TP Enabled",         "MHUD - CP/TP Disabled"        },
-	{"Outline",                   "mhudOutline",         true,  "MHUD - Outline Enabled",       "MHUD - Outline Disabled"      },
+// Таблица per-element тумблеров (без первого пункта hudType — он особый, int-pref).
+// Порядок соответствует ТЗ: speed / prespeed / timer / timerDetail / keys / keysOverlap / cptp / outline.
+static const HUDMenuToggle s_hudToggles[] = {
+	{"Скорость",            "mhudSpeedEnabled",    true,  "MHUD - Speed Enabled",         "MHUD - Speed Disabled"        },
+	{"Pre-speed",           "mhudPrespeedEnabled", true,  "MHUD - Prespeed Enabled",      "MHUD - Prespeed Disabled"     },
+	{"Таймер",              "mhudTimerEnabled",    true,  "MHUD - Timer Enabled",         "MHUD - Timer Disabled"        },
+	{"Детализация таймера", "mhudTimerDetailed",   true,  "MHUD - Timer Detail Enabled",  "MHUD - Timer Detail Disabled" },
+	{"Клавиши",             "mhudKeysEnabled",     true,  "MHUD - Keys Enabled",          "MHUD - Keys Disabled"         },
+	{"Наложение клавиш",    "mhudKeysOverlap",     true,  "MHUD - Keys Overlap Enabled",  "MHUD - Keys Overlap Disabled" },
+	{"CP/TP",               "mhudCpTpEnabled",     true,  "MHUD - CP/TP Enabled",         "MHUD - CP/TP Disabled"        },
+	{"Outline",             "mhudOutline",         true,  "MHUD - Outline Enabled",       "MHUD - Outline Disabled"      },
 };
 
-// Колбэк выбора пункта. На главном потоке; lock cs2menus НЕ держится в момент колбэка,
-// поэтому SetItemText безопасен. Игрока резолвим по slot, по info-тегу (prefKey)
-// переключаем pref, обновляем текст пункта вживую и печатаем результат.
-static_function void OnMHUDMenuSelect(MenuHandle menu, int slot, int item)
+// info-тег специального первого пункта (тип худа) — используем уникальную строку.
+static constexpr const char *HUD_MENU_TYPE_TAG = "__hudType__";
+
+// Колбэк выбора пункта меню !hud.
+static_function void OnHUDMenuSelect(MenuHandle menu, int slot, int item)
 {
 	KZPlayer *p = g_pKZPlayerManager->ToPlayer(CPlayerSlot(slot));
 	if (!p)
@@ -986,109 +1025,128 @@ static_function void OnMHUDMenuSelect(MenuHandle menu, int slot, int item)
 	{
 		return;
 	}
-	for (const auto &t : s_mhudToggles)
+
+	// Первый пункт — переключение hudType.
+	if (KZ_STREQ(key, HUD_MENU_TYPE_TAG))
+	{
+		int current = p->hudService->GetHudType();
+		int next = (current == 0) ? 1 : 0;
+		p->hudService->SetHudType(next);
+		// Если переключились на MHUD, но ассеты недоступны — предупредить.
+		if (next == 1 && !KZHUDService::IsMHUDAvailable())
+		{
+			p->languageService->PrintChat(true, false, "MHUD - Unavailable");
+		}
+		const char *typeName = (next == 0) ? "Стандартный" : "MHUD";
+		char newText[64];
+		V_snprintf(newText, sizeof(newText), "Вид худа: %s", typeName);
+		g_pMenus->SetItemText(menu, item, newText);
+		return;
+	}
+
+	// Per-element тумблеры.
+	for (const auto &t : s_hudToggles)
 	{
 		if (KZ_STREQ(key, t.prefKey))
 		{
 			MHUDToggle(p, t.prefKey, t.defaultValue, t.enabledKey, t.disabledKey);
-			// Обновляем текст пункта вживую — меню остаётся открытым (SetCloseOnSelect=false),
-			// cs2menus перерисует строку сразу после возврата из колбэка.
 			bool nowOn = p->optionService->GetPreferenceBool(t.prefKey, t.defaultValue);
+			// Outline: при смене пересоздаём particle'ы (vpcf-путь зависит от outline).
+			if (KZ_STREQ(t.prefKey, "mhudOutline"))
+			{
+				p->hudService->DestroyAllParticles();
+			}
 			char newText[64];
-			V_snprintf(newText, sizeof(newText), "%s: %s", t.label, nowOn ? "on" : "off");
+			V_snprintf(newText, sizeof(newText), "%s: %s", t.label, nowOn ? "вкл" : "выкл");
 			g_pMenus->SetItemText(menu, item, newText);
 			return;
 		}
 	}
 }
 
-void KZHUDService::OpenMHUDMenu()
+void KZHUDService::OpenHUDMenu()
 {
-	// Гейт доступности (нужен MAM): поведение как в no-arg ветке SCMD.
-	if (!IsMHUDAvailable())
-	{
-		this->player->languageService->PrintChat(true, false, "MHUD - Unavailable");
-		return;
-	}
-	// Меню-движок не загружен → старое текстовое поведение.
+	// Меню-движок не загружен → текстовая сводка.
 	if (g_pMenus == nullptr)
 	{
-		this->PrintMHUDSummary();
+		this->PrintHUDSummary();
 		return;
 	}
 
 	int slot = this->player->GetPlayerSlot().Get();
-
-	// Лайфтайм: один хэндл на слот. Мы в контексте команды (не в колбэке) — безопасно пересоздавать.
-	static MenuHandle s_mhudMenu[MAXPLAYERS + 1] = {};
 	if (slot < 0 || slot > MAXPLAYERS)
 	{
 		return;
 	}
-	if (s_mhudMenu[slot] != kInvalidMenuHandle)
+
+	// Один хэндл на слот — пересоздаём при повторном вызове.
+	static MenuHandle s_hudMenu[MAXPLAYERS + 1] = {};
+	if (s_hudMenu[slot] != kInvalidMenuHandle)
 	{
-		g_pMenus->DestroyMenu(s_mhudMenu[slot]);
-		s_mhudMenu[slot] = kInvalidMenuHandle;
+		g_pMenus->DestroyMenu(s_hudMenu[slot]);
+		s_hudMenu[slot] = kInvalidMenuHandle;
 	}
 
-	MenuHandle m = g_pMenus->CreateMenu(MenuType::Default, "MHUD", &OnMHUDMenuSelect);
+	MenuHandle m = g_pMenus->CreateMenu(MenuType::Default, "HUD", &OnHUDMenuSelect);
 	if (m == kInvalidMenuHandle)
 	{
-		// Не удалось создать меню — фолбэк на сводку.
-		this->PrintMHUDSummary();
+		this->PrintHUDSummary();
 		return;
 	}
 
 	auto *opts = this->MHUDSettingsSource()->optionService;
-	for (const auto &t : s_mhudToggles)
+
+	// Пункт 1: тип худа (int-pref).
+	int hudType = this->GetHudType();
+	const char *typeName = (hudType == 0) ? "Стандартный" : "MHUD";
+	char typeText[64];
+	V_snprintf(typeText, sizeof(typeText), "Вид худа: %s", typeName);
+	g_pMenus->AddItem(m, typeText, HUD_MENU_TYPE_TAG, false);
+
+	// Пункты 2-9: per-element тумблеры.
+	for (const auto &t : s_hudToggles)
 	{
 		bool on = opts->GetPreferenceBool(t.prefKey, t.defaultValue);
 		char text[64];
-		V_snprintf(text, sizeof(text), "%s: %s", t.label, on ? "on" : "off");
+		V_snprintf(text, sizeof(text), "%s: %s", t.label, on ? "вкл" : "выкл");
 		g_pMenus->AddItem(m, text, t.prefKey, false);
 	}
 
-	// Не закрываем меню после выбора: колбэк обновляет текст пункта вживую через SetItemText.
+	// Не закрываем при выборе — текст пункта обновляется вживую.
 	g_pMenus->SetCloseOnSelect(m, false);
 
-	s_mhudMenu[slot] = m;
+	s_hudMenu[slot] = m;
 	g_pMenus->DisplayMenu(m, slot, 0);
 }
 
 // Hierarchy:
-//   kz_mhud                                  → interactive toggle menu (fallback: summary)
-//   kz_mhud master                           → toggle master (hide default HUD, show only enabled)
-//   kz_mhud cptp                             → toggle CP/TP element (HTML)
-//   kz_mhud speed                            → toggle speed
-//   kz_mhud speed offset [x y]               → show/set X,Y offset
-//   kz_mhud speed scale [v]                  → show/set scale
-//   kz_mhud speed color|crouchjumpcolor/cjcolor [r g b [a]]
-//   kz_mhud speed reset                      → reset all speed prefs
-//   kz_mhud prespeed [offset|scale|color|perfcolor|jumpbugcolor/jbcolor|reset ...]
-//   kz_mhud timer [detail|offset|scale|tpcolor|procolor|pausedcolor|stoppedcolor|reset ...]
-//   kz_mhud keys [overlap|offset|scale|color|overlapcolor|reset ...]
-//   kz_mhud font [lato|verdana]              → set font for all elements
-//   kz_mhud outline                          → toggle outline for all elements
+//   kz_hud                                   → интерактивное меню (фолбэк: сводка)
+//   kz_hud type                              → переключить hudType (Standard ↔ MHUD)
+//   kz_hud speed / prespeed / timer / keys / cptp / outline → toggle per-element
+//   kz_hud <element> offset|scale|color|...  → тонкая настройка (см. kz_mhud ниже)
+//
+//   kz_mhud                                  → алиас kz_hud (обратная совместимость)
+//   kz_mhud master                           → теперь переключает hudType 0↔1
+//   kz_mhud speed/prespeed/timer/keys/...    → те же субкоманды
 
-SCMD(kz_mhud, SCFL_HUD | SCFL_PREFERENCE)
+// Общая логика субкоманд, разделённая между kz_hud и kz_mhud.
+static META_RES HandleHUDSubcmd(KZPlayer *player, const CCommand *args)
 {
-	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	bool mhudAvail = KZHUDService::IsMHUDAvailable();
-
-	// kz_mhud → интерактивное меню (гейт доступности и фолбэк — внутри OpenMHUDMenu).
-	if (args->ArgC() < 2)
-	{
-		player->hudService->OpenMHUDMenu();
-		return MRES_SUPERCEDE;
-	}
-
 	const char *element = args->Arg(1);
 	const char *prop = args->ArgC() >= 3 ? args->Arg(2) : nullptr;
 
-	// Мастер-тумблер и CP/TP работают на HTML-рендере, MAM не требуется.
-	if (KZ_STREQI(element, "master"))
+	// type: переключает hudType 0↔1. Аналог старого master.
+	if (KZ_STREQI(element, "type") || KZ_STREQI(element, "master"))
 	{
-		MHUDToggle(player, "mhudMaster", false, "MHUD - Master Enabled", "MHUD - Master Disabled");
+		int current = player->hudService->GetHudType();
+		int next = (current == 0) ? 1 : 0;
+		player->hudService->SetHudType(next);
+		if (next == 1 && !mhudAvail)
+		{
+			player->languageService->PrintChat(true, false, "MHUD - Unavailable");
+		}
+		player->languageService->PrintChat(true, false, next == 1 ? "MHUD - Master Enabled" : "MHUD - Master Disabled");
 	}
 	else if (KZ_STREQI(element, "cptp"))
 	{
@@ -1098,13 +1156,7 @@ SCMD(kz_mhud, SCFL_HUD | SCFL_PREFERENCE)
 	{
 		if (!prop)
 		{
-			// kz_mhud speed → toggle (particle-only, requires MHUD)
-			if (!mhudAvail)
-			{
-				player->languageService->PrintChat(true, false, "MHUD - Unavailable");
-				return MRES_SUPERCEDE;
-			}
-			MHUDToggle(player, "mhudSpeedEnabled", false, "MHUD - Speed Enabled", "MHUD - Speed Disabled");
+			MHUDToggle(player, "mhudSpeedEnabled", true, "MHUD - Speed Enabled", "MHUD - Speed Disabled");
 		}
 		else if (KZ_STREQI(prop, "offset"))
 		{
@@ -1125,7 +1177,6 @@ SCMD(kz_mhud, SCFL_HUD | SCFL_PREFERENCE)
 			}
 			MHUDSetScale(player, args, 3, "mhudSpeedScale", MHUD_DEF_SPEED_SCALE, "MHUD - Speed Scale Usage", "MHUD - Speed Scale Set");
 		}
-		// Color commands are always available — they also affect the HTML panel.
 		else if (KZ_STREQI(prop, "color"))
 		{
 			SetColorPref(player, args, 3, "mhudSpeedColor", "MHUD - Speed Color Usage", "MHUD - Speed Color Set");
@@ -1146,22 +1197,27 @@ SCMD(kz_mhud, SCFL_HUD | SCFL_PREFERENCE)
 	}
 	else if (KZ_STREQI(element, "prespeed"))
 	{
-		if (!mhudAvail)
-		{
-			player->languageService->PrintChat(true, false, "MHUD - Unavailable");
-			return MRES_SUPERCEDE;
-		}
 		if (!prop)
 		{
-			MHUDToggle(player, "mhudPrespeedEnabled", false, "MHUD - Prespeed Enabled", "MHUD - Prespeed Disabled");
+			MHUDToggle(player, "mhudPrespeedEnabled", true, "MHUD - Prespeed Enabled", "MHUD - Prespeed Disabled");
 		}
 		else if (KZ_STREQI(prop, "offset"))
 		{
+			if (!mhudAvail)
+			{
+				player->languageService->PrintChat(true, false, "MHUD - Unavailable");
+				return MRES_SUPERCEDE;
+			}
 			MHUDSetOffset(player, args, 3, "mhudPrespeedOffsetX", "mhudPrespeedOffsetY", MHUD_DEF_PRESPEED_OFFSET_X, MHUD_DEF_PRESPEED_OFFSET_Y,
 						  "MHUD - Prespeed Offset Usage", "MHUD - Prespeed Offset Set");
 		}
 		else if (KZ_STREQI(prop, "scale"))
 		{
+			if (!mhudAvail)
+			{
+				player->languageService->PrintChat(true, false, "MHUD - Unavailable");
+				return MRES_SUPERCEDE;
+			}
 			MHUDSetScale(player, args, 3, "mhudPrespeedScale", MHUD_DEF_PRESPEED_SCALE, "MHUD - Prespeed Scale Usage", "MHUD - Prespeed Scale Set");
 		}
 		else if (KZ_STREQI(prop, "color"))
@@ -1188,14 +1244,9 @@ SCMD(kz_mhud, SCFL_HUD | SCFL_PREFERENCE)
 	}
 	else if (KZ_STREQI(element, "timer"))
 	{
-		if (!mhudAvail)
-		{
-			player->languageService->PrintChat(true, false, "MHUD - Unavailable");
-			return MRES_SUPERCEDE;
-		}
 		if (!prop)
 		{
-			MHUDToggle(player, "mhudTimerEnabled", false, "MHUD - Timer Enabled", "MHUD - Timer Disabled");
+			MHUDToggle(player, "mhudTimerEnabled", true, "MHUD - Timer Enabled", "MHUD - Timer Disabled");
 		}
 		else if (KZ_STREQI(prop, "detail"))
 		{
@@ -1203,11 +1254,21 @@ SCMD(kz_mhud, SCFL_HUD | SCFL_PREFERENCE)
 		}
 		else if (KZ_STREQI(prop, "offset"))
 		{
+			if (!mhudAvail)
+			{
+				player->languageService->PrintChat(true, false, "MHUD - Unavailable");
+				return MRES_SUPERCEDE;
+			}
 			MHUDSetOffset(player, args, 3, "mhudTimerOffsetX", "mhudTimerOffsetY", MHUD_DEF_TIMER_OFFSET_X, MHUD_DEF_TIMER_OFFSET_Y,
 						  "MHUD - Timer Offset Usage", "MHUD - Timer Offset Set");
 		}
 		else if (KZ_STREQI(prop, "scale"))
 		{
+			if (!mhudAvail)
+			{
+				player->languageService->PrintChat(true, false, "MHUD - Unavailable");
+				return MRES_SUPERCEDE;
+			}
 			MHUDSetScale(player, args, 3, "mhudTimerScale", MHUD_DEF_TIMER_SCALE, "MHUD - Timer Scale Usage", "MHUD - Timer Scale Set");
 		}
 		else if (KZ_STREQI(prop, "tpcolor"))
@@ -1238,14 +1299,9 @@ SCMD(kz_mhud, SCFL_HUD | SCFL_PREFERENCE)
 	}
 	else if (KZ_STREQI(element, "keys"))
 	{
-		if (!mhudAvail)
-		{
-			player->languageService->PrintChat(true, false, "MHUD - Unavailable");
-			return MRES_SUPERCEDE;
-		}
 		if (!prop)
 		{
-			MHUDToggle(player, "mhudKeysEnabled", false, "MHUD - Keys Enabled", "MHUD - Keys Disabled");
+			MHUDToggle(player, "mhudKeysEnabled", true, "MHUD - Keys Enabled", "MHUD - Keys Disabled");
 		}
 		else if (KZ_STREQI(prop, "overlap"))
 		{
@@ -1253,11 +1309,21 @@ SCMD(kz_mhud, SCFL_HUD | SCFL_PREFERENCE)
 		}
 		else if (KZ_STREQI(prop, "offset"))
 		{
+			if (!mhudAvail)
+			{
+				player->languageService->PrintChat(true, false, "MHUD - Unavailable");
+				return MRES_SUPERCEDE;
+			}
 			MHUDSetOffset(player, args, 3, "mhudKeysOffsetX", "mhudKeysOffsetY", MHUD_DEF_KEYS_OFFSET_X, MHUD_DEF_KEYS_OFFSET_Y,
 						  "MHUD - Keys Offset Usage", "MHUD - Keys Offset Set");
 		}
 		else if (KZ_STREQI(prop, "scale"))
 		{
+			if (!mhudAvail)
+			{
+				player->languageService->PrintChat(true, false, "MHUD - Unavailable");
+				return MRES_SUPERCEDE;
+			}
 			MHUDSetScale(player, args, 3, "mhudKeysScale", MHUD_DEF_KEYS_SCALE, "MHUD - Keys Scale Usage", "MHUD - Keys Scale Set");
 		}
 		else if (KZ_STREQI(prop, "color"))
@@ -1311,13 +1377,9 @@ SCMD(kz_mhud, SCFL_HUD | SCFL_PREFERENCE)
 	}
 	else if (KZ_STREQI(element, "outline"))
 	{
-		if (!mhudAvail)
-		{
-			player->languageService->PrintChat(true, false, "MHUD - Unavailable");
-			return MRES_SUPERCEDE;
-		}
 		bool next = !player->optionService->GetPreferenceBool("mhudOutline", true);
 		player->optionService->SetPreferenceBool("mhudOutline", next);
+		// Пересоздаём particle'ы: vpcf-путь зависит от outline (outline/no_outline суффикс).
 		player->hudService->DestroyAllParticles();
 		player->languageService->PrintChat(true, false, next ? "MHUD - Outline Enabled" : "MHUD - Outline Disabled");
 	}
@@ -1327,4 +1389,27 @@ SCMD(kz_mhud, SCFL_HUD | SCFL_PREFERENCE)
 	}
 
 	return MRES_SUPERCEDE;
+}
+
+SCMD(kz_hud, SCFL_HUD | SCFL_PREFERENCE)
+{
+	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
+	if (args->ArgC() < 2)
+	{
+		player->hudService->OpenHUDMenu();
+		return MRES_SUPERCEDE;
+	}
+	return HandleHUDSubcmd(player, args);
+}
+
+// kz_mhud — обратная совместимость: без аргументов открывает то же меню что и kz_hud.
+SCMD(kz_mhud, SCFL_HUD | SCFL_PREFERENCE)
+{
+	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
+	if (args->ArgC() < 2)
+	{
+		player->hudService->OpenMHUDMenu();
+		return MRES_SUPERCEDE;
+	}
+	return HandleHUDSubcmd(player, args);
 }

@@ -48,6 +48,11 @@ public:
 	// Requires MultiAddonManager to be available, unless kz_force_mhud is set.
 	static bool IsMHUDAvailable();
 
+	// Тип активного худа: 0 = Стандартный (HTML версия C), 1 = MHUD (particle).
+	// Дефолт = 0 (не зависит от ассетов).
+	int GetHudType();
+	void SetHudType(int type);
+
 	static void PrecacheParticles(IEntityResourceManifest *pResourceManifest);
 	// Draw the panel from a player to a specific target.
 	static void DrawPanels(KZPlayer *player, KZPlayer *target);
@@ -109,8 +114,8 @@ public:
 	// CheckTransmit support (see kz_quiet.cpp).
 	bool OwnsParticle(const CEntityHandle &handle) const;
 
-	// Мастер-тумблер mhud: ON → дефолтный cs2kz-HUD гасится целиком, рисуются ТОЛЬКО
-	// включённые per-element тумблеры (скорость/клавиши/время/CP-TP). OFF → HUD как раньше.
+	// Мастер-тумблер mhud (legacy, сохранён для обратной совместимости команды kz_mhud master).
+	// В новой модели управляется через hudType — этот метод теперь читает hudType==1.
 	bool IsMHUDMasterEnabled();
 
 	// Per-element enable flags (also consulted for panel suppression).
@@ -123,11 +128,14 @@ public:
 	bool IsMHUDKeysOverlapEnabled();
 	bool IsMHUDOutlineEnabled();
 
-	// kz_mhud — prints a summary of all MHUD settings.
-	void PrintMHUDSummary();
+	// kz_hud / kz_mhud — печатает сводку текущего конфига.
+	void PrintHUDSummary();
 
-	// kz_mhud (без аргументов) — интерактивное меню тумблеров через cs2menus.
-	// Фолбэк на PrintMHUDSummary(), если меню-движок недоступен.
+	// kz_hud (без аргументов) — интерактивное меню через cs2menus.
+	// Фолбэк на PrintHUDSummary(), если меню-движок недоступен.
+	void OpenHUDMenu();
+
+	// kz_mhud без аргументов — алиас OpenHUDMenu (обратная совместимость).
 	void OpenMHUDMenu();
 
 private:

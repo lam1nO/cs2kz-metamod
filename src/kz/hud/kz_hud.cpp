@@ -57,20 +57,16 @@ void KZHUDService::OnProcessMovement()
 {
 	if (sv_suppress_viewpunch.IsValidRef())
 	{
-		// clang-format off
-		bool useParticles = KZHUDService::IsMHUDAvailable() && 
-		(
-			this->IsMHUDSpeedEnabled() 
-			|| this->IsMHUDPrespeedEnabled() 
-			|| this->IsMHUDTimerEnabled() 
-			|| this->IsMHUDKeysEnabled()
-		);
-		// clang-format on
-		if (useParticles != this->particlesActive)
+		// Particle-MHUD активен только если hudType==1, ассеты доступны и хотя бы один
+		// элемент включён. В режиме hudType==0 particle'ы не спавним → viewpunch не гасим.
+		bool wantParticles = (this->GetHudType() == 1) && KZHUDService::IsMHUDAvailable()
+							 && (this->IsMHUDSpeedEnabled() || this->IsMHUDPrespeedEnabled() || this->IsMHUDTimerEnabled()
+								 || this->IsMHUDKeysEnabled());
+		if (wantParticles != this->particlesActive)
 		{
-			this->particlesActive = useParticles;
-			utils::SendConVarValue(this->player->GetPlayerSlot(), sv_suppress_viewpunch, useParticles ? "1" : "0");
-			utils::SendConVarValue(this->player->GetPlayerSlot(), "view_punch_decay", useParticles ? "99999" : "18");
+			this->particlesActive = wantParticles;
+			utils::SendConVarValue(this->player->GetPlayerSlot(), sv_suppress_viewpunch, wantParticles ? "1" : "0");
+			utils::SendConVarValue(this->player->GetPlayerSlot(), "view_punch_decay", wantParticles ? "99999" : "18");
 		}
 		auto dst = sv_suppress_viewpunch.GetConVarData()->Value(-1);
 		auto traits = sv_suppress_viewpunch.TypeTraits();
@@ -342,16 +338,20 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 
 void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 {
-	// Only update/show particles for alive players when MHUD is available.
-	bool useParticles = target->IsAlive() && KZHUDService::IsMHUDAvailable();
+	KZHUDService *cfg = target->hudService;
+	int hudType = cfg->GetHudType();
+
+	// Particle-путь активен только для hudType==1 (MHUD), при живом игроке и доступных ассетах.
+	bool useParticles = (hudType == 1) && target->IsAlive() && KZHUDService::IsMHUDAvailable();
+
 	if (useParticles)
 	{
-		// player = источник данных (наблюдаемый при спектировании). Particle-MHUD
-		// спектатора рисуется по данным наблюдаемого, а не по своим нулям.
+		// player = источник данных (наблюдаемый при спектировании).
 		target->hudService->UpdateParticles(player);
 	}
 	else
 	{
+		// Гасим particle'ы: либо hudType==0, либо MHUD недоступен, либо игрок мёртв.
 		target->hudService->DestroyAllParticles();
 	}
 
@@ -366,43 +366,44 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	}
 	const char *language = target->languageService->GetLanguage();
 
-	// Настройки берём у получателя (target = сам игрок / спектатор), данные — у player
-	// (наблюдаемого при спектировании). Так спектатор видит СВОЙ HUD-конфиг, но с данными
-	// того, за кем следит.
-	KZHUDService *cfg = target->hudService;
+	std::string htmlText;
 
-	// Per-element panel suppression: only active when the particle HUD is live.
-	// particle-MHUD рисует элемент по настройкам получателя → HTML-строку того же
-	// элемента прячем, иначе двойной рендер.
-	bool suppressSpeed = useParticles && cfg->IsMHUDSpeedEnabled();
-	bool suppressTimer = useParticles && cfg->IsMHUDTimerEnabled();
-	bool suppressKeys = useParticles && cfg->IsMHUDKeysEnabled();
-
-	// Мастер-тумблер: гасим весь дефолтный HUD, показываем только включённые тумблеры.
-	bool masterMode = cfg->IsMHUDMasterEnabled();
-
-	bool compact = cfg->IsCompactPanel();
-
-	std::string htmlText = "";
-
-	if (compact && !masterMode)
+	if (hudType == 1)
 	{
-		std::string timerText = suppressTimer ? std::string("") : player->hudService->GetTimerText(language);
-		std::string speedText = suppressSpeed ? std::string("") : player->hudService->GetSpeedText(language);
-		if (!timerText.empty() && !speedText.empty())
+		// MHUD-режим: particle рисует speed/timer/keys; HTML рисует только CP/TP
+		// (particle-путь CP/TP не реализован). Compact-панель не применяется.
+		if (cfg->IsMHUDCpTpEnabled())
 		{
-			htmlText = timerText + "<br>" + speedText;
-		}
-		else
-		{
-			htmlText = timerText + speedText;
+			// Передаём suppress*=true, чтобы BuildVersionCHud рисовал только CP/TP.
+			// masterMode=true включает per-element gate; speed/timer/keys выключены suppress'ом,
+			// CP/TP suppress не имеет → рисуется если IsMHUDCpTpEnabled().
+			htmlText = cfg->BuildVersionCHud(player, /*suppressSpeed=*/true, /*suppressTimer=*/true, /*suppressKeys=*/true,
+											 /*masterMode=*/true, language);
 		}
 	}
 	else
 	{
-		// Единый HUD версии C (скорость / клавиши / CP-TP / время|стейдж) одним
-		// HTML-center-блоком. Настройки — cfg (получатель), данные — player (наблюдаемый).
-		htmlText = cfg->BuildVersionCHud(player, suppressSpeed, suppressTimer, suppressKeys, masterMode, language);
+		// Стандартный HTML-режим (hudType==0): весь HUD через BuildVersionCHud.
+		// suppress=false (particle не активен), masterMode=false (рисуем всё по per-element pref).
+		if (cfg->IsCompactPanel())
+		{
+			std::string timerText = player->hudService->GetTimerText(language);
+			std::string speedText = player->hudService->GetSpeedText(language);
+			if (!timerText.empty() && !speedText.empty())
+			{
+				htmlText = timerText + "<br>" + speedText;
+			}
+			else
+			{
+				htmlText = timerText + speedText;
+			}
+		}
+		else
+		{
+			// masterMode=true: показывать элемент только если его per-element тумблер ВКЛ.
+			htmlText = cfg->BuildVersionCHud(player, /*suppressSpeed=*/false, /*suppressTimer=*/false, /*suppressKeys=*/false,
+											 /*masterMode=*/true, language);
+		}
 	}
 
 	htmlText = htmlText.substr(0, htmlText.find_last_not_of('\n') + 1);

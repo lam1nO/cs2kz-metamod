@@ -273,17 +273,17 @@
 
 	"MHUD - Master Enabled"
 	{
-		"en"		"{grey}MHUD master is {green}enabled{grey} (default HUD hidden, only enabled elements shown)."
-		"chi"		"{grey}MHUD 主开关已 {green}启用{grey} (隐藏默认 HUD, 仅显示已启用的元素)."
-		"ru"		"{grey}Мастер-режим MHUD {green}включён{grey} (дефолтный HUD скрыт, показаны только включённые элементы)."
-		"ua"		"{grey}Майстер-режим MHUD {green}увімкнено{grey} (типовий HUD приховано, показано лише увімкнені елементи)."
+		"en"		"{grey}HUD type set to {green}MHUD{grey} (particle HUD)."
+		"chi"		"{grey}HUD 类型已设置为 {green}MHUD{grey} (粒子 HUD)."
+		"ru"		"{grey}Тип HUD переключён на {green}MHUD{grey} (частицы)."
+		"ua"		"{grey}Тип HUD переключено на {green}MHUD{grey} (частинки)."
 	}
 	"MHUD - Master Disabled"
 	{
-		"en"		"{grey}MHUD master is {darkred}disabled{grey} (default HUD shown)."
-		"chi"		"{grey}MHUD 主开关已 {darkred}禁用{grey} (显示默认 HUD)."
-		"ru"		"{grey}Мастер-режим MHUD {darkred}выключен{grey} (показан дефолтный HUD)."
-		"ua"		"{grey}Майстер-режим MHUD {darkred}вимкнено{grey} (показано типовий HUD)."
+		"en"		"{grey}HUD type set to {green}Standard{grey} (HTML HUD)."
+		"chi"		"{grey}HUD 类型已设置为 {green}标准{grey} (HTML HUD)."
+		"ru"		"{grey}Тип HUD переключён на {green}Стандартный{grey} (HTML)."
+		"ua"		"{grey}Тип HUD переключено на {green}Стандартний{grey} (HTML)."
 	}
 	"MHUD - Speed Enabled"
 	{
@@ -783,5 +783,20 @@
 		"ru"		"{grey}Обводка шрифта {red}выключена."
 		"chi"		"{grey}轮廓当前为 {red}禁用."
 		"ua"		"{grey}Обводку шрифту {red}вимкнено."
+	}
+
+	"HUD - Type Standard"
+	{
+		"en"		"{grey}HUD type set to {green}Standard{grey} (HTML)."
+		"ru"		"{grey}Тип HUD: {green}Стандартный{grey} (HTML)."
+		"chi"		"{grey}HUD 类型已设置为 {green}标准{grey} (HTML)."
+		"ua"		"{grey}Тип HUD: {green}Стандартний{grey} (HTML)."
+	}
+	"HUD - Type MHUD"
+	{
+		"en"		"{grey}HUD type set to {green}MHUD{grey} (particle)."
+		"ru"		"{grey}Тип HUD: {green}MHUD{grey} (частицы)."
+		"chi"		"{grey}HUD 类型已设置为 {green}MHUD{grey} (粒子)."
+		"ua"		"{grey}Тип HUD: {green}MHUD{grey} (частинки)."
 	}
 }
