@@ -187,6 +187,29 @@ bool KZPlugin::IsAddonMounted()
 	return false;
 }
 
+void KZPlugin::EnsureClientAsset(u64 steamID64)
+{
+	// Гарантируем, что контент-ассет (particles/sounds/HUD) доедет клиенту даже на тяжёлых
+	// картах. MAM v1.5 формирует клиенту очередь докачки в жёстком порядке [воркшоп-карта,
+	// серверные mm_extra_addons (сюда входит ассет), ...] — ассет ВСЕГДА после карты, и
+	// переставить его перед картой через API нельзя. На combobreaker (~65 МБ, холодный кэш)
+	// клиент может не дойти до ассета: движок дропает его на воркшоп-попапе карты.
+	// Метод вызывается из OnPlayerActive — то есть карта у клиента УЖЕ скачана (он active).
+	// AddClientAddon(..., bRefresh=true) сам решает, нужен ли реконнект: он вычитает уже
+	// скачанные клиентом аддоны (downloadedAddons, сохраняются т.к. mm_cache_clients_with_addons=true);
+	// если ассет уже скачан — очередь пуста и реконнекта не будет (no-op). Если не скачан —
+	// один изолированный реконнект догрузит ТОЛЬКО ассет (карта уже в downloadedAddons).
+	// Remove перед Add сбрасывает per-client запись, чтобы фикс срабатывал и после смены карты
+	// (иначе повторный AddClientAddon упёрся бы в дедуп и не переслал ассет).
+	if (g_pMultiAddonManager == nullptr || !steamID64)
+	{
+		return;
+	}
+	const char *asset = KZLanguageService::GetBaseAddon();
+	g_pMultiAddonManager->RemoveClientAddon(asset, steamID64);
+	g_pMultiAddonManager->AddClientAddon(asset, steamID64, true);
+}
+
 bool KZPlugin::Pause(char *error, size_t maxlen)
 {
 	return true;

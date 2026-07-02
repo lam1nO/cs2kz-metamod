@@ -17,6 +17,12 @@ public:
 	bool Unpause(char *error, size_t maxlen);
 	void AddonInit();
 	bool IsAddonMounted();
+	// Страховочная дослачка контент-ассета (particles/sounds/HUD) конкретному клиенту.
+	// На тяжёлых картах (combobreaker ~65 МБ) MAM ставит ассет в очередь ПОСЛЕ карты, и
+	// клиент может не дойти до него (движок дропает на воркшоп-попапе карты). Вызывается
+	// в OnPlayerActive (карта у клиента уже скачана) — MAM сам решит слать ли реконнект:
+	// если ассет уже в downloadedAddons клиента, вызов безвреден (no-op).
+	void EnsureClientAsset(u64 steamID64);
 	void AllPluginsLoaded();
 
 public:

@@ -30,6 +30,7 @@
 #include "fov/kz_fov.h"
 #include "ztopwatch/kz_ztopwatch.h"
 
+#include "cs2kz.h"
 #include "sdk/datatypes.h"
 #include "sdk/entity/cbasetrigger.h"
 #include "vprof.h"
@@ -144,6 +145,15 @@ void KZPlayer::OnPlayerActive()
 
 	this->optionService->OnPlayerActive();
 	this->recordingService->EnsureCircularRecorderInitialized();
+
+	// Страховка доставки контент-ассета (particle-MHUD/звуки/jumpstats) на тяжёлых картах:
+	// клиент уже active (карта скачана) — досылаем ассет, если MAM его ещё не догрузил.
+	// Ботов пропускаем (фейк-клиенты аддоны не качают). Внутри EnsureClientAsset безвредно,
+	// если ассет уже у клиента (no-op).
+	if (!this->IsFakeClient())
+	{
+		g_KZPlugin.EnsureClientAsset(this->GetSteamId64(false));
+	}
 
 	// Серверный шум в чате на коннекте отключён (cyber): бета-предупреждение
 	// ("Beta Join Warning") и ссылка на сайт ("Tip - website") не относятся
