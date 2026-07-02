@@ -799,4 +799,104 @@
 		"chi"		"{grey}HUD 类型已设置为 {green}MHUD{grey} (粒子)."
 		"ua"		"{grey}Тип HUD: {green}MHUD{grey} (частинки)."
 	}
+
+	// === Пункты интерактивного меню !hud ============================================
+
+	// Метка строки "Вид худа" в меню с плейсхолдером для имени типа.
+	"HUD - Menu Label Type"
+	{
+		"#format"	"type:s"
+		"en"		"HUD type: {type}"
+		"ru"		"Вид худа: {type}"
+		"chi"		"HUD 类型: {type}"
+		"ua"		"Вид HUD: {type}"
+	}
+	// Отображаемое имя типа Standard в пункте меню.
+	"HUD - Menu Type Standard"
+	{
+		"en"		"Standard"
+		"ru"		"Стандартный"
+		"chi"		"标准"
+		"ua"		"Стандартний"
+	}
+	// Отображаемое имя типа MHUD в пункте меню.
+	"HUD - Menu Type MHUD"
+	{
+		"en"		"MHUD"
+		"ru"		"MHUD"
+		"chi"		"MHUD"
+		"ua"		"MHUD"
+	}
+	// Состояние тумблера в меню.
+	"HUD - Menu On"
+	{
+		"en"		"on"
+		"ru"		"вкл"
+		"chi"		"开"
+		"ua"		"увім"
+	}
+	"HUD - Menu Off"
+	{
+		"en"		"off"
+		"ru"		"выкл"
+		"chi"		"关"
+		"ua"		"вимк"
+	}
+	// Метки элементов в меню тумблеров.
+	"HUD - Menu Label Speed"
+	{
+		"en"		"Speed"
+		"ru"		"Скорость"
+		"chi"		"速度"
+		"ua"		"Швидкість"
+	}
+	"HUD - Menu Label Prespeed"
+	{
+		"en"		"Pre-speed"
+		"ru"		"Pre-speed"
+		"chi"		"起跳速度"
+		"ua"		"Pre-speed"
+	}
+	"HUD - Menu Label Timer"
+	{
+		"en"		"Timer"
+		"ru"		"Таймер"
+		"chi"		"计时器"
+		"ua"		"Таймер"
+	}
+	"HUD - Menu Label TimerDetail"
+	{
+		"en"		"Timer detail"
+		"ru"		"Детализация таймера"
+		"chi"		"计时器详情"
+		"ua"		"Деталізація таймера"
+	}
+	"HUD - Menu Label Keys"
+	{
+		"en"		"Keys"
+		"ru"		"Клавиши"
+		"chi"		"按键"
+		"ua"		"Клавіші"
+	}
+	"HUD - Menu Label KeysOverlap"
+	{
+		"en"		"Keys overlap"
+		"ru"		"Наложение клавиш"
+		"chi"		"按键冲突"
+		"ua"		"Накладання клавіш"
+	}
+	"HUD - Menu Label CpTp"
+	{
+		"en"		"CP/TP"
+		"ru"		"CP/TP"
+		"chi"		"CP/TP"
+		"ua"		"CP/TP"
+	}
+	"HUD - Menu Label Outline"
+	{
+		"en"		"Outline"
+		"ru"		"Outline"
+		"chi"		"轮廓"
+		"ua"		"Обводка"
+	}
 }

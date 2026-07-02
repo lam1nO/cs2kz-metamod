@@ -297,7 +297,7 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		addLine(row);
 	}
 
-	// --- 3. CP/TP в стиле версии C (per-element тумблер mhudCpTpEnabled) ---
+	// --- 3. CP/TP в стиле версии C (per-element тумблер hudCpTp) ---
 	if (showCpTp)
 	{
 		i32 cpIndex = isReplay ? KZ::replaysystem::GetCurrentCpIndex() : dataSource->checkpointService->GetCurrentCpIndex();
