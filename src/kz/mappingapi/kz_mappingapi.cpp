@@ -923,6 +923,37 @@ bool KZ::course::UpdateCourseGlobalID(const char *courseName, u32 globalID)
 	return false;
 }
 
+i32 KZ::course::GetCyberCourseNumber(const KZCourseDescriptor *course)
+{
+	if (!course)
+	{
+		return 0;
+	}
+	// "Bonus 3" / "bonus3" → 3; вменяемый диапазон 1..99, иначе считаем именем не-бонуса
+	if (V_strnicmp(course->name, "bonus", 5) == 0)
+	{
+		const char *p = course->name + 5;
+		while (*p && !isdigit((unsigned char)*p))
+		{
+			p++;
+		}
+		if (isdigit((unsigned char)*p))
+		{
+			i32 n = atoi(p);
+			if (n >= 1 && n <= 99)
+			{
+				return n;
+			}
+		}
+	}
+	const KZCourseDescriptor *first = KZ::course::GetFirstCourse();
+	if (first && first->guid == course->guid)
+	{
+		return 0;
+	}
+	return course->id;
+}
+
 static void ListCourses(KZPlayer *player)
 {
 	if (player->timerService->GetCourse())

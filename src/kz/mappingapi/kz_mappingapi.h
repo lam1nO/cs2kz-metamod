@@ -259,6 +259,10 @@ namespace KZ::course
 	// Get the first course's information sorted by map-defined ID.
 	const KZCourseDescriptor *GetFirstCourse();
 
+	// Номер курса для ingest cyber: 0 = main (первый курс по mapper id),
+	// N = bonus N (по имени вида "Bonus N"), иначе — mapper id курса.
+	i32 GetCyberCourseNumber(const KZCourseDescriptor *course);
+
 	// Setup all the courses to the local database.
 	void SetupLocalCourses();
 

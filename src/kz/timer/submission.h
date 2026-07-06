@@ -87,6 +87,8 @@ struct RunSubmission
 	{
 		std::string name {};
 		u32 localID {};
+		// Номер курса по конвенции cyber ingest: 0 = main, N = bonus N.
+		i32 number {};
 	} course;
 
 	u16 globalFilterID {};

@@ -108,7 +108,8 @@ void CybEmitter::Emit(const RunSubmission &sub)
 		"\"actor\":{\"steamId64\":\"%llu\"},"
 		"\"data\":{"
 		"\"mapName\":\"%s\","
-		"\"course\":0,"
+		"\"course\":%d,"
+		"\"courseName\":\"%s\","
 		"\"mode\":\"%s\","
 		"\"timeMs\":%lld,"
 		"\"teleports\":%u,"
@@ -120,6 +121,8 @@ void CybEmitter::Emit(const RunSubmission &sub)
 		JsonEscape(std::string(serverId ? serverId : "")).c_str(),
 		(unsigned long long)sub.player.steamid64,
 		JsonEscape(sub.map.name).c_str(),
+		(int)sub.course.number,
+		JsonEscape(sub.course.name).c_str(),
 		modeStr,
 		timeMs,
 		(unsigned)sub.teleports);

@@ -9,6 +9,7 @@
 #include "kz/style/kz_style.h"
 #include "kz/option/kz_option.h"
 #include "kz/replays/kz_replay.h"
+#include "kz/mappingapi/kz_mappingapi.h"
 #include "utils/async_file_io.h"
 #include "utils/utils.h"
 
@@ -85,6 +86,7 @@ RunSubmission::RunSubmission(KZPlayer *player)
 	assert(player->timerService->GetCourse());
 	this->course.name = player->timerService->GetCourse()->GetName().Get();
 	this->course.localID = player->timerService->GetCourse()->localDatabaseID;
+	this->course.number = KZ::course::GetCyberCourseNumber(player->timerService->GetCourse());
 
 	// clang-format off
 	KZGlobalService::WithCurrentMap([&](const std::optional<KZ::api::Map> &currentMap)
