@@ -715,11 +715,22 @@ void KZTimerService::TogglePause()
 	if (!this->player->IsAlive())
 	{
 		KZ::misc::JoinTeam(player, CS_TEAM_CT);
+		return;
 	}
-	else
+	if (this->paused)
 	{
-		paused ? Resume() : Pause();
+		this->Resume();
+		return;
 	}
+	// Пауза без запущенного таймера бессмысленна (игрок просто замирает) — запрещаем.
+	// Гард именно здесь, а не в CanPause(): на CanPause завязан spectate-флоу (kz_misc.cpp).
+	if (!this->GetTimerRunning())
+	{
+		this->player->languageService->PrintChat(true, false, "Can't Pause (Timer Not Running)");
+		this->player->PlayErrorSound();
+		return;
+	}
+	this->Pause();
 }
 
 SCMD(kz_timerstopsound, SCFL_TIMER | SCFL_PREFERENCE)
