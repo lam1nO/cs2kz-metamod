@@ -235,6 +235,14 @@ void KZCheckpointService::DoTeleport(const Checkpoint cp, bool stayOnGround)
 		return;
 	}
 
+	// В паузе телепорты запрещены (сознательное поведение — инвариант kz-профиля).
+	if (this->player->timerService->GetPaused())
+	{
+		this->player->languageService->PrintChat(true, false, "Can't Teleport (Paused)");
+		this->PlayTeleportErrorSound();
+		return;
+	}
+
 	Vector currentOrigin;
 	this->player->GetOrigin(&currentOrigin);
 
