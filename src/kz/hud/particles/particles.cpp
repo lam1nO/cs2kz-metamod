@@ -992,13 +992,20 @@ void KZHUDService::UpdateMHUDCpTp()
 			}
 		}
 	}
-	// TP count
+	// TP count — рисуем только если были телепорты (аналогично hasCp у CP-элементов)
 	{
 		CParticleSystem *p = this->cptpParticles[2].Get();
 		if (p)
 		{
-			UpdateParticleLayout(p, (f32)(tpCount % 10), scale, offsetX + step * 1.5f + step, offsetY);
-			p->Start();
+			if (tpCount > 0)
+			{
+				UpdateParticleLayout(p, (f32)(tpCount % 10), scale, offsetX + step * 1.5f + step, offsetY);
+				p->Start();
+			}
+			else
+			{
+				p->Destroy();
+			}
 		}
 	}
 

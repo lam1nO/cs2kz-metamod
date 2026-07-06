@@ -58,10 +58,10 @@ void KZHUDService::OnProcessMovement()
 	if (sv_suppress_viewpunch.IsValidRef())
 	{
 		// Particle-MHUD активен только если hudType==1, ассеты доступны и хотя бы один
-		// элемент включён. В режиме hudType==0 particle'ы не спавним → viewpunch не гасим.
+		// элемент включён (включая CP/TP, который теперь тоже particle-путь).
 		bool wantParticles = (this->GetHudType() == 1) && KZHUDService::IsMHUDAvailable()
 							 && (this->IsMHUDSpeedEnabled() || this->IsMHUDPrespeedEnabled() || this->IsMHUDTimerEnabled()
-								 || this->IsMHUDKeysEnabled());
+								 || this->IsMHUDKeysEnabled() || this->IsMHUDCpTpEnabled());
 		if (wantParticles != this->particlesActive)
 		{
 			this->particlesActive = wantParticles;
@@ -370,21 +370,13 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 
 	if (hudType == 1)
 	{
-		// MHUD-режим: particle рисует speed/timer/keys; HTML рисует только CP/TP
-		// (particle-путь CP/TP не реализован). Compact-панель не применяется.
-		if (cfg->IsMHUDCpTpEnabled())
-		{
-			// Передаём suppress*=true, чтобы BuildVersionCHud рисовал только CP/TP.
-			// masterMode=true включает per-element gate; speed/timer/keys выключены suppress'ом,
-			// CP/TP suppress не имеет → рисуется если IsMHUDCpTpEnabled().
-			htmlText = cfg->BuildVersionCHud(player, /*suppressSpeed=*/true, /*suppressTimer=*/true, /*suppressKeys=*/true,
-											 /*masterMode=*/true, language);
-		}
+		// MHUD-режим (particle): весь HUD — speed/timer/keys/CP/TP — рисует particle-путь.
+		// HTML не используем совсем (нет двойного рендера).
 	}
 	else
 	{
 		// Стандартный HTML-режим (hudType==0): весь HUD через BuildVersionCHud.
-		// suppress=false (particle не активен), masterMode=false (рисуем всё по per-element pref).
+		// suppress=false (particle не активен), masterMode=true (per-element тумблеры).
 		if (cfg->IsCompactPanel())
 		{
 			std::string timerText = player->hudService->GetTimerText(language);

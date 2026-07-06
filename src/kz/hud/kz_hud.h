@@ -138,6 +138,12 @@ public:
 	// kz_mhud без аргументов — алиас OpenHUDMenu (обратная совместимость).
 	void OpenMHUDMenu();
 
+	// Константы геометрии particle-MHUD (public: нужны из файловых функций particles.cpp).
+	// Скорость: до 4 разрядов (по одному particle на цифру).
+	static constexpr i32 MHUD_SPEED_DIGITS = 4;
+	// Клавиши: W A S D J C — 6 particle'ов.
+	static constexpr i32 MHUD_KEY_COUNT = 6;
+
 private:
 	std::string GetSpeedText(const char *language = KZ_DEFAULT_LANGUAGE);
 	std::string GetKeyText(const char *language = KZ_DEFAULT_LANGUAGE);
@@ -160,16 +166,12 @@ private:
 	// CP18.x/y   = screen-space offset
 
 	// Path B: по-глифные particle'ы — каждый разряд/клавиша/символ = отдельная сущность.
-
-	// Скорость: до 4 разрядов (по одному particle на цифру).
-	static constexpr i32 MHUD_SPEED_DIGITS = 4;
 	CHandle<CParticleSystem> speedParticles[MHUD_SPEED_DIGITS];
 	// Preспeed: тот же механизм, другой scale/offset.
 	CHandle<CParticleSystem> prespeedParticles[MHUD_SPEED_DIGITS];
 
 	// Клавиши: W A S D J C — 6 particle'ов, у каждого свой .vpcf с 2-кадровым листом.
 	// sequence=0 inactive, sequence=1 active.
-	static constexpr i32 MHUD_KEY_COUNT = 6;
 	CHandle<CParticleSystem> keyParticles[MHUD_KEY_COUNT];
 
 	// Таймер: до 4 разрядов (каждый = двузначное значение) + до 3 разделителей.
