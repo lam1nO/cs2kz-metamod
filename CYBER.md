@@ -1,9 +1,23 @@
 # Наши отличия от апстрима (KZGlobalTeam/cs2kz-metamod)
 
 Форк для non-global серверов cyber. Версии тегаются `cyb.N`, профиль kz
-в монорепо пинит их в `gameops/profiles/kz/plugins.lock.yaml`.
+в монорепо пинит их в `gameops/plugins/cs2kz-fork.json` (ref+cyb_build) →
+CI `cs2kz-build.yml` монорепо собирает и льёт артефакт в S3 →
+`gameops/profiles/kz/plugins.lock.yaml` пинит url+sha256.
 Дизайн текущего пакета доработок — в монорепо:
 `docs/superpowers/specs/2026-07-06-kz-ux-pack-design.md`.
+
+## Локальная сборка (macOS) — две ловушки
+
+1. AMBuildScript ищет каталог `hl2sdk-manifests` вверх от cwd; в репо его нет.
+   Один раз: `cp -R metamod-source/hl2sdk-manifests ./hl2sdk-manifests && rm
+./hl2sdk-manifests/.git` (untracked, в .git/info/exclude).
+2. Исходники живут в docker-ОБРАЗЕ (`COPY . .`), `docker run` монтирует только
+   `build/` и `.git` — перед КАЖДОЙ сборкой: `docker build -q -t
+   cs2kz-linux-builder .`, иначе компилируются старые исходники, а `test -f`
+   «зеленеет» от старого артефакта. Успех = новый mtime
+   `build/package/addons/cs2kz/bin/linuxsteamrt64/cs2kz.so`.
+   Локальная сборка — только для валидации; релизный артефакт делает CI.
 
 ## Реестр отличий
 
