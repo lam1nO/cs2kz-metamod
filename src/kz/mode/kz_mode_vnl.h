@@ -46,7 +46,7 @@ class KZVanillaModeService : public KZModeService
 		(float)0.9f,           // sv_water_slow_amount
 		(int)0,                // mp_solid_teammates
 		(int)0,                // mp_solid_enemies
-		(bool)true,            // sv_subtick_movement_view_angles
+		(bool)false,           // sv_subtick_movement_view_angles — форс false во всех режимах (эксплойт движения)
 		(bool)false,           // sv_legacy_jump
 		(float)0.0078125f      // sv_bhop_time_window
 	};
