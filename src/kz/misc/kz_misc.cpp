@@ -143,32 +143,8 @@ SCMD(kz_end, SCFL_MAP)
 	return MRES_SUPERCEDE;
 }
 
-void KZ::misc::HandleTeleportToCourse(KZPlayer *player, const CCommand *args)
+void KZ::misc::TeleportToCourse(KZPlayer *player, const KZCourseDescriptor *course)
 {
-	const KZCourseDescriptor *startPosCourse = nullptr;
-	// If the player specify a course name, we first check if it's valid or not.
-	if (V_strlen(args->ArgS()) > 0)
-	{
-		CUtlString courseArg = args->ArgS();
-		// Trim whitespace
-		courseArg.Trim();
-		if (utils::IsNumeric(courseArg.Get()))
-		{
-			i32 courseID = atoi(courseArg.Get());
-			startPosCourse = KZ::course::GetCourseByCourseID(courseID);
-		}
-		else
-		{
-			startPosCourse = KZ::course::GetCourse(courseArg.Get(), false, true);
-		}
-
-		if (!startPosCourse || !startPosCourse || !startPosCourse->hasStartPosition)
-		{
-			player->languageService->PrintChat(true, false, "No Start Position For Course", courseArg.Get());
-			return;
-		}
-	}
-
 	if (!player->timerService->CheckSafeguardRestart())
 	{
 		return;
@@ -195,9 +171,9 @@ void KZ::misc::HandleTeleportToCourse(KZPlayer *player, const CCommand *args)
 		KZ::misc::JoinTeam(player, CS_TEAM_CT, false);
 	}
 
-	if (startPosCourse)
+	if (course)
 	{
-		player->Teleport(&startPosCourse->startPosition, &startPosCourse->startAngles, &vec3_origin);
+		player->Teleport(&course->startPosition, &course->startAngles, &vec3_origin);
 		return;
 	}
 
@@ -248,6 +224,34 @@ void KZ::misc::HandleTeleportToCourse(KZPlayer *player, const CCommand *args)
 	// Last resort, just respawn the player.
 	player->GetPlayerPawn()->Respawn();
 	player->pistolService->UpdatePistol();
+}
+
+void KZ::misc::HandleTeleportToCourse(KZPlayer *player, const CCommand *args)
+{
+	const KZCourseDescriptor *startPosCourse = nullptr;
+	// If the player specify a course name, we first check if it's valid or not.
+	if (V_strlen(args->ArgS()) > 0)
+	{
+		CUtlString courseArg = args->ArgS();
+		// Trim whitespace
+		courseArg.Trim();
+		if (utils::IsNumeric(courseArg.Get()))
+		{
+			i32 courseID = atoi(courseArg.Get());
+			startPosCourse = KZ::course::GetCourseByCourseID(courseID);
+		}
+		else
+		{
+			startPosCourse = KZ::course::GetCourse(courseArg.Get(), false, true);
+		}
+
+		if (!startPosCourse || !startPosCourse->hasStartPosition)
+		{
+			player->languageService->PrintChat(true, false, "No Start Position For Course", courseArg.Get());
+			return;
+		}
+	}
+	KZ::misc::TeleportToCourse(player, startPosCourse);
 }
 
 SCMD(kz_restart, SCFL_TIMER | SCFL_MAP)

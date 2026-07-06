@@ -248,6 +248,13 @@
 		"es"		"{darkred}Datos del curso {default}{course}{darkred} inaccesibles."
 	}
 
+	"Bonus Not Found"
+	{
+		"#format"	"bonus:s"
+		"en"		"{darkred}Bonus {default}{bonus}{darkred} not found on this map."
+		"ru"		"{darkred}Бонус {default}{bonus}{darkred} не найден на этой карте."
+	}
+
 	"Tier Info"
 	{
 		// Main (Ranked) - Tier 1/2: Simple jumps all around.

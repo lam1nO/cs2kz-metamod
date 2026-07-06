@@ -957,6 +957,73 @@ SCMD(kz_course, SCFL_MAP)
 	return MRES_SUPERCEDE;
 }
 
+static_function const KZCourseDescriptor *FindBonusCourse(i32 n)
+{
+	char buf[64];
+	V_snprintf(buf, sizeof(buf), "Bonus %d", n);
+	const KZCourseDescriptor *course = KZ::course::GetCourse(buf, false, false);
+	if (!course)
+	{
+		V_snprintf(buf, sizeof(buf), "Bonus%d", n);
+		course = KZ::course::GetCourse(buf, false, false);
+	}
+	return course;
+}
+
+static_function META_RES GotoBonus(CCSPlayerController *controller, i32 n)
+{
+	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
+	const KZCourseDescriptor *course = (n >= 1) ? FindBonusCourse(n) : nullptr;
+	if (!course || !course->hasStartPosition)
+	{
+		char num[16];
+		V_snprintf(num, sizeof(num), "%d", n);
+		player->languageService->PrintChat(true, false, "Bonus Not Found", num);
+		return MRES_SUPERCEDE;
+	}
+	KZ::misc::TeleportToCourse(player, course);
+	return MRES_SUPERCEDE;
+}
+
+SCMD(kz_main, SCFL_MAP)
+{
+	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
+	const KZCourseDescriptor *course = KZ::course::GetFirstCourse();
+	if (!course || !course->hasStartPosition)
+	{
+		player->languageService->PrintChat(true, false, "No Start Position For Course", "Main");
+		return MRES_SUPERCEDE;
+	}
+	KZ::misc::TeleportToCourse(player, course);
+	return MRES_SUPERCEDE;
+}
+
+SCMD(kz_b, SCFL_MAP)
+{
+	i32 n = (args->ArgC() < 2) ? 1 : atoi(args->Arg(1));
+	return GotoBonus(controller, n);
+}
+
+SCMD_LINK(kz_bonus, kz_b);
+
+// !b1..!b9 / !bonus1..!bonus9 — фиксированные алиасы (чат-триггер матчит имя целиком).
+#define KZ_BONUS_NUM_CMD(n) \
+	SCMD(kz_b##n, SCFL_MAP) \
+	{ \
+		return GotoBonus(controller, n); \
+	} \
+	SCMD_LINK(kz_bonus##n, kz_b##n);
+
+KZ_BONUS_NUM_CMD(1)
+KZ_BONUS_NUM_CMD(2)
+KZ_BONUS_NUM_CMD(3)
+KZ_BONUS_NUM_CMD(4)
+KZ_BONUS_NUM_CMD(5)
+KZ_BONUS_NUM_CMD(6)
+KZ_BONUS_NUM_CMD(7)
+KZ_BONUS_NUM_CMD(8)
+KZ_BONUS_NUM_CMD(9)
+
 // TODO: Does this *really* belong here?
 // clang-format off
 #define COURSE_TABLE_NAME "Courses - Table Name"

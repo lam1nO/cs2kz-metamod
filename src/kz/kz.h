@@ -273,5 +273,7 @@ namespace KZ
 		void UnrestrictTimeLimit();
 		void OnPhysicsGameSystemFrameBoundary(void *pThis);
 		void HandleTeleportToCourse(KZPlayer *player, const CCommand *args);
+		// Телепорт на старт курса (сейфгард + снятие паузы). course == nullptr — поведение !r без аргумента.
+		void TeleportToCourse(KZPlayer *player, const KZCourseDescriptor *course);
 	} // namespace misc
 }; // namespace KZ
