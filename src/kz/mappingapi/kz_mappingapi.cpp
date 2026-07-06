@@ -951,7 +951,9 @@ i32 KZ::course::GetCyberCourseNumber(const KZCourseDescriptor *course)
 	{
 		return 0;
 	}
-	return course->id;
+	// Не-бонусный не-главный курс: уводим в диапазон 100+, чтобы номер не
+	// столкнулся с "Bonus N" на той же карте (лидерборд ключуется по course).
+	return 100 + course->id;
 }
 
 static void ListCourses(KZPlayer *player)
@@ -990,26 +992,33 @@ SCMD(kz_course, SCFL_MAP)
 
 static_function const KZCourseDescriptor *FindBonusCourse(i32 n)
 {
-	char buf[64];
-	V_snprintf(buf, sizeof(buf), "Bonus %d", n);
-	const KZCourseDescriptor *course = KZ::course::GetCourse(buf, false, false);
-	if (!course)
+	// Зеркало конвенции эмиттера: бонус N = курс, чей GetCyberCourseNumber == n.
+	// Так !b3 находит и "bonus_3"/"BONUS STAGE 3", а не только "Bonus 3".
+	FOR_EACH_VEC(g_sortedCourses, i)
 	{
-		V_snprintf(buf, sizeof(buf), "Bonus%d", n);
-		course = KZ::course::GetCourse(buf, false, false);
+		if (KZ::course::GetCyberCourseNumber(g_sortedCourses[i]) == n)
+		{
+			return g_sortedCourses[i];
+		}
 	}
-	return course;
+	return nullptr;
 }
 
 static_function META_RES GotoBonus(CCSPlayerController *controller, i32 n)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	const KZCourseDescriptor *course = (n >= 1) ? FindBonusCourse(n) : nullptr;
-	if (!course || !course->hasStartPosition)
+	if (!course)
 	{
 		char num[16];
 		V_snprintf(num, sizeof(num), "%d", n);
 		player->languageService->PrintChat(true, false, "Bonus Not Found", num);
+		return MRES_SUPERCEDE;
+	}
+	if (!course->hasStartPosition)
+	{
+		// Бонус есть, но маппер не задал стартовую позицию — честное сообщение.
+		player->languageService->PrintChat(true, false, "No Start Position For Course", course->name);
 		return MRES_SUPERCEDE;
 	}
 	KZ::misc::TeleportToCourse(player, course);
