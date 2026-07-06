@@ -174,6 +174,12 @@ void KZ::misc::HandleTeleportToCourse(KZPlayer *player, const CCommand *args)
 		return;
 	}
 
+	// Рестарт всегда снимает паузу — иначе после !r игрок остаётся замороженным (MOVETYPE_NONE).
+	if (player->timerService->GetPaused())
+	{
+		player->timerService->Resume(true);
+	}
+
 	player->timerService->OnTeleportToStart();
 	if (player->GetPlayerPawn()->IsAlive())
 	{
