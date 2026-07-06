@@ -152,29 +152,36 @@ private:
 	std::string BuildVersionCHud(KZPlayer *dataSource, bool suppressSpeed, bool suppressTimer, bool suppressKeys, bool masterMode,
 								 const char *language);
 
-	// Control point mapping:
-	// 16 = RGB tint | 17X = sequence | 17Y = scale | 18X = X offset | 18Y = Y offset
+	// Control point mapping (контракт workshop-аддона particles/cyberkz/*):
+	// CP16       = RGB tint (0..255)
+	// CP17.x     = sequence (кадр)
+	// CP17.y     = size (масштаб)
+	// CP17.z     = self-illum / init field1 (1.0 = вкл.)
+	// CP18.x/y   = screen-space offset
 
-	// Speed: two number-pair particles (each shows 00-99) so we can render up to 4 digits.
-	CHandle<CParticleSystem> speedParticles[2];
-	// Prespeed: same layout, smaller scale, different offset.
-	CHandle<CParticleSystem> prespeedParticles[2];
+	// Path B: по-глифные particle'ы — каждый разряд/клавиша/символ = отдельная сущность.
 
-	enum KeyParticleFlags : u8
-	{
-		Forward = 1 << 0,
-		Left = 1 << 1,
-		Back = 1 << 2,
-		Right = 1 << 3,
-		Jump = 1 << 4,
-		Duck = 1 << 5,
-	};
+	// Скорость: до 4 разрядов (по одному particle на цифру).
+	static constexpr i32 MHUD_SPEED_DIGITS = 4;
+	CHandle<CParticleSystem> speedParticles[MHUD_SPEED_DIGITS];
+	// Preспeed: тот же механизм, другой scale/offset.
+	CHandle<CParticleSystem> prespeedParticles[MHUD_SPEED_DIGITS];
 
-	CHandle<CParticleSystem> keysParticle;
+	// Клавиши: W A S D J C — 6 particle'ов, у каждого свой .vpcf с 2-кадровым листом.
+	// sequence=0 inactive, sequence=1 active.
+	static constexpr i32 MHUD_KEY_COUNT = 6;
+	CHandle<CParticleSystem> keyParticles[MHUD_KEY_COUNT];
 
-	// Timer: up to 4 number-pair particles (h:mm:ss.cc) + up to 3 delimiter particles.
+	// Таймер: до 4 разрядов (каждый = двузначное значение) + до 3 разделителей.
 	CHandle<CParticleSystem> timerTextParticles[4];
 	CHandle<CParticleSystem> timerDelimiterParticles[3];
+
+	// CP/TP: 3 цифры (cpCurrent, cpTotal, tpCount) + 1 разделитель (slash).
+	CHandle<CParticleSystem> cptpParticles[3];
+	CHandle<CParticleSystem> cptpDelimParticles[1];
+
+	// Пилюля-подложка (фон под CP/TP).
+	CHandle<CParticleSystem> pillParticle;
 
 	void UpdateMHUDSpeed();
 	void SetMHUDSpeedParticleVelocity(const Vector &speed, const Vector *prespeed);
@@ -182,8 +189,11 @@ private:
 	void CheckMHUDTimerParticles();
 	void UpdateMHUDTimer();
 
-	void CheckMHUDKeyParticle();
+	void CheckMHUDKeyParticles();  // Path B: 6 отдельных particle'ов
 	void UpdateMHUDKeys();
+
+	void CheckMHUDCpTpParticles(); // Particle'ы для CP/TP в particle-HUD
+	void UpdateMHUDCpTp();
 
 	// Preference helpers.
 	Color GetMHUDColorPref(const char *name, const Color &defaultColor);
