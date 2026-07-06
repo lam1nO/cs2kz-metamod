@@ -126,6 +126,12 @@ SCMD(kz_end, SCFL_MAP)
 			return MRES_SUPERCEDE;
 		}
 		player->timerService->TimerStop();
+		// Как и !r: телепорт к концу снимает паузу у живого игрока, иначе он
+		// приезжает замороженным (MOVETYPE_NONE, gravity 0).
+		if (player->timerService->GetPaused() && player->IsAlive())
+		{
+			player->timerService->Resume(true);
+		}
 		if (player->GetPlayerPawn()->IsAlive())
 		{
 			if (player->noclipService->IsNoclipping())
@@ -150,8 +156,10 @@ void KZ::misc::TeleportToCourse(KZPlayer *player, const KZCourseDescriptor *cour
 		return;
 	}
 
-	// Рестарт всегда снимает паузу — иначе после !r игрок остаётся замороженным (MOVETYPE_NONE).
-	if (player->timerService->GetPaused())
+	// Рестарт снимает паузу — но только у живого игрока: у спектатора paused
+	// выставлен всегда (OnPlayerJoinTeam), а Resume лезет в pawn/move services
+	// без null-чеков. «Паузу» спектатора снимает OnPlayerSpawn после JoinTeam.
+	if (player->timerService->GetPaused() && player->IsAlive())
 	{
 		player->timerService->Resume(true);
 	}
