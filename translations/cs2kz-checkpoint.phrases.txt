@@ -126,8 +126,8 @@
 	}
 	"Can't Teleport (Paused)"
 	{
-		"en"		"{grey}You can't teleport while {purple}paused{grey}."
-		"ru"		"{grey}Нельзя телепортироваться на {purple}паузе{grey}."
+		"en"		"{darkred}You can't teleport while paused."
+		"ru"		"{darkred}Нельзя телепортироваться на паузе."
 	}
 	"Can't Prev CP (No Checkpoints)"
 	{
