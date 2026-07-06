@@ -22,6 +22,7 @@
 #include "tip/kz_tip.h"
 #include "trigger/kz_trigger.h"
 #include "recording/kz_recording.h"
+#include "savedrun/kz_savedrun.h"
 #include "replays/kz_replaysystem.h"
 #include "racing/kz_racing.h"
 #include "global/kz_global.h"
@@ -61,6 +62,7 @@ void KZPlayer::Init()
 	delete this->triggerService;
 	delete this->recordingService;
 	delete this->racingService;
+	delete this->savedRunService;
 	delete this->globalService;
 	delete this->measureService;
 	delete this->profileService;
@@ -87,6 +89,7 @@ void KZPlayer::Init()
 	this->triggerService = new KZTriggerService(this);
 	this->recordingService = new KZRecordingService(this);
 	this->racingService = new KZRacingService(this);
+	this->savedRunService = new KZSavedRunService(this);
 	this->globalService = new KZGlobalService(this);
 	this->measureService = new KZMeasureService(this);
 	this->profileService = new KZProfileService(this);
@@ -121,6 +124,7 @@ void KZPlayer::Reset()
 	this->recordingService->Reset();
 	this->paintService->Reset();
 	this->ztopwatchService->Reset();
+	this->savedRunService->Reset();
 
 	g_pKZModeManager->SwitchToMode(this, KZOptionService::GetOptionStr("defaultMode", KZ_DEFAULT_MODE), true, true, false);
 	g_pKZStyleManager->ClearStyles(this, true, false);

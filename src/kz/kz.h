@@ -45,6 +45,7 @@ class KZOptionService;
 class KZPaintService;
 class KZQuietService;
 class KZRacingService;
+class KZSavedRunService;
 class KZSavelocService;
 class KZSpecService;
 class KZGotoService;
@@ -167,6 +168,7 @@ public:
 	KZPaintService *paintService {};
 	KZQuietService *quietService {};
 	KZRacingService *racingService {};
+	KZSavedRunService *savedRunService {};
 	KZSavelocService *savelocService {};
 	KZSpecService *specService {};
 	KZGotoService *gotoService {};
