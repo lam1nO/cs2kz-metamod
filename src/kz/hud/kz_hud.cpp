@@ -57,9 +57,10 @@ void KZHUDService::OnProcessMovement()
 {
 	if (sv_suppress_viewpunch.IsValidRef())
 	{
-		// Particle-MHUD активен только если hudType==1, ассеты доступны и хотя бы один
-		// элемент включён (включая CP/TP, который теперь тоже particle-путь).
-		bool wantParticles = (this->GetHudType() == 1) && KZHUDService::IsMHUDAvailable()
+		// Particle-путь активен при доступных ассетах и хотя бы одном включённом элементе
+		// (CP/TP тоже particle). Оба типа худа (0=нарисованный cyberkz, 1=апстрим MHUD) —
+		// particle-путь, поэтому hudType в условии не участвует.
+		bool wantParticles = KZHUDService::IsMHUDAvailable()
 							 && (this->IsMHUDSpeedEnabled() || this->IsMHUDPrespeedEnabled() || this->IsMHUDTimerEnabled()
 								 || this->IsMHUDKeysEnabled() || this->IsMHUDCpTpEnabled());
 		if (wantParticles != this->particlesActive)
@@ -339,10 +340,12 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 {
 	KZHUDService *cfg = target->hudService;
-	int hudType = cfg->GetHudType();
 
-	// Particle-путь активен только для hudType==1 (MHUD), при живом игроке и доступных ассетах.
-	bool useParticles = (hudType == 1) && target->IsAlive() && KZHUDService::IsMHUDAvailable();
+	// Оба типа худа рисуются particle-путём: hudType==0 — наш нарисованный (cyberkz),
+	// hudType==1 — оригинальный апстрим MHUD (velo/inputs). Конкретную ветку выбирает
+	// сам UpdateParticles по GetHudType(). HTML остаётся ТОЛЬКО фолбэком без аддонов.
+	bool available = KZHUDService::IsMHUDAvailable();
+	bool useParticles = available && target->IsAlive();
 
 	if (useParticles)
 	{
@@ -351,7 +354,7 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	}
 	else
 	{
-		// Гасим particle'ы: либо hudType==0, либо MHUD недоступен, либо игрок мёртв.
+		// Гасим particle'ы: MHUD недоступен или игрок мёртв.
 		target->hudService->DestroyAllParticles();
 	}
 
@@ -368,15 +371,13 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 
 	std::string htmlText;
 
-	if (hudType == 1)
+	if (available)
 	{
-		// MHUD-режим (particle): весь HUD — speed/timer/keys/CP/TP — рисует particle-путь.
-		// HTML не используем совсем (нет двойного рендера).
+		// Аддоны есть → весь HUD (оба типа) рисует particle-путь. HTML не используем.
 	}
 	else
 	{
-		// Стандартный HTML-режим (hudType==0): весь HUD через BuildVersionCHud.
-		// suppress=false (particle не активен), masterMode=true (per-element тумблеры).
+		// Фолбэк без аддонов (нет MAM): HTML версия C, masterMode=true (per-element тумблеры).
 		if (cfg->IsCompactPanel())
 		{
 			std::string timerText = player->hudService->GetTimerText(language);
