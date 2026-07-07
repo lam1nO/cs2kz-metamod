@@ -21,6 +21,11 @@ extern ICS2Menus *g_pMenus;
 
 static CConVar<bool> kz_force_mhud("kz_force_mhud", FCVAR_NONE, "Force the particle-based MHUD even when MultiAddonManager is not available.", false);
 
+// Фичефлаг нарисованного HUD (cyberkz, hudType==0). При false Standard-тип рисуется
+// HTML-фолбэком (версия C), MHUD (hudType==1) при этом работает без изменений.
+// Дефолт false: нарисованный HUD в разработке, включать через server.cfg или RCON.
+static CConVar<bool> kz_hud_drawn("kz_hud_drawn", FCVAR_NONE, "Enable the drawn/particle cyberkz HUD (hudType 0). False = Standard uses HTML fallback.", false);
+
 static CConVarRef<bool> sv_suppress_viewpunch("sv_suppress_viewpunch");
 
 static_global class KZTimerServiceEventListener_HUD : public KZTimerServiceEventListener
@@ -57,10 +62,14 @@ void KZHUDService::OnProcessMovement()
 {
 	if (sv_suppress_viewpunch.IsValidRef())
 	{
-		// Particle-путь активен при доступных ассетах и хотя бы одном включённом элементе
-		// (CP/TP тоже particle). Оба типа худа (0=нарисованный cyberkz, 1=апстрим MHUD) —
-		// particle-путь, поэтому hudType в условии не участвует.
+		// Particle-путь активен при доступных ассетах и хотя бы одном включённом элементе.
+		// Нарисованный cyberkz (hudType==0) требует дополнительно kz_hud_drawn==true;
+		// MHUD (hudType==1) particle-путь — без этого ограничения.
+		int hudType = this->GetHudType();
+		bool drawnOn = kz_hud_drawn.Get();
+		bool wantsParticleHud = (hudType == 1) || (hudType == 0 && drawnOn);
 		bool wantParticles = KZHUDService::IsMHUDAvailable()
+							 && wantsParticleHud
 							 && (this->IsMHUDSpeedEnabled() || this->IsMHUDPrespeedEnabled() || this->IsMHUDTimerEnabled()
 								 || this->IsMHUDKeysEnabled() || this->IsMHUDCpTpEnabled());
 		if (wantParticles != this->particlesActive)
@@ -341,11 +350,14 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 {
 	KZHUDService *cfg = target->hudService;
 
-	// Оба типа худа рисуются particle-путём: hudType==0 — наш нарисованный (cyberkz),
-	// hudType==1 — оригинальный апстрим MHUD (velo/inputs). Конкретную ветку выбирает
-	// сам UpdateParticles по GetHudType(). HTML остаётся ТОЛЬКО фолбэком без аддонов.
+	// hudType==1 (MHUD апстрим) — particle-путь всегда при наличии ассетов.
+	// hudType==0 (cyberkz нарисованный) — particle-путь только если kz_hud_drawn==true;
+	// иначе HTML-фолбэк (версия C), как если бы аддоны не были загружены.
 	bool available = KZHUDService::IsMHUDAvailable();
-	bool useParticles = available && target->IsAlive();
+	int hudType = cfg->GetHudType();
+	bool drawnOn = kz_hud_drawn.Get();
+	bool wantsParticleHud = (hudType == 1) || (hudType == 0 && drawnOn);
+	bool useParticles = available && target->IsAlive() && wantsParticleHud;
 
 	if (useParticles)
 	{
@@ -354,7 +366,7 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	}
 	else
 	{
-		// Гасим particle'ы: MHUD недоступен или игрок мёртв.
+		// Гасим particle'ы: MHUD недоступен, игрок мёртв, или нарисованный HUD отключён флагом.
 		target->hudService->DestroyAllParticles();
 	}
 
@@ -371,13 +383,12 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 
 	std::string htmlText;
 
-	if (available)
+	// HTML рисуем если: аддоны недоступны (фолбэк без MAM),
+	// ИЛИ hudType==0 (Standard) при kz_hud_drawn==false (нарисованный выключен флагом).
+	bool needHtml = !available || (hudType == 0 && !drawnOn);
+	if (needHtml)
 	{
-		// Аддоны есть → весь HUD (оба типа) рисует particle-путь. HTML не используем.
-	}
-	else
-	{
-		// Фолбэк без аддонов (нет MAM): HTML версия C, masterMode=true (per-element тумблеры).
+		// HTML версия C, masterMode=true (per-element тумблеры).
 		if (cfg->IsCompactPanel())
 		{
 			std::string timerText = player->hudService->GetTimerText(language);
