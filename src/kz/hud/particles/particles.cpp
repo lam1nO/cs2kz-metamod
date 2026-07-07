@@ -830,17 +830,26 @@ void KZHUDService::UpdateMHUDKeys()
 	const f32 keyStep = MHUD_KEY_STEP * (scale / MHUD_DEF_KEYS_SCALE);
 	const f32 gap     = MHUD_KEYS_GAP * (scale / MHUD_DEF_KEYS_SCALE);
 
-	// Раскладка: [W A S D] <gap> [J C]
-	const f32 wasd_center_x = offsetX - (gap * 0.5f + keyStep);          // центр блока WASD
-	const f32 jc_center_x   = offsetX + (gap * 0.5f + keyStep * 0.5f);   // центр блока JC
+	// Раскладка блоком (не строкой): W над рядом ASD, J/C справа.
+	//   W          J
+	//  A S D       C
+	// Ряд задаётся смещением по Y на один keyStep; знак rowUp зависит от того,
+	// как .vpcf CenterYOffset (CP18.y) мапит экранную ось — проверить смоуком.
+	const f32 rowUp   = -keyStep;                                       // «выше» на экране (см. знак offsetY)
+	const f32 wasd_center_x = offsetX - (gap * 0.5f + keyStep);         // центр блока WASD (столбца S)
+	const f32 jc_center_x   = offsetX + (gap * 0.5f + keyStep * 0.5f);  // центр блока JC
 
 	f32 keyX[MHUD_KEY_COUNT];
-	keyX[0] = wasd_center_x - keyStep * 1.5f; // W
-	keyX[1] = wasd_center_x - keyStep * 0.5f; // A
-	keyX[2] = wasd_center_x + keyStep * 0.5f; // S
-	keyX[3] = wasd_center_x + keyStep * 1.5f; // D
-	keyX[4] = jc_center_x   - keyStep * 0.5f; // J
-	keyX[5] = jc_center_x   + keyStep * 0.5f; // C
+	f32 keyY[MHUD_KEY_COUNT];
+	// W — верхний ряд, по центру над S
+	keyX[0] = wasd_center_x;            keyY[0] = offsetY + rowUp; // W
+	// A S D — нижний ряд
+	keyX[1] = wasd_center_x - keyStep;  keyY[1] = offsetY;         // A
+	keyX[2] = wasd_center_x;            keyY[2] = offsetY;         // S
+	keyX[3] = wasd_center_x + keyStep;  keyY[3] = offsetY;         // D
+	// J — верхний ряд справа, C — под ним
+	keyX[4] = jc_center_x;              keyY[4] = offsetY + rowUp; // J
+	keyX[5] = jc_center_x;              keyY[5] = offsetY;         // C
 
 	bool hasOverlap         = (pressed[0] && pressed[2]) || (pressed[1] && pressed[3]);
 	const Color overlapColor = this->GetMHUDColorPref("mhudKeysOverlapColor", MHUD_DEF_KEYS_OVERLAP_COLOR);
@@ -853,7 +862,7 @@ void KZHUDService::UpdateMHUDKeys()
 
 		// sequence: 0=inactive, 1=active
 		f32 seq = pressed[i] ? 1.0f : 0.0f;
-		UpdateParticleLayout(p, seq, scale, keyX[i], offsetY);
+		UpdateParticleLayout(p, seq, scale, keyX[i], keyY[i]);
 		p->Start();
 
 		// Overlap-цвет применяем только к WASD (индексы 0-3) при конфликте
