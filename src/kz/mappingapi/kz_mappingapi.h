@@ -263,6 +263,12 @@ namespace KZ::course
 	// N = bonus N (по имени вида "Bonus N"), иначе — mapper id курса.
 	i32 GetCyberCourseNumber(const KZCourseDescriptor *course);
 
+	// Обратный резолв: курс, чей GetCyberCourseNumber() == n (см. FindBonusCourse в
+	// kz_mappingapi.cpp, зеркалит ту же конвенцию для n == 0 / main). Task 4 (SavedRuns):
+	// восстановление рана хранит только cyber-номер курса, не guid/имя (карта могла
+	// обновиться между сессиями). nullptr, если курса с таким номером на карте больше нет.
+	const KZCourseDescriptor *GetCourseByCyberNumber(i32 n);
+
 	// Setup all the courses to the local database.
 	void SetupLocalCourses();
 

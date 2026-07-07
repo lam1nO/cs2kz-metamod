@@ -960,6 +960,13 @@
 		"ua"		"{yellow}Увага: {grey} Курс {default}{course_name}{grey} не є рейтинговим. Проходження на цьому курсі не будуть зараховані до вашого глобального рейтингу."
 		"es"		"{yellow}Atención: {grey} El recorrido {default}{course_name}{grey} no tiene un rango establecido. Las carreras no serán reflejadas en tus estadísticas de jugador globales."
 	}
+	"Run Restored"
+	{
+		// Your saved run has been restored (12.34).
+		"#format"	"time:s"
+		"en"		"{grey}Your saved run has been restored {default}({time}){grey}."
+		"ru"		"{grey}Ваш сохранённый забег восстановлен {default}({time}){grey}."
+	}
 	"Safeguard - Disable"
 	{
 		"en"		"{grey}Safeguard disabled."

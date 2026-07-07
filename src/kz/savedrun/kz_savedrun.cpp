@@ -2,8 +2,15 @@
 #include "kz_savedrun.h"
 #include "kz/checkpoint/kz_checkpoint.h"
 #include "kz/db/kz_db.h"
+#include "kz/language/kz_language.h"
+#include "kz/mappingapi/kz_mappingapi.h"
+#include "kz/mode/kz_mode.h"
+#include "kz/style/kz_style.h"
 #include "kz/timer/kz_timer.h"
 #include "utils/json.h"
+#include "utils/utils.h"
+
+#include "vendor/sql_mm/src/public/sql_mm.h"
 
 namespace
 {
@@ -47,6 +54,23 @@ namespace
 		std::vector<f64> stageTimes;
 		std::vector<CpSnapshotJson> checkpoints;
 	};
+
+	// Строит "mode+styles"-подпись текущего состояния игрока — используется и для fetch-запроса
+	// (Task 4: TryRestoreOnSpawn), и для повторной проверки "не изменилось ли за время round-trip"
+	// в колбэке. Совпадает по построению со save_savedrun.cpp (тот же формат ключа хранения).
+	CUtlString BuildStylesString(KZPlayer *player)
+	{
+		CUtlString styles;
+		FOR_EACH_VEC(player->styleServices, i)
+		{
+			if (i > 0)
+			{
+				styles.Append(",");
+			}
+			styles.Append(player->styleServices[i]->GetStyleShortName());
+		}
+		return styles;
+	}
 } // namespace
 
 std::string KZSavedRunService::SerializeSnapshot()
@@ -96,7 +120,7 @@ std::string KZSavedRunService::SerializeSnapshot()
 	return json.ToString();
 }
 
-bool KZSavedRunService::ApplySnapshot(const std::string &snapshot)
+bool KZSavedRunService::ApplySnapshot(i32 course, u32 tpCount, const std::string &snapshot)
 {
 	if (snapshot.empty())
 	{
@@ -151,13 +175,87 @@ bool KZSavedRunService::ApplySnapshot(const std::string &snapshot)
 		return false;
 	}
 
-	// TODO(Task 4): применить parsed.* к состоянию игрока:
-	//  - timerService: SetTime(parsed.time), пометить validTime = parsed.valid, восстановить
-	//    lastCheckpoint/reachedCheckpoints и cpZoneTimes/splitZoneTimes/stageZoneTimes (нужен новый
-	//    RestoreFromSnapshot(...) в KZTimerService, т.к. эти поля приватны — см. SnapshotForSave выше).
-	//  - checkpointService: воссоздать checkpoints из parsed.checkpoints (origin/angles/ladderNormal/onLadder),
-	//    затем currentCpIndex = parsed.cpIndex и TpToCheckpoint(), если игрок ожил на нужной карте/курсе.
-	// Здесь (Task 2) только парсинг + валидация — состояние игрока не трогаем.
+	// Резолв курса по cyber-номеру — обратная операция KZ::course::GetCyberCourseNumber
+	// (см. save_savedrun.cpp). Карта могла обновиться и потерять этот курс между сессиями —
+	// отказ без побочных эффектов и без чат-сообщения (не наша вина, не должны спамить игроку).
+	const KZCourseDescriptor *courseDescriptor = KZ::course::GetCourseByCyberNumber(course);
+	if (!courseDescriptor)
+	{
+		KZ_LOG_WARN(LogChannel::Timer, "[SavedRuns] Snapshot for %s references course %d not found on current map, discarding.\n",
+					this->player->GetName(), course);
+		return false;
+	}
+
+	// Пустой снапшот чекпоинтов телепортирует прямо на старт курса (см. TeleportToCourse
+	// в kz_misc.cpp) — если у курса нет заданной стартовой позиции, восстанавливать некуда.
+	if (parsed.checkpoints.empty() && !courseDescriptor->hasStartPosition)
+	{
+		KZ_LOG_WARN(LogChannel::Timer, "[SavedRuns] Snapshot for %s has no checkpoints and course %s has no start position, discarding.\n",
+					this->player->GetName(), courseDescriptor->name);
+		return false;
+	}
+
+	// --- Валидация выше не мутирует состояние; дальше только применение. ---
+
+	KZTimerService *timerService = this->player->timerService;
+	KZCheckpointService *checkpointService = this->player->checkpointService;
+
+	CUtlVector<KZCheckpointService::Checkpoint> restoredCheckpoints;
+	for (const CpSnapshotJson &cpJson : parsed.checkpoints)
+	{
+		KZCheckpointService::Checkpoint cp {};
+		cp.origin = Vector((f32)cpJson.o[0], (f32)cpJson.o[1], (f32)cpJson.o[2]);
+		cp.angles = QAngle((f32)cpJson.a[0], (f32)cpJson.a[1], (f32)cpJson.a[2]);
+		cp.ladderNormal = Vector((f32)cpJson.ln[0], (f32)cpJson.ln[1], (f32)cpJson.ln[2]);
+		cp.onLadder = cpJson.l;
+		// cp.groundEnt намеренно не трогаем — CHandle по умолчанию невалиден, ground entity
+		// не переживает сессию/смену карты (см. CpSnapshotJson выше).
+		restoredCheckpoints.AddToTail(cp);
+	}
+	checkpointService->RestoreFromSnapshot(restoredCheckpoints, parsed.cpIndex, tpCount);
+
+	KZTimerService::TimerSaveSnapshot restoreSnap;
+	restoreSnap.time = parsed.time;
+	restoreSnap.valid = parsed.valid;
+	restoreSnap.lastCheckpoint = parsed.lastCheckpoint;
+	restoreSnap.reachedCheckpoints = parsed.reachedCheckpoints;
+	restoreSnap.splits = parsed.splits;
+	restoreSnap.cpTimes = parsed.cpTimes;
+	restoreSnap.stageTimes = parsed.stageTimes;
+	timerService->RestoreFromSnapshot(courseDescriptor->guid, restoreSnap);
+
+	// Телепорт ДО паузы: DoTeleport гардит "в паузе телепорт запрещён" (cyb.19-инвариант), а
+	// игрок сейчас ещё не paused. Пустые чекпоинты -> прямой TP на старт курса, тем же путём,
+	// что и TeleportToCourse(player, course) в kz_misc.cpp.
+	//
+	// Намеренно НЕ используем checkpointService->TpToCheckpoint(): она идёт через
+	// DoTeleport(i32 index), который гардит racingService->CanTeleport() и
+	// timerService->CheckSafeguardPro() — это политики для игрок-инициированного !tp/!cp
+	// (лимит ТП в гонке, сейфгард "первый TP ломает pro-ран"), нерелевантные для внутреннего
+	// восстановления. Вместо этого — "сырой" DoTeleport(Checkpoint), который их не проверяет
+	// (но всё ещё уважает паузный гард). Он, как и любой физический телепорт, инкрементит
+	// tpCount как побочный эффект — откатываем счётчик обратно к персистентному значению.
+	if (restoredCheckpoints.Count() == 0)
+	{
+		this->player->Teleport(&courseDescriptor->startPosition, &courseDescriptor->startAngles, &vec3_origin);
+	}
+	else
+	{
+		i32 restoredCpIndex = checkpointService->GetRawCpIndex();
+		checkpointService->DoTeleport(restoredCheckpoints[restoredCpIndex]);
+		checkpointService->RestoreFromSnapshot(restoredCheckpoints, restoredCpIndex, tpCount);
+	}
+
+	// На свежетелепортированном (velocity 0) CanPause должен пройти по midair-гарду; если
+	// пауза всё же не проходит (например анти-пауза зона под точкой восстановления) — оставляем
+	// таймер бегущим без паузы, это осознанный край (см. brief Step 2.6), не зацикливаемся.
+	this->player->SetVelocity(vec3_origin);
+	timerService->Pause();
+
+	char timeText[32];
+	utils::FormatTime(parsed.time, timeText, sizeof(timeText));
+	this->player->languageService->PrintChat(true, false, "Run Restored", timeText);
+
 	return true;
 }
 
@@ -187,7 +285,101 @@ void KZSavedRunService::SaveOnDisconnect()
 
 void KZSavedRunService::TryRestoreOnSpawn()
 {
-	// Task 4
+	if (this->restoreAttempted || this->fetchStarted)
+	{
+		return;
+	}
+	// Ботов не персистим (см. SaveOnDisconnect) - восстанавливать для них нечего.
+	if (this->player->IsFakeClient())
+	{
+		this->restoreAttempted = true;
+		return;
+	}
+
+	bool mapNameOk = false;
+	CUtlString mapName = g_pKZUtils->GetCurrentMapName(&mapNameOk);
+	if (!mapNameOk || mapName.IsEmpty())
+	{
+		this->restoreAttempted = true;
+		return;
+	}
+
+	// Порядок выбран по brief (упрощённый вариант): fetch стартует на первом живом спауне,
+	// применение снапшота - прямо в колбэке этого fetch'а, а не на "следующем" спауне (следующего
+	// спауна может не быть до конца карты). fetchStarted ставим здесь, а не раньше отказов выше -
+	// те отказы должны сразу выставлять restoreAttempted, а не блокироваться в fetchStarted навечно.
+	this->fetchStarted = true;
+
+	KZModeManager::ModePluginInfo modeInfo = KZ::mode::GetModeInfo(this->player->modeService);
+	CUtlString styles = BuildStylesString(this->player);
+	u64 steamID64 = this->player->GetSteamId64();
+	CPlayerUserId userID = this->player->GetClient()->GetUserID();
+
+	// Захват map/mode/styles на момент старта fetch'а: колбэк обязан сверить их с текущими
+	// перед применением (гард "mode/styles не изменились с момента fetch", см. brief).
+	CUtlString capturedMapName = mapName;
+	CUtlString capturedMode = modeInfo.shortModeName;
+	CUtlString capturedStyles = styles;
+
+	auto onSuccess = [userID, capturedMapName, capturedMode, capturedStyles](std::vector<ISQLQuery *> queries)
+	{
+		KZPlayer *pl = g_pKZPlayerManager->ToPlayer(userID);
+		if (!pl)
+		{
+			// Игрок отключился за время round-trip - восстанавливать уже некому.
+			return;
+		}
+		KZSavedRunService *savedRunService = pl->savedRunService;
+		if (savedRunService->restoreAttempted)
+		{
+			// Уже решено иначе (защита от повторного входа, не должно случаться в норме).
+			return;
+		}
+
+		ISQLResult *result = queries.size() > 0 ? queries[0]->GetResultSet() : nullptr;
+		if (!result || !result->FetchRow())
+		{
+			// Сейва нет - штатный случай (первый визит на карту/курс).
+			savedRunService->restoreAttempted = true;
+			return;
+		}
+
+		i32 course = result->GetInt(0);
+		u32 tpCount = (u32)result->GetInt(2);
+		const char *snapshotRaw = result->GetString(3);
+		std::string snapshot = snapshotRaw ? snapshotRaw : "";
+
+		// Условия ДО применения (brief Step 2): жив, таймер ещё не запущен (игрок не начал новый
+		// ран, пока фетч летел), карта/mode/styles не изменились с момента старта fetch'а.
+		bool mapStillOk = false;
+		CUtlString currentMap = g_pKZUtils->GetCurrentMapName(&mapStillOk);
+		KZModeManager::ModePluginInfo currentModeInfo = KZ::mode::GetModeInfo(pl->modeService);
+		CUtlString currentStyles = BuildStylesString(pl);
+
+		bool environmentChanged = !mapStillOk || currentMap != capturedMapName || currentModeInfo.shortModeName != capturedMode
+								   || currentStyles != capturedStyles;
+
+		if (!pl->IsAlive() || pl->timerService->GetTimerRunning() || environmentChanged)
+		{
+			savedRunService->restoreAttempted = true;
+			return;
+		}
+
+		savedRunService->ApplySnapshot(course, tpCount, snapshot);
+		savedRunService->restoreAttempted = true;
+	};
+
+	auto onFailure = [userID](std::string error, int failIndex)
+	{
+		KZPlayer *pl = g_pKZPlayerManager->ToPlayer(userID);
+		if (pl)
+		{
+			pl->savedRunService->restoreAttempted = true;
+		}
+		KZ_LOG_WARN(LogChannel::DB, "[SavedRuns] Fetch for restore failed: %s\n", error.c_str());
+	};
+
+	KZDatabaseService::FetchSavedRun(steamID64, mapName, modeInfo.shortModeName, styles, onSuccess, onFailure);
 }
 
 void KZSavedRunService::InvalidateCurrent(const char *reason)

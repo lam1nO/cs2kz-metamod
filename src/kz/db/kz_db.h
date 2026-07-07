@@ -153,6 +153,15 @@ public:
 	// у игрока нет активного курса. Fire-and-forget — ошибки только логируются (OnGenericTxnFailure).
 	static void SaveRun(KZPlayer *player, f64 runTime, u32 tpCount, const std::string &snapshot);
 
+	// SavedRuns (Task 4): fetch последнего сейва по (SteamID64, MapName, Mode, Styles) — без
+	// Course, ключ поиска на заходе его не знает. Возвращает "сырой" результат в onSuccess
+	// (queries[0]->GetResultSet()): Course/RunTime/TpCount/Snapshot по индексам 0..3, либо
+	// пустой result set, если сейва нет. Caller (KZSavedRunService) сам безопасно резолвит
+	// игрока по userID внутри колбэка (см. паттерн setup_client.cpp) — DB-слой не хранит
+	// указатель на player между вызовом и ответом.
+	static void FetchSavedRun(u64 steamID64, CUtlString mapName, CUtlString mode, CUtlString styles,
+							  TransactionSuccessCallbackFunc onSuccess, TransactionFailureCallbackFunc onFailure);
+
 	static void Ban(u64 steamID64, const char *reason = nullptr, f32 duration = 0.0f, const UUID_t banId = UUID_t(false),
 					const UUID_t replayUuid = UUID_t(false), TransactionSuccessCallbackFunc onSuccess = OnGenericTxnSuccess,
 					TransactionFailureCallbackFunc onFailure = OnGenericTxnFailure);

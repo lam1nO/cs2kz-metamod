@@ -48,3 +48,12 @@ constexpr char sqlite_savedruns_upsert[] = R"(
 		RunTime=excluded.RunTime, TpCount=excluded.TpCount,
 		Snapshot=excluded.Snapshot, UpdatedAt=excluded.UpdatedAt
 )";
+
+// Fetch последнего сейва по (SteamID64, MapName, Mode, Styles) — БЕЗ Course: поиск при заходе
+// не знает курса заранее (см. brief Task 4). LIMIT/ORDER BY одинаковы в MySQL и SQLite,
+// отдельного sqlite_-варианта не требуется (см. sql_getpb в personal_best.h — тот же приём).
+constexpr char sql_savedruns_fetch[] = R"(
+	SELECT Course, RunTime, TpCount, Snapshot FROM SavedRuns
+	WHERE SteamID64 = %llu AND MapName = '%s' AND Mode = '%s' AND Styles = '%s'
+	ORDER BY UpdatedAt DESC LIMIT 1
+)";

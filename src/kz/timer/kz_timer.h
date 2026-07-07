@@ -272,6 +272,45 @@ public:
 		return snap;
 	}
 
+	// Task 4 (SavedRuns): восстанавливает состояние таймера из распарсенного снапшота
+	// (обратное SnapshotForSave). timerRunning выставляется в true безусловно — снапшот
+	// сохраняется только для активного незавершённого рана. currentStage намеренно не
+	// восстанавливается (не сериализуется в v=1, см. TimerSaveSnapshot) — HUD-строка
+	// стейджа может на кадр показать 0/total, это принятый пробел формата Task 2.
+	// Не трогает паузу/телепорт — порядок применения держит KZSavedRunService.
+	void RestoreFromSnapshot(u32 courseGUID, const TimerSaveSnapshot &snap)
+	{
+		this->currentCourseGUID = courseGUID;
+		this->currentTime = snap.time;
+		this->timerRunning = true;
+		this->validTime = snap.valid;
+		this->lastCheckpoint = snap.lastCheckpoint;
+		this->reachedCheckpoints = snap.reachedCheckpoints;
+
+		// Капы совпадают с CUtlVectorFixed-ёмкостью (см. KZ_MAX_*_ZONES) — снапшот из чужой
+		// БД-строки не должен переполнить фиксированный буфер.
+		i32 splitCount = MIN((i32)snap.splits.size(), (i32)KZ_MAX_SPLIT_ZONES);
+		this->splitZoneTimes.SetSize(splitCount);
+		for (i32 i = 0; i < splitCount; i++)
+		{
+			this->splitZoneTimes[i] = snap.splits[i];
+		}
+
+		i32 cpTimeCount = MIN((i32)snap.cpTimes.size(), (i32)KZ_MAX_CHECKPOINT_ZONES);
+		this->cpZoneTimes.SetSize(cpTimeCount);
+		for (i32 i = 0; i < cpTimeCount; i++)
+		{
+			this->cpZoneTimes[i] = snap.cpTimes[i];
+		}
+
+		i32 stageTimeCount = MIN((i32)snap.stageTimes.size(), (i32)KZ_MAX_STAGE_ZONES);
+		this->stageZoneTimes.SetSize(stageTimeCount);
+		for (i32 i = 0; i < stageTimeCount; i++)
+		{
+			this->stageZoneTimes[i] = snap.stageTimes[i];
+		}
+	}
+
 	static void FormatDiffTime(f64 time, char *output, u32 length, bool precise = true)
 	{
 		char temp[32];

@@ -323,6 +323,21 @@ void KZCheckpointService::DoTeleport(const Checkpoint cp, bool stayOnGround)
 	this->lastTeleportForcedOnGround = stayOnGround;
 }
 
+void KZCheckpointService::RestoreFromSnapshot(const CUtlVector<Checkpoint> &savedCheckpoints, i32 cpIndex, u32 tpCountValue)
+{
+	this->checkpoints.Purge();
+	FOR_EACH_VEC(savedCheckpoints, i)
+	{
+		this->checkpoints.AddToTail(savedCheckpoints[i]);
+	}
+	this->currentCpIndex = this->checkpoints.Count() > 0 ? MAX(0, MIN(cpIndex, this->checkpoints.Count() - 1)) : 0;
+	this->tpCount = tpCountValue;
+	// Undo-буфер/holding-still не переживают сессию — чистый старт после восстановления.
+	this->undoTeleportData = {};
+	this->holdingStill = false;
+	this->teleportTime = 0.0f;
+}
+
 void KZCheckpointService::TpToCheckpoint()
 {
 	DoTeleport(this->currentCpIndex);

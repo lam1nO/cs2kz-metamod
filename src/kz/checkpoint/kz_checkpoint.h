@@ -100,6 +100,13 @@ public:
 		return this->checkpoints;
 	}
 
+	// Task 4 (SavedRuns): восстановление чекпоинтов/индекса/счётчика ТП из снапшота БД.
+	// Каждый Checkpoint должен приходить с невалидным groundEnt (CHandle не переживает
+	// сессию/смену карты — вызывающая сторона его не сериализовала). cpIndex клэмпится
+	// в границы; при пустом savedCheckpoints оседает на 0. Не телепортирует и не трогает
+	// паузу/таймер — порядок применения держит KZSavedRunService::ApplySnapshot.
+	void RestoreFromSnapshot(const CUtlVector<Checkpoint> &savedCheckpoints, i32 cpIndex, u32 tpCountValue);
+
 	void SetStartPosition();
 	void ClearStartPosition();
 

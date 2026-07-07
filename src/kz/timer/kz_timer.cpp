@@ -952,25 +952,28 @@ void KZTimerService::OnClientDisconnect()
 
 void KZTimerService::OnPlayerSpawn()
 {
-	if (!this->player->GetPlayerPawn() || !this->paused)
+	if (this->player->GetPlayerPawn() && this->paused)
 	{
-		return;
+		// Player has left paused state by spawning in, so resume
+		this->paused = false;
+		if (this->GetTimerRunning())
+		{
+			this->hasResumedInThisRun = true;
+			this->lastResumeTime = g_pKZUtils->GetServerGlobals()->curtime;
+		}
+		this->player->GetMoveServices()->m_flDuckAmount = this->lastDuckValue;
+		this->player->GetMoveServices()->m_flStamina = this->lastStaminaValue;
+
+		FOR_EACH_VEC(eventListeners, i)
+		{
+			eventListeners[i]->OnResumePost(this->player);
+		}
 	}
 
-	// Player has left paused state by spawning in, so resume
-	this->paused = false;
-	if (this->GetTimerRunning())
-	{
-		this->hasResumedInThisRun = true;
-		this->lastResumeTime = g_pKZUtils->GetServerGlobals()->curtime;
-	}
-	this->player->GetMoveServices()->m_flDuckAmount = this->lastDuckValue;
-	this->player->GetMoveServices()->m_flStamina = this->lastStaminaValue;
-
-	FOR_EACH_VEC(eventListeners, i)
-	{
-		eventListeners[i]->OnResumePost(this->player);
-	}
+	// Восстановление персист-рана (транш 3): один раз за сессию на карте. Вызываем ПОСЛЕ
+	// авто-снятия паузы выше — не конфликтует, т.к. restoreAttempted защищает от повторного
+	// восстановления на следующих спаунах, а само применение снапшота ставит паузу заново.
+	this->player->savedRunService->TryRestoreOnSpawn();
 }
 
 void KZTimerService::OnPlayerJoinTeam(i32 team)

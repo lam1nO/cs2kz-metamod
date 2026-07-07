@@ -21,25 +21,25 @@ public:
 	// Task 2: сериализует текущее состояние таймера/чекпоинтов игрока в JSON-снапшот (формат v=1,
 	// см. docs/superpowers/sdd/t3-task-2-brief.md). Не мутирует состояние игрока.
 	std::string SerializeSnapshot();
-	// Task 2: парсит и валидирует снапшот из БД. Применение к timerService/checkpointService — Task 4.
-	// Возвращает false, если снапшот повреждён/неизвестной версии/не проходит базовую санность.
-	bool ApplySnapshot(const std::string &snapshot);
+	// Task 4: парсит, валидирует и ПРИМЕНЯЕТ снапшот из БД к состоянию игрока (timerService +
+	// checkpointService), затем телепортирует на последний чекпоинт (или старт курса, если
+	// чекпоинтов не было) и ставит паузу. course/tpCount — соседние колонки строки SavedRuns
+	// (не часть JSON, см. save_savedrun.cpp), snapshot — сам JSON (Task 2 формат).
+	// Возвращает false без побочных эффектов, если снапшот повреждён/неизвестной версии/не
+	// проходит базовую санность, ИЛИ курс с таким cyber-номером не найден на текущей карте
+	// (карта обновилась) — в этом случае чат-сообщение не выводится.
+	bool ApplySnapshot(i32 course, u32 tpCount, const std::string &snapshot);
 
-	// Восстановление уже выполнено/не нужно в этой сессии на этой карте.
+	// Восстановление уже выполнено/не нужно в этой сессии на этой карте (сбрасывается при
+	// KZPlayer::Reset(), т.е. на дисконнект/смену карты для обычных клиентов).
 	bool restoreAttempted {};
-	// Fetch сейва уже запущен (Task 4: старт на первом живом спауне).
+	// Fetch сейва уже запущен (Task 4: старт на первом живом спауне из TryRestoreOnSpawn).
+	// Применение снапшота происходит прямо в колбэке этого fetch'а (не ждём следующий спаун —
+	// он может не случиться до конца карты); повторные спауны, пока fetch летит, no-op.
 	bool fetchStarted {};
-	// Снапшот, полученный из БД до спауна (Task 4).
-	std::string pendingSnapshot {};
-	i32 pendingCourse {};
-	f64 pendingRunTime {};
-	u32 pendingTpCount {};
-	bool hasPending {};
 	void Reset()
 	{
 		restoreAttempted = false;
 		fetchStarted = false;
-		pendingSnapshot.clear();
-		hasPending = false;
 	}
 };

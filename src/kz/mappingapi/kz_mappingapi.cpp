@@ -956,6 +956,20 @@ i32 KZ::course::GetCyberCourseNumber(const KZCourseDescriptor *course)
 	return 100 + course->id;
 }
 
+const KZCourseDescriptor *KZ::course::GetCourseByCyberNumber(i32 n)
+{
+	// Зеркало FindBonusCourse ниже, но без ограничения n >= 1 (Task 4: main-курс тоже
+	// нужно резолвить обратно, cyber-номер 0).
+	FOR_EACH_VEC(g_sortedCourses, i)
+	{
+		if (KZ::course::GetCyberCourseNumber(g_sortedCourses[i]) == n)
+		{
+			return g_sortedCourses[i];
+		}
+	}
+	return nullptr;
+}
+
 static void ListCourses(KZPlayer *player)
 {
 	if (player->timerService->GetCourse())
