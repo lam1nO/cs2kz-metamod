@@ -1,6 +1,7 @@
 #include "../kz.h"
 #include "kz_savedrun.h"
 #include "kz/checkpoint/kz_checkpoint.h"
+#include "kz/db/kz_db.h"
 #include "kz/timer/kz_timer.h"
 #include "utils/json.h"
 
@@ -162,7 +163,21 @@ bool KZSavedRunService::ApplySnapshot(const std::string &snapshot)
 
 void KZSavedRunService::SaveOnDisconnect()
 {
-	// Task 3
+	// Guard здесь — только "таймер активен" (paused неважно, спека п.4). БД-готовность
+	// и наличие активного курса проверяет сам KZDatabaseService::SaveRun — не дублируем.
+	KZTimerService *timerService = this->player->timerService;
+	if (!timerService->GetTimerRunning())
+	{
+		return;
+	}
+
+	// Сериализация читает только сервисные поля (timerService/checkpointService), pawn не трогает —
+	// у вышедшего игрока pawn уже может быть невалиден/уничтожен.
+	std::string snapshot = this->SerializeSnapshot();
+	f64 runTime = timerService->GetTime();
+	u32 tpCount = this->player->checkpointService->GetTeleportCount();
+
+	KZDatabaseService::SaveRun(this->player, runTime, tpCount, snapshot);
 }
 
 void KZSavedRunService::TryRestoreOnSpawn()

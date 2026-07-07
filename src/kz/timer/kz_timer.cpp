@@ -10,6 +10,7 @@
 #include "kz/trigger/kz_trigger.h"
 #include "kz/spec/kz_spec.h"
 #include "kz/recording/kz_recording.h"
+#include "kz/savedrun/kz_savedrun.h"
 #include "submission.h"
 
 #include "utils/utils.h"
@@ -944,6 +945,8 @@ void KZTimerService::OnTeleportToStart()
 
 void KZTimerService::OnClientDisconnect()
 {
+	// Персист незавершённого рана (транш 3) — до TimerStop, пока состояние живо.
+	this->player->savedRunService->SaveOnDisconnect();
 	this->TimerStop();
 }
 
