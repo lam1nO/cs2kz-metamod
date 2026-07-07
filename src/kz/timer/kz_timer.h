@@ -274,10 +274,17 @@ public:
 
 	// Task 4 (SavedRuns): восстанавливает состояние таймера из распарсенного снапшота
 	// (обратное SnapshotForSave). timerRunning выставляется в true безусловно — снапшот
-	// сохраняется только для активного незавершённого рана. currentStage намеренно не
-	// восстанавливается (не сериализуется в v=1, см. TimerSaveSnapshot) — HUD-строка
-	// стейджа может на кадр показать 0/total, это принятый пробел формата Task 2.
-	// Не трогает паузу/телепорт — порядок применения держит KZSavedRunService.
+	// сохраняется только для активного незавершённого рана. Целевые размеры
+	// splits/cpTimes/stageTimes берутся из ТЕКУЩЕГО courseDesc (карта могла обновиться между
+	// сессиями и поменять число зон курса), а не из длины снапшота — иначе индексация по
+	// currentStage/StageZoneStartTouch/SplitZoneStartTouch разъедется с текущим курсом (тот же
+	// паттерн SetSize+FillWithValue(-1), что в TimerStart). currentStage и lastSplit не
+	// сериализуются отдельно (см. TimerSaveSnapshot) — восстанавливаются как длина непрерывного
+	// префикса пройденных зон с начала (первый -1 останавливает счёт): для стейджей это точно
+	// соответствует порядку прохождения (StageZoneStartTouch пишет stageZoneTimes[currentStage]
+	// строго последовательно, зона выше currentStage+1 отбивается как "missed stage"), без этого
+	// TimerEnd (currentStage == courseDesc->stageCount) недостижим на курсах со stage-зонами после
+	// рестора. Не трогает паузу/телепорт — порядок применения держит KZSavedRunService.
 	void RestoreFromSnapshot(u32 courseGUID, const TimerSaveSnapshot &snap)
 	{
 		this->currentCourseGUID = courseGUID;
@@ -287,27 +294,66 @@ public:
 		this->lastCheckpoint = snap.lastCheckpoint;
 		this->reachedCheckpoints = snap.reachedCheckpoints;
 
-		// Капы совпадают с CUtlVectorFixed-ёмкостью (см. KZ_MAX_*_ZONES) — снапшот из чужой
-		// БД-строки не должен переполнить фиксированный буфер.
-		i32 splitCount = MIN((i32)snap.splits.size(), (i32)KZ_MAX_SPLIT_ZONES);
-		this->splitZoneTimes.SetSize(splitCount);
-		for (i32 i = 0; i < splitCount; i++)
+		// Вызывающая сторона (KZSavedRunService::ApplySnapshot) уже резолвит курс по
+		// cyber-номеру до вызова, так что courseDesc здесь ожидаемо не-null; на случай future
+		// caller'а без этой гарантии деградируем на длину снапшота, капнутую фиксированным буфером
+		// (старое поведение), а не падаем в null deref.
+		const KZCourseDescriptor *courseDesc = KZ::course::GetCourse(courseGUID);
+		f64 invalidTime = -1;
+
+		i32 splitTarget = courseDesc ? courseDesc->splitCount : (i32)snap.splits.size();
+		splitTarget = MIN(splitTarget, (i32)KZ_MAX_SPLIT_ZONES);
+		this->splitZoneTimes.SetSize(splitTarget);
+		this->splitZoneTimes.FillWithValue(invalidTime);
+		i32 splitCopyCount = MIN(splitTarget, (i32)snap.splits.size());
+		for (i32 i = 0; i < splitCopyCount; i++)
 		{
 			this->splitZoneTimes[i] = snap.splits[i];
 		}
 
-		i32 cpTimeCount = MIN((i32)snap.cpTimes.size(), (i32)KZ_MAX_CHECKPOINT_ZONES);
-		this->cpZoneTimes.SetSize(cpTimeCount);
-		for (i32 i = 0; i < cpTimeCount; i++)
+		i32 cpTarget = courseDesc ? courseDesc->checkpointCount : (i32)snap.cpTimes.size();
+		cpTarget = MIN(cpTarget, (i32)KZ_MAX_CHECKPOINT_ZONES);
+		this->cpZoneTimes.SetSize(cpTarget);
+		this->cpZoneTimes.FillWithValue(invalidTime);
+		i32 cpCopyCount = MIN(cpTarget, (i32)snap.cpTimes.size());
+		for (i32 i = 0; i < cpCopyCount; i++)
 		{
 			this->cpZoneTimes[i] = snap.cpTimes[i];
 		}
 
-		i32 stageTimeCount = MIN((i32)snap.stageTimes.size(), (i32)KZ_MAX_STAGE_ZONES);
-		this->stageZoneTimes.SetSize(stageTimeCount);
-		for (i32 i = 0; i < stageTimeCount; i++)
+		i32 stageTarget = courseDesc ? courseDesc->stageCount : (i32)snap.stageTimes.size();
+		stageTarget = MIN(stageTarget, (i32)KZ_MAX_STAGE_ZONES);
+		this->stageZoneTimes.SetSize(stageTarget);
+		this->stageZoneTimes.FillWithValue(invalidTime);
+		i32 stageCopyCount = MIN(stageTarget, (i32)snap.stageTimes.size());
+		for (i32 i = 0; i < stageCopyCount; i++)
 		{
 			this->stageZoneTimes[i] = snap.stageTimes[i];
+		}
+
+		// currentStage = длина непрерывного префикса пройденных стейджей (см. комментарий выше
+		// метода). Обязателен для курсов со stage-зонами: без него TimerEnd недостижим.
+		this->currentStage = 0;
+		FOR_EACH_VEC(this->stageZoneTimes, i)
+		{
+			if (this->stageZoneTimes[i] < 0)
+			{
+				break;
+			}
+			this->currentStage++;
+		}
+
+		// lastSplit не сериализуется отдельно (нет соответствующего поля в TimerSaveSnapshot/v=1) —
+		// тот же префиксный вывод по splitZoneTimes. Влияет только на "diff since last split" в
+		// ShowSplitText, не на завершаемость рана.
+		this->lastSplit = 0;
+		FOR_EACH_VEC(this->splitZoneTimes, i)
+		{
+			if (this->splitZoneTimes[i] < 0)
+			{
+				break;
+			}
+			this->lastSplit = i + 1;
 		}
 	}
 

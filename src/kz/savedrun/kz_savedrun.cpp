@@ -59,14 +59,33 @@ namespace
 
 CUtlString KZSavedRunService::BuildStylesString(KZPlayer *player)
 {
+	// Ключ SavedRuns хранится в колонке Styles VARCHAR(64) на MySQL (см. queries/savedruns.h) —
+	// переполнение роняет upsert целиком под strict-MySQL (сейв рана теряется молча), а не
+	// обрезается движком. Капаем здесь же, ДО похода в БД, по границе последнего ПОЛНОГО имени
+	// стиля — частично обрезанное имя не совпало бы byte-в-byte между upsert (save_savedrun.cpp)
+	// и fetch (TryRestoreOnSpawn)/delete (InvalidateCurrent), которые все идут через этот метод.
+	constexpr i32 kMaxStylesLength = 64;
+
 	CUtlString styles;
 	FOR_EACH_VEC(player->styleServices, i)
 	{
+		const char *shortName = player->styleServices[i]->GetStyleShortName();
+
+		CUtlString candidate = styles;
 		if (i > 0)
 		{
-			styles.Append(",");
+			candidate.Append(",");
 		}
-		styles.Append(player->styleServices[i]->GetStyleShortName());
+		candidate.Append(shortName);
+
+		if (candidate.Length() > kMaxStylesLength)
+		{
+			KZ_LOG_WARN(LogChannel::DB,
+						"[SavedRuns] Styles string for %s would exceed %d chars, truncating before style '%s' (kept: '%s').\n",
+						player->GetName(), kMaxStylesLength, shortName, styles.Get());
+			break;
+		}
+		styles = candidate;
 	}
 	return styles;
 }
@@ -184,19 +203,23 @@ bool KZSavedRunService::ApplySnapshot(i32 course, u32 tpCount, const std::string
 		return false;
 	}
 
-	// Пустой снапшот чекпоинтов телепортирует прямо на старт курса (см. TeleportToCourse
-	// в kz_misc.cpp) — если у курса нет заданной стартовой позиции, восстанавливать некуда.
-	if (parsed.checkpoints.empty() && !courseDescriptor->hasStartPosition)
+	// Пустой снапшот чекпоинтов — pro-ран (0 телепортов), который ни разу не оставил !cp/сплит.
+	// Честный отказ вместо декоративного восстановления: раньше этот путь телепортировал игрока
+	// на старт курса и ставил ForcePause, но выход из старт-зоны сразу дёргает
+	// StartZoneEndTouch -> TimerStart, который безусловно сбрасывает currentTime/currentStage
+	// (см. TimerStart) — восстановленное время исчезало на первом же движении, при этом чат уже
+	// сказал "Run Restored". Сейв НЕ удаляем (это не порча данных, а пустой pro-ран) — он живёт до
+	// TTL (см. PurgeExpired, Task 5).
+	if (parsed.checkpoints.empty())
 	{
-		KZ_LOG_WARN(LogChannel::Timer, "[SavedRuns] Snapshot for %s has no checkpoints and course %s has no start position, discarding.\n",
-					this->player->GetName(), courseDescriptor->name);
+		KZ_LOG_INFO(LogChannel::Timer, "[SavedRuns] skip restore: no checkpoints (pro-run) for %s on course %s.\n", this->player->GetName(),
+					courseDescriptor->name);
 		return false;
 	}
 
 	// Карта запрещает ТП на чекпоинты: DoTeleport ниже молча откажет, и состояние применилось
-	// бы «наполовину» (таймер/пауза без позиции). Отказ целиком ДО любых мутаций. Пустой
-	// снапшот не затрагивается — там прямой TP на старт курса мимо чекпоинт-механики (аналог !r).
-	if (!parsed.checkpoints.empty() && !this->player->triggerService->CanTeleportToCheckpoints())
+	// бы «наполовину» (таймер/пауза без позиции). Отказ целиком ДО любых мутаций.
+	if (!this->player->triggerService->CanTeleportToCheckpoints())
 	{
 		KZ_LOG_WARN(LogChannel::Timer, "[SavedRuns] Snapshot for %s has checkpoints but map forbids checkpoint teleports, discarding.\n",
 					this->player->GetName());
@@ -233,8 +256,8 @@ bool KZSavedRunService::ApplySnapshot(i32 course, u32 tpCount, const std::string
 	timerService->RestoreFromSnapshot(courseDescriptor->guid, restoreSnap);
 
 	// Телепорт ДО паузы: DoTeleport гардит "в паузе телепорт запрещён" (cyb.19-инвариант), а
-	// игрок сейчас ещё не paused. Пустые чекпоинты -> прямой TP на старт курса, тем же путём,
-	// что и TeleportToCourse(player, course) в kz_misc.cpp.
+	// игрок сейчас ещё не paused. restoredCheckpoints гарантированно непуст здесь — пустой
+	// снапшот чекпоинтов отбивается выше (pro-ран, честный skip без ТП/паузы).
 	//
 	// Намеренно НЕ используем checkpointService->TpToCheckpoint(): она идёт через
 	// DoTeleport(i32 index), который гардит racingService->CanTeleport() и
@@ -244,15 +267,8 @@ bool KZSavedRunService::ApplySnapshot(i32 course, u32 tpCount, const std::string
 	// (но всё ещё уважает паузный гард). Он, как и любой физический телепорт, инкрементит
 	// tpCount как побочный эффект — пин-бэчим только счётчик, не трогая teleportTime
 	// (окно TpHoldPlayerStill свежего телепорта должно жить).
-	if (restoredCheckpoints.Count() == 0)
-	{
-		this->player->Teleport(&courseDescriptor->startPosition, &courseDescriptor->startAngles, &vec3_origin);
-	}
-	else
-	{
-		checkpointService->DoTeleport(restoredCheckpoints[checkpointService->GetRawCpIndex()]);
-		checkpointService->SetTeleportCountForRestore(tpCount);
-	}
+	checkpointService->DoTeleport(restoredCheckpoints[checkpointService->GetRawCpIndex()]);
+	checkpointService->SetTeleportCountForRestore(tpCount);
 
 	// Форс-пауза, а не Pause(): CanPause почти всегда откажет по JustLanded — landingTime
 	// выставляется на первом тике после спауна, а колбэк локальной БД приходит через 1-2 тика
@@ -278,6 +294,14 @@ void KZSavedRunService::SaveOnDisconnect()
 	}
 	// Ботов не персистим (pawn-независимая проверка — pawn на дисконнекте невалиден).
 	if (this->player->IsFakeClient())
+	{
+		return;
+	}
+	// Без полной Steam-аутентификации GetSteamId64() отдаёт 0 (см. Player::GetSteamId) — upsert
+	// ушёл бы со SteamID64=0 и разные неавторизованные коннекты схлопывались бы в одну строку
+	// ключа. Хук идёт ДО фактического дисконнекта (см. Hook_ClientDisconnect), так что для
+	// нормально доигравшего игрока IsAuthenticated() здесь ещё true.
+	if (!this->player->IsAuthenticated())
 	{
 		return;
 	}
@@ -375,7 +399,18 @@ void KZSavedRunService::TryRestoreOnSpawn()
 		bool environmentChanged = !mapStillOk || currentMap != capturedMapName || currentModeInfo.shortModeName != capturedMode
 								   || currentStyles != capturedStyles;
 
-		if (!pl->IsAlive() || pl->timerService->GetTimerRunning() || environmentChanged)
+		if (environmentChanged)
+		{
+			// Mode/styles (или имя карты) доехали асинхронно между стартом fetch'а и этим
+			// колбэком (SetupClient/prefs-загрузка гонится с нашим fetch'ем) - снапшот был
+			// запрошен под уже неактуальным ключом. НЕ жжём restoreAttempted: даём ретрай на
+			// следующем спауне с актуальными mode/styles. fetchStarted сбрасываем, иначе
+			// TryRestoreOnSpawn молча no-op'нет навечно (см. её ранний return по fetchStarted).
+			savedRunService->fetchStarted = false;
+			return;
+		}
+
+		if (!pl->IsAlive() || pl->timerService->GetTimerRunning())
 		{
 			savedRunService->restoreAttempted = true;
 			return;

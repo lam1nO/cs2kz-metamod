@@ -37,6 +37,19 @@ cs2kz-linux-builder .`, иначе компилируются старые ис�
 - **Чат**: `!`-команды и серверный шум (beta join, website tip, turnbinds,
   broadcast jumpstat) скрыты; `!maps`/`!mcustom` работают через релей.
 - **Ноги**: hideLegs по умолчанию true (`!hidelegs` — тумблер).
+- **SavedRuns** (`src/kz/savedrun/kz_savedrun.*`): персистентный незавершённый
+  таймер — таблица `SavedRuns` в общей MySQL флота, ключ хранения
+  (steam, map, course, mode, styles), поиск на заходе — БЕЗ course (курс
+  определяется из найденной строки). Сейв на дисконнекте (только
+  аутентифицированные, не боты, только пока таймер бежит); рестор —
+  «телепорт → `ForcePause`» на первом живом спауне ПОСЛЕ Steam-auth (fetch
+  ретраится, если mode/styles/карта успели измениться за время round-trip).
+  Пустые чекпоинты (pro-ран без единого !cp) не восстанавливаются вовсе —
+  честный skip вместо декоративного ТП-на-старт. Инвалидация сейва — на
+  finish/`!r`/`!stop`/noclip; TTL 30 дней (`PurgeExpired`, раз на загрузку
+  карты). Конвенция course — cyber-номер (`KZ::course::GetCyberCourseNumber`/
+  `GetCourseByCyberNumber`), не hammerId/guid — переживает ребилд карты, пока
+  номер курса не меняется.
 
 ## Инварианты (не ломать при мёрже апстрима)
 
