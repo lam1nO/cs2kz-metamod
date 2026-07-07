@@ -15,20 +15,31 @@
 // Меню-движок cs2menus (определён в kz_hud.cpp); может быть nullptr, если плагин не загружен.
 extern ICS2Menus *g_pMenus;
 
-// === Particle asset paths (Path B — per-glyph из workshop-аддона 3759276798) =========
+// === Particle asset paths ============================================================
 //
-// Одна схема cyberkz, без font/outline суффиксов.
-// Outline управляется выбором vpcf: velo_plain ↔ velo_glow.
+// Path B (hudType==0): cyberkz per-glyph из workshop-аддона 3759276798.
+//   Без font/outline суффиксов; outline = выбор vpcf (plain/glow).
+//
+// Upstream (hudType==1): апстрим cs2kz пути.
+//   Два аргумента: font (lato/verdana) × outline (outline/no_outline).
 
+// --- hudType==0: cyberkz ---
 #define PARTICLE_VELO_PATTERN       "particles/cyberkz/velo_%s.vpcf"
 #define PARTICLE_TIMER_DIGIT_PATH   "particles/cyberkz/timer_digit.vpcf"
 #define PARTICLE_TIMER_DELIM_PATH   "particles/cyberkz/timer_delim.vpcf"
 #define PARTICLE_KEY_PATTERN        "particles/cyberkz/key_%s.vpcf"
 #define PARTICLE_PILL_PATH          "particles/cyberkz/pill.vpcf"
 
-// CP-TP использует те же листы что таймер
+// CP-TP использует те же листы что таймер (cyberkz)
 #define PARTICLE_CPTP_DIGIT_PATH    "particles/cyberkz/timer_digit.vpcf"
 #define PARTICLE_CPTP_DELIM_PATH    "particles/cyberkz/timer_delim.vpcf"
+
+// --- hudType==1: апстрим ---
+#define UPSTREAM_PARTICLE_NUMBERS_PATTERN     "particles/velo/velo_overlay_large_%s_%s.vpcf"
+#define UPSTREAM_PARTICLE_TIMER_DELIM_PATTERN "particles/timer_delimiter/timer_delimiter_%s_%s.vpcf"
+#define UPSTREAM_PARTICLE_INPUTS_PATTERN      "particles/inputs/inputs_%s_%s.vpcf"
+
+static_global constexpr const char *UPSTREAM_AVAILABLE_FONTS[] = {"lato", "verdana"};
 
 // === Layout constants ================================================================
 // Скорость: 4 разряда, шаг масштабируется со scale.
@@ -111,10 +122,35 @@ static_function void BuildKeyPath(char *buf, size_t bufSize, const char *keyName
 	V_snprintf(buf, bufSize, PARTICLE_KEY_PATTERN, keyName);
 }
 
+// Апстрим-helper: строит путь из pattern + font + outline суффикс.
+static_function void BuildUpstreamPath(char *buf, size_t bufSize, const char *pattern, const char *font, bool outline)
+{
+	V_snprintf(buf, bufSize, pattern, font, outline ? "outline" : "no_outline");
+}
+
+// Возвращает нижний регистр mhudFont preference (lato/verdana) из optionService игрока.
+// settingsPlayer — всегда игрок-владелец настроек (не наблюдаемый при спектировании).
+static_function const char *GetUpstreamFont(KZPlayer *settingsPlayer, char *out_buf, size_t bufSize)
+{
+	const char *font = settingsPlayer->optionService->GetPreferenceStr("mhudFont", UPSTREAM_AVAILABLE_FONTS[0]);
+	V_strncpy(out_buf, font, bufSize);
+	V_strlower(out_buf);
+	// Проверяем, что шрифт из допустимого списка; иначе дефолт.
+	bool valid = false;
+	for (const char *f : UPSTREAM_AVAILABLE_FONTS)
+	{
+		if (KZ_STREQ(out_buf, f)) { valid = true; break; }
+	}
+	if (!valid) V_strncpy(out_buf, UPSTREAM_AVAILABLE_FONTS[0], bufSize);
+	return out_buf;
+}
+
 void KZHUDService::PrecacheParticles(IEntityResourceManifest *pResourceManifest)
 {
 	// Прекешируем все пути, которые могут понадобиться в рантайме.
 	char path[256];
+
+	// === hudType==0 (cyberkz) ===
 
 	// Скорость: два варианта (plain / glow)
 	BuildVeloPath(path, sizeof(path), false);
@@ -135,6 +171,20 @@ void KZHUDService::PrecacheParticles(IEntityResourceManifest *pResourceManifest)
 
 	// Пилюля
 	pResourceManifest->AddResource(PARTICLE_PILL_PATH);
+
+	// === hudType==1 (апстрим: velo / inputs / timer_delimiter) ===
+	for (const char *font : UPSTREAM_AVAILABLE_FONTS)
+	{
+		for (bool outline : {false, true})
+		{
+			BuildUpstreamPath(path, sizeof(path), UPSTREAM_PARTICLE_NUMBERS_PATTERN, font, outline);
+			pResourceManifest->AddResource(path);
+			BuildUpstreamPath(path, sizeof(path), UPSTREAM_PARTICLE_TIMER_DELIM_PATTERN, font, outline);
+			pResourceManifest->AddResource(path);
+			BuildUpstreamPath(path, sizeof(path), UPSTREAM_PARTICLE_INPUTS_PATTERN, font, outline);
+			pResourceManifest->AddResource(path);
+		}
+	}
 }
 
 // === Particle creation ==============================================================
@@ -165,7 +215,7 @@ static_function CParticleSystem *CreateMHUDParticle(const char *particleName, co
 
 bool KZHUDService::OwnsParticle(const CEntityHandle &handle) const
 {
-	// Скорость (4 разряда + 4 prespeed)
+	// hudType==0: cyberkz per-glyph
 	for (i32 i = 0; i < MHUD_SPEED_DIGITS; i++)
 	{
 		if (handle == this->speedParticles[i] || handle == this->prespeedParticles[i])
@@ -173,7 +223,6 @@ bool KZHUDService::OwnsParticle(const CEntityHandle &handle) const
 			return true;
 		}
 	}
-	// Клавиши (6 штук)
 	for (i32 i = 0; i < MHUD_KEY_COUNT; i++)
 	{
 		if (handle == this->keyParticles[i])
@@ -181,7 +230,7 @@ bool KZHUDService::OwnsParticle(const CEntityHandle &handle) const
 			return true;
 		}
 	}
-	// Таймер
+	// Таймер (общие массивы для обоих типов)
 	for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(this->timerTextParticles); i++)
 	{
 		if (handle == this->timerTextParticles[i])
@@ -216,6 +265,18 @@ bool KZHUDService::OwnsParticle(const CEntityHandle &handle) const
 	{
 		return true;
 	}
+	// hudType==1: апстрим particle'ы
+	for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(this->upstreamSpeedParticles); i++)
+	{
+		if (handle == this->upstreamSpeedParticles[i] || handle == this->upstreamPrespeedParticles[i])
+		{
+			return true;
+		}
+	}
+	if (handle == this->keysParticle)
+	{
+		return true;
+	}
 	return false;
 }
 
@@ -233,6 +294,7 @@ static_function void DestroyHandle(CHandle<CParticleSystem> &handle)
 
 void KZHUDService::DestroyAllParticles()
 {
+	// hudType==0: cyberkz per-glyph
 	for (i32 i = 0; i < MHUD_SPEED_DIGITS; i++)
 	{
 		DestroyHandle(this->speedParticles[i]);
@@ -242,14 +304,7 @@ void KZHUDService::DestroyAllParticles()
 	{
 		DestroyHandle(this->keyParticles[i]);
 	}
-	for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(this->timerTextParticles); i++)
-	{
-		DestroyHandle(this->timerTextParticles[i]);
-	}
-	for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(this->timerDelimiterParticles); i++)
-	{
-		DestroyHandle(this->timerDelimiterParticles[i]);
-	}
+	// CP/TP
 	for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(this->cptpParticles); i++)
 	{
 		DestroyHandle(this->cptpParticles[i]);
@@ -259,6 +314,24 @@ void KZHUDService::DestroyAllParticles()
 		DestroyHandle(this->cptpDelimParticles[i]);
 	}
 	DestroyHandle(this->pillParticle);
+
+	// hudType==1: апстрим
+	for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(this->upstreamSpeedParticles); i++)
+	{
+		DestroyHandle(this->upstreamSpeedParticles[i]);
+		DestroyHandle(this->upstreamPrespeedParticles[i]);
+	}
+	DestroyHandle(this->keysParticle);
+
+	// Таймер (общие массивы — уничтожаем в обоих путях)
+	for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(this->timerTextParticles); i++)
+	{
+		DestroyHandle(this->timerTextParticles[i]);
+	}
+	for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(this->timerDelimiterParticles); i++)
+	{
+		DestroyHandle(this->timerDelimiterParticles[i]);
+	}
 }
 
 void KZHUDService::OnClientDisconnect()
@@ -366,8 +439,50 @@ static_function void UpdateParticleLayout(CParticleSystem *p, f32 sequence, f32 
 	p->SetControlPointValue(18, Vector(x, y, 1.0f));
 }
 
-// === Speed + prespeed (Path B: до 4 отдельных particle'ов per значение) ==============
+// === Speed + prespeed ================================================================
 
+// --- Апстрим-helper (hudType==1): два particle'а — пары разрядов hi/lo. ---
+// Воспроизводит апстрим LayoutDigitPair (cp17.z = 0.0f, не 1.0f — апстрим-контракт).
+static_function void LayoutDigitPair(i32 value, f32 size, f32 baseOffsetX, f32 baseOffsetY,
+									  CParticleSystem *p0, CParticleSystem *p1, bool transmit[2])
+{
+	// Апстрим-константы позиций
+	static constexpr f32 X_LEFT       = -0.625f;
+	static constexpr f32 X_CENTER     =  0.0f;
+	static constexpr f32 X_RIGHT_3DIG =  0.3125f;
+	static constexpr f32 X_RIGHT_4DIG =  0.625f;
+
+	transmit[0] = true;
+	transmit[1] = true;
+	if (value >= 1000)
+	{
+		i32 hi = value / 100;
+		i32 lo = value % 100;
+		if (lo < 10) lo += 100; // вариант "0X"
+		p0->SetControlPointValue(17, Vector((f32)hi, size, 0.0f));
+		p0->SetControlPointValue(18, Vector(baseOffsetX + X_LEFT, baseOffsetY, 1.0f));
+		p1->SetControlPointValue(17, Vector((f32)lo, size, 0.0f));
+		p1->SetControlPointValue(18, Vector(baseOffsetX + X_RIGHT_4DIG, baseOffsetY, 1.0f));
+	}
+	else if (value >= 100)
+	{
+		i32 hi = value / 100;
+		i32 lo = value % 100;
+		if (lo < 10) lo += 100;
+		p0->SetControlPointValue(17, Vector((f32)hi, size, 0.0f));
+		p0->SetControlPointValue(18, Vector(baseOffsetX + X_LEFT, baseOffsetY, 1.0f));
+		p1->SetControlPointValue(17, Vector((f32)lo, size, 0.0f));
+		p1->SetControlPointValue(18, Vector(baseOffsetX + X_RIGHT_3DIG, baseOffsetY, 1.0f));
+	}
+	else
+	{
+		p0->SetControlPointValue(17, Vector((f32)value, size, 0.0f));
+		p0->SetControlPointValue(18, Vector(baseOffsetX + X_CENTER, baseOffsetY, 1.0f));
+		transmit[1] = false;
+	}
+}
+
+// --- cyberkz-helper (hudType==0): до 4 отдельных particle'ов per значение. ---
 // Вычисляет позиции разрядов числа val (0..9999), записывает в out_x/out_y/out_seq.
 // Ведущие нули не рисуем: numDigits = кол-во видимых разрядов (мин. 1).
 // Разряды выровнены по центру baseOffsetX.
@@ -417,26 +532,23 @@ void KZHUDService::UpdateMHUDSpeed()
 	bool speedEnabled    = this->IsMHUDSpeedEnabled();
 	bool prespeedEnabled = this->IsMHUDPrespeedEnabled();
 
-	if (!speedEnabled)
-	{
-		for (i32 i = 0; i < MHUD_SPEED_DIGITS; i++)
-		{
-			if (this->speedParticles[i]) DestroyHandle(this->speedParticles[i]);
-		}
-	}
-	if (!prespeedEnabled)
-	{
-		for (i32 i = 0; i < MHUD_SPEED_DIGITS; i++)
-		{
-			if (this->prespeedParticles[i]) DestroyHandle(this->prespeedParticles[i]);
-		}
-	}
 	if (!speedEnabled && !prespeedEnabled)
 	{
+		// Гасим particle'ы обоих путей при отключении.
+		for (i32 i = 0; i < MHUD_SPEED_DIGITS; i++)
+		{
+			if (this->speedParticles[i])    DestroyHandle(this->speedParticles[i]);
+			if (this->prespeedParticles[i]) DestroyHandle(this->prespeedParticles[i]);
+		}
+		for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(this->upstreamSpeedParticles); i++)
+		{
+			if (this->upstreamSpeedParticles[i])    DestroyHandle(this->upstreamSpeedParticles[i]);
+			if (this->upstreamPrespeedParticles[i]) DestroyHandle(this->upstreamPrespeedParticles[i]);
+		}
 		return;
 	}
 
-	const Color baseColor        = this->GetMHUDColorPref("mhudSpeedColor", MHUD_DEF_BASE_COLOR);
+	const Color baseColor         = this->GetMHUDColorPref("mhudSpeedColor",    MHUD_DEF_BASE_COLOR);
 	const Color prespeedBaseColor = this->GetMHUDColorPref("mhudPrespeedColor", MHUD_DEF_BASE_COLOR);
 	const f32 speedOffsetX   = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudSpeedOffsetX",   MHUD_DEF_SPEED_OFFSET_X);
 	const f32 speedOffsetY   = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudSpeedOffsetY",   MHUD_DEF_SPEED_OFFSET_Y);
@@ -444,32 +556,77 @@ void KZHUDService::UpdateMHUDSpeed()
 	const f32 prespeedOffsetX = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudPrespeedOffsetX", MHUD_DEF_PRESPEED_OFFSET_X);
 	const f32 prespeedOffsetY = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudPrespeedOffsetY", MHUD_DEF_PRESPEED_OFFSET_Y);
 	const f32 prespeedScale   = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudPrespeedScale",   MHUD_DEF_PRESPEED_SCALE);
-
-	// Outline определяет vpcf (glow / plain). Смена outline → DestroyAllParticles в SCMD.
 	bool outline = this->IsMHUDOutlineEnabled();
-	char veloPath[256];
-	BuildVeloPath(veloPath, sizeof(veloPath), outline);
 
-	// Lazy-create: все 4 разряда создаются одним .vpcf, позиции проставляются ниже.
-	if (speedEnabled)
+	int hudType = this->GetHudType();
+
+	if (hudType == 1)
 	{
+		// === MHUD (апстрим): два particle'а-пары-разрядов (hi/lo) ===
+		// Гасим cyberkz-разряды если они вдруг живые (смена типа без DestroyAll не должна
+		// происходить, но на всякий случай).
 		for (i32 i = 0; i < MHUD_SPEED_DIGITS; i++)
 		{
-			if (!this->speedParticles[i])
-			{
-				this->speedParticles[i] = CreateMHUDParticle(veloPath, baseColor, 0.0f, speedScale, speedOffsetX, speedOffsetY);
-			}
+			if (this->speedParticles[i])    DestroyHandle(this->speedParticles[i]);
+			if (this->prespeedParticles[i]) DestroyHandle(this->prespeedParticles[i]);
+		}
+
+		char fontBuf[64];
+		const char *font = GetUpstreamFont(this->player, fontBuf, sizeof(fontBuf));
+		char numbersPath[256];
+		BuildUpstreamPath(numbersPath, sizeof(numbersPath), UPSTREAM_PARTICLE_NUMBERS_PATTERN, font, outline);
+
+		if (!speedEnabled)
+		{
+			for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(this->upstreamSpeedParticles); i++)
+				if (this->upstreamSpeedParticles[i]) DestroyHandle(this->upstreamSpeedParticles[i]);
+		}
+		if (!prespeedEnabled)
+		{
+			for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(this->upstreamPrespeedParticles); i++)
+				if (this->upstreamPrespeedParticles[i]) DestroyHandle(this->upstreamPrespeedParticles[i]);
+		}
+		if (speedEnabled)
+		{
+			for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(this->upstreamSpeedParticles); i++)
+				if (!this->upstreamSpeedParticles[i])
+					this->upstreamSpeedParticles[i] = CreateMHUDParticle(numbersPath, baseColor, 0.0f, speedScale, speedOffsetX, speedOffsetY);
+		}
+		if (prespeedEnabled)
+		{
+			for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(this->upstreamPrespeedParticles); i++)
+				if (!this->upstreamPrespeedParticles[i])
+					this->upstreamPrespeedParticles[i] = CreateMHUDParticle(numbersPath, prespeedBaseColor, 0.0f, prespeedScale, prespeedOffsetX, prespeedOffsetY);
 		}
 	}
-	if (prespeedEnabled)
+	else
 	{
-		for (i32 i = 0; i < MHUD_SPEED_DIGITS; i++)
+		// === Стандартный (cyberkz): 4 per-glyph particle'а ===
+		// Гасим апстрим-particle'ы если живые.
+		for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(this->upstreamSpeedParticles); i++)
 		{
-			if (!this->prespeedParticles[i])
-			{
-				this->prespeedParticles[i] = CreateMHUDParticle(veloPath, prespeedBaseColor, 0.0f, prespeedScale, prespeedOffsetX, prespeedOffsetY);
-			}
+			if (this->upstreamSpeedParticles[i])    DestroyHandle(this->upstreamSpeedParticles[i]);
+			if (this->upstreamPrespeedParticles[i]) DestroyHandle(this->upstreamPrespeedParticles[i]);
 		}
+
+		char veloPath[256];
+		BuildVeloPath(veloPath, sizeof(veloPath), outline);
+
+		if (!speedEnabled)
+			for (i32 i = 0; i < MHUD_SPEED_DIGITS; i++)
+				if (this->speedParticles[i]) DestroyHandle(this->speedParticles[i]);
+		if (!prespeedEnabled)
+			for (i32 i = 0; i < MHUD_SPEED_DIGITS; i++)
+				if (this->prespeedParticles[i]) DestroyHandle(this->prespeedParticles[i]);
+
+		if (speedEnabled)
+			for (i32 i = 0; i < MHUD_SPEED_DIGITS; i++)
+				if (!this->speedParticles[i])
+					this->speedParticles[i] = CreateMHUDParticle(veloPath, baseColor, 0.0f, speedScale, speedOffsetX, speedOffsetY);
+		if (prespeedEnabled)
+			for (i32 i = 0; i < MHUD_SPEED_DIGITS; i++)
+				if (!this->prespeedParticles[i])
+					this->prespeedParticles[i] = CreateMHUDParticle(veloPath, prespeedBaseColor, 0.0f, prespeedScale, prespeedOffsetX, prespeedOffsetY);
 	}
 
 	KZPlayer *src = this->MHUDDataSource();
@@ -484,18 +641,29 @@ void KZHUDService::UpdateMHUDSpeed()
 
 	this->SetMHUDSpeedParticleVelocity(velocity, useTakeoff ? &src->takeoffVelocity : nullptr);
 
-	const Color perfColor    = this->GetMHUDColorPref("mhudPrespeedPerfColor", MHUD_DEF_PERF_COLOR);
+	const Color perfColor    = this->GetMHUDColorPref("mhudPrespeedPerfColor",  MHUD_DEF_PERF_COLOR);
 	const Color jumpbugColor = this->GetMHUDColorPref("mhudPrespeedJumpbugColor", MHUD_DEF_JUMPBUG_COLOR);
-	const Color cjColor      = this->GetMHUDColorPref("mhudSpeedCjColor", MHUD_DEF_CJ_COLOR);
+	const Color cjColor      = this->GetMHUDColorPref("mhudSpeedCjColor",       MHUD_DEF_CJ_COLOR);
 	bool perfing = src->IsPerfing() && !src->possibleLadderHop && !src->takeoffFromLadder;
 
 	const Color speedColor    = useTakeoff && src->hudService->crouchJumping ? cjColor : baseColor;
 	const Color prespeedColor = perfing ? (src->hudService->fromDuckbug ? jumpbugColor : perfColor) : prespeedBaseColor;
 
-	for (i32 i = 0; i < MHUD_SPEED_DIGITS; i++)
+	if (hudType == 1)
 	{
-		SetParticleTint(this->speedParticles[i].Get(), speedColor);
-		SetParticleTint(this->prespeedParticles[i].Get(), prespeedColor);
+		for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(this->upstreamSpeedParticles); i++)
+		{
+			SetParticleTint(this->upstreamSpeedParticles[i].Get(),    speedColor);
+			SetParticleTint(this->upstreamPrespeedParticles[i].Get(), prespeedColor);
+		}
+	}
+	else
+	{
+		for (i32 i = 0; i < MHUD_SPEED_DIGITS; i++)
+		{
+			SetParticleTint(this->speedParticles[i].Get(),    speedColor);
+			SetParticleTint(this->prespeedParticles[i].Get(), prespeedColor);
+		}
 	}
 }
 
@@ -508,6 +676,51 @@ void KZHUDService::SetMHUDSpeedParticleVelocity(const Vector &speed, const Vecto
 	const f32 prespeedOffsetY = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudPrespeedOffsetY", MHUD_DEF_PRESPEED_OFFSET_Y);
 	const f32 prespeedScale   = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudPrespeedScale",   MHUD_DEF_PRESPEED_SCALE);
 
+	int hudType = this->GetHudType();
+
+	if (hudType == 1)
+	{
+		// === MHUD (апстрим): два particle'а, пары разрядов, апстрим LayoutDigitPair ===
+		if (this->upstreamSpeedParticles[0] && this->upstreamSpeedParticles[1])
+		{
+			i32 val = RoundFloatToInt(speed.Length2D());
+			if (val < 0)    val = 0;
+			if (val > 9999) val = 9999;
+			bool transmit[2];
+			LayoutDigitPair(val, speedScale, speedOffsetX, speedOffsetY,
+							this->upstreamSpeedParticles[0].Get(), this->upstreamSpeedParticles[1].Get(), transmit);
+			this->upstreamSpeedParticles[0].Get()->Start();
+			if (transmit[1])
+				this->upstreamSpeedParticles[1].Get()->Start();
+			else
+				this->upstreamSpeedParticles[1].Get()->Destroy();
+		}
+		if (this->upstreamPrespeedParticles[0] && this->upstreamPrespeedParticles[1])
+		{
+			if (prespeed)
+			{
+				i32 val = RoundFloatToInt(prespeed->Length2D());
+				if (val < 0)    val = 0;
+				if (val > 9999) val = 9999;
+				bool transmit[2];
+				LayoutDigitPair(val, prespeedScale, prespeedOffsetX, prespeedOffsetY,
+								this->upstreamPrespeedParticles[0].Get(), this->upstreamPrespeedParticles[1].Get(), transmit);
+				this->upstreamPrespeedParticles[0].Get()->Start();
+				if (transmit[1])
+					this->upstreamPrespeedParticles[1].Get()->Start();
+				else
+					this->upstreamPrespeedParticles[1].Get()->Destroy();
+			}
+			else
+			{
+				this->upstreamPrespeedParticles[0].Get()->Destroy();
+				this->upstreamPrespeedParticles[1].Get()->Destroy();
+			}
+		}
+		return;
+	}
+
+	// === Стандартный (cyberkz): 4 per-glyph particle'а ===
 	// Шаг масштабируется вместе со scale, чтобы разряды не разъезжались при изменении размера.
 	const f32 speedStep    = MHUD_SPEED_DIGIT_STEP * (speedScale / MHUD_DEF_SPEED_SCALE);
 	const f32 prespeedStep = MHUD_SPEED_DIGIT_STEP * (prespeedScale / MHUD_DEF_PRESPEED_SCALE);
@@ -598,20 +811,42 @@ void KZHUDService::CheckMHUDTimerParticles()
 	const Color tpColor = this->GetMHUDColorPref("mhudTimerTpColor", MHUD_DEF_TIMER_TP_COLOR);
 	const f32 scale     = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudTimerScale",   MHUD_DEF_TIMER_SCALE);
 	const f32 offsetY   = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudTimerOffsetY", MHUD_DEF_TIMER_OFFSET_Y);
+	bool outline = this->IsMHUDOutlineEnabled();
 
-	// Таймер и разделители: единый .vpcf (не зависит от font/outline)
-	for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(this->timerTextParticles); i++)
+	int hudType = this->GetHudType();
+
+	if (hudType == 1)
 	{
-		if (!this->timerTextParticles[i])
+		// Апстрим: пути зависят от font + outline.
+		char fontBuf[64];
+		const char *font = GetUpstreamFont(this->player, fontBuf, sizeof(fontBuf));
+		char numbersPath[256], delimPath[256];
+		BuildUpstreamPath(numbersPath, sizeof(numbersPath), UPSTREAM_PARTICLE_NUMBERS_PATTERN, font, outline);
+		BuildUpstreamPath(delimPath,   sizeof(delimPath),   UPSTREAM_PARTICLE_TIMER_DELIM_PATTERN, font, outline);
+
+		for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(this->timerTextParticles); i++)
 		{
-			this->timerTextParticles[i] = CreateMHUDParticle(PARTICLE_TIMER_DIGIT_PATH, tpColor, 0.0f, scale, 0.0f, offsetY);
+			if (!this->timerTextParticles[i])
+				this->timerTextParticles[i] = CreateMHUDParticle(numbersPath, tpColor, 0.0f, scale, 0.0f, offsetY);
+		}
+		for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(this->timerDelimiterParticles); i++)
+		{
+			if (!this->timerDelimiterParticles[i])
+				this->timerDelimiterParticles[i] = CreateMHUDParticle(delimPath, tpColor, 0.0f, scale, 0.0f, offsetY);
 		}
 	}
-	for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(this->timerDelimiterParticles); i++)
+	else
 	{
-		if (!this->timerDelimiterParticles[i])
+		// Стандартный (cyberkz): фиксированные пути, не зависят от font/outline.
+		for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(this->timerTextParticles); i++)
 		{
-			this->timerDelimiterParticles[i] = CreateMHUDParticle(PARTICLE_TIMER_DELIM_PATH, tpColor, 0.0f, scale, 0.0f, offsetY);
+			if (!this->timerTextParticles[i])
+				this->timerTextParticles[i] = CreateMHUDParticle(PARTICLE_TIMER_DIGIT_PATH, tpColor, 0.0f, scale, 0.0f, offsetY);
+		}
+		for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(this->timerDelimiterParticles); i++)
+		{
+			if (!this->timerDelimiterParticles[i])
+				this->timerDelimiterParticles[i] = CreateMHUDParticle(PARTICLE_TIMER_DELIM_PATH, tpColor, 0.0f, scale, 0.0f, offsetY);
 		}
 	}
 }
@@ -707,10 +942,18 @@ void KZHUDService::UpdateMHUDTimer()
 	const f32 offsetY = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudTimerOffsetY", MHUD_DEF_TIMER_OFFSET_Y);
 	const f32 scale   = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudTimerScale",   MHUD_DEF_TIMER_SCALE);
 
-	// Центрируем N видимых разрядов
+	// Центрируем N видимых разрядов.
+	// hudType==0 (cyberkz): шаг масштабируется вместе со scale.
+	// hudType==1 (апстрим): шаг фиксированный (1.6f) — апстрим-контракт не масштабирует.
 	i32 numVisible = 0;
 	for (i32 i = 0; i < 4; i++) numVisible += digitVisible[i] ? 1 : 0;
-	f32 timerStep = MHUD_TIMER_DIGIT_STEP * (scale / MHUD_DEF_TIMER_SCALE);
+
+	f32 timerStep;
+	if (this->GetHudType() == 1)
+		timerStep = MHUD_TIMER_DIGIT_STEP; // апстрим: фиксированный шаг
+	else
+		timerStep = MHUD_TIMER_DIGIT_STEP * (scale / MHUD_DEF_TIMER_SCALE); // cyberkz: масштабируется
+
 	f32 layoutX[4] = {};
 	for (i32 i = 0; i < numVisible; i++)
 	{
@@ -775,8 +1018,34 @@ void KZHUDService::UpdateMHUDTimer()
 	}
 }
 
-// === Keys (Path B: 6 отдельных particle'ов, sequence=0/1) ==========================
+// === Keys ============================================================================
 
+// --- Апстрим (hudType==1): один particle, 6-битная маска ---
+void KZHUDService::CheckMHUDKeyParticle()
+{
+	bool enabled = this->IsMHUDKeysEnabled();
+	if (!enabled)
+	{
+		if (this->keysParticle) DestroyHandle(this->keysParticle);
+		return;
+	}
+
+	const Color color = this->GetMHUDColorPref("mhudKeysColor", MHUD_DEF_BASE_COLOR);
+	const f32 offsetX = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudKeysOffsetX", MHUD_DEF_KEYS_OFFSET_X);
+	const f32 offsetY = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudKeysOffsetY", MHUD_DEF_KEYS_OFFSET_Y);
+	const f32 scale   = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudKeysScale",   MHUD_DEF_KEYS_SCALE);
+	bool outline = this->IsMHUDOutlineEnabled();
+
+	char fontBuf[64];
+	const char *font = GetUpstreamFont(this->player, fontBuf, sizeof(fontBuf));
+	char inputsPath[256];
+	BuildUpstreamPath(inputsPath, sizeof(inputsPath), UPSTREAM_PARTICLE_INPUTS_PATTERN, font, outline);
+
+	if (!this->keysParticle)
+		this->keysParticle = CreateMHUDParticle(inputsPath, color, 0.0f, scale, offsetX, offsetY);
+}
+
+// --- Стандартный (hudType==0): 6 отдельных particle'ов per-glyph ---
 void KZHUDService::CheckMHUDKeyParticles()
 {
 	bool enabled = this->IsMHUDKeysEnabled();
@@ -807,72 +1076,94 @@ void KZHUDService::CheckMHUDKeyParticles()
 
 void KZHUDService::UpdateMHUDKeys()
 {
-	this->CheckMHUDKeyParticles();
-	if (!this->keyParticles[0])
-	{
-		return;
-	}
-
 	KZPlayer *src = this->MHUDDataSource();
 
-	// Маска нажатых кнопок
+	// Маска нажатых кнопок (общая для обоих путей)
 	bool pressed[MHUD_KEY_COUNT];
-	pressed[0] = src->IsButtonPressed(IN_FORWARD);                                         // W
-	pressed[1] = src->IsButtonPressed(IN_MOVELEFT);                                        // A
-	pressed[2] = src->IsButtonPressed(IN_BACK);                                            // S
-	pressed[3] = src->IsButtonPressed(IN_MOVERIGHT);                                       // D
-	pressed[4] = src->hudService->jumpedThisTick || src->IsButtonPressed(IN_JUMP);         // J
-	pressed[5] = src->IsButtonPressed(IN_DUCK);                                            // C
+	pressed[0] = src->IsButtonPressed(IN_FORWARD);                                  // W
+	pressed[1] = src->IsButtonPressed(IN_MOVELEFT);                                 // A
+	pressed[2] = src->IsButtonPressed(IN_BACK);                                     // S
+	pressed[3] = src->IsButtonPressed(IN_MOVERIGHT);                                // D
+	pressed[4] = src->hudService->jumpedThisTick || src->IsButtonPressed(IN_JUMP);  // J
+	pressed[5] = src->IsButtonPressed(IN_DUCK);                                     // C
 
 	const f32 offsetX = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudKeysOffsetX", MHUD_DEF_KEYS_OFFSET_X);
 	const f32 offsetY = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudKeysOffsetY", MHUD_DEF_KEYS_OFFSET_Y);
 	const f32 scale   = (f32)this->MHUDSettingsSource()->optionService->GetPreferenceFloat("mhudKeysScale",   MHUD_DEF_KEYS_SCALE);
-	const f32 keyStep = MHUD_KEY_STEP * (scale / MHUD_DEF_KEYS_SCALE);
-	const f32 gap     = MHUD_KEYS_GAP * (scale / MHUD_DEF_KEYS_SCALE);
-
-	// Раскладка блоком (не строкой): W над рядом ASD, J/C справа.
-	//   W          J
-	//  A S D       C
-	// Ряд задаётся смещением по Y на один keyStep; знак rowUp зависит от того,
-	// как .vpcf CenterYOffset (CP18.y) мапит экранную ось — проверить смоуком.
-	const f32 rowUp   = -keyStep;                                       // «выше» на экране (см. знак offsetY)
-	const f32 wasd_center_x = offsetX - (gap * 0.5f + keyStep);         // центр блока WASD (столбца S)
-	const f32 jc_center_x   = offsetX + (gap * 0.5f + keyStep * 0.5f);  // центр блока JC
-
-	f32 keyX[MHUD_KEY_COUNT];
-	f32 keyY[MHUD_KEY_COUNT];
-	// W — верхний ряд, по центру над S
-	keyX[0] = wasd_center_x;            keyY[0] = offsetY + rowUp; // W
-	// A S D — нижний ряд
-	keyX[1] = wasd_center_x - keyStep;  keyY[1] = offsetY;         // A
-	keyX[2] = wasd_center_x;            keyY[2] = offsetY;         // S
-	keyX[3] = wasd_center_x + keyStep;  keyY[3] = offsetY;         // D
-	// J — верхний ряд справа, C — под ним
-	keyX[4] = jc_center_x;              keyY[4] = offsetY + rowUp; // J
-	keyX[5] = jc_center_x;              keyY[5] = offsetY;         // C
 
 	bool hasOverlap         = (pressed[0] && pressed[2]) || (pressed[1] && pressed[3]);
 	const Color overlapColor = this->GetMHUDColorPref("mhudKeysOverlapColor", MHUD_DEF_KEYS_OVERLAP_COLOR);
-	const Color baseColor    = this->GetMHUDColorPref("mhudKeysColor", MHUD_DEF_BASE_COLOR);
+	const Color baseColor    = this->GetMHUDColorPref("mhudKeysColor",        MHUD_DEF_BASE_COLOR);
 
-	for (i32 i = 0; i < MHUD_KEY_COUNT; i++)
+	int hudType = this->GetHudType();
+
+	if (hudType == 1)
 	{
-		CParticleSystem *p = this->keyParticles[i].Get();
-		if (!p) continue;
+		// === MHUD (апстрим): один particle, sequence = 6-битная маска ===
+		// Гасим cyberkz per-glyph клавиши если живые.
+		for (i32 i = 0; i < MHUD_KEY_COUNT; i++)
+			if (this->keyParticles[i]) DestroyHandle(this->keyParticles[i]);
 
-		// sequence: 0=inactive, 1=active
-		f32 seq = pressed[i] ? 1.0f : 0.0f;
-		UpdateParticleLayout(p, seq, scale, keyX[i], keyY[i]);
+		this->CheckMHUDKeyParticle();
+		CParticleSystem *p = this->keysParticle.Get();
+		if (!p) return;
+
+		u8 mask = 0;
+		if (pressed[0]) mask |= KPF_Forward;
+		if (pressed[1]) mask |= KPF_Left;
+		if (pressed[2]) mask |= KPF_Back;
+		if (pressed[3]) mask |= KPF_Right;
+		if (pressed[4]) mask |= KPF_Jump;
+		if (pressed[5]) mask |= KPF_Duck;
+
+		p->SetControlPointValue(17, Vector((f32)mask, scale, 0.0f));
+		p->SetControlPointValue(18, Vector(offsetX, offsetY, 1.0f));
 		p->Start();
 
-		// Overlap-цвет применяем только к WASD (индексы 0-3) при конфликте
-		if (hasOverlap && this->IsMHUDKeysOverlapEnabled() && i < 4)
+		Color tint = hasOverlap && this->IsMHUDKeysOverlapEnabled() ? overlapColor : baseColor;
+		SetParticleTint(p, tint);
+	}
+	else
+	{
+		// === Стандартный (cyberkz): 6 per-glyph particle'ов ===
+		// Гасим апстрим-particle если живой.
+		if (this->keysParticle) DestroyHandle(this->keysParticle);
+
+		this->CheckMHUDKeyParticles();
+		if (!this->keyParticles[0]) return;
+
+		const f32 keyStep = MHUD_KEY_STEP * (scale / MHUD_DEF_KEYS_SCALE);
+		const f32 gap     = MHUD_KEYS_GAP * (scale / MHUD_DEF_KEYS_SCALE);
+
+		// Раскладка блоком:  W         J
+		//                   A S D      C
+		const f32 rowUp         = -keyStep;
+		const f32 wasd_center_x = offsetX - (gap * 0.5f + keyStep);
+		const f32 jc_center_x   = offsetX + (gap * 0.5f + keyStep * 0.5f);
+
+		f32 keyX[MHUD_KEY_COUNT];
+		f32 keyY[MHUD_KEY_COUNT];
+		keyX[0] = wasd_center_x;            keyY[0] = offsetY + rowUp; // W
+		keyX[1] = wasd_center_x - keyStep;  keyY[1] = offsetY;         // A
+		keyX[2] = wasd_center_x;            keyY[2] = offsetY;         // S
+		keyX[3] = wasd_center_x + keyStep;  keyY[3] = offsetY;         // D
+		keyX[4] = jc_center_x;              keyY[4] = offsetY + rowUp; // J
+		keyX[5] = jc_center_x;              keyY[5] = offsetY;         // C
+
+		for (i32 i = 0; i < MHUD_KEY_COUNT; i++)
 		{
-			SetParticleTint(p, overlapColor);
-		}
-		else
-		{
-			SetParticleTint(p, baseColor);
+			CParticleSystem *p = this->keyParticles[i].Get();
+			if (!p) continue;
+
+			f32 seq = pressed[i] ? 1.0f : 0.0f;
+			UpdateParticleLayout(p, seq, scale, keyX[i], keyY[i]);
+			p->Start();
+
+			// Overlap-цвет применяем только к WASD (0-3) при конфликте.
+			if (hasOverlap && this->IsMHUDKeysOverlapEnabled() && i < 4)
+				SetParticleTint(p, overlapColor);
+			else
+				SetParticleTint(p, baseColor);
 		}
 	}
 }

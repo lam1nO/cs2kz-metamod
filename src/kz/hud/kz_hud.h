@@ -165,6 +165,8 @@ private:
 	// CP17.z     = self-illum / init field1 (1.0 = вкл.)
 	// CP18.x/y   = screen-space offset
 
+	// === hudType==0: Стандартный (cyberkz per-glyph, workshop-аддон 3759276798) ==========
+
 	// Path B: по-глифные particle'ы — каждый разряд/клавиша/символ = отдельная сущность.
 	CHandle<CParticleSystem> speedParticles[MHUD_SPEED_DIGITS];
 	// Preспeed: тот же механизм, другой scale/offset.
@@ -185,13 +187,34 @@ private:
 	// Пилюля-подложка (фон под CP/TP).
 	CHandle<CParticleSystem> pillParticle;
 
+	// === hudType==1: MHUD (апстрим cs2kz particle-пути: velo/inputs/timer_delimiter) =====
+	// Скорость: два particle'а на пары-разрядов (апстрим-схема hi/lo).
+	CHandle<CParticleSystem> upstreamSpeedParticles[2];
+	CHandle<CParticleSystem> upstreamPrespeedParticles[2];
+
+	// Клавиши: один particle, sequence = 6-битная маска кнопок.
+	enum KeyParticleFlags : u8
+	{
+		KPF_Forward = 1 << 0,
+		KPF_Left    = 1 << 1,
+		KPF_Back    = 1 << 2,
+		KPF_Right   = 1 << 3,
+		KPF_Jump    = 1 << 4,
+		KPF_Duck    = 1 << 5,
+	};
+	CHandle<CParticleSystem> keysParticle;
+
+	// Таймер апстрима использует те же timerTextParticles/timerDelimiterParticles (те же
+	// массивы, разные .vpcf-пути — они пересоздаются при смене hudType через DestroyAllParticles).
+
 	void UpdateMHUDSpeed();
 	void SetMHUDSpeedParticleVelocity(const Vector &speed, const Vector *prespeed);
 
 	void CheckMHUDTimerParticles();
 	void UpdateMHUDTimer();
 
-	void CheckMHUDKeyParticles();  // Path B: 6 отдельных particle'ов
+	void CheckMHUDKeyParticles();  // Path B (hudType==0): 6 отдельных particle'ов
+	void CheckMHUDKeyParticle();   // Upstream (hudType==1): 1 particle с 6-бит маской
 	void UpdateMHUDKeys();
 
 	void CheckMHUDCpTpParticles(); // Particle'ы для CP/TP в particle-HUD
