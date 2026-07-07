@@ -400,10 +400,40 @@ void KZSavedRunService::TryRestoreOnSpawn()
 
 void KZSavedRunService::InvalidateCurrent(const char *reason)
 {
-	// Task 5
+	// Ботов не персистим (см. SaveOnDisconnect) - нечего инвалидировать.
+	if (this->player->IsFakeClient())
+	{
+		return;
+	}
+
+	// Курс неизвестен -> нечего удалять. Вызывающие точки (kz_stop, noclip) уже гейтят это через
+	// GetTimerRunning() перед вызовом, но держим no-op и здесь на случай будущих вызовов без гарда.
+	const KZCourseDescriptor *course = this->player->timerService->GetCourse();
+	if (!course)
+	{
+		return;
+	}
+
+	bool mapNameOk = false;
+	CUtlString mapName = g_pKZUtils->GetCurrentMapName(&mapNameOk);
+	if (!mapNameOk || mapName.IsEmpty())
+	{
+		return;
+	}
+
+	i32 courseNumber = KZ::course::GetCyberCourseNumber(course);
+	KZModeManager::ModePluginInfo modeInfo = KZ::mode::GetModeInfo(this->player->modeService);
+	// Единая точка построения styles-подписи ключа (см. BuildStylesString) - обязана совпадать
+	// байт-в-байт с той, что писал upsert, иначе удалим не тот сейв (или ни один).
+	CUtlString styles = KZSavedRunService::BuildStylesString(this->player);
+
+	KZ_LOG_DEBUG(LogChannel::DB, "[SavedRuns] Invalidating saved run for %s (reason: %s).\n", this->player->GetName(), reason);
+
+	KZDatabaseService::DeleteSavedRun(this->player->GetSteamId64(), mapName, courseNumber, modeInfo.shortModeName, styles);
 }
 
 void KZSavedRunService::PurgeExpired()
 {
-	// Task 5
+	// Раз на загрузку карты, fire-and-forget (см. вызов рядом с SetupLocalCourses в kz_timer.cpp).
+	KZDatabaseService::PurgeExpiredSavedRuns();
 }

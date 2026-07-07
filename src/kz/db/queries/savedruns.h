@@ -57,3 +57,20 @@ constexpr char sql_savedruns_fetch[] = R"(
 	WHERE SteamID64 = %llu AND MapName = '%s' AND Mode = '%s' AND Styles = '%s'
 	ORDER BY UpdatedAt DESC LIMIT 1
 )";
+
+// Инвалидация (Task 5): удалить сейв игрока по полному ключу хранения (нужен, чтобы удалить именно
+// текущий ран, а не другие сейвы игрока на этой же карте по другим course/mode/styles).
+constexpr char sql_savedruns_delete[] = R"(
+	DELETE FROM SavedRuns
+	WHERE SteamID64 = %llu AND MapName = '%s' AND Course = %d AND Mode = '%s' AND Styles = '%s'
+)";
+
+// TTL-чистка (Task 5): раз на загрузку карты, fire-and-forget. Без параметров - экранировать
+// нечего, строка идёт в транзакцию как есть (см. delete_savedrun.cpp).
+constexpr char mysql_savedruns_purge[] = R"(
+	DELETE FROM SavedRuns WHERE UpdatedAt < NOW() - INTERVAL 30 DAY
+)";
+
+constexpr char sqlite_savedruns_purge[] = R"(
+	DELETE FROM SavedRuns WHERE UpdatedAt < strftime('%s','now') - 2592000
+)";

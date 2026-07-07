@@ -3,6 +3,7 @@
 #include "kz/timer/kz_timer.h"
 #include "kz/language/kz_language.h"
 #include "kz/option/kz_option.h"
+#include "kz/savedrun/kz_savedrun.h"
 
 #include "utils/utils.h"
 #include "utils/simplecmds.h"
@@ -27,6 +28,12 @@ void KZNoclipService::HandleNoclip()
 		if (pawn->m_MoveType() != MOVETYPE_NOCLIP)
 		{
 			this->player->SetMoveType(MOVETYPE_NOCLIP);
+			// Инвалидация ДО TimerStop, только если таймер реально бежал - иначе InvalidateCurrent
+			// не может резолвить курс (см. guard внутри) и это просто лишний no-op вызов.
+			if (this->player->timerService->GetTimerRunning())
+			{
+				this->player->savedRunService->InvalidateCurrent("noclip");
+			}
 			this->player->timerService->TimerStop();
 		}
 		// if (pawn->m_Collision().m_CollisionGroup() != KZ_COLLISION_GROUP_NOTRIGGER)
@@ -35,6 +42,10 @@ void KZNoclipService::HandleNoclip()
 		// 	pawn->CollisionRulesChanged();
 		// }
 		this->lastNoclipTime = g_pKZUtils->GetServerGlobals()->curtime;
+		if (this->player->timerService->GetTimerRunning())
+		{
+			this->player->savedRunService->InvalidateCurrent("noclip");
+		}
 		this->player->timerService->TimerStop();
 	}
 	else
@@ -46,6 +57,10 @@ void KZNoclipService::HandleNoclip()
 		if (pawn->m_nActualMoveType() == MOVETYPE_NOCLIP)
 		{
 			this->player->SetMoveType(MOVETYPE_WALK);
+			if (this->player->timerService->GetTimerRunning())
+			{
+				this->player->savedRunService->InvalidateCurrent("noclip");
+			}
 			this->player->timerService->TimerStop();
 		}
 		if (pawn->m_Collision().m_CollisionGroup() != KZ_COLLISION_GROUP_STANDARD)
@@ -58,6 +73,7 @@ void KZNoclipService::HandleNoclip()
 	{
 		if (this->player->IsAlive() && this->player->timerService->GetTimerRunning())
 		{
+			this->player->savedRunService->InvalidateCurrent("noclip");
 			this->player->timerService->TimerStop();
 		}
 	}

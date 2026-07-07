@@ -420,6 +420,9 @@ bool KZTimerService::TimerEnd(const KZCourseDescriptor *courseDesc)
 		RunSubmission::Create(this->player);
 	}
 
+	// Успешный финиш - ран завершён, сейв незавершённого рана по этому ключу больше не актуален.
+	this->player->savedRunService->InvalidateCurrent("finish");
+
 	return true;
 }
 
@@ -944,6 +947,9 @@ void KZTimerService::OnChangeMoveType(MoveType_t oldMoveType)
 
 void KZTimerService::OnTeleportToStart()
 {
+	// Инвалидация ДО TimerStop - курс ещё известен (currentCourseGUID сбрасывается не здесь, но
+	// логически это "явный сброс игрока": !r/!course/!main/!bN/старт-зона - все идут через этот путь).
+	this->player->savedRunService->InvalidateCurrent("teleport_to_start");
 	this->TimerStop();
 }
 
@@ -1025,6 +1031,7 @@ SCMD(kz_stop, SCFL_TIMER)
 		{
 			return MRES_SUPERCEDE;
 		}
+		player->savedRunService->InvalidateCurrent("stop");
 		player->timerService->TimerStop();
 	}
 	return MRES_SUPERCEDE;
@@ -1744,6 +1751,9 @@ void KZDatabaseServiceEventListener_Timer::OnMapSetup()
 {
 	KZ::course::SetupLocalCourses();
 	KZTimerService::UpdateLocalRecordCache();
+	// Раз на загрузку карты (OnMapSetup стреляет один раз после успешного SetupMap()) -
+	// TTL-чистка SavedRuns, fire-and-forget (Task 5).
+	KZSavedRunService::PurgeExpired();
 }
 
 void KZDatabaseServiceEventListener_Timer::OnClientSetup(Player *player, u64 steamID64, bool isBanned)

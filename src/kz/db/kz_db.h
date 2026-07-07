@@ -162,6 +162,15 @@ public:
 	static void FetchSavedRun(u64 steamID64, CUtlString mapName, CUtlString mode, CUtlString styles,
 							  TransactionSuccessCallbackFunc onSuccess, TransactionFailureCallbackFunc onFailure);
 
+	// SavedRuns (Task 5): удалить сейв по полному ключу хранения (map, course, mode, styles) -
+	// явный сброс/финиш/оверврайт (см. KZSavedRunService::InvalidateCurrent). Fire-and-forget,
+	// ошибки только логируются (OnGenericTxnFailure).
+	static void DeleteSavedRun(u64 steamID64, CUtlString mapName, i32 course, CUtlString mode, CUtlString styles);
+
+	// SavedRuns (Task 5): TTL-чистка сейвов старше 30 дней. Вызывается раз на загрузку карты
+	// (см. KZDatabaseServiceEventListener_Timer::OnMapSetup в kz_timer.cpp). Fire-and-forget.
+	static void PurgeExpiredSavedRuns();
+
 	static void Ban(u64 steamID64, const char *reason = nullptr, f32 duration = 0.0f, const UUID_t banId = UUID_t(false),
 					const UUID_t replayUuid = UUID_t(false), TransactionSuccessCallbackFunc onSuccess = OnGenericTxnSuccess,
 					TransactionFailureCallbackFunc onFailure = OnGenericTxnFailure);
