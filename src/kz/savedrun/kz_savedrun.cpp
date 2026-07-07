@@ -7,6 +7,7 @@
 #include "kz/mode/kz_mode.h"
 #include "kz/style/kz_style.h"
 #include "kz/timer/kz_timer.h"
+#include "kz/trigger/kz_trigger.h"
 #include "utils/json.h"
 #include "utils/utils.h"
 
@@ -54,24 +55,21 @@ namespace
 		std::vector<f64> stageTimes;
 		std::vector<CpSnapshotJson> checkpoints;
 	};
-
-	// Строит "mode+styles"-подпись текущего состояния игрока — используется и для fetch-запроса
-	// (Task 4: TryRestoreOnSpawn), и для повторной проверки "не изменилось ли за время round-trip"
-	// в колбэке. Совпадает по построению со save_savedrun.cpp (тот же формат ключа хранения).
-	CUtlString BuildStylesString(KZPlayer *player)
-	{
-		CUtlString styles;
-		FOR_EACH_VEC(player->styleServices, i)
-		{
-			if (i > 0)
-			{
-				styles.Append(",");
-			}
-			styles.Append(player->styleServices[i]->GetStyleShortName());
-		}
-		return styles;
-	}
 } // namespace
+
+CUtlString KZSavedRunService::BuildStylesString(KZPlayer *player)
+{
+	CUtlString styles;
+	FOR_EACH_VEC(player->styleServices, i)
+	{
+		if (i > 0)
+		{
+			styles.Append(",");
+		}
+		styles.Append(player->styleServices[i]->GetStyleShortName());
+	}
+	return styles;
+}
 
 std::string KZSavedRunService::SerializeSnapshot()
 {
@@ -195,6 +193,16 @@ bool KZSavedRunService::ApplySnapshot(i32 course, u32 tpCount, const std::string
 		return false;
 	}
 
+	// Карта запрещает ТП на чекпоинты: DoTeleport ниже молча откажет, и состояние применилось
+	// бы «наполовину» (таймер/пауза без позиции). Отказ целиком ДО любых мутаций. Пустой
+	// снапшот не затрагивается — там прямой TP на старт курса мимо чекпоинт-механики (аналог !r).
+	if (!parsed.checkpoints.empty() && !this->player->triggerService->CanTeleportToCheckpoints())
+	{
+		KZ_LOG_WARN(LogChannel::Timer, "[SavedRuns] Snapshot for %s has checkpoints but map forbids checkpoint teleports, discarding.\n",
+					this->player->GetName());
+		return false;
+	}
+
 	// --- Валидация выше не мутирует состояние; дальше только применение. ---
 
 	KZTimerService *timerService = this->player->timerService;
@@ -234,23 +242,23 @@ bool KZSavedRunService::ApplySnapshot(i32 course, u32 tpCount, const std::string
 	// (лимит ТП в гонке, сейфгард "первый TP ломает pro-ран"), нерелевантные для внутреннего
 	// восстановления. Вместо этого — "сырой" DoTeleport(Checkpoint), который их не проверяет
 	// (но всё ещё уважает паузный гард). Он, как и любой физический телепорт, инкрементит
-	// tpCount как побочный эффект — откатываем счётчик обратно к персистентному значению.
+	// tpCount как побочный эффект — пин-бэчим только счётчик, не трогая teleportTime
+	// (окно TpHoldPlayerStill свежего телепорта должно жить).
 	if (restoredCheckpoints.Count() == 0)
 	{
 		this->player->Teleport(&courseDescriptor->startPosition, &courseDescriptor->startAngles, &vec3_origin);
 	}
 	else
 	{
-		i32 restoredCpIndex = checkpointService->GetRawCpIndex();
-		checkpointService->DoTeleport(restoredCheckpoints[restoredCpIndex]);
-		checkpointService->RestoreFromSnapshot(restoredCheckpoints, restoredCpIndex, tpCount);
+		checkpointService->DoTeleport(restoredCheckpoints[checkpointService->GetRawCpIndex()]);
+		checkpointService->SetTeleportCountForRestore(tpCount);
 	}
 
-	// На свежетелепортированном (velocity 0) CanPause должен пройти по midair-гарду; если
-	// пауза всё же не проходит (например анти-пауза зона под точкой восстановления) — оставляем
-	// таймер бегущим без паузы, это осознанный край (см. brief Step 2.6), не зацикливаемся.
-	this->player->SetVelocity(vec3_origin);
-	timerService->Pause();
+	// Форс-пауза, а не Pause(): CanPause почти всегда откажет по JustLanded — landingTime
+	// выставляется на первом тике после спауна, а колбэк локальной БД приходит через 1-2 тика
+	// (окно KZ_TIMER_MIN_GROUND_TIME = 0.05s). Состояние при этом валидно: игрок только что
+	// телепортирован нами, velocity 0 — форсим паузу без гарда.
+	timerService->ForcePause();
 
 	char timeText[32];
 	utils::FormatTime(parsed.time, timeText, sizeof(timeText));
@@ -293,6 +301,14 @@ void KZSavedRunService::TryRestoreOnSpawn()
 	if (this->player->IsFakeClient())
 	{
 		this->restoreAttempted = true;
+		return;
+	}
+	// До полной Steam-аутентификации GetSteamId64() возвращает 0 (validated-путь, см.
+	// Player::GetSteamId), а prefs/mode ещё не загружены (SetupClient идёт после auth) —
+	// fetch со SteamID64=0 гарантированно пуст и навсегда сжёг бы restoreAttempted.
+	// Выходим БЕЗ выставления флагов: попытка повторится на следующем спауне.
+	if (!this->player->IsAuthenticated())
+	{
 		return;
 	}
 
@@ -354,7 +370,7 @@ void KZSavedRunService::TryRestoreOnSpawn()
 		bool mapStillOk = false;
 		CUtlString currentMap = g_pKZUtils->GetCurrentMapName(&mapStillOk);
 		KZModeManager::ModePluginInfo currentModeInfo = KZ::mode::GetModeInfo(pl->modeService);
-		CUtlString currentStyles = BuildStylesString(pl);
+		CUtlString currentStyles = KZSavedRunService::BuildStylesString(pl);
 
 		bool environmentChanged = !mapStillOk || currentMap != capturedMapName || currentModeInfo.shortModeName != capturedMode
 								   || currentStyles != capturedStyles;

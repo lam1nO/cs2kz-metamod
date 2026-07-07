@@ -561,7 +561,11 @@ void KZTimerService::Pause()
 	{
 		return;
 	}
+	this->ForcePause();
+}
 
+void KZTimerService::ForcePause()
+{
 	bool allowPause = true;
 	FOR_EACH_VEC(eventListeners, i)
 	{

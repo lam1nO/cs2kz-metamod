@@ -447,6 +447,11 @@ public:
 	}
 
 	void Pause();
+	// Пауза БЕЗ CanPause-гарда (JustLanded/анти-пауза зона/midair/кулдаун), но с
+	// OnPause/OnPausePost-листенерами. Для внутренних вызовов, где вызывающая сторона сама
+	// гарантирует валидность состояния (SavedRuns-рестор: игрок только что телепортирован,
+	// velocity 0). Игрокские команды должны идти через Pause().
+	void ForcePause();
 	bool CanPause(bool showError = false);
 	void Resume(bool force = false);
 	bool CanResume(bool showError = false);

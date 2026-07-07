@@ -4,7 +4,7 @@
 #include "kz_db.h"
 #include "kz/mappingapi/kz_mappingapi.h"
 #include "kz/mode/kz_mode.h"
-#include "kz/style/kz_style.h"
+#include "kz/savedrun/kz_savedrun.h"
 #include "kz/timer/kz_timer.h"
 #include "queries/savedruns.h"
 
@@ -41,15 +41,8 @@ void KZDatabaseService::SaveRun(KZPlayer *player, f64 runTime, u32 tpCount, cons
 
 	KZModeManager::ModePluginInfo modeInfo = KZ::mode::GetModeInfo(player->modeService);
 
-	CUtlString styles;
-	FOR_EACH_VEC(player->styleServices, i)
-	{
-		if (i > 0)
-		{
-			styles.Append(",");
-		}
-		styles.Append(player->styleServices[i]->GetStyleShortName());
-	}
+	// Единая точка построения styles-подписи ключа (upsert и fetch обязаны совпадать байт-в-байт).
+	CUtlString styles = KZSavedRunService::BuildStylesString(player);
 
 	ISQLConnection *db = KZDatabaseService::GetDatabaseConnection();
 	std::string cleanMapName = db->Escape(mapName.Get());

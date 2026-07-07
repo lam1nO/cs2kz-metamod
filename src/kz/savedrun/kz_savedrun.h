@@ -21,6 +21,12 @@ public:
 	// Task 2: сериализует текущее состояние таймера/чекпоинтов игрока в JSON-снапшот (формат v=1,
 	// см. docs/superpowers/sdd/t3-task-2-brief.md). Не мутирует состояние игрока.
 	std::string SerializeSnapshot();
+
+	// Styles-подпись игрока для ключа SavedRuns (короткие имена стилей через запятую, в порядке
+	// styleServices). Единая точка построения: upsert (save_savedrun.cpp), fetch + сверка после
+	// round-trip (TryRestoreOnSpawn), инвалидация (Task 5).
+	static CUtlString BuildStylesString(KZPlayer *player);
+
 	// Task 4: парсит, валидирует и ПРИМЕНЯЕТ снапшот из БД к состоянию игрока (timerService +
 	// checkpointService), затем телепортирует на последний чекпоинт (или старт курса, если
 	// чекпоинтов не было) и ставит паузу. course/tpCount — соседние колонки строки SavedRuns

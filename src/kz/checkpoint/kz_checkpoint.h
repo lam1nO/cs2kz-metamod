@@ -107,6 +107,15 @@ public:
 	// паузу/таймер — порядок применения держит KZSavedRunService::ApplySnapshot.
 	void RestoreFromSnapshot(const CUtlVector<Checkpoint> &savedCheckpoints, i32 cpIndex, u32 tpCountValue);
 
+	// Task 4 (SavedRuns): пин-бэк счётчика ТП после внутреннего DoTeleport восстановления
+	// (тот инкрементит tpCount как побочный эффект любого физического телепорта). Трогает
+	// ТОЛЬКО tpCount — teleportTime/undo-буфер свежего телепорта должны жить (на teleportTime
+	// завязано окно TpHoldPlayerStill).
+	void SetTeleportCountForRestore(u32 tpCountValue)
+	{
+		this->tpCount = tpCountValue;
+	}
+
 	void SetStartPosition();
 	void ClearStartPosition();
 
