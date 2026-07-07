@@ -1,5 +1,6 @@
 #include "kz_db.h"
 #include "kz/option/kz_option.h"
+#include "kz/savedrun/kz_savedrun.h"
 #include "vendor/sql_mm/src/public/sql_mm.h"
 
 #include "queries/players.h"
@@ -94,6 +95,11 @@ void KZDatabaseService::SetupClient()
 				this->isSetUp = true;
 				pl->optionService->InitializeLocalPrefs(prefs);
 				CALL_FORWARD(KZDatabaseService::eventListeners, OnClientSetup, pl, pl->GetSteamId64(), isBanned);
+				// Рестор персист-рана: первый спаун почти всегда происходит ДО завершения
+				// Steam-auth (спаун мгновенный, auth — секунды), а второго спауна на KZ нет —
+				// спаун-триггер в OnPlayerSpawn срабатывает вхолостую. Здесь prefs уже
+				// применены (mode/styles актуальны) и auth гарантирован (гейт выше).
+				pl->savedRunService->TryRestoreOnSpawn();
 			}
 		},
 		OnGenericTxnFailure);

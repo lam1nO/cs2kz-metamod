@@ -353,6 +353,9 @@ void KZSavedRunService::TryRestoreOnSpawn()
 	KZModeManager::ModePluginInfo modeInfo = KZ::mode::GetModeInfo(this->player->modeService);
 	CUtlString styles = BuildStylesString(this->player);
 	u64 steamID64 = this->player->GetSteamId64();
+	// Наблюдаемость: без этого лога отказ рестора не диагностируется по логам сервера.
+	KZ_LOG_INFO(LogChannel::Timer, "[SavedRuns] fetch: steam=%llu map=%s mode=%s styles='%s' (player %s)\n", (unsigned long long)steamID64,
+				mapName.Get(), modeInfo.shortModeName.Get(), styles.Get(), this->player->GetName());
 	CPlayerUserId userID = this->player->GetClient()->GetUserID();
 
 	// Захват map/mode/styles на момент старта fetch'а: колбэк обязан сверить их с текущими
@@ -380,6 +383,7 @@ void KZSavedRunService::TryRestoreOnSpawn()
 		if (!result || !result->FetchRow())
 		{
 			// Сейва нет - штатный случай (первый визит на карту/курс).
+			KZ_LOG_INFO(LogChannel::Timer, "[SavedRuns] fetch empty for %s.\n", pl->GetName());
 			savedRunService->restoreAttempted = true;
 			return;
 		}
@@ -410,7 +414,14 @@ void KZSavedRunService::TryRestoreOnSpawn()
 			return;
 		}
 
-		if (!pl->IsAlive() || pl->timerService->GetTimerRunning())
+		if (!pl->IsAlive())
+		{
+			// Сетап-триггер мог выстрелить до фактического спауна (медленная загрузка) -
+			// не жжём попытку, спаун-триггер в OnPlayerSpawn перезапустит fetch.
+			savedRunService->fetchStarted = false;
+			return;
+		}
+		if (pl->timerService->GetTimerRunning())
 		{
 			savedRunService->restoreAttempted = true;
 			return;
