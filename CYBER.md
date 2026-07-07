@@ -50,6 +50,16 @@ cs2kz-linux-builder .`, иначе компилируются старые ис�
   карты). Конвенция course — cyber-номер (`KZ::course::GetCyberCourseNumber`/
   `GetCourseByCyberNumber`), не hammerId/guid — переживает ребилд карты, пока
   номер курса не меняется.
+- **Центральные реплеи PB/WR** (`src/kz/replays/cyb_replay_{common,upload,download}.*`,
+  cyb.26): авто-upload при новом локальном PB и серверном рекорде (WR = overall/nub;
+  pro отдельно НЕ выгружается) через api `POST /replays/v1/upload` (Bearer
+  cybEmitToken); `!replay pb [ник|steamid64]` / `!replay wr` — резолв
+  `GET /replays/v1/resolve` + докачка с S3 в `kzreplays/downloads/`. Гейт по режиму —
+  ключом (map, course, mode). ВНИМАНИЕ: upstream-ключевые слова `pb`/`wr` команды
+  kz_replay ПОДМЕНЕНЫ на центральный путь (PR #556 апстрима роутил их в global API) —
+  при мёрже апстрима конфликт разрешать в пользу нашей ветки; остальные 8 вариантов
+  (pbpro/sr/gpb/spb…) не тронуты. Content-Type в utils/http.cpp теперь уважает
+  SetHeader (имя заголовка — строго "Content-Type").
 
 ## Инварианты (не ломать при мёрже апстрима)
 
