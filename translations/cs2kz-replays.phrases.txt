@@ -768,4 +768,14 @@
 		"ru"		"{darkred}Не удалось загрузить повтор."
 		"ua"		"{darkred}Не вдалося завантажити повтор."
 	}
+	"Replay - Central Not Found"
+	{
+		"en"		"{darkred}No central replay found for this map/course/mode."
+		"ru"		"{darkred}Центральный повтор для этой карты/маршрута/режима не найден."
+	}
+	"Replay - Central Downloading"
+	{
+		"en"		"{grey}Downloading replay from central storage..."
+		"ru"		"{grey}Скачиваем повтор из центрального хранилища..."
+	}
 }

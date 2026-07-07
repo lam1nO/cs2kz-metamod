@@ -3,6 +3,7 @@
 #include "utils/http.h"
 #include "utils/logging.h"
 #include "kz/option/kz_option.h"
+#include "cyb_replay_common.h"
 
 #include <string>
 
@@ -10,40 +11,6 @@ namespace
 {
 	// Лимит тела запроса на стороне api (см. план T4b, Global Constraints).
 	constexpr size_t kMaxReplayBytes = 32u * 1024u * 1024u; // 32 МБ
-
-	// Маппинг короткого имени режима cs2kz → короткое имя api.
-	// Продублировано из cyb_emitter.cpp::MapMode (файл-локальная static-функция,
-	// не экспортируется намеренно — не стоит менять публичный интерфейс
-	// cyb_emitter ради одной строчки; см. отчёт по задаче).
-	const char *MapMode(const std::string &shortName)
-	{
-		if (shortName == "CKZ" || shortName == "ckz")
-			return "ckz";
-		if (shortName == "VNL" || shortName == "vnl")
-			return "vnl";
-		if (shortName == "KZT" || shortName == "kzt")
-			return "kzt";
-		return "";
-	}
-
-	// api валидирует map как [a-z0-9_-]{1,128} — проверяем на своей стороне,
-	// чтобы не слать заведомо отклоняемые запросы (fail-open, только лог).
-	bool IsValidMapName(const std::string &name)
-	{
-		if (name.empty() || name.size() > 128)
-		{
-			return false;
-		}
-		for (char c : name)
-		{
-			bool ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-';
-			if (!ok)
-			{
-				return false;
-			}
-		}
-		return true;
-	}
 
 	// Один POST на один тип (pb/wr) — по одному на каждый вызов.
 	void DoUpload(const std::string &baseUrl, const std::string &token, u64 steamId64, const std::string &map, i32 course, const char *mode,
@@ -119,14 +86,14 @@ void CybReplayUpload::MaybeUpload(const RunSubmission &sub, bool isServerRecord)
 	}
 	const char *token = KZOptionService::GetOptionStr("cybEmitToken", "");
 
-	const char *modeStr = MapMode(sub.mode.name);
+	const char *modeStr = CybReplayCommon::MapMode(sub.mode.name);
 	if (modeStr[0] == '\0')
 	{
 		KZ_LOG_INFO(LogChannel::Replays, "[cyb_replay] unknown mode '%s', skipping central upload\n", sub.mode.name.c_str());
 		return;
 	}
 
-	if (!IsValidMapName(sub.map.name))
+	if (!CybReplayCommon::IsValidMapName(sub.map.name))
 	{
 		KZ_LOG_WARN(LogChannel::Replays, "[cyb_replay] map name '%s' fails api validation, skipping central upload\n", sub.map.name.c_str());
 		return;

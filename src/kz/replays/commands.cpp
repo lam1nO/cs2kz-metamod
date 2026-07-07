@@ -15,10 +15,13 @@
 #include "events.h"
 #include "playback.h"
 #include "watcher.h"
+#include "cyb_replay_download.h"
 #include "utils/uuid.h"
 #include "utils/simplecmds.h"
 #include "kz/global/kz_global.h"
 #include "vendor/sql_mm/src/public/sql_mm.h"
+#include <cctype>
+#include <cstdlib>
 #include <functional>
 extern ReplayWatcher g_ReplayWatcher;
 
@@ -744,6 +747,71 @@ namespace KZ::replaysystem::commands
 		KZGlobalService::QueryPB(params, std::move(callback));
 	}
 
+	// Ищет ПОДКЛЮЧЁННОГО игрока по подстроке ника (без учёта регистра, первое
+	// совпадение — как kz_playercheck в kz/misc/kz_misc.cpp). Без обращения к БД:
+	// `!replay pb <ник>` работает только для игроков, которые прямо сейчас на
+	// сервере (не резолвит офлайн-игроков по нику — для них нужен steamid64).
+	static_function KZPlayer *FindOnlinePlayerByName(const char *nameQuery)
+	{
+		if (!nameQuery || nameQuery[0] == '\0')
+		{
+			return nullptr;
+		}
+
+		char needle[256];
+		V_strncpy(needle, nameQuery, sizeof(needle));
+		V_strlower(needle);
+
+		for (i32 i = 0; i <= MAXPLAYERS; i++)
+		{
+			CBasePlayerController *controller = g_pKZPlayerManager->players[i]->GetController();
+			if (!controller)
+			{
+				continue;
+			}
+
+			char haystack[256];
+			V_strncpy(haystack, g_pKZPlayerManager->players[i]->GetName(), sizeof(haystack));
+			V_strlower(haystack);
+
+			if (V_strstr(haystack, needle))
+			{
+				return g_pKZPlayerManager->ToPlayer(i);
+			}
+		}
+
+		return nullptr;
+	}
+
+	// Строгий парсинг steamid64: ровно 17 цифр (api валидирует так же —
+	// apps/api/src/modules/replays/replays.controller.ts, steamId64Schema). Не
+	// делаем более "умную" эвристику намеренно: цель — быстро отличить явный
+	// steamid64-аргумент от опечатки в нике, а не принять любую цифровую строку.
+	static_function bool ParseStrictSteamId64(const char *arg, u64 &out)
+	{
+		if (!arg || arg[0] == '\0')
+		{
+			return false;
+		}
+
+		size_t len = strlen(arg);
+		if (len != 17)
+		{
+			return false;
+		}
+
+		for (size_t i = 0; i < len; i++)
+		{
+			if (!isdigit((unsigned char)arg[i]))
+			{
+				return false;
+			}
+		}
+
+		out = strtoull(arg, nullptr, 10);
+		return true;
+	}
+
 	void LoadReplayForRecord(KZPlayer *player, RecordType type, const char *courseArg, const char *modeArg)
 	{
 		if (!player)
@@ -836,16 +904,51 @@ SCMD(kz_replay, SCFL_REPLAY)
 	using namespace KZ::replaysystem::commands;
 	using RT = RecordType;
 
+	const char *arg1 = args->Arg(1);
+
+	// `!replay pb [ник|steamid64]` / `!replay wr` — Cyber-платформа: центральное
+	// (кросс-серверное) хранилище через api, ПОДМЕНЯЕТ upstream-обработку этих
+	// двух ключевых слов (которая требовала глобального cs2kz-api — недоступен
+	// для кастомных режимов вроде kzt, см. refs/cs2kz-api в CLAUDE.md). Прочие
+	// upstream-варианты (wrpro/sr/srpro/pbpro/gpb/gpbpro/spb/spbpro) не тронуты —
+	// см. recordKeywords ниже. Ключ резолва — ТЕКУЩИЙ курс/режим игрока (без
+	// аргументов курса/режима, в отличие от upstream-варианта): это и есть
+	// mode-гейт спеки.
+	if (KZ_STREQI(arg1, "pb"))
+	{
+		u64 targetSteamId64 = player->GetSteamId64();
+		if (args->ArgC() >= 3)
+		{
+			const char *targetArg = args->Arg(2);
+			KZPlayer *target = FindOnlinePlayerByName(targetArg);
+			if (target)
+			{
+				targetSteamId64 = target->GetSteamId64();
+			}
+			else if (!ParseStrictSteamId64(targetArg, targetSteamId64))
+			{
+				player->languageService->PrintChat(true, false, "Error Message (Player Not Found)", targetArg);
+				return MRES_SUPERCEDE;
+			}
+		}
+		CybReplayDownload::RequestAndPlay(player, CybReplayDownload::Kind::PB, targetSteamId64);
+		return MRES_SUPERCEDE;
+	}
+	if (KZ_STREQI(arg1, "wr"))
+	{
+		CybReplayDownload::RequestAndPlay(player, CybReplayDownload::Kind::WR, 0);
+		return MRES_SUPERCEDE;
+	}
+
 	static const struct
 	{
 		const char *keyword;
 		RT type;
 	} recordKeywords[] = {
-		{"wr", RT::WR},       {"wrpro", RT::WRPro}, {"sr", RT::SR},         {"srpro", RT::SRPro}, {"pb", RT::PB},
-		{"pbpro", RT::PBPro}, {"gpb", RT::GPB},     {"gpbpro", RT::GPBPro}, {"spb", RT::SPB},     {"spbpro", RT::SPBPro},
+		{"wrpro", RT::WRPro}, {"sr", RT::SR},         {"srpro", RT::SRPro}, {"pbpro", RT::PBPro},
+		{"gpb", RT::GPB},     {"gpbpro", RT::GPBPro}, {"spb", RT::SPB},     {"spbpro", RT::SPBPro},
 	};
 
-	const char *arg1 = args->Arg(1);
 	for (const auto &kw : recordKeywords)
 	{
 		if (KZ_STREQI(arg1, kw.keyword))
