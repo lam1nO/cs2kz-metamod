@@ -769,6 +769,12 @@ namespace KZ::replaysystem::commands
 			{
 				continue;
 			}
+			// Боты/SourceTV и не-аутентифицированные (SteamID64==0) не годятся в цель PB —
+			// иначе матч по подстроке уйдёт в api со steamId64=0 и вернёт невнятный отказ.
+			if (g_pKZPlayerManager->players[i]->IsFakeClient() || g_pKZPlayerManager->players[i]->GetSteamId64() == 0)
+			{
+				continue;
+			}
 
 			char haystack[256];
 			V_strncpy(haystack, g_pKZPlayerManager->players[i]->GetName(), sizeof(haystack));
@@ -917,6 +923,12 @@ SCMD(kz_replay, SCFL_REPLAY)
 	if (KZ_STREQI(arg1, "pb"))
 	{
 		u64 targetSteamId64 = player->GetSteamId64();
+		// До завершения Steam-auth свой steamid == 0 — честный отказ вместо api-400.
+		if (targetSteamId64 == 0 && args->ArgC() < 3)
+		{
+			player->languageService->PrintChat(true, false, "Error Message (Player Not Found)", player->GetName());
+			return MRES_SUPERCEDE;
+		}
 		if (args->ArgC() >= 3)
 		{
 			const char *targetArg = args->Arg(2);

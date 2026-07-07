@@ -330,9 +330,9 @@
 	}
 	"Replay - Usage Command"
 	{
-		"en"		"{grey}Usage: kz_replay <ID> or kz_replay <wr/sr/pb/gpb/spb[pro]> [<course> [<mode>]]"
+		"en"		"{grey}Usage: kz_replay <ID> | pb [name|steamid64] | wr | <wrpro/sr/gpb/spb[pro]> [<course> [<mode>]]"
 		"chi"		"{grey}用法: kz_replay <ID> 或 kz_replay <wr/sr/pb/gpb/spb[pro]> [<关卡> [<模式>]]"
-		"ru"		"{grey}Применение: kz_replay <ID> или kz_replay <wr/sr/pb/gpb/spb[pro]> [<маршрут> [<режим>]]"
+		"ru"		"{grey}Применение: kz_replay <ID> | pb [ник|steamid64] | wr | <wrpro/sr/gpb/spb[pro]> [<маршрут> [<режим>]]"
 		"ua"		"{grey}Використання: kz_replay <ID> або kz_replay <wr/sr/pb/gpb/spb[pro]> [<course> [<mode>]]"
 	}
 	"Replay - Load Cancelled"
