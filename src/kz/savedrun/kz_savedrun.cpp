@@ -170,6 +170,11 @@ void KZSavedRunService::SaveOnDisconnect()
 	{
 		return;
 	}
+	// Ботов не персистим (pawn-независимая проверка — pawn на дисконнекте невалиден).
+	if (this->player->IsFakeClient())
+	{
+		return;
+	}
 
 	// Сериализация читает только сервисные поля (timerService/checkpointService), pawn не трогает —
 	// у вышедшего игрока pawn уже может быть невалиден/уничтожен.
