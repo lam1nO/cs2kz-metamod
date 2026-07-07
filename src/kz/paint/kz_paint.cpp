@@ -10,11 +10,10 @@
 
 void KZPaintService::Reset()
 {
-	// Reset to default: red color and default size
-	player->optionService->SetPreferenceInt("paintColor", 0xFF0000FF); // Red (RGBA format)
-	player->optionService->SetPreferenceFloat("paintSize", DEFAULT_PAINT_SIZE);
-	player->optionService->SetPreferenceBool("showAllPaint", false);
-
+	// ВАЖНО: префы (paintColor/paintSize/showAllPaint) здесь НЕ трогаем — Reset()
+	// дёргается на смене карты/пересоздании игрока (KZPlayer::Reset) и запись
+	// дефолтов затирала выбор игрока в prefs (уезжал в БД дефолтный красный).
+	// Сбрасываем только сессионное состояние.
 	this->autoPaintEnabled = false;
 	this->hasLastAutoPaintPosition = false;
 	this->nextAutoPaintTime = 0.0;
