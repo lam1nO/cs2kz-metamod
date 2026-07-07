@@ -947,9 +947,12 @@ void KZTimerService::OnChangeMoveType(MoveType_t oldMoveType)
 
 void KZTimerService::OnTeleportToStart()
 {
-	// Инвалидация ДО TimerStop - курс ещё известен (currentCourseGUID сбрасывается не здесь, но
-	// логически это "явный сброс игрока": !r/!course/!main/!bN/старт-зона - все идут через этот путь).
-	this->player->savedRunService->InvalidateCurrent("teleport_to_start");
+	// Инвалидация ДО TimerStop - курс ещё известен. Гейт на бегущий таймер:
+	// повторный !r после финиша/стопа не должен слать пустой DELETE.
+	if (this->GetTimerRunning())
+	{
+		this->player->savedRunService->InvalidateCurrent("teleport_to_start");
+	}
 	this->TimerStop();
 }
 

@@ -24,7 +24,7 @@ void KZDatabaseService::DeleteSavedRun(u64 steamID64, CUtlString mapName, i32 co
 	std::string cleanMode = db->Escape(mode.Get());
 	std::string cleanStyles = db->Escape(styles.Get());
 
-	char query[1024];
+	char query[2048];
 	V_snprintf(query, sizeof(query), sql_savedruns_delete, steamID64, cleanMapName.c_str(), course, cleanMode.c_str(), cleanStyles.c_str());
 
 	Transaction txn;
