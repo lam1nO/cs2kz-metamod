@@ -88,6 +88,18 @@ public:
 		return this->checkpoints.Count();
 	}
 
+	// Task 2 (SavedRuns): срез состояния для сериализации снапшота незавершённого рана.
+	// Возвращает "сырой" (0-based) индекс, как ожидает DoTeleport(i32 index); не мутирует состояние.
+	i32 GetRawCpIndex()
+	{
+		return this->currentCpIndex;
+	}
+
+	const CUtlVector<Checkpoint> &GetCheckpointsForSave()
+	{
+		return this->checkpoints;
+	}
+
 	void SetStartPosition();
 	void ClearStartPosition();
 

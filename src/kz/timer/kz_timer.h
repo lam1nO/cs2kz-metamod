@@ -235,6 +235,43 @@ public:
 		return currentTime;
 	}
 
+	// Task 2 (SavedRuns): срез приватных полей таймера для сериализации снапшота незавершённого рана.
+	// Не мутирует состояние. Восстановление (Task 4) — отдельный RestoreFromSnapshot.
+	struct TimerSaveSnapshot
+	{
+		f64 time {};
+		bool valid {};
+		u32 lastCheckpoint {};
+		i32 reachedCheckpoints {};
+		std::vector<f64> splits;
+		std::vector<f64> cpTimes;
+		std::vector<f64> stageTimes;
+	};
+
+	TimerSaveSnapshot SnapshotForSave()
+	{
+		TimerSaveSnapshot snap;
+		snap.time = this->currentTime;
+		snap.valid = this->validTime;
+		snap.lastCheckpoint = this->lastCheckpoint;
+		snap.reachedCheckpoints = this->reachedCheckpoints;
+
+		FOR_EACH_VEC(this->splitZoneTimes, i)
+		{
+			snap.splits.push_back(this->splitZoneTimes[i]);
+		}
+		FOR_EACH_VEC(this->cpZoneTimes, i)
+		{
+			snap.cpTimes.push_back(this->cpZoneTimes[i]);
+		}
+		FOR_EACH_VEC(this->stageZoneTimes, i)
+		{
+			snap.stageTimes.push_back(this->stageZoneTimes[i]);
+		}
+
+		return snap;
+	}
+
 	static void FormatDiffTime(f64 time, char *output, u32 length, bool precise = true)
 	{
 		char temp[32];

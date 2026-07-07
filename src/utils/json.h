@@ -444,6 +444,37 @@ public:
 		return true;
 	}
 
+	// Плоский массив чисел (нет симметричного Set/Get у примитивов через шаблон ниже,
+	// т.к. f64 не имеет FromJson). Нужно для SavedRuns-снапшота (splits/cpTimes/... и o/a/ln чекпоинтов).
+	bool Get(const std::string &key, std::vector<f64> &out) const
+	{
+		if (!this->ContainsKey(key))
+		{
+			return false;
+		}
+
+		if (!this->inner[key].is_array())
+		{
+			KZ_LOG_WARN(LogChannel::General, "[JSON] Key `%s` is not an array.\n", key.c_str());
+			return false;
+		}
+
+		out.clear();
+
+		for (const auto &item : this->inner[key])
+		{
+			if (!item.is_number())
+			{
+				KZ_LOG_WARN(LogChannel::General, "[JSON] Key `%s` contains a non-numeric element.\n", key.c_str());
+				return false;
+			}
+
+			out.push_back(item.get<f64>());
+		}
+
+		return true;
+	}
+
 	template<typename T>
 	bool Get(const std::string &key, std::vector<T> &out) const
 	{

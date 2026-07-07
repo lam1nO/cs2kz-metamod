@@ -148,6 +148,11 @@ public:
 	static void QueryRecords(CUtlString mapName, CUtlString courseName, u32 modeID, u32 count, u32 offset, TransactionSuccessCallbackFunc onSuccess,
 							 TransactionFailureCallbackFunc onFailure);
 
+	// SavedRuns (Task 2): upsert снапшота незавершённого рана игрока на текущей карте/курсе.
+	// Собирает map/course/mode/styles из состояния player сам (см. save_savedrun.cpp); no-op, если
+	// у игрока нет активного курса. Fire-and-forget — ошибки только логируются (OnGenericTxnFailure).
+	static void SaveRun(KZPlayer *player, f64 runTime, u32 tpCount, const std::string &snapshot);
+
 	static void Ban(u64 steamID64, const char *reason = nullptr, f32 duration = 0.0f, const UUID_t banId = UUID_t(false),
 					const UUID_t replayUuid = UUID_t(false), TransactionSuccessCallbackFunc onSuccess = OnGenericTxnSuccess,
 					TransactionFailureCallbackFunc onFailure = OnGenericTxnFailure);

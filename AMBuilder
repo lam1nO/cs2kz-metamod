@@ -104,6 +104,7 @@ def configure_main(sdk_target, sdk, cxx):
     os.path.join(builder.sourcePath, 'src', 'kz', 'db', 'find_records.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'db', 'migrations.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'db', 'save_prefs.cpp'),
+    os.path.join(builder.sourcePath, 'src', 'kz', 'db', 'save_savedrun.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'db', 'save_time.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'db', 'rename_run.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'db', 'set_cheater.cpp'),
