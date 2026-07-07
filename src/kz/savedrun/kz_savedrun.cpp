@@ -57,12 +57,18 @@ std::string KZSavedRunService::SerializeSnapshot()
 
 	Json json;
 	// v: версия формата снапшота (see t3-task-2-brief.md). Меняется при несовместимой правке формата.
+	// Кап: последние 200 чекпоинтов (спам !cp не должен раздувать запрос на
+	// дисконнекте); cpIndex ремапится в усечённое окно.
+	const CUtlVector<KZCheckpointService::Checkpoint> &savedCheckpoints = checkpointService->GetCheckpointsForSave();
+	const i32 cpCap = 200;
+	const i32 cpOffset = MAX(0, savedCheckpoints.Count() - cpCap);
+
 	json.Set("v", (u32)1);
 	json.Set("time", timerSnapshot.time);
 	json.Set("valid", timerSnapshot.valid);
 	// currentCpIndex всегда >= 0 (см. kz_checkpoint.cpp: ResetCheckpoints/Tp*), безопасно кастить в u32.
 	// Json не умеет Set() для знаковых int-типов (нет FromJson у примитива, см. utils/json.h).
-	json.Set("cpIndex", (u32)checkpointService->GetRawCpIndex());
+	json.Set("cpIndex", (u32)MAX(0, checkpointService->GetRawCpIndex() - cpOffset));
 	json.Set("lastCheckpoint", timerSnapshot.lastCheckpoint);
 	json.Set("reachedCheckpoints", (u32)timerSnapshot.reachedCheckpoints);
 	json.Set("splits", timerSnapshot.splits);
@@ -70,8 +76,7 @@ std::string KZSavedRunService::SerializeSnapshot()
 	json.Set("stageTimes", timerSnapshot.stageTimes);
 
 	std::vector<CpSnapshotJson> checkpoints;
-	const CUtlVector<KZCheckpointService::Checkpoint> &savedCheckpoints = checkpointService->GetCheckpointsForSave();
-	FOR_EACH_VEC(savedCheckpoints, i)
+	for (i32 i = cpOffset; i < savedCheckpoints.Count(); i++)
 	{
 		const KZCheckpointService::Checkpoint &cp = savedCheckpoints[i];
 		CpSnapshotJson entry;

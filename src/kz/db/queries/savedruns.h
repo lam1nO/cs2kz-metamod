@@ -36,14 +36,14 @@ constexpr char sqlite_savedruns_create[] = R"(
 // экранированы вызывающей стороной через GetDatabaseConnection()->Escape().
 constexpr char mysql_savedruns_upsert[] = R"(
 	INSERT INTO SavedRuns (SteamID64, MapName, Course, Mode, Styles, RunTime, TpCount, Snapshot)
-	VALUES (%llu, '%s', %d, '%s', '%s', %f, %u, '%s')
+	VALUES (%llu, '%s', %d, '%s', '%s', %.7f, %u, '%s')
 	ON DUPLICATE KEY UPDATE RunTime=VALUES(RunTime), TpCount=VALUES(TpCount),
 		Snapshot=VALUES(Snapshot), UpdatedAt=CURRENT_TIMESTAMP
 )";
 
 constexpr char sqlite_savedruns_upsert[] = R"(
 	INSERT INTO SavedRuns (SteamID64, MapName, Course, Mode, Styles, RunTime, TpCount, Snapshot, UpdatedAt)
-	VALUES (%llu, '%s', %d, '%s', '%s', %f, %u, '%s', strftime('%%s','now'))
+	VALUES (%llu, '%s', %d, '%s', '%s', %.7f, %u, '%s', strftime('%%s','now'))
 	ON CONFLICT (SteamID64, MapName, Course, Mode, Styles) DO UPDATE SET
 		RunTime=excluded.RunTime, TpCount=excluded.TpCount,
 		Snapshot=excluded.Snapshot, UpdatedAt=excluded.UpdatedAt

@@ -70,5 +70,5 @@ void KZDatabaseService::SaveRun(KZPlayer *player, f64 runTime, u32 tpCount, cons
 	Transaction txn;
 	txn.queries.push_back(query.data());
 
-	KZDatabaseService::GetDatabaseConnection()->ExecuteTransaction(txn, OnGenericTxnSuccess, OnGenericTxnFailure);
+	db->ExecuteTransaction(txn, OnGenericTxnSuccess, OnGenericTxnFailure);
 }
