@@ -9,6 +9,7 @@
 #include "kz/style/kz_style.h"
 #include "kz/option/kz_option.h"
 #include "kz/replays/kz_replay.h"
+#include "kz/replays/cyb_replay_upload.h"
 #include "kz/mappingapi/kz_mappingapi.h"
 #include "utils/async_file_io.h"
 #include "utils/utils.h"
@@ -328,6 +329,12 @@ void RunSubmission::OnReplayReady(std::vector<char> &&buffer)
 	{
 		TryFinalize();
 	}
+
+	// Буфер реплея готов — если локальная БД уже успела ответить с результатом
+	// PB/ранга, аплоад в центральное хранилище можно запускать прямо сейчас.
+	// Если БД ещё не ответила, TryUploadCentralReplay() будет вызван повторно
+	// из колбэка SubmitLocal() и сработает тогда.
+	TryUploadCentralReplay();
 }
 
 // ---------------------------------------------------------------------------
@@ -466,12 +473,17 @@ void RunSubmission::SubmitLocal(const char *uuid)
 
 		ISQLResult *result = queries[1]->GetResultSet();
 		sub->localResponse.overall.firstTime = result->GetRowCount() == 1;
+		// firstTime уже означает новый (единственный) личный рекорд.
+		sub->localResponse.overall.isNewPB = sub->localResponse.overall.firstTime;
 		if (!sub->localResponse.overall.firstTime)
 		{
 			result->FetchRow();
 			f32 pb = result->GetFloat(0);
 			if (fabs(pb - sub->time) < EPSILON)
 			{
+				// Текущий топ-PB совпал с временем этого рана — значит именно
+				// этот ран и есть (новый) личный рекорд.
+				sub->localResponse.overall.isNewPB = true;
 				result->FetchRow();
 				f32 oldPB = result->GetFloat(0);
 				sub->localResponse.overall.pbDiff = sub->time - oldPB;
@@ -520,10 +532,46 @@ void RunSubmission::SubmitLocal(const char *uuid)
 		}
 
 		sub->UpdateLocalCache();
+
+		// Локальный ранг/PB теперь известны — если буфер реплея уже готов
+		// (OnReplayReady() случился раньше ответа БД), аплоад можно запускать.
+		sub->TryUploadCentralReplay();
 	};
 
 	KZDatabaseService::SaveTime(uuid, this->player.steamid64, this->course.localID, this->mode.localID, this->time, this->teleports, this->styleIDs,
 								this->metadata, onSuccess, onFailure);
+}
+
+// ---------------------------------------------------------------------------
+// Central replay upload (Cyber api)
+// ---------------------------------------------------------------------------
+
+void RunSubmission::TryUploadCentralReplay()
+{
+	if (centralReplayUploadAttempted)
+	{
+		return;
+	}
+	// Нужен результат локальной БД (PB/ранг) — без него неизвестно, стоит ли
+	// вообще что-то грузить. Для styled-ранов SubmitLocal переиспользует
+	// generic-колбэк (см. save_time.cpp), localResponse не заполняется, и
+	// local сбрасывается в false — этот путь их естественно не затрагивает.
+	if (!local || !localResponse.received)
+	{
+		return;
+	}
+	// Нужен готовый в памяти буфер реплея.
+	if (!replayReady || replayBuffer.empty())
+	{
+		return;
+	}
+	if (!localResponse.overall.isNewPB)
+	{
+		return; // не новый личный рекорд — в центральное хранилище не шлём
+	}
+
+	centralReplayUploadAttempted = true;
+	CybReplayUpload::MaybeUpload(*this, localResponse.overall.rank == 1);
 }
 
 // ---------------------------------------------------------------------------

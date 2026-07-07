@@ -63,7 +63,18 @@ namespace HTTP
 
 		if (method >= Method::POST)
 		{
-			if (!g_pHTTP->SetHTTPRequestRawPostBody(handle, "application/json", (u8 *)body.data(), body.size()))
+			// По умолчанию JSON (обратная совместимость со старыми вызывающими).
+			// Если вызывающий код явно выставил заголовок Content-Type через SetHeader
+			// (например "application/octet-stream" для бинарной загрузки) — используем
+			// его: раньше тип тела был жёстко прибит к "application/json" всегда, из-за
+			// чего SetHeader("Content-Type", ...) молча игнорировался для тела запроса.
+			std::string bodyContentType = "application/json";
+			auto contentTypeHeader = headers.find("Content-Type");
+			if (contentTypeHeader != headers.end())
+			{
+				bodyContentType = contentTypeHeader->second;
+			}
+			if (!g_pHTTP->SetHTTPRequestRawPostBody(handle, bodyContentType.c_str(), (u8 *)body.data(), body.size()))
 			{
 				KZ_LOG_WARN(LogChannel::General, "[HTTP] Failed to set request body.\n");
 				return;
@@ -72,6 +83,13 @@ namespace HTTP
 
 		for (const auto &[name, value] : headers)
 		{
+			// Content-Type для тела POST/PUT/PATCH уже выставлен выше через
+			// SetHTTPRequestRawPostBody — это зарезервированный заголовок,
+			// повторная установка может конфликтовать/дублироваться.
+			if (method >= Method::POST && name == "Content-Type")
+			{
+				continue;
+			}
 			g_pHTTP->SetHTTPRequestHeaderValue(handle, name.c_str(), value.c_str());
 		}
 

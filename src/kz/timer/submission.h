@@ -53,6 +53,11 @@ struct RunSubmission
 	bool runAnnounced {};        // AnnounceRun()/AnnounceLocal()/AnnounceGlobal() have been called
 	bool localSubmitted {};      // set once SubmitLocal() has been called, prevents double-insert
 
+	// Центральный (Cyber api) аплоад PB/WR-реплея уже запущен для этого рана —
+	// не даёт TryUploadCentralReplay() выстрелить дважды (гонка между
+	// локальным DB-ответом и готовностью буфера реплея, см. .cpp).
+	bool centralReplayUploadAttempted {};
+
 	// Replay buffer held in RAM from OnReplayReady() until QueueUpload() moves it away.
 	// After the move it is empty; DoLateAPIResponse() will fall back to a disk read.
 	std::vector<char> replayBuffer;
@@ -148,6 +153,12 @@ struct RunSubmission
 			f32 pbDiff {};
 			u32 rank {};
 			u32 maxRank {};
+			// Явно вычисляется в SubmitLocal() в момент разбора Top-2 PB-запроса
+			// (save_time.cpp/queries/save_time.h): true, если этот ран стал новым
+			// личным рекордом (firstTime ИЛИ время совпало с текущим топ-PB).
+			// Используется только для overall — центральные реплеи не различают
+			// pro/overall (см. cyb_replay_upload.cpp).
+			bool isNewPB {};
 		} overall, pro;
 	} localResponse;
 
@@ -212,6 +223,13 @@ private:
 
 	// Insert the run into the local database using the provided UUID.
 	void SubmitLocal(const char *uuid);
+
+	// Аплоад PB/WR-реплея в центральное хранилище Cyber-платформы (fail-open).
+	// Идемпотентно: реально шлёт HTTP не более одного раза на объект (см.
+	// centralReplayUploadAttempted). Вызывается из двух мест — OnReplayReady()
+	// и колбэка SubmitLocal() — так как оба асинхронных события (буфер реплея
+	// готов / локальная БД ответила с рангом) могут прийти в любом порядке.
+	void TryUploadCentralReplay();
 
 	// Update caches after receiving API / DB responses.
 	void UpdateGlobalCache();
