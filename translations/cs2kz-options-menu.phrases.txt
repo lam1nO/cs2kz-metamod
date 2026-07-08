@@ -1,0 +1,39 @@
+"Phrases"
+{
+	// Метки пунктов интерактивного меню !options (замена RadioPanel menu_option/radio2).
+	"Options - Menu Label HidePlayers"
+	{
+		"en"	"Hide players"
+		"ru"	"Скрыть игроков"
+	}
+	"Options - Menu Label HideWeapon"
+	{
+		"en"	"Hide weapon"
+		"ru"	"Скрыть оружие"
+	}
+	"Options - Menu Label HideLegs"
+	{
+		"en"	"Hide legs"
+		"ru"	"Скрыть ноги"
+	}
+	"Options - Menu Label JsDisplay"
+	{
+		"en"	"Jumpstats display"
+		"ru"	"Показ джампстатов"
+	}
+	"Options - Menu Label JsAlways"
+	{
+		"en"	"Jumpstats always"
+		"ru"	"Джампстаты всегда"
+	}
+	"Options - Menu Label SetStartPos"
+	{
+		"en"	"Set custom start position"
+		"ru"	"Задать свою точку старта"
+	}
+	"Options - Menu Label ClearStartPos"
+	{
+		"en"	"Clear custom start position"
+		"ru"	"Сбросить свою точку старта"
+	}
+}
