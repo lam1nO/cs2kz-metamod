@@ -120,49 +120,49 @@
 				{
 					"hotkey"	"1"
 					"label"		"Встановити стартову позицію"
-					"cmd"		"kz_ssp"
+					"cmd"		"kz_ssp; radio2"
 				}
 
 				"Clear Custom Start Position"
 				{
 					"hotkey"	"2"
 					"label"		"Скинути стартову позицію"
-					"cmd"		"kz_csp"
+					"cmd"		"kz_csp; radio2"
 				}
 
 				"Hide"
 				{
 					"hotkey"	"3"
 					"label"		"Показати/Приховати інших гравців"
-					"cmd"		"kz_hide"
+					"cmd"		"kz_hide; radio2"
 				}
 
 				"Hide Weapon"
 				{
 					"hotkey"	"4"
 					"label"		"Показати/Приховати зброю"
-					"cmd"		"kz_hideweapon"
+					"cmd"		"kz_hideweapon; radio2"
 				}
 
 				"Hide Legs"
 				{
 					"hotkey"	"5"
 					"label"		"Показати/Приховати ноги"
-					"cmd"		"kz_hidelegs"
+					"cmd"		"kz_hidelegs; radio2"
 				}
 
 				"Toggle Jumpstats"
 				{
 					"hotkey"	"6"
 					"label"		"Перемкнути статистику стрибків"
-					"cmd"		"kz_togglejs"
+					"cmd"		"kz_togglejs; radio2"
 				}
 
 				"Toggle Jumpstats Always"
 				{
 					"hotkey"	"7"
 					"label"		"Статистика для всіх стрибків"
-					"cmd"		"kz_jsalways"
+					"cmd"		"kz_jsalways; radio2"
 				}
 			}
 		}
