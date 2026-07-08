@@ -30,6 +30,7 @@
 #include "kz/recording/kz_recording.h"
 #include "kz/replays/kz_replaysystem.h"
 #include "kz/racing/kz_racing.h"
+#include "kz/misc/kz_customchangemap.h"
 
 #include <vendor/MultiAddonManager/public/imultiaddonmanager.h>
 #include <vendor/ClientCvarValue/public/iclientcvarvalue.h>
@@ -78,6 +79,7 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 	KZBeamService::Init();
 	KZPistolService::Init();
 	KZ::misc::Init();
+	KZ::misc::customchangemap::Init();
 	KZQuietService::Init();
 	KZZtopwatchService::Init();
 	AsyncFileIO::Init();
@@ -118,6 +120,7 @@ bool KZPlugin::Unload(char *error, size_t maxlen)
 	KZ::misc::UnrestrictTimeLimit();
 	KZRecordingService::Shutdown();
 	AsyncFileIO::Cleanup();
+	KZ::misc::customchangemap::Cleanup();
 	KZRacingService::Cleanup();
 	ix::uninitNetSystem();
 	hooks::Cleanup();
