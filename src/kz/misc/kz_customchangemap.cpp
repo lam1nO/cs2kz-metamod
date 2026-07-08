@@ -104,7 +104,19 @@ SCMD(kz_customchangemap, SCFL_MAP)
 			KZLanguageService::PrintChatAll(true, "Mcustom - Already Playing");
 			return MRES_SUPERCEDE;
 		}
+		// Карта уже готова — переключаемся сразу. Обнуляем state, чтобы более ранний
+		// pending-запрос (другой ID, чья докачка ещё идёт) не был подхвачен колбэком
+		// и не откатил это переключение на свою карту при своём успехе.
+		s_state = {};
 		SwitchToMap(id);
+		return MRES_SUPERCEDE;
+	}
+
+	if (s_state.pending && s_state.workshopId == id)
+	{
+		// Повторный вызов на уже идущий запрос — просто печатаем текущий статус,
+		// попытки не сбрасываем и докачку не перезапускаем.
+		KZLanguageService::PrintChatAll(true, "Mcustom - Retry", s_state.attempt, CUSTOMMAP_MAX_ATTEMPTS);
 		return MRES_SUPERCEDE;
 	}
 
