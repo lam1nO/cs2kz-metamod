@@ -1,0 +1,28 @@
+"Phrases"
+{
+	"Mcustom - Downloading"
+	{
+		"en"	"Downloading map {darkred}%s{default}…"
+		"ru"	"Скачиваю карту {darkred}%s{default}…"
+	}
+	"Mcustom - Ready"
+	{
+		"en"	"Map ready, switching…"
+		"ru"	"Карта готова, переключаю…"
+	}
+	"Mcustom - Retry"
+	{
+		"en"	"Still downloading (attempt %i of %i)…"
+		"ru"	"Всё ещё качаю (попытка %i из %i)…"
+	}
+	"Mcustom - Exhausted"
+	{
+		"en"	"Failed to download the map — Steam connection issue. Try {darkred}!mcustom %s{default} again in a minute."
+		"ru"	"Не удалось скачать карту — проблема связи со Steam. Попробуйте {darkred}!mcustom %s{default} ещё раз через минуту."
+	}
+	"Mcustom - Already Playing"
+	{
+		"en"	"Already playing this map."
+		"ru"	"Уже играем эту карту."
+	}
+}
