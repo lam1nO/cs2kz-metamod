@@ -48,11 +48,6 @@ public:
 	// Requires MultiAddonManager to be available, unless kz_force_mhud is set.
 	static bool IsMHUDAvailable();
 
-	// Тип активного худа: 0 = Стандартный (HTML версия C), 1 = MHUD (particle).
-	// Дефолт = 0 (не зависит от ассетов).
-	int GetHudType();
-	void SetHudType(int type);
-
 	static void PrecacheParticles(IEntityResourceManifest *pResourceManifest);
 	// Draw the panel from a player to a specific target.
 	static void DrawPanels(KZPlayer *player, KZPlayer *target);
@@ -114,10 +109,6 @@ public:
 	// CheckTransmit support (see kz_quiet.cpp).
 	bool OwnsParticle(const CEntityHandle &handle) const;
 
-	// Мастер-тумблер mhud (legacy, сохранён для обратной совместимости команды kz_mhud master).
-	// В новой модели управляется через hudType — этот метод теперь читает hudType==1.
-	bool IsMHUDMasterEnabled();
-
 	// Per-element enable flags (also consulted for panel suppression).
 	bool IsMHUDSpeedEnabled();
 	bool IsMHUDPrespeedEnabled();
@@ -139,9 +130,7 @@ public:
 	void OpenMHUDMenu();
 
 	// Константы геометрии particle-MHUD (public: нужны из файловых функций particles.cpp).
-	// Скорость: до 4 разрядов (по одному particle на цифру).
-	static constexpr i32 MHUD_SPEED_DIGITS = 4;
-	// Клавиши: W A S D J C — 6 particle'ов.
+	// Клавиши: W A S D J C.
 	static constexpr i32 MHUD_KEY_COUNT = 6;
 
 private:
@@ -158,36 +147,18 @@ private:
 	std::string BuildVersionCHud(KZPlayer *dataSource, bool suppressSpeed, bool suppressTimer, bool suppressKeys, bool masterMode,
 								 const char *language);
 
-	// Control point mapping (контракт workshop-аддона particles/cyberkz/*):
+	// Control point mapping (общий контракт particle-ассетов апстрима):
 	// CP16       = RGB tint (0..255)
 	// CP17.x     = sequence (кадр)
 	// CP17.y     = size (масштаб)
 	// CP17.z     = self-illum / init field1 (1.0 = вкл.)
 	// CP18.x/y   = screen-space offset
 
-	// === hudType==0: Стандартный (cyberkz per-glyph, workshop-аддон 3759276798) ==========
-
-	// Path B: по-глифные particle'ы — каждый разряд/клавиша/символ = отдельная сущность.
-	CHandle<CParticleSystem> speedParticles[MHUD_SPEED_DIGITS];
-	// Preспeed: тот же механизм, другой scale/offset.
-	CHandle<CParticleSystem> prespeedParticles[MHUD_SPEED_DIGITS];
-
-	// Клавиши: W A S D J C — 6 particle'ов, у каждого свой .vpcf с 2-кадровым листом.
-	// sequence=0 inactive, sequence=1 active.
-	CHandle<CParticleSystem> keyParticles[MHUD_KEY_COUNT];
-
 	// Таймер: до 4 разрядов (каждый = двузначное значение) + до 3 разделителей.
 	CHandle<CParticleSystem> timerTextParticles[4];
 	CHandle<CParticleSystem> timerDelimiterParticles[3];
 
-	// CP/TP: 3 цифры (cpCurrent, cpTotal, tpCount) + 1 разделитель (slash).
-	CHandle<CParticleSystem> cptpParticles[3];
-	CHandle<CParticleSystem> cptpDelimParticles[1];
-
-	// Пилюля-подложка (фон под CP/TP).
-	CHandle<CParticleSystem> pillParticle;
-
-	// === hudType==1: MHUD (апстрим cs2kz particle-пути: velo/inputs/timer_delimiter) =====
+	// === MHUD (апстрим cs2kz particle-пути: velo/inputs/timer_delimiter) =================
 	// Скорость: два particle'а на пары-разрядов (апстрим-схема hi/lo).
 	CHandle<CParticleSystem> upstreamSpeedParticles[2];
 	CHandle<CParticleSystem> upstreamPrespeedParticles[2];
@@ -204,21 +175,14 @@ private:
 	};
 	CHandle<CParticleSystem> keysParticle;
 
-	// Таймер апстрима использует те же timerTextParticles/timerDelimiterParticles (те же
-	// массивы, разные .vpcf-пути — они пересоздаются при смене hudType через DestroyAllParticles).
-
 	void UpdateMHUDSpeed();
 	void SetMHUDSpeedParticleVelocity(const Vector &speed, const Vector *prespeed);
 
 	void CheckMHUDTimerParticles();
 	void UpdateMHUDTimer();
 
-	void CheckMHUDKeyParticles();  // Path B (hudType==0): 6 отдельных particle'ов
-	void CheckMHUDKeyParticle();   // Upstream (hudType==1): 1 particle с 6-бит маской
+	void CheckMHUDKeyParticle();
 	void UpdateMHUDKeys();
-
-	void CheckMHUDCpTpParticles(); // Particle'ы для CP/TP в particle-HUD
-	void UpdateMHUDCpTp();
 
 	// Preference helpers.
 	Color GetMHUDColorPref(const char *name, const Color &defaultColor);
