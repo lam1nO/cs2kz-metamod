@@ -7,7 +7,6 @@
 #include "kz/kz.h"
 #include "kz/language/kz_language.h"
 #include "utils/utils.h"
-#include "utils/simplecmds.h"
 #include "utils/logging.h"
 
 #include "public/steam/isteamugc.h"
@@ -86,14 +85,18 @@ void CustomMapDownloadHandler::OnDownloadResult(DownloadItemResult_t *pParam)
 }
 } // namespace
 
-SCMD(kz_customchangemap, SCFL_MAP)
+// Настоящий движковый ConCommand, а НЕ SCMD: команду зовёт mcustom (CSSharp) через
+// Server.ExecuteCommand, т.е. серверным контекстом без игрока. SCMD-диспатч живёт в хуке
+// DispatchConCommand и требует controller — из серверной консоли/RCON такая команда
+// давала "Unknown command" (подтверждено вживую на srv-1, cyb.32).
+CON_COMMAND_F(kz_customchangemap, "Switch to a workshop map, downloading it with retries if needed (used by !mcustom).", FCVAR_NONE)
 {
 	// atoll — та же конвенция парсинга u64 из строкового аргумента, что в
 	// src/kz/anticheat/kz_anticheat.cpp:27.
-	PublishedFileId_t id = atoll(args->Arg(1));
+	PublishedFileId_t id = atoll(args.Arg(1));
 	if (id == 0)
 	{
-		return MRES_SUPERCEDE;
+		return;
 	}
 
 	if (IsMapReady(id))
@@ -102,14 +105,14 @@ SCMD(kz_customchangemap, SCFL_MAP)
 		if (isCurrent)
 		{
 			KZLanguageService::PrintChatAll(true, "Mcustom - Already Playing");
-			return MRES_SUPERCEDE;
+			return;
 		}
 		// Карта уже готова — переключаемся сразу. Обнуляем state, чтобы более ранний
 		// pending-запрос (другой ID, чья докачка ещё идёт) не был подхвачен колбэком
 		// и не откатил это переключение на свою карту при своём успехе.
 		s_state = {};
 		SwitchToMap(id);
-		return MRES_SUPERCEDE;
+		return;
 	}
 
 	if (s_state.pending && s_state.workshopId == id)
@@ -117,7 +120,7 @@ SCMD(kz_customchangemap, SCFL_MAP)
 		// Повторный вызов на уже идущий запрос — просто печатаем текущий статус,
 		// попытки не сбрасываем и докачку не перезапускаем.
 		KZLanguageService::PrintChatAll(true, "Mcustom - Retry", s_state.attempt, CUSTOMMAP_MAX_ATTEMPTS);
-		return MRES_SUPERCEDE;
+		return;
 	}
 
 	s_state.pending = true;
@@ -125,7 +128,6 @@ SCMD(kz_customchangemap, SCFL_MAP)
 	s_state.attempt = 1;
 	KZLanguageService::PrintChatAll(true, "Mcustom - Downloading", std::to_string(id).c_str());
 	StartDownload(id);
-	return MRES_SUPERCEDE;
 }
 
 void KZ::misc::customchangemap::Init()
