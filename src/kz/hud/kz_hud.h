@@ -48,6 +48,10 @@ public:
 	// Requires MultiAddonManager to be available, unless kz_force_mhud is set.
 	static bool IsMHUDAvailable();
 
+	// Тип худа: 0 = Standard (HTML-панель), 1 = MHUD (particle-оверлей). Персистентный int-pref.
+	int GetHudType();
+	void SetHudType(int type);
+
 	static void PrecacheParticles(IEntityResourceManifest *pResourceManifest);
 	// Draw the panel from a player to a specific target.
 	static void DrawPanels(KZPlayer *player, KZPlayer *target);

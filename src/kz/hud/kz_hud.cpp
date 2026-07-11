@@ -57,8 +57,8 @@ void KZHUDService::OnProcessMovement()
 {
 	if (sv_suppress_viewpunch.IsValidRef())
 	{
-		// Particle-путь активен при доступных ассетах и хотя бы одном включённом элементе.
-		bool wantParticles = KZHUDService::IsMHUDAvailable()
+		// Particle-путь активен при выбранном MHUD, доступных ассетах и хотя бы одном включённом элементе.
+		bool wantParticles = KZHUDService::IsMHUDAvailable() && this->GetHudType() == 1
 							 && (this->IsMHUDSpeedEnabled() || this->IsMHUDPrespeedEnabled() || this->IsMHUDTimerEnabled()
 								 || this->IsMHUDKeysEnabled());
 		if (wantParticles != this->particlesActive)
@@ -340,7 +340,8 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	KZHUDService *cfg = target->hudService;
 
 	bool available = KZHUDService::IsMHUDAvailable();
-	bool useParticles = available && target->IsAlive();
+	// hudType: 0 = Standard (HTML-панель), 1 = MHUD (particle-оверлей).
+	bool useParticles = available && target->IsAlive() && cfg->GetHudType() == 1;
 
 	if (useParticles)
 	{
@@ -349,7 +350,7 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	}
 	else
 	{
-		// Гасим particle'ы: MHUD недоступен или игрок мёртв.
+		// Гасим particle'ы: MHUD недоступен, не выбран или игрок мёртв.
 		target->hudService->DestroyAllParticles();
 	}
 
@@ -366,8 +367,8 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 
 	std::string htmlText;
 
-	// HTML-фолбэк рисуем только когда аддонов вообще нет (нет MultiAddonManager/ассетов).
-	bool needHtml = !available;
+	// HTML-панель: выбран Standard-тип ИЛИ аддонов вообще нет (нет MultiAddonManager/ассетов).
+	bool needHtml = !available || cfg->GetHudType() == 0;
 	if (needHtml)
 	{
 		// HTML версия C, masterMode=true (per-element тумблеры).

@@ -213,6 +213,34 @@ void KZHUDService::OnClientDisconnect()
 
 // === Preferences ====================================================================
 
+// === Тип худа (hudType) ============================================================
+// 0 = Standard (классическая HTML-панель по центру), 1 = MHUD (particle-оверлей).
+// Нарисованный cyberkz-HUD выпилен в cyb.27 — Standard теперь всегда HTML-путь.
+
+int KZHUDService::GetHudType()
+{
+	// Читаем из настроек источника (сам игрок / спектатор).
+	// Миграция: если hudType не задан и mhudMaster=true (старый конфиг) → возвращаем 1 (MHUD).
+	auto *opts = this->MHUDSettingsSource()->optionService;
+	int stored = opts->GetPreferenceInt("hudType", -1);
+	if (stored == -1)
+	{
+		// Первый запрос — мигрируем из mhudMaster.
+		bool legacyMaster = opts->GetPreferenceBool("mhudMaster", false);
+		int migrated = legacyMaster ? 1 : 0;
+		opts->SetPreferenceInt("hudType", migrated);
+		return migrated;
+	}
+	return stored;
+}
+
+void KZHUDService::SetHudType(int type)
+{
+	this->MHUDSettingsSource()->optionService->SetPreferenceInt("hudType", type);
+	// При смене типа уничтожаем все particle'ы, чтобы корректно переключить состояние.
+	this->DestroyAllParticles();
+}
+
 // Все тумблеры/раскладка — НАСТРОЙКИ: читаем из источника настроек (сам игрок/спектатор),
 // а не из данных наблюдаемого. Иначе у спектатора «прыгал» бы HUD при смене цели.
 // Per-element тумблеры.
@@ -904,6 +932,9 @@ static const HUDMenuToggle s_hudToggles[] = {
 	{"HUD - Menu Label Outline",      "hudOutline",     true,  "MHUD - Outline Enabled",       "MHUD - Outline Disabled"      },
 };
 
+// info-тег специального первого пункта (тип худа).
+static constexpr const char *HUD_MENU_TYPE_TAG = "__hudType__";
+
 // Колбэк выбора пункта меню !hud.
 static_function void OnHUDMenuSelect(MenuHandle menu, int slot, int item)
 {
@@ -919,6 +950,23 @@ static_function void OnHUDMenuSelect(MenuHandle menu, int slot, int item)
 	}
 
 	const char *lang = p->languageService->GetLanguage();
+
+	// Первый пункт — переключение hudType (Standard ↔ MHUD).
+	if (KZ_STREQ(key, HUD_MENU_TYPE_TAG))
+	{
+		int current = p->hudService->GetHudType();
+		int next = (current == 0) ? 1 : 0;
+		p->hudService->SetHudType(next);
+		if (next == 1 && !KZHUDService::IsMHUDAvailable())
+		{
+			p->languageService->PrintChat(true, false, "MHUD - Unavailable");
+		}
+		const char *typePhrase = (next == 0) ? "HUD - Menu Type Standard" : "HUD - Menu Type MHUD";
+		std::string typeName = KZLanguageService::PrepareMessageWithLang(lang, typePhrase);
+		std::string typeLabel = KZLanguageService::PrepareMessageWithLang(lang, "HUD - Menu Label Type", typeName.c_str());
+		g_pMenus->SetItemText(menu, item, typeLabel.c_str());
+		return;
+	}
 
 	// Per-element тумблеры.
 	for (const auto &t : s_hudToggles)
@@ -976,7 +1024,14 @@ void KZHUDService::OpenHUDMenu()
 	auto *opts = this->MHUDSettingsSource()->optionService;
 	const char *lang = this->player->languageService->GetLanguage();
 
-	// Per-element тумблеры.
+	// Пункт 1: тип худа (int-pref).
+	int hudType = this->GetHudType();
+	const char *typePhrase = (hudType == 0) ? "HUD - Menu Type Standard" : "HUD - Menu Type MHUD";
+	std::string typeName = KZLanguageService::PrepareMessageWithLang(lang, typePhrase);
+	std::string typeText = KZLanguageService::PrepareMessageWithLang(lang, "HUD - Menu Label Type", typeName.c_str());
+	g_pMenus->AddItem(m, typeText.c_str(), HUD_MENU_TYPE_TAG, false);
+
+	// Пункты 2-9: per-element тумблеры.
 	for (const auto &t : s_hudToggles)
 	{
 		bool on = opts->GetPreferenceBool(t.prefKey, t.defaultValue);
