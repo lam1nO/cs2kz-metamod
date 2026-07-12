@@ -24,7 +24,7 @@ namespace KZ::replaysystem::bot
 	void InitializeBotForReplay(const ReplayHeader &header);
 
 	// Bot spectator handling
-	void SpectateBot(KZPlayer *spectator);
+	bool SpectateBot(KZPlayer *spectator);
 } // namespace KZ::replaysystem::bot
 
 #endif // KZ_REPLAYBOT_H

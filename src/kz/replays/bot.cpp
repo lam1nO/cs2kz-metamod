@@ -155,13 +155,15 @@ namespace KZ::replaysystem::bot
 		}
 	}
 
-	void SpectateBot(KZPlayer *spectator)
+	// true — спектейт бота реально включился (SpectatePlayer гейтится CanSpectate).
+	bool SpectateBot(KZPlayer *spectator)
 	{
 		KZPlayer *botPlayer = GetBotPlayer();
-		if (botPlayer && spectator)
+		if (!botPlayer || !spectator)
 		{
-			spectator->specService->SpectatePlayer(botPlayer);
+			return false;
 		}
+		return spectator->specService->SpectatePlayer(botPlayer);
 	}
 
 } // namespace KZ::replaysystem::bot

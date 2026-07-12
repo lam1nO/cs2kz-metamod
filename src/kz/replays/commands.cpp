@@ -155,9 +155,12 @@ namespace KZ::replaysystem::commands
 				bot::InitializeBotForReplay(replay->header);
 				playback::StartReplay();
 				playback::InitializeWeapons();
-				bot::SpectateBot(player);
-				// Авто-открытие меню управления у инициатора (!rpmenu — переоткрыть вручную).
-				menu::OpenReplayControlsMenu(player);
+				// Авто-открытие меню — только если спектейт бота реально включился
+				// (иначе живому игроку меню перекроет управление раном); !rpmenu — вручную.
+				if (bot::SpectateBot(player))
+				{
+					menu::OpenReplayControlsMenu(player);
+				}
 			}),
 			// Failure callback (runs on main thread via ProcessAsyncLoadCompletion)
 			data::LoadFailureCallback([playerUserID](const char* error) {
