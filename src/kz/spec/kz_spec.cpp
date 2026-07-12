@@ -1,4 +1,5 @@
 #include "kz_spec.h"
+#include "kz_spec_menu.h"
 #include "../timer/kz_timer.h"
 #include "kz/language/kz_language.h"
 #include "utils/simplecmds.h"
@@ -116,8 +117,9 @@ bool KZSpecService::SpectatePlayer(const char *playerName)
 	{
 		return this->SpectatePlayer(candidates[0]);
 	}
-	// Неоднозначная подстрока: пока фолбэк — первый совпавший (Task 2 заменит на меню выбора).
-	return this->SpectatePlayer(candidates[0]);
+	// Неоднозначная подстрока — меню выбора (внутри фолбэк, если cs2menus не загружен).
+	KZ::spec::OpenSpectateMenu(this->player, candidates, MIN(total, KZ_SPEC_MENU_MAX_ITEMS), total);
+	return true;
 }
 
 static_function f64 TeleportObserver(CPlayerUserId userID, Vector origin, QAngle angles)

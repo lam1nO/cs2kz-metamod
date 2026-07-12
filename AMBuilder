@@ -180,6 +180,7 @@ def configure_main(sdk_target, sdk, cxx):
     os.path.join(builder.sourcePath, 'src', 'kz', 'savedrun', 'kz_savedrun.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'saveloc', 'kz_saveloc.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'spec', 'kz_spec.cpp'),
+    os.path.join(builder.sourcePath, 'src', 'kz', 'spec', 'kz_spec_menu.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'goto', 'kz_goto.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'style', 'kz_style_manager.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'telemetry', 'kz_telemetry.cpp'),
