@@ -778,4 +778,44 @@
 		"en"		"{grey}Downloading replay from central storage..."
 		"ru"		"{grey}Скачиваем повтор из центрального хранилища..."
 	}
+	"Replay Menu - Title"
+	{
+		"en"		"Replay controls"
+		"ru"		"Управление реплеем"
+	}
+	"Replay Menu - Pause"
+	{
+		"en"		"Pause"
+		"ru"		"Пауза"
+	}
+	"Replay Menu - Resume"
+	{
+		"en"		"Resume"
+		"ru"		"Продолжить"
+	}
+	"Replay Menu - Restart"
+	{
+		"en"		"From start"
+		"ru"		"С начала"
+	}
+	"Replay Menu - Back10"
+	{
+		"en"		"-10 sec"
+		"ru"		"-10 сек"
+	}
+	"Replay Menu - Fwd10"
+	{
+		"en"		"+10 sec"
+		"ru"		"+10 сек"
+	}
+	"Replay Menu - Back30"
+	{
+		"en"		"-30 sec"
+		"ru"		"-30 сек"
+	}
+	"Replay Menu - Fwd30"
+	{
+		"en"		"+30 sec"
+		"ru"		"+30 сек"
+	}
 }
