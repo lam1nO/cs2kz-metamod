@@ -220,6 +220,12 @@ void KZPlayer::OnPhysicsSimulatePost()
 	{
 		KZHUDService::DrawPanels(this, this);
 	}
+	else
+	{
+		// Dead and not spectating anyone (death cam on own corpse / freeroam):
+		// destroy particles here, otherwise a frozen MHUD stays up until the next DrawPanels.
+		this->hudService->DestroyAllParticles();
+	}
 	this->measureService->OnPhysicsSimulatePost();
 	this->quietService->OnPhysicsSimulatePost();
 	this->profileService->OnPhysicsSimulatePost();

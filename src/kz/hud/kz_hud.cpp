@@ -341,7 +341,11 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 
 	bool available = KZHUDService::IsMHUDAvailable();
 	// hudType: 0 = Standard (HTML-панель), 1 = MHUD (particle-оверлей).
-	bool useParticles = available && target->IsAlive() && cfg->GetHudType() == 1;
+	// A spectator (player != target) also takes the particle path: data comes from the
+	// observed player (mhudSource, see kz_hud.h), settings stay the spectator's own.
+	// The IsAlive gate only matters when target draws for itself (player == target);
+	// a dead player with no spectate target is cleaned up separately in KZPlayer::OnPhysicsSimulatePost.
+	bool useParticles = available && cfg->GetHudType() == 1 && (target->IsAlive() || player != target);
 
 	if (useParticles)
 	{
@@ -367,8 +371,11 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 
 	std::string htmlText;
 
-	// HTML-панель: выбран Standard-тип ИЛИ аддонов вообще нет (нет MultiAddonManager/ассетов).
-	bool needHtml = !available || cfg->GetHudType() == 0;
+	// HTML fallback: Standard type is selected, OR no addons are available at all
+	// (no MultiAddonManager/assets), OR the particle path isn't active for some other
+	// reason (upstream parity safety net). needHtml and useParticles must stay mutually
+	// exclusive, otherwise the recipient ends up with no HUD at all.
+	bool needHtml = !available || cfg->GetHudType() == 0 || !useParticles;
 	if (needHtml)
 	{
 		// HTML версия C, masterMode=true (per-element тумблеры).
