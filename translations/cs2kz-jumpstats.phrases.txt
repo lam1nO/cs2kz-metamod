@@ -1128,4 +1128,98 @@
 		"ua"		"{grey}Показ статистики невдалих стрибків в консолі вимкнено."
 		"es"		"{grey}Reporte de estadísticas de fallo en console desactivado."
 	}
+
+	// =====[ MENU !js ]=====
+	"Jumpstats - Menu Label Reporting"
+	{
+		"en"		"Chat reporting"
+		"ru"		"Отчёты в чат"
+	}
+	"Jumpstats - Menu Label MinTier"
+	{
+		"en"		"Minimum tier (chat)"
+		"ru"		"Мин. тир (чат)"
+	}
+	"Jumpstats - Menu Label SoundMinTier"
+	{
+		"en"		"Minimum tier (sound)"
+		"ru"		"Мин. тир (звук)"
+	}
+	"Jumpstats - Menu Label Volume"
+	{
+		"en"		"Volume"
+		"ru"		"Громкость"
+	}
+	"Jumpstats - Menu Label BroadcastMinTier"
+	{
+		"en"		"Broadcast minimum tier"
+		"ru"		"Мин. тир трансляции"
+	}
+	"Jumpstats - Menu Label BroadcastSoundTier"
+	{
+		"en"		"Broadcast minimum tier (sound)"
+		"ru"		"Мин. тир трансляции (звук)"
+	}
+	"Jumpstats - Menu Label Failstats"
+	{
+		"en"		"Failstats"
+		"ru"		"Провальные прыжки"
+	}
+	"Jumpstats - Menu Label ExtendedChatStats"
+	{
+		"en"		"Extended chat stats"
+		"ru"		"Расширенная статистика в чате"
+	}
+	"Jumpstats - Menu Label MinTierConsole"
+	{
+		"en"		"Minimum tier (console)"
+		"ru"		"Мин. тир (консоль)"
+	}
+
+	// Tier names for the !js menu. No localized tier names existed before (tiers are
+	// plain English words in every language, see "Jumpstats Option - Tier Hint"), so ru
+	// keeps the English word by the same convention.
+	"Jumpstats - Tier Name None"
+	{
+		"en"		"None"
+		"ru"		"None"
+	}
+	"Jumpstats - Tier Name Meh"
+	{
+		"en"		"Meh"
+		"ru"		"Meh"
+	}
+	"Jumpstats - Tier Name Impressive"
+	{
+		"en"		"Impressive"
+		"ru"		"Impressive"
+	}
+	"Jumpstats - Tier Name Perfect"
+	{
+		"en"		"Perfect"
+		"ru"		"Perfect"
+	}
+	"Jumpstats - Tier Name Godlike"
+	{
+		"en"		"Godlike"
+		"ru"		"Godlike"
+	}
+	"Jumpstats - Tier Name Ownage"
+	{
+		"en"		"Ownage"
+		"ru"		"Ownage"
+	}
+	"Jumpstats - Tier Name Wrecker"
+	{
+		"en"		"Wrecker"
+		"ru"		"Wrecker"
+	}
+
+	// Chat fallback line for !js when the menu engine isn't loaded (one per preference).
+	"Jumpstats - Menu Summary Line"
+	{
+		"#format"	"line:s"
+		"en"		"{grey}{line}"
+		"ru"		"{grey}{line}"
+	}
 }

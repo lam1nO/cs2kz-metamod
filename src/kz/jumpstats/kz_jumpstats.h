@@ -571,4 +571,8 @@ public:
 	void ToggleFailstatsConsoleReporting();
 	void SetJumpstatsVolume(f32 volume);
 	void ToggleJumpstatsReporting();
+
+	// kz_js — interactive jumpstats preferences menu (cs2menus).
+	// Falls back to a chat summary of current preferences if the menu engine isn't loaded.
+	void OpenJumpstatsMenu();
 };

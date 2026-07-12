@@ -5,6 +5,11 @@
 #include "utils/simplecmds.h"
 #include "utils/utils.h"
 
+#include <vendor/mm-cs2menus/src/public/ics2menus.h>
+
+// Menu engine (defined in kz_hud.cpp); may be nullptr if the plugin isn't loaded.
+extern ICS2Menus *g_pMenus;
+
 bool KZJumpstatsService::GetDistTierFromString(const char *tierString, DistanceTier &outTier)
 {
 	if (!tierString || !V_stricmp("", tierString))
@@ -375,4 +380,183 @@ SCMD(kz_jumpstats, SCFL_JUMPSTATS | SCFL_PREFERENCE)
 	return MRES_SUPERCEDE;
 }
 
-SCMD_LINK(kz_js, kz_jumpstats);
+// === Interactive kz_js menu (cs2menus) ===============================================
+
+// Phrase keys for tier names. No localized tier names existed before this menu (tiers
+// appear as plain English words in every language, see "Jumpstats Option - Tier Hint"),
+// so these are new keys; en/ru currently share the English word by fork convention.
+static const char *s_tierNameKeys[DISTANCETIER_COUNT] = {
+	"Jumpstats - Tier Name None",       "Jumpstats - Tier Name Meh",     "Jumpstats - Tier Name Impressive",
+	"Jumpstats - Tier Name Perfect",    "Jumpstats - Tier Name Godlike", "Jumpstats - Tier Name Ownage",
+	"Jumpstats - Tier Name Wrecker",
+};
+
+// Volume presets cycled through by the jsVolume menu item.
+static constexpr f32 s_volumePresets[] = {0.0f, 0.25f, 0.5f, 0.75f, 1.0f};
+
+enum class JSMenuItemKind : u8
+{
+	Toggle,    // bool preference: on/off
+	TierCycle, // int preference: 0..DISTANCETIER_COUNT-1, cycles
+	Volume,    // float preference: cycles through s_volumePresets
+};
+
+struct JSMenuItem
+{
+	const char *label;   // phrase key for the item label
+	const char *prefKey; // preference name in optionService, also the menu item's info tag
+	JSMenuItemKind kind;
+	i64 defaultInt;   // default for Toggle (0/1) and TierCycle
+	f32 defaultFloat; // default for Volume
+};
+
+// kz_js menu items, in display order.
+static const JSMenuItem s_jsMenuItems[] = {
+	{"Jumpstats - Menu Label Reporting",         "jsReporting",             JSMenuItemKind::Toggle,    1,                       0.0f },
+	{"Jumpstats - Menu Label MinTier",           "jsMinTier",               JSMenuItemKind::TierCycle, DistanceTier_Impressive, 0.0f },
+	{"Jumpstats - Menu Label SoundMinTier",      "jsSoundMinTier",          JSMenuItemKind::TierCycle, DistanceTier_Impressive, 0.0f },
+	{"Jumpstats - Menu Label Volume",            "jsVolume",                JSMenuItemKind::Volume,    0,                       0.75f},
+	{"Jumpstats - Menu Label BroadcastMinTier",  "jsBroadcastMinTier",      JSMenuItemKind::TierCycle, DistanceTier_Godlike,    0.0f },
+	{"Jumpstats - Menu Label BroadcastSoundTier","jsBroadcastSoundMinTier", JSMenuItemKind::TierCycle, DistanceTier_Godlike,    0.0f },
+	{"Jumpstats - Menu Label Failstats",         "jsFailstats",             JSMenuItemKind::Toggle,    1,                       0.0f },
+	{"Jumpstats - Menu Label ExtendedChatStats", "jsExtendedChatStats",     JSMenuItemKind::Toggle,    0,                       0.0f },
+	{"Jumpstats - Menu Label MinTierConsole",    "jsMinTierConsole",        JSMenuItemKind::TierCycle, DistanceTier_Impressive, 0.0f },
+};
+
+// "<label>: <value>" text for one menu item, from the current preference.
+static_function std::string JSMenuItemText(KZPlayer *p, const JSMenuItem &it, const char *lang)
+{
+	std::string label = KZLanguageService::PrepareMessageWithLang(lang, it.label);
+	char text[128];
+	switch (it.kind)
+	{
+		case JSMenuItemKind::Toggle:
+		{
+			bool on = p->optionService->GetPreferenceBool(it.prefKey, it.defaultInt != 0);
+			std::string state = KZLanguageService::PrepareMessageWithLang(lang, on ? "HUD - Menu On" : "HUD - Menu Off");
+			V_snprintf(text, sizeof(text), "%s: %s", label.c_str(), state.c_str());
+			break;
+		}
+		case JSMenuItemKind::TierCycle:
+		{
+			i64 tier = Clamp(p->optionService->GetPreferenceInt(it.prefKey, it.defaultInt), (i64)0, (i64)(DISTANCETIER_COUNT - 1));
+			std::string tierName = KZLanguageService::PrepareMessageWithLang(lang, s_tierNameKeys[tier]);
+			V_snprintf(text, sizeof(text), "%s: %s", label.c_str(), tierName.c_str());
+			break;
+		}
+		case JSMenuItemKind::Volume:
+		{
+			f32 vol = static_cast<f32>(p->optionService->GetPreferenceFloat(it.prefKey, it.defaultFloat));
+			V_snprintf(text, sizeof(text), "%s: %.0f%%", label.c_str(), vol * 100.0f);
+			break;
+		}
+	}
+	return std::string(text);
+}
+
+// Chat fallback for when the menu engine isn't loaded: current value of every item.
+static_function void PrintJumpstatsMenuSummary(KZPlayer *p)
+{
+	const char *lang = p->languageService->GetLanguage();
+	for (const auto &it : s_jsMenuItems)
+	{
+		p->languageService->PrintChat(true, false, "Jumpstats - Menu Summary Line", JSMenuItemText(p, it, lang).c_str());
+	}
+}
+
+// Menu item select callback (pattern: OnHUDMenuSelect, particles.cpp).
+static_function void OnJSMenuSelect(MenuHandle menu, int slot, int item)
+{
+	KZPlayer *p = g_pKZPlayerManager->ToPlayer(CPlayerSlot(slot));
+	if (!p)
+	{
+		return;
+	}
+	const char *key = g_pMenus->GetItemInfo(menu, item);
+	if (!key || !key[0])
+	{
+		return;
+	}
+	for (const auto &it : s_jsMenuItems)
+	{
+		if (!KZ_STREQ(key, it.prefKey))
+		{
+			continue;
+		}
+		switch (it.kind)
+		{
+			case JSMenuItemKind::Toggle:
+			{
+				bool next = !p->optionService->GetPreferenceBool(it.prefKey, it.defaultInt != 0);
+				p->optionService->SetPreferenceBool(it.prefKey, next);
+				break;
+			}
+			case JSMenuItemKind::TierCycle:
+			{
+				i64 next = (p->optionService->GetPreferenceInt(it.prefKey, it.defaultInt) + 1) % DISTANCETIER_COUNT;
+				p->optionService->SetPreferenceInt(it.prefKey, next);
+				break;
+			}
+			case JSMenuItemKind::Volume:
+			{
+				f32 cur = static_cast<f32>(p->optionService->GetPreferenceFloat(it.prefKey, it.defaultFloat));
+				f32 next = s_volumePresets[0]; // wrap back to the first preset if already at/above the last
+				for (f32 v : s_volumePresets)
+				{
+					if (v > cur + 0.001f)
+					{
+						next = v;
+						break;
+					}
+				}
+				p->optionService->SetPreferenceFloat(it.prefKey, next);
+				break;
+			}
+		}
+		std::string text = JSMenuItemText(p, it, p->languageService->GetLanguage());
+		g_pMenus->SetItemText(menu, item, text.c_str());
+		return;
+	}
+}
+
+void KZJumpstatsService::OpenJumpstatsMenu()
+{
+	if (g_pMenus == nullptr)
+	{
+		PrintJumpstatsMenuSummary(this->player);
+		return;
+	}
+	int slot = this->player->GetPlayerSlot().Get();
+	if (slot < 0 || slot > MAXPLAYERS)
+	{
+		return;
+	}
+	static MenuHandle s_jsMenu[MAXPLAYERS + 1] = {};
+	if (s_jsMenu[slot] != kInvalidMenuHandle)
+	{
+		g_pMenus->DestroyMenu(s_jsMenu[slot]);
+		s_jsMenu[slot] = kInvalidMenuHandle;
+	}
+	MenuHandle m = g_pMenus->CreateMenu(MenuType::Default, "Jumpstats", &OnJSMenuSelect);
+	if (m == kInvalidMenuHandle)
+	{
+		PrintJumpstatsMenuSummary(this->player);
+		return;
+	}
+	const char *lang = this->player->languageService->GetLanguage();
+	for (const auto &it : s_jsMenuItems)
+	{
+		std::string text = JSMenuItemText(this->player, it, lang);
+		g_pMenus->AddItem(m, text.c_str(), it.prefKey, false);
+	}
+	g_pMenus->SetCloseOnSelect(m, false); // item text updates live
+	s_jsMenu[slot] = m;
+	g_pMenus->DisplayMenu(m, slot, 0);
+}
+
+SCMD(kz_js, SCFL_JUMPSTATS | SCFL_PREFERENCE)
+{
+	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
+	player->jumpstatsService->OpenJumpstatsMenu();
+	return MRES_SUPERCEDE;
+}
