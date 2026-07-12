@@ -98,16 +98,20 @@ void KZHUDService::Reset()
 	this->DestroyAllParticles();
 }
 
-std::string KZHUDService::GetSpeedText(const char *language)
+std::string KZHUDService::GetSpeedText(const char *language, KZPlayer *dataSource)
 {
+	// dataSource — источник ДАННЫХ (скорость/перф/крауч-джамп), settings (цвета, через
+	// GetMHUDColorPref/MHUDSettingsSource) — всегда this (получатель). При вызове со
+	// спектатора: cfg->GetSpeedText(language, player) — тот же контракт, что в BuildVersionCHud.
+	KZPlayer *src = dataSource ? dataSource : this->player;
 	Vector velocity, baseVelocity;
-	this->player->GetVelocity(&velocity);
-	this->player->GetBaseVelocity(&baseVelocity);
+	src->GetVelocity(&velocity);
+	src->GetBaseVelocity(&baseVelocity);
 	velocity += baseVelocity;
 	// Keep the takeoff velocity on for a while after landing so the speed values flicker less.
-	if ((this->player->GetPlayerPawn()->m_fFlags & FL_ONGROUND
-		 && g_pKZUtils->GetServerGlobals()->curtime - this->player->landingTime > KZ_HUD_ON_GROUND_THRESHOLD)
-		|| (this->player->GetPlayerPawn()->m_MoveType == MOVETYPE_LADDER && !player->IsButtonPressed(IN_JUMP)))
+	if ((src->GetPlayerPawn()->m_fFlags & FL_ONGROUND
+		 && g_pKZUtils->GetServerGlobals()->curtime - src->landingTime > KZ_HUD_ON_GROUND_THRESHOLD)
+		|| (src->GetPlayerPawn()->m_MoveType == MOVETYPE_LADDER && !src->IsButtonPressed(IN_JUMP)))
 	{
 		return KZLanguageService::PrepareMessageWithLang(language, "HUD - Speed Text", velocity.Length2D());
 	}
@@ -116,17 +120,17 @@ std::string KZHUDService::GetSpeedText(const char *language)
 	const Color jumpbugCol = this->GetMHUDColorPref("mhudPrespeedJumpbugColor", Color(0xFF, 0xFF, 0x20, 0xFF));
 	const Color cjCol = this->GetMHUDColorPref("mhudSpeedCjColor", Color(0x71, 0xEE, 0xB8, 0xFF));
 	Color tintCol = baseCol;
-	if (this->player->IsPerfing() && !this->player->possibleLadderHop && !this->player->takeoffFromLadder)
+	if (src->IsPerfing() && !src->possibleLadderHop && !src->takeoffFromLadder)
 	{
-		tintCol = this->fromDuckbug ? jumpbugCol : perfCol;
+		tintCol = src->hudService->fromDuckbug ? jumpbugCol : perfCol;
 	}
 	char colorBuf[24];
 	V_snprintf(colorBuf, sizeof(colorBuf), "<font color='#%02x%02x%02x'>", tintCol.r(), tintCol.g(), tintCol.b());
 	char cjBuf[24];
 	V_snprintf(cjBuf, sizeof(cjBuf), "<font color='#%02x%02x%02x'>", cjCol.r(), cjCol.g(), cjCol.b());
-	std::string crouchJumpingText = this->crouchJumping ? std::string(" ") + cjBuf + "C</font>" : "";
+	std::string crouchJumpingText = src->hudService->crouchJumping ? std::string(" ") + cjBuf + "C</font>" : "";
 	return KZLanguageService::PrepareMessageWithLang(language, "HUD - Speed Text (Takeoff)", velocity.Length2D(), colorBuf,
-													 this->player->takeoffVelocity.Length2D(), crouchJumpingText.c_str());
+													 src->takeoffVelocity.Length2D(), crouchJumpingText.c_str());
 }
 
 std::string KZHUDService::GetKeyText(const char *language)
@@ -341,20 +345,30 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 
 	bool available = KZHUDService::IsMHUDAvailable();
 	// hudType: 0 = Standard (HTML-панель), 1 = MHUD (particle-оверлей).
-	// A spectator (player != target) also takes the particle path: data comes from the
-	// observed player (mhudSource, see kz_hud.h), settings stay the spectator's own.
-	// The IsAlive gate only matters when target draws for itself (player == target);
-	// a dead player with no spectate target is cleaned up separately in KZPlayer::OnPhysicsSimulatePost.
-	bool useParticles = available && cfg->GetHudType() == 1 && (target->IsAlive() || player != target);
+	//
+	// Particle-путь — ТОЛЬКО для живого владельца (player == target && target->IsAlive()).
+	// Причина не в правах, а в движке: у CS2 нет честного screen-space API для HUD поверх
+	// экрана произвольного клиента — particle-MHUD физически позиционируется относительно
+	// взгляда ВЛАДЕЛЬЦА (это апстримный контракт, апстримный IsAlive-гейт был ровно про
+	// «owner жив и смотрит своими глазами»). cyb.34 разрешил тот же путь спектатору
+	// (player != target) на тех же particle-хендлах: там позиция считается по взгляду
+	// НАБЛЮДАЕМОГО, а не самого спектатора, и при поворотах цели оверлей уезжает за
+	// экран спектатора (живой баг cyb.36). Поэтому спектатор — всегда HTML: needHtml
+	// ниже подхватывает это автоматически, т.к. useParticles=false как только player != target.
+	// Мёртвый игрок без цели наблюдения (свой труп / фриролл) сюда вообще не попадает —
+	// DrawPanels для него не вызывается, particle'ы гасятся отдельно в
+	// KZPlayer::OnPhysicsSimulatePost.
+	bool useParticles = available && cfg->GetHudType() == 1 && player == target && target->IsAlive();
 
 	if (useParticles)
 	{
-		// player = источник данных (наблюдаемый при спектировании).
+		// player == target здесь всегда (см. гейт выше) — источник данных — сам владелец.
 		target->hudService->UpdateParticles(player);
 	}
 	else
 	{
-		// Гасим particle'ы: MHUD недоступен, не выбран или игрок мёртв.
+		// Гасим particle'ы: MHUD недоступен, не выбран, игрок мёртв, либо это спектатор
+		// (particle-путь спектатору принципиально не положен, см. комментарий выше).
 		target->hudService->DestroyAllParticles();
 	}
 
@@ -373,16 +387,20 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 
 	// HTML fallback: Standard type is selected, OR no addons are available at all
 	// (no MultiAddonManager/assets), OR the particle path isn't active for some other
-	// reason (upstream parity safety net). needHtml and useParticles must stay mutually
-	// exclusive, otherwise the recipient ends up with no HUD at all.
+	// reason — target is dead, or this is a spectator (player != target, see the gate
+	// above). needHtml and useParticles must stay mutually exclusive, otherwise the
+	// recipient ends up with no HUD at all.
 	bool needHtml = !available || cfg->GetHudType() == 0 || !useParticles;
 	if (needHtml)
 	{
 		// HTML версия C, masterMode=true (per-element тумблеры).
 		if (cfg->IsCompactPanel())
 		{
+			// Таймер — чистые данные, без per-игрочных настроек, берём прямо с наблюдаемого.
+			// Скорость подмешивает цвета (настройка получателя) — вызываем на cfg с явным
+			// dataSource=player, иначе цвета текли бы с наблюдаемого вместо спектатора.
 			std::string timerText = player->hudService->GetTimerText(language);
-			std::string speedText = player->hudService->GetSpeedText(language);
+			std::string speedText = cfg->GetSpeedText(language, player);
 			if (!timerText.empty() && !speedText.empty())
 			{
 				htmlText = timerText + "<br>" + speedText;

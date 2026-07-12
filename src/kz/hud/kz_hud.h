@@ -138,7 +138,9 @@ public:
 	static constexpr i32 MHUD_KEY_COUNT = 6;
 
 private:
-	std::string GetSpeedText(const char *language = KZ_DEFAULT_LANGUAGE);
+	// dataSource = источник данных (наблюдаемый при спектировании); nullptr → сам игрок.
+	// Настройки (цвета perf/CJ) всегда идут с this (получателя) — см. GetMHUDColorPref.
+	std::string GetSpeedText(const char *language = KZ_DEFAULT_LANGUAGE, KZPlayer *dataSource = nullptr);
 	std::string GetKeyText(const char *language = KZ_DEFAULT_LANGUAGE);
 	std::string GetCheckpointText(const char *language = KZ_DEFAULT_LANGUAGE);
 	std::string GetTimerText(const char *language = KZ_DEFAULT_LANGUAGE);
