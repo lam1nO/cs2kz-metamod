@@ -198,15 +198,17 @@ void KZTimerModeService::OnStopTouchGround()
 	Vector velocity;
 	this->player->GetVelocity(&velocity);
 
-	// Под legacy-прыжком (sv_legacy_jump=true) базовый KZPlayer inPerf НЕ ставит (он делает это
-	// только для modern/subtick). Поэтому детектим перф сами по времени на земле — как CKZ.
+	// Перф в KZT — прыжок в окне KZT_PERF_WINDOW после приземления, детектим по времени на
+	// земле (как CKZ). inPerf ПЕРЕЗАПИСЫВАЕМ: Detour_OnJumpLegacy уже поставил его по широкой
+	// эвристике !oldWalkMoved (~целый тик), и без перезаписи HUD красил «перфы», к которым
+	// кап/высота не применялись. Как в GOKZ: один флаг гейтит и кап, и HUD, и старт таймера.
 	// Высоту полной 55.83 на бхопе даёт сам legacy-прыжок движка; здесь — только скорость и
 	// перф-высота (выравнивание origin для консистентности jumpstats).
 	f32 timeOnGround = this->player->takeoffTime - this->player->landingTime;
-	if (timeOnGround <= KZT_PERF_WINDOW && !this->player->possibleLadderHop)
+	bool perf = this->player->jumped && timeOnGround <= KZT_PERF_WINDOW && !this->player->possibleLadderHop && !this->player->takeoffFromLadder;
+	this->player->inPerf = perf;
+	if (perf)
 	{
-		this->player->inPerf = true;
-
 		// gokz TweakJump: режем горизонталь до PERF_SPEED_CAP (KZTimer-механика, не CKZ-логарифм).
 		f32 horizSpeed = velocity.Length2D();
 		if (horizSpeed > PERF_SPEED_CAP)
