@@ -12,7 +12,7 @@
 
 #include "tier0/memdbgon.h"
 
-// Меню-движок cs2menus (определён в kz_hud.cpp); может быть nullptr, если плагин не загружен.
+// Меню-движок cs2menus (определён в cs2kz.cpp); может быть nullptr, если плагин не загружен.
 extern ICS2Menus *g_pMenus;
 
 // === Particle asset paths ============================================================

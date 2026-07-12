@@ -7,7 +7,7 @@
 
 #include <vendor/mm-cs2menus/src/public/ics2menus.h>
 
-// Menu engine (defined in kz_hud.cpp); may be nullptr if the plugin isn't loaded.
+// Menu engine (defined in cs2kz.cpp); may be nullptr if the plugin isn't loaded.
 extern ICS2Menus *g_pMenus;
 
 bool KZJumpstatsService::GetDistTierFromString(const char *tierString, DistanceTier &outTier)
