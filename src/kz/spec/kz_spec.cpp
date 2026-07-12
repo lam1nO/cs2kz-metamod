@@ -58,10 +58,43 @@ bool KZSpecService::IsSpectating(KZPlayer *target)
 	return this->GetSpectatedPlayer() == target;
 }
 
+i32 KZSpecService::CollectSpectateCandidates(const char *query, KZPlayer **candidates, i32 maxCandidates)
+{
+	KZPlayer *exact[MAXPLAYERS + 1] = {};
+	KZPlayer *sub[MAXPLAYERS + 1] = {};
+	i32 exactCount = 0;
+	i32 subCount = 0;
+	for (i32 i = 0; i <= MAXPLAYERS; i++)
+	{
+		KZPlayer *other = g_pKZPlayerManager->ToPlayer(i);
+		if (!other || other == this->player || !other->GetController())
+		{
+			continue;
+		}
+		if (other->GetController()->GetTeam() == CS_TEAM_SPECTATOR)
+		{
+			continue;
+		}
+		if (KZ_STREQI(other->GetName(), query))
+		{
+			exact[exactCount++] = other;
+		}
+		else if (V_stristr(other->GetName(), query))
+		{
+			sub[subCount++] = other;
+		}
+	}
+	KZPlayer **src = exactCount > 0 ? exact : sub;
+	i32 total = exactCount > 0 ? exactCount : subCount;
+	for (i32 i = 0; i < total && i < maxCandidates; i++)
+	{
+		candidates[i] = src[i];
+	}
+	return total;
+}
+
 bool KZSpecService::SpectatePlayer(const char *playerName)
 {
-	CCSPlayerController *controller = this->player->GetController();
-	KZPlayer *targetPlayer = nullptr;
 	if (KZ_STREQI(playerName, "@me"))
 	{
 		if (!this->player->IsAlive())
@@ -69,66 +102,22 @@ bool KZSpecService::SpectatePlayer(const char *playerName)
 			this->player->languageService->PrintChat(true, false, "Spectate Failure (Dead)");
 			return false;
 		}
-		targetPlayer = this->player;
+		return this->SpectatePlayer(this->player);
 	}
-	else
+
+	KZPlayer *candidates[KZ_SPEC_MENU_MAX_ITEMS] = {};
+	i32 total = this->CollectSpectateCandidates(playerName, candidates, KZ_SPEC_MENU_MAX_ITEMS);
+	if (total == 0)
 	{
-		// Prefer exact matches over partial matches.
-		for (i32 i = 0; i <= MAXPLAYERS; i++)
-		{
-			CBasePlayerController *controller = g_pKZPlayerManager->players[i]->GetController();
-			KZPlayer *otherPlayer = g_pKZPlayerManager->ToPlayer(i);
-
-			if (!controller || this->player == otherPlayer)
-			{
-				continue;
-			}
-
-			if (KZ_STREQI(otherPlayer->GetName(), playerName))
-			{
-				if (otherPlayer->GetController()->GetTeam() == CS_TEAM_SPECTATOR)
-				{
-					continue;
-				}
-				targetPlayer = otherPlayer;
-				break;
-			}
-		}
-		// If no exact match was found, try partial matches.
-		if (!targetPlayer)
-		{
-			for (i32 i = 0; i <= MAXPLAYERS; i++)
-			{
-				CBasePlayerController *controller = g_pKZPlayerManager->players[i]->GetController();
-				KZPlayer *otherPlayer = g_pKZPlayerManager->ToPlayer(i);
-
-				if (!controller || this->player == otherPlayer)
-				{
-					continue;
-				}
-
-				if (V_strstr(V_strlower((char *)otherPlayer->GetName()), V_strlower((char *)playerName)))
-				{
-					if (otherPlayer->GetController()->GetTeam() == CS_TEAM_SPECTATOR)
-					{
-						player->languageService->PrintChat(true, false, "Spectate Failure (Dead)");
-						return MRES_SUPERCEDE;
-					}
-					targetPlayer = otherPlayer;
-					break;
-				}
-			}
-		}
+		this->player->languageService->PrintChat(true, false, "Spectate Failure (Player Not Found)", playerName);
+		return false;
 	}
-
-	if (!targetPlayer)
+	if (total == 1)
 	{
-		player->languageService->PrintChat(true, false, "Spectate Failure (Player Not Found)", playerName);
-		return MRES_SUPERCEDE;
+		return this->SpectatePlayer(candidates[0]);
 	}
-
-	this->SpectatePlayer(targetPlayer);
-	return true;
+	// Неоднозначная подстрока: пока фолбэк — первый совпавший (Task 2 заменит на меню выбора).
+	return this->SpectatePlayer(candidates[0]);
 }
 
 static_function f64 TeleportObserver(CPlayerUserId userID, Vector origin, QAngle angles)
@@ -242,50 +231,44 @@ void KZTimerServiceEventListener_Spec::OnTimerStartPost(KZPlayer *player, u32 co
 SCMD(kz_spec, SCFL_SPEC)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
+	if (!player)
+	{
+		return MRES_SUPERCEDE;
+	}
+
+	// !spec <подстрока ника> — спек по совпадению (точное имя приоритетно).
+	if (args->ArgC() >= 2)
+	{
+		if (!player->specService->CanSpectate())
+		{
+			player->languageService->PrintChat(true, false, "Spectate Failure (Generic)");
+			return MRES_SUPERCEDE;
+		}
+		player->specService->SpectatePlayer(args->Arg(1));
+		return MRES_SUPERCEDE;
+	}
+
+	// !spec без аргументов — тоггл: спектатор возвращается в игру на сохранённое место.
+	if (player->GetController() && player->GetController()->GetTeam() == CS_TEAM_SPECTATOR)
+	{
+		if (player->specService->HasSavedPosition())
+		{
+			KZ::misc::JoinTeam(player, CS_TEAM_CT, true);
+		}
+		else
+		{
+			player->languageService->PrintChat(true, false, "Spec - No Saved Position");
+		}
+		return MRES_SUPERCEDE;
+	}
+
+	// Живой (или мёртвый вне спека) — свободная камера из своей точки.
 	if (!player->specService->CanSpectate())
 	{
 		player->languageService->PrintChat(true, false, "Spectate Failure (Generic)");
 		return MRES_SUPERCEDE;
 	}
-
-	// Count alive players and find first alive player
-	u32 numAlivePlayers = 0;
-	KZPlayer *firstAlivePlayer = nullptr;
-	for (i32 i = 0; i < MAXPLAYERS + 1; i++)
-	{
-		KZPlayer *otherPlayer = g_pKZPlayerManager->ToPlayer(i);
-		if (otherPlayer && otherPlayer->IsAlive() && otherPlayer != player)
-		{
-			numAlivePlayers++;
-			if (!firstAlivePlayer)
-			{
-				firstAlivePlayer = otherPlayer;
-			}
-		}
-	}
-
-	if (numAlivePlayers == 0 && args->ArgC() == 1)
-	{
-		player->specService->SpectatePlayer("@me");
-		return MRES_SUPERCEDE;
-	}
-
-	// Handle automatic spectating
-	if (numAlivePlayers == 1)
-	{
-		player->specService->SpectatePlayer(firstAlivePlayer);
-		return MRES_SUPERCEDE;
-	}
-
-	// If no target is provided, default to the first alive player.
-	if (args->ArgC() < 2)
-	{
-		player->specService->SpectatePlayer(firstAlivePlayer);
-		return MRES_SUPERCEDE;
-	}
-
-	// Handle explicit target
-	player->specService->SpectatePlayer(args->Arg(1));
+	player->specService->SpectatePlayer("@me");
 	return MRES_SUPERCEDE;
 }
 
