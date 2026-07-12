@@ -16,6 +16,7 @@
 #include "playback.h"
 #include "watcher.h"
 #include "cyb_replay_download.h"
+#include "menu.h"
 #include "utils/uuid.h"
 #include "utils/simplecmds.h"
 #include "kz/global/kz_global.h"
@@ -155,6 +156,8 @@ namespace KZ::replaysystem::commands
 				playback::StartReplay();
 				playback::InitializeWeapons();
 				bot::SpectateBot(player);
+				// Авто-открытие меню управления у инициатора (!rpmenu — переоткрыть вручную).
+				menu::OpenReplayControlsMenu(player);
 			}),
 			// Failure callback (runs on main thread via ProcessAsyncLoadCompletion)
 			data::LoadFailureCallback([playerUserID](const char* error) {
