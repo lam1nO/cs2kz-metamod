@@ -168,6 +168,11 @@ class KZTimerModeService : public KZModeService
 	bool airMoving {};
 	CUtlVector<Vector> tpmTriggerFixOrigins;
 
+	// Схлопывание прыжка: только первое свежее нажатие за тик доходит до движка (GO@128-паритет).
+	i64 lastJumpPressTick = -1;
+	u64 savedJumpBits[3] = {};
+	bool jumpSuppressed = false;
+
 public:
 	virtual void Reset() override;
 	virtual void Cleanup() override;
@@ -197,6 +202,8 @@ public:
 	virtual void OnTryPlayerMove(Vector *pFirstDest, trace_t *pFirstTrace, bool *bIsSurfing) override;
 	virtual void OnTryPlayerMovePost(Vector *pFirstDest, trace_t *pFirstTrace, bool *bIsSurfing) override;
 	virtual void OnTeleport(const Vector *newPosition, const QAngle *newAngles, const Vector *newVelocity) override;
+	virtual void OnCheckJumpButtonLegacy() override;
+	virtual void OnCheckJumpButtonLegacyPost() override;
 
 	virtual bool CanTouchTimerZone() override;
 	virtual bool OnTriggerStartTouch(CBaseTrigger *trigger) override;

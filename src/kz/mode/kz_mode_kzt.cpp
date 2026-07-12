@@ -18,6 +18,8 @@ ModeServiceFactory g_ModeFactory = [](KZPlayer *player) -> KZModeService * { ret
 PLUGIN_EXPOSE(KZTimerModePlugin, g_KZTimerModePlugin);
 
 CConVarRef<f32> sv_standable_normal("sv_standable_normal");
+CConVar<bool> kz_kzt_jump_collapse("kz_kzt_jump_collapse", FCVAR_NONE,
+	"Учитывать только первое нажатие прыжка за тик (перф-хит как в GO@128)", true);
 
 bool KZTimerModePlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool late)
 {
@@ -117,6 +119,9 @@ void KZTimerModeService::Reset()
 
 	this->airMoving = {};
 	this->tpmTriggerFixOrigins.RemoveAll();
+
+	this->lastJumpPressTick = -1;
+	this->jumpSuppressed = false;
 }
 
 void KZTimerModeService::Cleanup()
@@ -318,6 +323,59 @@ void KZTimerModeService::OnSetupMove(PlayerCommand *pc)
 		}
 		subtickMove->set_when(when >= 0.5 ? 0.5 : 0);
 	}
+}
+
+// Схлопываем прыжковые попытки до одной на тик: в CS2 каждый щелчок колеса — отдельный
+// сабтиковый сегмент со своей проверкой прыжка, в GO был один бит на команду. Повторные
+// свежие нажатия в том же тике прячем от движка на время проверки и возвращаем обратно,
+// чтобы остальной код (AC, реплеи, HUD) видел ввод нетронутым.
+void KZTimerModeService::OnCheckJumpButtonLegacy()
+{
+	this->jumpSuppressed = false;
+	if (!kz_kzt_jump_collapse.GetBool())
+	{
+		return;
+	}
+	CCSPlayer_MovementServices *ms = this->player->GetMoveServices();
+	if (!ms)
+	{
+		return;
+	}
+	CInButtonState &buttons = ms->m_nButtons();
+	if (!buttons.IsButtonNewlyPressed(IN_JUMP))
+	{
+		return; // удержание/отпускание не гейтим — legacy-прыжок и так требует нового нажатия
+	}
+	i64 tick = g_pKZUtils->GetServerGlobals()->tickcount;
+	if (this->lastJumpPressTick != tick)
+	{
+		this->lastJumpPressTick = tick; // первая попытка в тике — пропускаем
+		return;
+	}
+	for (int i = 0; i < 3; i++)
+	{
+		this->savedJumpBits[i] = buttons.m_pButtonStates[i] & IN_JUMP;
+		buttons.m_pButtonStates[i] &= ~IN_JUMP;
+	}
+	this->jumpSuppressed = true;
+}
+
+void KZTimerModeService::OnCheckJumpButtonLegacyPost()
+{
+	if (!this->jumpSuppressed)
+	{
+		return;
+	}
+	CCSPlayer_MovementServices *ms = this->player->GetMoveServices();
+	if (ms)
+	{
+		CInButtonState &buttons = ms->m_nButtons();
+		for (int i = 0; i < 3; i++)
+		{
+			buttons.m_pButtonStates[i] |= this->savedJumpBits[i];
+		}
+	}
+	this->jumpSuppressed = false;
 }
 
 void KZTimerModeService::OnProcessMovement()
