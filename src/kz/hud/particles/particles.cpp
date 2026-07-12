@@ -752,8 +752,11 @@ void KZHUDService::UpdateMHUDKeys()
 
 void KZHUDService::UpdateParticles(KZPlayer *source)
 {
-	// Данные читаются из mhudSource (наблюдаемый при спектировании),
-	// настройки — всегда из this->player.
+	// Данные — из mhudSource (source, если это не сам игрок), настройки — всегда из
+	// this->player. После cyb.36 DrawPanels вызывает это ТОЛЬКО при player == target
+	// (живой владелец), т.е. source == this->player и mhudSource остаётся nullptr;
+	// spectator-ветка сохранена как generic-задел и вызывающей стороной не используется
+	// (спектатор всегда идёт HTML-путём, см. гейт useParticles в DrawPanels).
 	this->mhudSource = (source && source != this->player) ? source : nullptr;
 	this->UpdateMHUDSpeed();
 	this->UpdateMHUDTimer();
