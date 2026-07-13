@@ -171,6 +171,13 @@ class KZTimerModeService : public KZModeService
 	bool airMoving {};
 	CUtlVector<Vector> tpmTriggerFixOrigins;
 
+	// Мёртвая граница (GO@128): чек, чей отрыв совпал бы с регистрацией касания
+	// (tog<=0), подавляется — биты и защёлка прячутся парно и возвращаются в Post.
+	u64 savedJumpBits[3] = {};
+	bool jumpSuppressed = false;
+	bool savedOldJumpPressed = false;
+	f32 savedJumpPressedTime = 0.0f;
+
 public:
 	virtual void Reset() override;
 	virtual void Cleanup() override;
@@ -197,6 +204,8 @@ public:
 	virtual void OnWaterMovePost() override;
 	virtual void OnStartTouchGround() override;
 	virtual void OnStopTouchGround() override;
+	virtual void OnCheckJumpButtonLegacy() override;
+	virtual void OnCheckJumpButtonLegacyPost() override;
 	virtual void OnTryPlayerMove(Vector *pFirstDest, trace_t *pFirstTrace, bool *bIsSurfing) override;
 	virtual void OnTryPlayerMovePost(Vector *pFirstDest, trace_t *pFirstTrace, bool *bIsSurfing) override;
 	virtual void OnTeleport(const Vector *newPosition, const QAngle *newAngles, const Vector *newVelocity) override;

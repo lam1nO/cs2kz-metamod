@@ -232,6 +232,56 @@ void KZTimerModeService::OnStopTouchGround()
 	}
 }
 
+// GO@128 «мёртвая граница»: в GO джамп-чек тика шёл ДО движения этого тика — прыжок
+// в интервале, где зарегистрировано касание, невозможен (tog=0 не существовал).
+// В CS2 ground материализуется (CategorizePosition) до чека того же прохода, поэтому
+// tog=0 достижим — подавляем такой чек. Клик не теряется: биты возвращаются в Post,
+// движок допрыгнет на следующей границе (это и есть GO-перф, tog=7.8125мс).
+void KZTimerModeService::OnCheckJumpButtonLegacy()
+{
+	this->jumpSuppressed = false;
+	CCSPlayer_MovementServices *ms = this->player->GetMoveServices();
+	if (!ms)
+	{
+		return;
+	}
+	// Отрыв этого чека был бы takeoffTime = curtime - frametime (mv_player.cpp:282).
+	f32 wouldBeTakeoff = g_pKZUtils->GetGlobals()->curtime - g_pKZUtils->GetGlobals()->frametime;
+	if (wouldBeTakeoff > this->player->landingTime)
+	{
+		return; // обычный чек — не мёртвая граница
+	}
+	CInButtonState &buttons = ms->m_nButtons();
+	for (int i = 0; i < 3; i++)
+	{
+		this->savedJumpBits[i] = buttons.m_pButtonStates[i] & IN_JUMP;
+		buttons.m_pButtonStates[i] &= ~IN_JUMP;
+	}
+	this->savedOldJumpPressed = ms->m_LegacyJump().m_bOldJumpPressed();
+	this->savedJumpPressedTime = ms->m_LegacyJump().m_flJumpPressedTime();
+	this->jumpSuppressed = true;
+}
+
+void KZTimerModeService::OnCheckJumpButtonLegacyPost()
+{
+	if (!this->jumpSuppressed)
+	{
+		return;
+	}
+	CCSPlayer_MovementServices *ms = this->player->GetMoveServices();
+	if (ms)
+	{
+		CInButtonState &buttons = ms->m_nButtons();
+		for (int i = 0; i < 3; i++)
+		{
+			buttons.m_pButtonStates[i] |= this->savedJumpBits[i];
+		}
+		ms->m_LegacyJump().m_bOldJumpPressed = this->savedOldJumpPressed;
+		ms->m_LegacyJump().m_flJumpPressedTime = this->savedJumpPressedTime;
+	}
+	this->jumpSuppressed = false;
+}
+
 void KZTimerModeService::OnStartTouchGround()
 {
 	this->SlopeFix();
