@@ -168,8 +168,8 @@ class KZTimerModeService : public KZModeService
 	bool airMoving {};
 	CUtlVector<Vector> tpmTriggerFixOrigins;
 
-	// Схлопывание прыжка: только первое свежее нажатие за тик доходит до движка (GO@128-паритет).
-	i64 lastJumpPressTick = -1;
+	// Схлопывание прыжка: одна попытка на 7.8-мс полу-слот тика (сетка GO@128).
+	i64 lastJumpPressSlot = -1;
 	u64 savedJumpBits[3] = {};
 	bool jumpSuppressed = false;
 	// Защёлка legacy-прыжка тоже сохраняется на время подавления: движок не должен её сбросить.

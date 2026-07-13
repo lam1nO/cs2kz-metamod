@@ -19,7 +19,7 @@ PLUGIN_EXPOSE(KZTimerModePlugin, g_KZTimerModePlugin);
 
 CConVarRef<f32> sv_standable_normal("sv_standable_normal");
 CConVar<bool> kz_kzt_jump_collapse("kz_kzt_jump_collapse", FCVAR_NONE,
-	"Учитывать только первое нажатие прыжка за тик (перф-хит как в GO@128)", true);
+	"Не больше одной прыжковой попытки на полу-тик (перф-хит как в GO@128)", true);
 
 bool KZTimerModePlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool late)
 {
@@ -120,7 +120,7 @@ void KZTimerModeService::Reset()
 	this->airMoving = {};
 	this->tpmTriggerFixOrigins.RemoveAll();
 
-	this->lastJumpPressTick = -1;
+	this->lastJumpPressSlot = -1;
 	this->jumpSuppressed = false;
 }
 
@@ -325,9 +325,9 @@ void KZTimerModeService::OnSetupMove(PlayerCommand *pc)
 	}
 }
 
-// Схлопываем прыжковые попытки до одной на тик: в CS2 каждый щелчок колеса — отдельный
+// Схлопываем прыжковые попытки до одной на 7.8-мс полу-слот (сетка GO@128): в CS2 каждый щелчок колеса — отдельный
 // сабтиковый сегмент со своей проверкой прыжка, в GO был один бит на команду. Повторные
-// свежие нажатия в том же тике прячем от движка на время проверки и возвращаем обратно,
+// свежие нажатия в том же полу-слоте прячем от движка на время проверки и возвращаем обратно,
 // чтобы остальной код (AC, реплеи, HUD) видел ввод нетронутым.
 void KZTimerModeService::OnCheckJumpButtonLegacy()
 {
@@ -346,10 +346,14 @@ void KZTimerModeService::OnCheckJumpButtonLegacy()
 	{
 		return; // удержание/отпускание не гейтим — legacy-прыжок и так требует нового нажатия
 	}
-	i64 tick = g_pKZUtils->GetServerGlobals()->tickcount;
-	if (this->lastJumpPressTick != tick)
+	// Полу-слот тика (сетка GO@128): when квантуется к {0, 0.5} в OnSetupMove, curtime
+	// в сегменте сабтиково-точен; порог 0.25 — максимальный запас от float-погрешности.
+	f64 tickWhole;
+	f64 tickFrac = modf((f64)g_pKZUtils->GetServerGlobals()->curtime * ENGINE_FIXED_TICK_RATE, &tickWhole);
+	i64 slot = (i64)tickWhole * 2 + (tickFrac >= 0.25 ? 1 : 0);
+	if (this->lastJumpPressSlot != slot)
 	{
-		this->lastJumpPressTick = tick; // первая попытка в тике — пропускаем
+		this->lastJumpPressSlot = slot; // первая попытка в полу-слоте — пропускаем
 		return;
 	}
 	for (int i = 0; i < 3; i++)
