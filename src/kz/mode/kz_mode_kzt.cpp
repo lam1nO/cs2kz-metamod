@@ -7,6 +7,10 @@
 #include "sdk/tracefilter.h"
 #include "sdk/navphysicsinterface.h"
 #include "sdk/entity/cbasetrigger.h"
+// powf нужен для friction-компенсации ниже; floorf/roundf/modf/fabs в этом файле уже
+// используются без явного инклюда (тянутся транзитивно), но для powf такого прецедента
+// в кодовой базе нет — подключаем явно, чтобы не полагаться на случайную транзитивность.
+#include <cmath>
 
 KZTimerModePlugin g_KZTimerModePlugin;
 
@@ -18,6 +22,12 @@ ModeServiceFactory g_ModeFactory = [](KZPlayer *player) -> KZModeService * { ret
 PLUGIN_EXPOSE(KZTimerModePlugin, g_KZTimerModePlugin);
 
 CConVarRef<f32> sv_standable_normal("sv_standable_normal");
+CConVarRef<f32> sv_stopspeed("sv_stopspeed");
+
+CConVar<bool> kz_kzt_friction_comp("kz_kzt_friction_comp", FCVAR_NONE,
+	"Компенсация трения к эталону GO@128 (порции 1/128 вместо движковых 1/64)", true);
+CConVar<bool> kz_kzt_go128_debug("kz_kzt_go128_debug", FCVAR_NONE,
+	"Логи GO@128-схемы (tog, порции трения, скорость) в консоль сервера", false);
 
 bool KZTimerModePlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool late)
 {
@@ -206,6 +216,41 @@ void KZTimerModeService::OnStopTouchGround()
 	// перф-высота (выравнивание origin для консистентности jumpstats).
 	f32 timeOnGround = this->player->takeoffTime - this->player->landingTime;
 	bool perf = this->player->jumped && timeOnGround <= KZT_PERF_WINDOW && !this->player->possibleLadderHop && !this->player->takeoffFromLadder;
+
+	// GO@128 friction-компенсация: движок применил порции трения на ЦЕЛЫХ 64-границах
+	// (dt=1/64), GO применил бы их на 128-границах (dt=1/128). В bhop-режиме
+	// (v > stopspeed) порция = умножение горизонтали на (1 - friction*dt) — приводим
+	// закрытой формулой. Дальше 2 тиков на земле не компенсируем (вне bhop-смысла).
+	if (kz_kzt_friction_comp.GetBool() && this->player->jumped
+		&& timeOnGround > 0.0f && timeOnGround <= 2.0f * ENGINE_FIXED_TICK_INTERVAL)
+	{
+		f32 friction = 5.0f; // = форс KZT sv_friction, modeCvarValues[7] в kz_mode_kzt.h:117 (позиционный
+							  // массив, именованного символа нет — литерал зеркалит именно эту строку)
+		f32 stopspeed = sv_stopspeed.IsValidRef() && sv_stopspeed.IsConVarDataAvailable() ? sv_stopspeed.Get() : 80.0f;
+		f32 horiz = velocity.Length2D();
+		if (horiz > stopspeed)
+		{
+			i32 n64 = (i32)(floorf(this->player->takeoffTime * ENGINE_FIXED_TICK_RATE)
+							- floorf(this->player->landingTime * ENGINE_FIXED_TICK_RATE));
+			i32 n128 = (i32)roundf(timeOnGround * 128.0f);
+			f32 scale = powf(1.0f - friction / 64.0f, -(f32)n64) * powf(1.0f - friction / 128.0f, (f32)n128);
+			// Санити-кламп: компенсация в этом диапазоне tog не может быть большой.
+			scale = MIN(MAX(scale, 0.85f), 1.15f);
+			velocity.x *= scale;
+			velocity.y *= scale;
+			this->player->SetVelocity(velocity);
+			if (kz_kzt_go128_debug.GetBool())
+			{
+				Msg("[kzt-go128] tog=%.1fms n64=%d n128=%d scale=%.4f v=%.0f\n",
+					timeOnGround * 1000.0f, n64, n128, scale, velocity.Length2D());
+			}
+		}
+	}
+	else if (kz_kzt_go128_debug.GetBool() && this->player->jumped)
+	{
+		Msg("[kzt-go128] tog=%.1fms (no comp)\n", timeOnGround * 1000.0f);
+	}
+
 	this->player->inPerf = perf;
 	if (perf)
 	{
