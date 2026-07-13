@@ -357,6 +357,8 @@ void KZTimerModeService::OnCheckJumpButtonLegacy()
 		this->savedJumpBits[i] = buttons.m_pButtonStates[i] & IN_JUMP;
 		buttons.m_pButtonStates[i] &= ~IN_JUMP;
 	}
+	this->savedOldJumpPressed = ms->m_LegacyJump().m_bOldJumpPressed();
+	this->savedJumpPressedTime = ms->m_LegacyJump().m_flJumpPressedTime();
 	this->jumpSuppressed = true;
 }
 
@@ -374,6 +376,8 @@ void KZTimerModeService::OnCheckJumpButtonLegacyPost()
 		{
 			buttons.m_pButtonStates[i] |= this->savedJumpBits[i];
 		}
+		ms->m_LegacyJump().m_bOldJumpPressed = this->savedOldJumpPressed;
+		ms->m_LegacyJump().m_flJumpPressedTime = this->savedJumpPressedTime;
 	}
 	this->jumpSuppressed = false;
 }

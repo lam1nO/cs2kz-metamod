@@ -172,6 +172,9 @@ class KZTimerModeService : public KZModeService
 	i64 lastJumpPressTick = -1;
 	u64 savedJumpBits[3] = {};
 	bool jumpSuppressed = false;
+	// Защёлка legacy-прыжка тоже сохраняется на время подавления: движок не должен её сбросить.
+	bool savedOldJumpPressed = false;
+	f32 savedJumpPressedTime = 0.0f;
 
 public:
 	virtual void Reset() override;
