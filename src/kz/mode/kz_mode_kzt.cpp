@@ -359,7 +359,7 @@ void KZTimerModeService::OnCheckJumpButtonLegacy()
 	{
 		if (jcDebugLog)
 		{
-			KZ_LOG_INFO(LogChannel::Movement, "[kzt-jc] state=%d tickWhole=%.3f tickFrac=%.3f slot=%lld path=cvar-off\n", (int)jcDebugState,
+			Msg("[kzt-jc] state=%d tickWhole=%.3f tickFrac=%.3f slot=%lld path=cvar-off\n", (int)jcDebugState,
 						jcDebugTickWhole, jcDebugTickFrac, (long long)jcDebugSlot);
 		}
 		return;
@@ -374,7 +374,7 @@ void KZTimerModeService::OnCheckJumpButtonLegacy()
 	{
 		if (jcDebugLog)
 		{
-			KZ_LOG_INFO(LogChannel::Movement, "[kzt-jc] state=%d tickWhole=%.3f tickFrac=%.3f slot=%lld path=not-newly-pressed\n",
+			Msg("[kzt-jc] state=%d tickWhole=%.3f tickFrac=%.3f slot=%lld path=not-newly-pressed\n",
 						(int)jcDebugState, jcDebugTickWhole, jcDebugTickFrac, (long long)jcDebugSlot);
 		}
 		return; // удержание/отпускание не гейтим — legacy-прыжок и так требует нового нажатия
@@ -389,7 +389,7 @@ void KZTimerModeService::OnCheckJumpButtonLegacy()
 		this->lastJumpPressSlot = slot; // первая попытка в полу-слоте — пропускаем
 		if (jcDebugLog)
 		{
-			KZ_LOG_INFO(LogChannel::Movement, "[kzt-jc] state=%d tickWhole=%.3f tickFrac=%.3f slot=%lld path=first-in-slot\n",
+			Msg("[kzt-jc] state=%d tickWhole=%.3f tickFrac=%.3f slot=%lld path=first-in-slot\n",
 						(int)jcDebugState, jcDebugTickWhole, jcDebugTickFrac, (long long)jcDebugSlot);
 		}
 		return;
@@ -404,7 +404,7 @@ void KZTimerModeService::OnCheckJumpButtonLegacy()
 	this->jumpSuppressed = true;
 	if (jcDebugLog)
 	{
-		KZ_LOG_INFO(LogChannel::Movement, "[kzt-jc] state=%d tickWhole=%.3f tickFrac=%.3f slot=%lld path=suppress\n", (int)jcDebugState,
+		Msg("[kzt-jc] state=%d tickWhole=%.3f tickFrac=%.3f slot=%lld path=suppress\n", (int)jcDebugState,
 					jcDebugTickWhole, jcDebugTickFrac, (long long)jcDebugSlot);
 	}
 }
@@ -428,7 +428,7 @@ void KZTimerModeService::OnCheckJumpButtonLegacyPost()
 	}
 	if (kz_kzt_jump_collapse_debug.GetBool())
 	{
-		KZ_LOG_INFO(LogChannel::Movement, "[kzt-jc] restored\n");
+		Msg("[kzt-jc] restored\n");
 	}
 	this->jumpSuppressed = false;
 }
