@@ -230,6 +230,8 @@ void KZTimerModeService::OnStopTouchGround()
 		f32 horiz = velocity.Length2D();
 		if (horiz > stopspeed)
 		{
+			// Допущение (проверяется L4-логами): takeoff снапнут к границе, движковый friction
+			// тика отрыва применяется ДО прыжка — граница отрыва входит в счёт n64.
 			i32 n64 = (i32)(floorf(this->player->takeoffTime * ENGINE_FIXED_TICK_RATE)
 							- floorf(this->player->landingTime * ENGINE_FIXED_TICK_RATE));
 			i32 n128 = (i32)roundf(timeOnGround * 128.0f);
@@ -244,6 +246,10 @@ void KZTimerModeService::OnStopTouchGround()
 				Msg("[kzt-go128] tog=%.1fms n64=%d n128=%d scale=%.4f v=%.0f\n",
 					timeOnGround * 1000.0f, n64, n128, scale, velocity.Length2D());
 			}
+		}
+		else if (kz_kzt_go128_debug.GetBool())
+		{
+			Msg("[kzt-go128] tog=%.1fms (no comp: v=%.0f <= stopspeed)\n", timeOnGround * 1000.0f, horiz);
 		}
 	}
 	else if (kz_kzt_go128_debug.GetBool() && this->player->jumped)
