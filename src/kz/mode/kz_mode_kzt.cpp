@@ -20,6 +20,8 @@ PLUGIN_EXPOSE(KZTimerModePlugin, g_KZTimerModePlugin);
 CConVarRef<f32> sv_standable_normal("sv_standable_normal");
 CConVar<bool> kz_kzt_jump_collapse("kz_kzt_jump_collapse", FCVAR_NONE,
 	"Не больше одной прыжковой попытки на полу-тик (перф-хит как в GO@128)", true);
+CConVar<bool> kz_kzt_jump_collapse_debug("kz_kzt_jump_collapse_debug", FCVAR_NONE,
+	"Логи гейта прыжка (вызовы/слоты/подавления) в консоль сервера", false);
 
 bool KZTimerModePlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool late)
 {
@@ -332,8 +334,34 @@ void KZTimerModeService::OnSetupMove(PlayerCommand *pc)
 void KZTimerModeService::OnCheckJumpButtonLegacy()
 {
 	this->jumpSuppressed = false;
+	// Диагностика (kz_kzt_jump_collapse_debug): значения считаем один раз здесь, до всех
+	// гейтинг-решений, и переиспользуем в каждой точке лога ниже — прод-ветки не трогаем.
+	bool jcDebugLog = false;
+	EInButtonState jcDebugState = (EInButtonState)0;
+	f64 jcDebugTickWhole = 0.0;
+	f64 jcDebugTickFrac = 0.0;
+	i64 jcDebugSlot = 0;
+	if (kz_kzt_jump_collapse_debug.GetBool())
+	{
+		CCSPlayer_MovementServices *jcDebugMs = this->player->GetMoveServices();
+		if (jcDebugMs)
+		{
+			jcDebugState = jcDebugMs->m_nButtons().GetButtonState(IN_JUMP);
+			if (jcDebugState != 0)
+			{
+				jcDebugTickFrac = modf((f64)g_pKZUtils->GetGlobals()->curtime * ENGINE_FIXED_TICK_RATE, &jcDebugTickWhole);
+				jcDebugSlot = (i64)jcDebugTickWhole * 2 + (jcDebugTickFrac >= 0.25 ? 1 : 0);
+				jcDebugLog = true;
+			}
+		}
+	}
 	if (!kz_kzt_jump_collapse.GetBool())
 	{
+		if (jcDebugLog)
+		{
+			KZ_LOG_INFO(LogChannel::Movement, "[kzt-jc] state=%d tickWhole=%.3f tickFrac=%.3f slot=%lld path=cvar-off\n", (int)jcDebugState,
+						jcDebugTickWhole, jcDebugTickFrac, (long long)jcDebugSlot);
+		}
 		return;
 	}
 	CCSPlayer_MovementServices *ms = this->player->GetMoveServices();
@@ -344,6 +372,11 @@ void KZTimerModeService::OnCheckJumpButtonLegacy()
 	CInButtonState &buttons = ms->m_nButtons();
 	if (!buttons.IsButtonNewlyPressed(IN_JUMP))
 	{
+		if (jcDebugLog)
+		{
+			KZ_LOG_INFO(LogChannel::Movement, "[kzt-jc] state=%d tickWhole=%.3f tickFrac=%.3f slot=%lld path=not-newly-pressed\n",
+						(int)jcDebugState, jcDebugTickWhole, jcDebugTickFrac, (long long)jcDebugSlot);
+		}
 		return; // удержание/отпускание не гейтим — legacy-прыжок и так требует нового нажатия
 	}
 	// Полу-слот тика (сетка GO@128): when квантуется к {0, 0.5} в OnSetupMove, curtime
@@ -354,6 +387,11 @@ void KZTimerModeService::OnCheckJumpButtonLegacy()
 	if (this->lastJumpPressSlot != slot)
 	{
 		this->lastJumpPressSlot = slot; // первая попытка в полу-слоте — пропускаем
+		if (jcDebugLog)
+		{
+			KZ_LOG_INFO(LogChannel::Movement, "[kzt-jc] state=%d tickWhole=%.3f tickFrac=%.3f slot=%lld path=first-in-slot\n",
+						(int)jcDebugState, jcDebugTickWhole, jcDebugTickFrac, (long long)jcDebugSlot);
+		}
 		return;
 	}
 	for (int i = 0; i < 3; i++)
@@ -364,6 +402,11 @@ void KZTimerModeService::OnCheckJumpButtonLegacy()
 	this->savedOldJumpPressed = ms->m_LegacyJump().m_bOldJumpPressed();
 	this->savedJumpPressedTime = ms->m_LegacyJump().m_flJumpPressedTime();
 	this->jumpSuppressed = true;
+	if (jcDebugLog)
+	{
+		KZ_LOG_INFO(LogChannel::Movement, "[kzt-jc] state=%d tickWhole=%.3f tickFrac=%.3f slot=%lld path=suppress\n", (int)jcDebugState,
+					jcDebugTickWhole, jcDebugTickFrac, (long long)jcDebugSlot);
+	}
 }
 
 void KZTimerModeService::OnCheckJumpButtonLegacyPost()
@@ -382,6 +425,10 @@ void KZTimerModeService::OnCheckJumpButtonLegacyPost()
 		}
 		ms->m_LegacyJump().m_bOldJumpPressed = this->savedOldJumpPressed;
 		ms->m_LegacyJump().m_flJumpPressedTime = this->savedJumpPressedTime;
+	}
+	if (kz_kzt_jump_collapse_debug.GetBool())
+	{
+		KZ_LOG_INFO(LogChannel::Movement, "[kzt-jc] restored\n");
 	}
 	this->jumpSuppressed = false;
 }
