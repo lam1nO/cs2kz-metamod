@@ -349,7 +349,7 @@ void KZTimerModeService::OnCheckJumpButtonLegacy()
 	// Полу-слот тика (сетка GO@128): when квантуется к {0, 0.5} в OnSetupMove, curtime
 	// в сегменте сабтиково-точен; порог 0.25 — максимальный запас от float-погрешности.
 	f64 tickWhole;
-	f64 tickFrac = modf((f64)g_pKZUtils->GetServerGlobals()->curtime * ENGINE_FIXED_TICK_RATE, &tickWhole);
+	f64 tickFrac = modf((f64)g_pKZUtils->GetGlobals()->curtime * ENGINE_FIXED_TICK_RATE, &tickWhole);
 	i64 slot = (i64)tickWhole * 2 + (tickFrac >= 0.25 ? 1 : 0);
 	if (this->lastJumpPressSlot != slot)
 	{
