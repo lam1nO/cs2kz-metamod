@@ -207,11 +207,16 @@ void KZTimerModeService::OnStopTouchGround()
 	// Перф в KZT — прыжок в окне KZT_PERF_WINDOW после приземления, детектим по времени на
 	// земле (как CKZ). inPerf ПЕРЕЗАПИСЫВАЕМ: Detour_OnJumpLegacy уже поставил его по широкой
 	// эвристике !oldWalkMoved (~целый тик), и без перезаписи HUD красил «перфы», к которым
-	// кап/высота не применялись. Как в GOKZ: один флаг гейтит и кап, и HUD, и старт таймера.
+	// кап/высота не применялись. Физика (кап/origin) — по физическому критерию physPerf;
+	// классификация (HUD, старт таймера, статы) — по строгому клик-критерию ниже.
 	// Высоту полной 55.83 на бхопе даёт сам legacy-прыжок движка; здесь — только скорость и
 	// перф-высота (выравнивание origin для консистентности jumpstats).
 	f32 timeOnGround = this->player->takeoffTime - this->player->landingTime;
-	bool perf = this->player->jumped && timeOnGround <= KZT_PERF_WINDOW && !this->player->possibleLadderHop && !this->player->takeoffFromLadder;
+	// Физический перф — мгновенный перепрыг, движок сохранил импульс. Гейтит ФИЗИКУ
+	// (кап 380, takeoffVelocity, выравнивание origin) НЕЗАВИСИМО от клик-критерия,
+	// иначе пре-буферный клик обходит срез скорости (эксплойт: 426 без капа).
+	bool physPerf = this->player->jumped && timeOnGround <= KZT_PERF_WINDOW && !this->player->possibleLadderHop && !this->player->takeoffFromLadder;
+	bool perf = physPerf;
 
 	// Строгий перф-критерий: реальный (неквантованный) клик прыжка должен прийти в окне
 	// KZT_PERF_WINDOW ПОСЛЕ приземления. Без этого клики квантуются к when {0, 0.5} в
@@ -225,13 +230,14 @@ void KZTimerModeService::OnStopTouchGround()
 		perf = perf && clickInWindow;
 		if (kz_kzt_perf_debug.GetBool())
 		{
-			Msg("[kzt-perf] land=%.4f click=%.4f d=%.1fms %s\n", landingTime, this->lastJumpPressRealTime,
-				(this->lastJumpPressRealTime - landingTime) * 1000.0f, perf ? "PERF" : "no");
+			Msg("[kzt-perf] land=%.4f click=%.4f d=%.1fms tog=%.1fms v=%.0f %s%s\n", landingTime, this->lastJumpPressRealTime,
+				(this->lastJumpPressRealTime - landingTime) * 1000.0f, timeOnGround * 1000.0f, velocity.Length2D(),
+				perf ? "PERF" : "no", physPerf && !perf ? " (cap-only)" : "");
 		}
 	}
 
 	this->player->inPerf = perf;
-	if (perf)
+	if (physPerf)
 	{
 		// gokz TweakJump: режем горизонталь до PERF_SPEED_CAP (KZTimer-механика, не CKZ-логарифм).
 		f32 horizSpeed = velocity.Length2D();
