@@ -168,13 +168,9 @@ class KZTimerModeService : public KZModeService
 	bool airMoving {};
 	CUtlVector<Vector> tpmTriggerFixOrigins;
 
-	// Схлопывание прыжка: одна попытка на 7.8-мс полу-слот тика (сетка GO@128).
-	i64 lastJumpPressSlot = -1;
-	u64 savedJumpBits[3] = {};
-	bool jumpSuppressed = false;
-	// Защёлка legacy-прыжка тоже сохраняется на время подавления: движок не должен её сбросить.
-	bool savedOldJumpPressed = false;
-	f32 savedJumpPressedTime = 0.0f;
+	// Реальное (неквантованное) время последнего свежего нажатия прыжка — для
+	// перф-критерия: перф только если клик пришёл в окне после приземления.
+	f32 lastJumpPressRealTime = -1.0f;
 
 public:
 	virtual void Reset() override;
@@ -205,8 +201,6 @@ public:
 	virtual void OnTryPlayerMove(Vector *pFirstDest, trace_t *pFirstTrace, bool *bIsSurfing) override;
 	virtual void OnTryPlayerMovePost(Vector *pFirstDest, trace_t *pFirstTrace, bool *bIsSurfing) override;
 	virtual void OnTeleport(const Vector *newPosition, const QAngle *newAngles, const Vector *newVelocity) override;
-	virtual void OnCheckJumpButtonLegacy() override;
-	virtual void OnCheckJumpButtonLegacyPost() override;
 
 	virtual bool CanTouchTimerZone() override;
 	virtual bool OnTriggerStartTouch(CBaseTrigger *trigger) override;

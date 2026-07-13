@@ -18,10 +18,10 @@ ModeServiceFactory g_ModeFactory = [](KZPlayer *player) -> KZModeService * { ret
 PLUGIN_EXPOSE(KZTimerModePlugin, g_KZTimerModePlugin);
 
 CConVarRef<f32> sv_standable_normal("sv_standable_normal");
-CConVar<bool> kz_kzt_jump_collapse("kz_kzt_jump_collapse", FCVAR_NONE,
-	"Не больше одной прыжковой попытки на полу-тик (перф-хит как в GO@128)", true);
-CConVar<bool> kz_kzt_jump_collapse_debug("kz_kzt_jump_collapse_debug", FCVAR_NONE,
-	"Логи гейта прыжка (вызовы/слоты/подавления) в консоль сервера", false);
+CConVar<bool> kz_kzt_perf_strict_click("kz_kzt_perf_strict_click", FCVAR_NONE,
+	"Перф только если реальный (неквантованный) клик пришёл в окне 1/128 после приземления", true);
+CConVar<bool> kz_kzt_perf_debug("kz_kzt_perf_debug", FCVAR_NONE,
+	"Логи перф-критерия (время касания/клика/вердикт) в консоль сервера", false);
 
 bool KZTimerModePlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool late)
 {
@@ -122,8 +122,7 @@ void KZTimerModeService::Reset()
 	this->airMoving = {};
 	this->tpmTriggerFixOrigins.RemoveAll();
 
-	this->lastJumpPressSlot = -1;
-	this->jumpSuppressed = false;
+	this->lastJumpPressRealTime = -1.0f;
 }
 
 void KZTimerModeService::Cleanup()
@@ -213,6 +212,24 @@ void KZTimerModeService::OnStopTouchGround()
 	// перф-высота (выравнивание origin для консистентности jumpstats).
 	f32 timeOnGround = this->player->takeoffTime - this->player->landingTime;
 	bool perf = this->player->jumped && timeOnGround <= KZT_PERF_WINDOW && !this->player->possibleLadderHop && !this->player->takeoffFromLadder;
+
+	// Строгий перф-критерий: реальный (неквантованный) клик прыжка должен прийти в окне
+	// KZT_PERF_WINDOW ПОСЛЕ приземления. Без этого клики квантуются к when {0, 0.5} в
+	// OnSetupMove, и субтиковое окно приземления детерминированно накрывает ближайший
+	// квант — перф на каждом приземлении. Единый флаг gates и кап, и HUD, и старт таймера.
+	if (kz_kzt_perf_strict_click.GetBool() && perf)
+	{
+		f32 landingTime = this->player->landingTime;
+		bool clickInWindow = this->lastJumpPressRealTime >= landingTime
+			&& this->lastJumpPressRealTime <= landingTime + KZT_PERF_WINDOW;
+		perf = perf && clickInWindow;
+		if (kz_kzt_perf_debug.GetBool())
+		{
+			Msg("[kzt-perf] land=%.4f click=%.4f d=%.1fms %s\n", landingTime, this->lastJumpPressRealTime,
+				(this->lastJumpPressRealTime - landingTime) * 1000.0f, perf ? "PERF" : "no");
+		}
+	}
+
 	this->player->inPerf = perf;
 	if (perf)
 	{
@@ -310,6 +327,13 @@ void KZTimerModeService::OnSetupMove(PlayerCommand *pc)
 		float when = subtickMove->when();
 		if (subtickMove->button() == IN_JUMP)
 		{
+			// Реальное (неквантованное) время клика — для перф-критерия в OnStopTouchGround.
+			// Нужно для ЛЮБОГО pressed-события (в т.ч. when==0), поэтому считаем отдельно от
+			// защёлко-логики ниже, которая работает только при when != 0.
+			if (subtickMove->pressed())
+			{
+				this->lastJumpPressRealTime = (g_pKZUtils->GetGlobals()->tickcount + when - 1) * ENGINE_FIXED_TICK_INTERVAL;
+			}
 			f32 inputTime = (g_pKZUtils->GetGlobals()->tickcount + when - 1) * ENGINE_FIXED_TICK_INTERVAL;
 			if (when != 0)
 			{
@@ -325,112 +349,6 @@ void KZTimerModeService::OnSetupMove(PlayerCommand *pc)
 		}
 		subtickMove->set_when(when >= 0.5 ? 0.5 : 0);
 	}
-}
-
-// Схлопываем прыжковые попытки до одной на 7.8-мс полу-слот (сетка GO@128): в CS2 каждый щелчок колеса — отдельный
-// сабтиковый сегмент со своей проверкой прыжка, в GO был один бит на команду. Повторные
-// свежие нажатия в том же полу-слоте прячем от движка на время проверки и возвращаем обратно,
-// чтобы остальной код (AC, реплеи, HUD) видел ввод нетронутым.
-void KZTimerModeService::OnCheckJumpButtonLegacy()
-{
-	this->jumpSuppressed = false;
-	// Диагностика (kz_kzt_jump_collapse_debug): значения считаем один раз здесь, до всех
-	// гейтинг-решений, и переиспользуем в каждой точке лога ниже — прод-ветки не трогаем.
-	bool jcDebugLog = false;
-	EInButtonState jcDebugState = (EInButtonState)0;
-	f64 jcDebugTickWhole = 0.0;
-	f64 jcDebugTickFrac = 0.0;
-	i64 jcDebugSlot = 0;
-	if (kz_kzt_jump_collapse_debug.GetBool())
-	{
-		CCSPlayer_MovementServices *jcDebugMs = this->player->GetMoveServices();
-		if (jcDebugMs)
-		{
-			jcDebugState = jcDebugMs->m_nButtons().GetButtonState(IN_JUMP);
-			if (jcDebugState != 0)
-			{
-				jcDebugTickFrac = modf((f64)g_pKZUtils->GetGlobals()->curtime * ENGINE_FIXED_TICK_RATE, &jcDebugTickWhole);
-				jcDebugSlot = (i64)jcDebugTickWhole * 2 + (jcDebugTickFrac >= 0.25 ? 1 : 0);
-				jcDebugLog = true;
-			}
-		}
-	}
-	if (!kz_kzt_jump_collapse.GetBool())
-	{
-		if (jcDebugLog)
-		{
-			Msg("[kzt-jc] state=%d tickWhole=%.3f tickFrac=%.3f slot=%lld path=cvar-off\n", (int)jcDebugState,
-						jcDebugTickWhole, jcDebugTickFrac, (long long)jcDebugSlot);
-		}
-		return;
-	}
-	CCSPlayer_MovementServices *ms = this->player->GetMoveServices();
-	if (!ms)
-	{
-		return;
-	}
-	CInButtonState &buttons = ms->m_nButtons();
-	if (!buttons.IsButtonNewlyPressed(IN_JUMP))
-	{
-		if (jcDebugLog)
-		{
-			Msg("[kzt-jc] state=%d tickWhole=%.3f tickFrac=%.3f slot=%lld path=not-newly-pressed\n",
-						(int)jcDebugState, jcDebugTickWhole, jcDebugTickFrac, (long long)jcDebugSlot);
-		}
-		return; // удержание/отпускание не гейтим — legacy-прыжок и так требует нового нажатия
-	}
-	// Полу-слот тика (сетка GO@128): when квантуется к {0, 0.5} в OnSetupMove, curtime
-	// в сегменте сабтиково-точен; порог 0.25 — максимальный запас от float-погрешности.
-	f64 tickWhole;
-	f64 tickFrac = modf((f64)g_pKZUtils->GetGlobals()->curtime * ENGINE_FIXED_TICK_RATE, &tickWhole);
-	i64 slot = (i64)tickWhole * 2 + (tickFrac >= 0.25 ? 1 : 0);
-	if (this->lastJumpPressSlot != slot)
-	{
-		this->lastJumpPressSlot = slot; // первая попытка в полу-слоте — пропускаем
-		if (jcDebugLog)
-		{
-			Msg("[kzt-jc] state=%d tickWhole=%.3f tickFrac=%.3f slot=%lld path=first-in-slot\n",
-						(int)jcDebugState, jcDebugTickWhole, jcDebugTickFrac, (long long)jcDebugSlot);
-		}
-		return;
-	}
-	for (int i = 0; i < 3; i++)
-	{
-		this->savedJumpBits[i] = buttons.m_pButtonStates[i] & IN_JUMP;
-		buttons.m_pButtonStates[i] &= ~IN_JUMP;
-	}
-	this->savedOldJumpPressed = ms->m_LegacyJump().m_bOldJumpPressed();
-	this->savedJumpPressedTime = ms->m_LegacyJump().m_flJumpPressedTime();
-	this->jumpSuppressed = true;
-	if (jcDebugLog)
-	{
-		Msg("[kzt-jc] state=%d tickWhole=%.3f tickFrac=%.3f slot=%lld path=suppress\n", (int)jcDebugState,
-					jcDebugTickWhole, jcDebugTickFrac, (long long)jcDebugSlot);
-	}
-}
-
-void KZTimerModeService::OnCheckJumpButtonLegacyPost()
-{
-	if (!this->jumpSuppressed)
-	{
-		return;
-	}
-	CCSPlayer_MovementServices *ms = this->player->GetMoveServices();
-	if (ms)
-	{
-		CInButtonState &buttons = ms->m_nButtons();
-		for (int i = 0; i < 3; i++)
-		{
-			buttons.m_pButtonStates[i] |= this->savedJumpBits[i];
-		}
-		ms->m_LegacyJump().m_bOldJumpPressed = this->savedOldJumpPressed;
-		ms->m_LegacyJump().m_flJumpPressedTime = this->savedJumpPressedTime;
-	}
-	if (kz_kzt_jump_collapse_debug.GetBool())
-	{
-		Msg("[kzt-jc] restored\n");
-	}
-	this->jumpSuppressed = false;
 }
 
 void KZTimerModeService::OnProcessMovement()
