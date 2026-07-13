@@ -246,8 +246,11 @@ void KZTimerModeService::OnCheckJumpButtonLegacy()
 		return;
 	}
 	// Отрыв этого чека был бы takeoffTime = curtime - frametime (mv_player.cpp:282).
-	f32 wouldBeTakeoff = g_pKZUtils->GetGlobals()->curtime - g_pKZUtils->GetGlobals()->frametime;
-	if (wouldBeTakeoff > this->player->landingTime)
+	f32 curtime = g_pKZUtils->GetGlobals()->curtime;
+	f32 wouldBeTakeoff = curtime - g_pKZUtils->GetGlobals()->frametime;
+	// Гейт от устаревшего landingTime: поле не сбрасывается без дисконнекта, а curtime
+	// обнуляется на смене карты — «касание в будущем» означает мусор, не подавляем.
+	if (wouldBeTakeoff > this->player->landingTime || this->player->landingTime > curtime)
 	{
 		return; // обычный чек — не мёртвая граница
 	}
