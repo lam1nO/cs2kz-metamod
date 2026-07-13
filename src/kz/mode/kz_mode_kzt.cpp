@@ -316,7 +316,18 @@ void KZTimerModeService::OnSetupMove(PlayerCommand *pc)
 				}
 			}
 		}
-		subtickMove->set_when(when >= 0.5 ? 0.5 : 0);
+		// GO@128: привязка инпута ВПЕРЁД — исполнение на первой границе 128-сетки
+		// ПОСЛЕ клика (в GO клик исполнялся на следующем тике; старый магнит назад
+		// позволял инпуту исполниться раньше себя). Точный ноль не трогаем:
+		// сохраняет сигнал античита по desubtick-читам (поток when==0).
+		if (when > 0.5f)
+		{
+			subtickMove->set_when(KZT_WHEN_TICK_END);
+		}
+		else if (when > 0.0f)
+		{
+			subtickMove->set_when(0.5f);
+		}
 	}
 }
 

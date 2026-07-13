@@ -22,6 +22,9 @@
 // Mode detects perf itself (base sets inPerf only for modern jump). 1/128 s = ~один
 // 128-tick кадр после приземления — строгий KZTimer-перф (важное условие режима).
 #define KZT_PERF_WINDOW 0.0078125f // 1/128
+// Исполнение «у границы тика» для forward-квантовки when (перенос события в
+// следующую команду невозможен — протобаф не переписываем).
+#define KZT_WHEN_TICK_END 0.9999f
 // Misc
 #define DUCK_SPEED_NORMAL  8.0f
 #define DUCK_SPEED_MINIMUM 6.0234375f // Equal to if you just ducked/unducked for the first time in a while
