@@ -132,6 +132,7 @@ void KZTimerModeService::Reset()
 	this->tpmTriggerFixOrigins.RemoveAll();
 
 	this->lastLandingSpeed = -1.0f;
+	this->lastLandingSpeedTime = -1.0f;
 }
 
 void KZTimerModeService::Cleanup()
@@ -241,7 +242,8 @@ void KZTimerModeService::OnStopTouchGround()
 	// Дальше 2 тиков на земле — движок как есть.
 	if (kz_kzt_takeoff_speed.GetBool() && this->player->jumped
 		&& timeOnGround > 0.0f && timeOnGround <= 2.0f * ENGINE_FIXED_TICK_INTERVAL
-		&& this->lastLandingSpeed > 0.0f)
+		&& this->lastLandingSpeed > 0.0f
+		&& this->lastLandingSpeedTime == this->player->landingTime)
 	{
 		f32 friction = 5.0f; // = форс KZT sv_friction (kz_mode_kzt.h, modeCvarValues)
 		i32 n128 = (i32)roundf(timeOnGround * 128.0f);
@@ -350,6 +352,11 @@ void KZTimerModeService::OnStartTouchGround()
 	Vector v;
 	this->player->GetVelocity(&v);
 	this->lastLandingSpeed = v.Length2D();
+	// landingTime здесь уже свежий: оба вызова OnStartTouchGround (mv_hooks.cpp
+	// Detour_CategorizePosition и mv_player.cpp OnProcessMovement) идут сразу после
+	// RegisterLanding, который его записывает. Связка «скорость ↔ её касание» рвёт
+	// телепорт-эксплойт: HandleTeleport двигает landingTime без нового касания.
+	this->lastLandingSpeedTime = this->player->landingTime;
 
 	this->SlopeFix();
 	bbox_t bounds;

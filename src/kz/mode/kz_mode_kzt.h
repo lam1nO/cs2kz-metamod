@@ -180,6 +180,7 @@ class KZTimerModeService : public KZModeService
 
 	// Скорость в момент касания — источник GO-формулы скорости отрыва (GO@128).
 	f32 lastLandingSpeed = -1.0f;
+	f32 lastLandingSpeedTime = -1.0f; // landingTime, которому соответствует lastLandingSpeed
 
 public:
 	virtual void Reset() override;
