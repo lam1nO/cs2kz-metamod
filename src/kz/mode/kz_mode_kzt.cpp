@@ -26,10 +26,9 @@ ModeServiceFactory g_ModeFactory = [](KZPlayer *player) -> KZModeService * { ret
 PLUGIN_EXPOSE(KZTimerModePlugin, g_KZTimerModePlugin);
 
 CConVarRef<f32> sv_standable_normal("sv_standable_normal");
-CConVarRef<f32> sv_stopspeed("sv_stopspeed");
 
-CConVar<bool> kz_kzt_friction_comp("kz_kzt_friction_comp", FCVAR_NONE,
-	"Компенсация трения к эталону GO@128 (порции 1/128 вместо движковых 1/64)", true);
+CConVar<bool> kz_kzt_takeoff_speed("kz_kzt_takeoff_speed", FCVAR_NONE,
+	"Скорость отрыва в bhop-окне по GO-формуле от скорости касания (нейтрализация движкового клампа)", true);
 CConVar<bool> kz_kzt_go128_debug("kz_kzt_go128_debug", FCVAR_NONE,
 	"Логи GO@128-схемы (tog, порции трения, скорость) в консоль сервера", false);
 
@@ -131,6 +130,8 @@ void KZTimerModeService::Reset()
 
 	this->airMoving = {};
 	this->tpmTriggerFixOrigins.RemoveAll();
+
+	this->lastLandingSpeed = -1.0f;
 }
 
 void KZTimerModeService::Cleanup()
@@ -225,41 +226,34 @@ void KZTimerModeService::OnStopTouchGround()
 	// (после капа). -1/1.0 — сентинелы «этот этап не выполнялся».
 	f32 dbgPreC = -1.0f;
 	f32 dbgPostC = -1.0f;
-	i32 dbgN64 = -1;
 	i32 dbgN128 = -1;
 	f32 dbgScale = 1.0f;
 
-	// horiz считаем ДО гейта compensation (просто чтение Length2D, velocity ещё не менялась
-	// с момента GetVelocity выше) — чтобы preC печатался и при kz_kzt_friction_comp=0.
+	// horiz считаем ДО нового блока (просто чтение Length2D, velocity ещё не менялась
+	// с момента GetVelocity выше) — чтобы preC печатался и при kz_kzt_takeoff_speed=0.
 	f32 horiz = velocity.Length2D();
 	dbgPreC = horiz;
 
-	// GO@128 friction-компенсация: движок применил порции трения на ЦЕЛЫХ 64-границах
-	// (dt=1/64), GO применил бы их на 128-границах (dt=1/128). В bhop-режиме
-	// (v > stopspeed) порция = умножение горизонтали на (1 - friction*dt) — приводим
-	// закрытой формулой. Дальше 2 тиков на земле не компенсируем (вне bhop-смысла).
-	if (kz_kzt_friction_comp.GetBool() && this->player->jumped
-		&& timeOnGround > 0.0f && timeOnGround <= 2.0f * ENGINE_FIXED_TICK_INTERVAL)
+	// GO@128: движок клампует «отложенный» прыжок (~1.1*maxspeed; старый tog=0-путь
+	// кламп обходил — потому cyb.36 сохранял 426). В bhop-окне скорость отрыва
+	// выставляет мод: горизонталь = скорость касания × (1 − friction/128)^n128
+	// (ГОшные порции трения от 128-сетки). Перф дополнительно капается ниже (380).
+	// Дальше 2 тиков на земле — движок как есть.
+	if (kz_kzt_takeoff_speed.GetBool() && this->player->jumped
+		&& timeOnGround > 0.0f && timeOnGround <= 2.0f * ENGINE_FIXED_TICK_INTERVAL
+		&& this->lastLandingSpeed > 0.0f)
 	{
-		f32 friction = 5.0f; // = форс KZT sv_friction, modeCvarValues[7] в kz_mode_kzt.h:117 (позиционный
-							  // массив, именованного символа нет — литерал зеркалит именно эту строку)
-		f32 stopspeed = sv_stopspeed.IsValidRef() && sv_stopspeed.IsConVarDataAvailable() ? sv_stopspeed.Get() : 80.0f;
-		if (horiz > stopspeed)
+		f32 friction = 5.0f; // = форс KZT sv_friction (kz_mode_kzt.h, modeCvarValues)
+		i32 n128 = (i32)roundf(timeOnGround * 128.0f);
+		f32 target = this->lastLandingSpeed * powf(1.0f - friction / 128.0f, (f32)n128);
+		if (horiz > 0.1f)
 		{
-			// Допущение (проверяется L4-логами): takeoff снапнут к границе, движковый friction
-			// тика отрыва применяется ДО прыжка — граница отрыва входит в счёт n64.
-			i32 n64 = (i32)(floorf(this->player->takeoffTime * ENGINE_FIXED_TICK_RATE)
-							- floorf(this->player->landingTime * ENGINE_FIXED_TICK_RATE));
-			i32 n128 = (i32)roundf(timeOnGround * 128.0f);
-			f32 scale = powf(1.0f - friction / 64.0f, -(f32)n64) * powf(1.0f - friction / 128.0f, (f32)n128);
-			// Санити-кламп: компенсация в этом диапазоне tog не может быть большой.
-			scale = MIN(MAX(scale, 0.85f), 1.15f);
-			velocity.x *= scale;
-			velocity.y *= scale;
+			f32 scaleT = target / horiz;
+			velocity.x *= scaleT;
+			velocity.y *= scaleT;
 			this->player->SetVelocity(velocity);
-			dbgN64 = n64;
 			dbgN128 = n128;
-			dbgScale = scale;
+			dbgScale = scaleT;
 			dbgPostC = velocity.Length2D();
 		}
 	}
@@ -291,9 +285,9 @@ void KZTimerModeService::OnStopTouchGround()
 
 	if (kz_kzt_go128_debug.GetBool() && this->player->jumped)
 	{
-		Msg("[kzt-go128] %s land=%.0f preC=%.0f postC=%.0f takeoff=%.0f tog=%.1fms n64=%d n128=%d scale=%.4f perf=%d comp=%d\n",
+		Msg("[kzt-go128] %s land=%.0f preC=%.0f postC=%.0f takeoff=%.0f tog=%.1fms n128=%d scale=%.4f perf=%d tsp=%d\n",
 			this->player->GetName(), this->lastLandingSpeed, dbgPreC, dbgPostC, velocity.Length2D(),
-			timeOnGround * 1000.0f, dbgN64, dbgN128, dbgScale, perf ? 1 : 0, kz_kzt_friction_comp.GetBool() ? 1 : 0);
+			timeOnGround * 1000.0f, dbgN128, dbgScale, perf ? 1 : 0, kz_kzt_takeoff_speed.GetBool() ? 1 : 0);
 		fflush(stdout);
 	}
 }
@@ -353,12 +347,10 @@ void KZTimerModeService::OnCheckJumpButtonLegacyPost()
 
 void KZTimerModeService::OnStartTouchGround()
 {
-	if (kz_kzt_go128_debug.GetBool())
-	{
-		Vector v;
-		this->player->GetVelocity(&v);
-		this->lastLandingSpeed = v.Length2D();
-	}
+	Vector v;
+	this->player->GetVelocity(&v);
+	this->lastLandingSpeed = v.Length2D();
+
 	this->SlopeFix();
 	bbox_t bounds;
 	this->player->GetBBoxBounds(&bounds);
