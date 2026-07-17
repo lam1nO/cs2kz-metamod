@@ -180,6 +180,18 @@ class KZTimerModeService : public KZModeService
 	bool savedOldJumpPressed = false;
 	f32 savedJumpPressedTime = 0.0f;
 
+	// Латч пресса второй половины тика (GO@128): такой клик должен исполниться на границе
+	// тика, но квант when=0.9999 даёт вырожденный сегмент ~1.5 мкс — скролльный клик
+	// умирает, не дожив до чека (релиз обнуляет кнопку раньше первого чека следующего
+	// тика; телеметрия cyb.48: чётные tog-бакеты пусты). Помним пресс и форсим IN_JUMP
+	// ровно на один чек — первый чек команды следующего тика, это и есть точка GO-сетки.
+	// Если эта граница — мёртвая (регистрация касания), пресс сгорает как пре-клик GO.
+	bool pendingBoundaryJump = false;
+	i32 pendingBoundaryTick = 0;        // tickcount команды, чей первый чек — точка исполнения
+	bool pendingOldJumpPressed = false; // защёлка на момент пресса — при форсе реплеим её
+	bool jumpForced = false;
+	u64 forcedJumpBits[3] = {};
+
 	// Скорость в момент касания — источник GO-формулы скорости отрыва (GO@128).
 	f32 lastLandingSpeed = -1.0f;
 	f32 lastLandingSpeedTime = -1.0f; // landingTime, которому соответствует lastLandingSpeed

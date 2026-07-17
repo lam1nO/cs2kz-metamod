@@ -133,6 +133,9 @@ void KZTimerModeService::Reset()
 
 	this->lastLandingSpeed = -1.0f;
 	this->lastLandingSpeedTime = -1.0f;
+
+	this->pendingBoundaryJump = false;
+	this->jumpForced = false;
 }
 
 void KZTimerModeService::Cleanup()
@@ -310,6 +313,7 @@ void KZTimerModeService::OnStopTouchGround()
 void KZTimerModeService::OnCheckJumpButtonLegacy()
 {
 	this->jumpSuppressed = false;
+	this->jumpForced = false;
 	CCSPlayer_MovementServices *ms = this->player->GetMoveServices();
 	if (!ms)
 	{
@@ -320,7 +324,61 @@ void KZTimerModeService::OnCheckJumpButtonLegacy()
 	f32 wouldBeTakeoff = curtime - g_pKZUtils->GetGlobals()->frametime;
 	// Гейт от устаревшего landingTime: поле не сбрасывается без дисконнекта, а curtime
 	// обнуляется на смене карты — «касание в будущем» означает мусор, не подавляем.
-	if (wouldBeTakeoff > this->player->landingTime || this->player->landingTime > curtime)
+	bool deadBoundary = wouldBeTakeoff <= this->player->landingTime && this->player->landingTime <= curtime;
+
+	if (this->pendingBoundaryJump)
+	{
+		i32 tickcount = g_pKZUtils->GetGlobals()->tickcount;
+		// Смена карты: tickcount откатился, латч из прошлой жизни — молча сбрасываем.
+		if (this->pendingBoundaryTick > tickcount + 2)
+		{
+			this->pendingBoundaryJump = false;
+		}
+		else if (tickcount >= this->pendingBoundaryTick)
+		{
+			// Первый чек команды целевого тика — точка исполнения пресса. Потребляем
+			// латч в любом исходе: у клика в GO ровно одна попытка на его границе.
+			this->pendingBoundaryJump = false;
+			if (tickcount > this->pendingBoundaryTick)
+			{
+				// Команда целевого тика не имела чеков (нет движения) — клик истёк.
+				if (kz_kzt_go128_debug.GetBool())
+				{
+					Msg("[kzt-go128] expire %s\n", this->player->GetName());
+					fflush(stdout);
+				}
+			}
+			else if (deadBoundary)
+			{
+				// Граница исполнения совпала с регистрацией касания — пре-клик GO, сгорает.
+				if (kz_kzt_go128_debug.GetBool())
+				{
+					Msg("[kzt-go128] burn %s\n", this->player->GetName());
+					fflush(stdout);
+				}
+			}
+			else
+			{
+				CInButtonState &buttons = ms->m_nButtons();
+				for (int i = 0; i < 3; i++)
+				{
+					this->forcedJumpBits[i] = buttons.m_pButtonStates[i] & IN_JUMP;
+					buttons.m_pButtonStates[i] |= IN_JUMP;
+				}
+				ms->m_LegacyJump().m_bOldJumpPressed = this->pendingOldJumpPressed;
+				// Свежий пресс с точки зрения движка: клик «происходит» на этой границе.
+				ms->m_LegacyJump().m_flJumpPressedTime = curtime;
+				this->jumpForced = true;
+				if (kz_kzt_go128_debug.GetBool())
+				{
+					Msg("[kzt-go128] force %s\n", this->player->GetName());
+					fflush(stdout);
+				}
+			}
+		}
+	}
+
+	if (!deadBoundary)
 	{
 		return; // обычный чек — не мёртвая граница
 	}
@@ -333,10 +391,31 @@ void KZTimerModeService::OnCheckJumpButtonLegacy()
 	this->savedOldJumpPressed = ms->m_LegacyJump().m_bOldJumpPressed();
 	this->savedJumpPressedTime = ms->m_LegacyJump().m_flJumpPressedTime();
 	this->jumpSuppressed = true;
+	// Считаем только реальные сжигания кликов, не каждый сегмент касания.
+	if (kz_kzt_go128_debug.GetBool() && (this->savedJumpBits[0] | this->savedJumpBits[1] | this->savedJumpBits[2]))
+	{
+		Msg("[kzt-go128] dead %s\n", this->player->GetName());
+		fflush(stdout);
+	}
 }
 
 void KZTimerModeService::OnCheckJumpButtonLegacyPost()
 {
+	if (this->jumpForced)
+	{
+		CCSPlayer_MovementServices *ms = this->player->GetMoveServices();
+		if (ms)
+		{
+			// Снимаем форс: кнопка возвращается в реальное состояние (клик давно отпущен).
+			// Защёлку не трогаем — её выставил движок по итогу прыжка, как при живом прессе.
+			CInButtonState &buttons = ms->m_nButtons();
+			for (int i = 0; i < 3; i++)
+			{
+				buttons.m_pButtonStates[i] = (buttons.m_pButtonStates[i] & ~IN_JUMP) | this->forcedJumpBits[i];
+			}
+		}
+		this->jumpForced = false;
+	}
 	if (!this->jumpSuppressed)
 	{
 		return;
@@ -447,6 +526,19 @@ void KZTimerModeService::OnSetupMove(PlayerCommand *pc)
 				if (!subtickMove->pressed())
 				{
 					this->lastJumpReleaseTime = (g_pKZUtils->GetGlobals()->tickcount + when - 1) * ENGINE_FIXED_TICK_INTERVAL;
+				}
+				// Латч на границу тика (см. kz_mode_kzt.h): снимок защёлки — ПОСЛЕ
+				// анлатча выше, чтобы форс реплеил ровно семантику этого пресса.
+				if (subtickMove->pressed() && when > 0.5f)
+				{
+					this->pendingBoundaryJump = true;
+					this->pendingBoundaryTick = g_pKZUtils->GetGlobals()->tickcount + 1;
+					this->pendingOldJumpPressed = this->player->GetMoveServices()->m_LegacyJump().m_bOldJumpPressed();
+					if (kz_kzt_go128_debug.GetBool())
+					{
+						Msg("[kzt-go128] pend %s when=%.3f old=%d\n", this->player->GetName(), when, this->pendingOldJumpPressed ? 1 : 0);
+						fflush(stdout);
+					}
 				}
 			}
 		}
