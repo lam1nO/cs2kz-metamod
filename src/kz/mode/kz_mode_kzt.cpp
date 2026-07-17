@@ -254,6 +254,9 @@ void KZTimerModeService::OnStopTouchGround()
 			velocity.x *= scaleT;
 			velocity.y *= scaleT;
 			this->player->SetVelocity(velocity);
+			// jumpstats должны видеть фактическую скорость отрыва: RegisterTakeoff уже
+			// снял клампнутое значение до нас (для перфа перф-ветка перезапишет после капа).
+			this->player->takeoffVelocity = velocity;
 			dbgN128 = n128;
 			dbgScale = scaleT;
 			dbgPostC = velocity.Length2D();
@@ -349,16 +352,18 @@ void KZTimerModeService::OnCheckJumpButtonLegacyPost()
 
 void KZTimerModeService::OnStartTouchGround()
 {
-	Vector v;
-	this->player->GetVelocity(&v);
-	this->lastLandingSpeed = v.Length2D();
+	this->SlopeFix();
+	// Захват скорости касания — ПОСЛЕ SlopeFix: на склонах он переписывает горизонталь
+	// (конвертирует падение в буст), до него слоуп-бхоп получил бы до-бустовое значение.
 	// landingTime здесь уже свежий: оба вызова OnStartTouchGround (mv_hooks.cpp
 	// Detour_CategorizePosition и mv_player.cpp OnProcessMovement) идут сразу после
 	// RegisterLanding, который его записывает. Связка «скорость ↔ её касание» рвёт
 	// телепорт-эксплойт: HandleTeleport двигает landingTime без нового касания.
+	Vector v;
+	this->player->GetVelocity(&v);
+	this->lastLandingSpeed = v.Length2D();
 	this->lastLandingSpeedTime = this->player->landingTime;
 
-	this->SlopeFix();
 	bbox_t bounds;
 	this->player->GetBBoxBounds(&bounds);
 	Vector ground = this->player->landingOrigin;
@@ -1173,6 +1178,10 @@ void KZTimerModeService::OnTeleport(const Vector *newPosition, const QAngle *new
 {
 	if (!this->player->processingMovement)
 	{
+		// Телепорт вне обработки движения (не triggerfix) инвалидирует скорость касания —
+		// гард от переноса скорости через tp (наземный tp не двигает landingTime и не рвёт
+		// связку lastLandingSpeedTime == landingTime сам по себе).
+		this->lastLandingSpeedTime = -1.0f;
 		return;
 	}
 	// Only happens when triggerfix happens.
