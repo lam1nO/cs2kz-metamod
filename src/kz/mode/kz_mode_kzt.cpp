@@ -236,19 +236,23 @@ void KZTimerModeService::OnStopTouchGround()
 	dbgPreC = horiz;
 
 	// GO@128: движок клампует «отложенный» прыжок (~1.1*maxspeed; старый tog=0-путь
-	// кламп обходил — потому cyb.36 сохранял 426). В bhop-окне (только для перфов) скорость отрыва
-	// выставляет мод: горизонталь = скорость касания × (1 − friction/128)^n128
-	// (ГОшные порции трения от 128-сетки); формула земля×(1−5/128)^n128, затем кап 380 ниже.
-	// Не-перфы отдаются движку: его кламп ~1.1×maxspeed(250)=275 + трение = классика KZT@128
-	// для промазанного бхопа (в GO-классике перф был единственным способом пронести скорость).
+	// кламп обходил — потому cyb.36 сохранял 426). В bhop-окне (до 4 тиков) скорость отрыва
+	// выставляет мод по GO-формуле: горизонталь = скорость касания × (1 − friction/128)^n128
+	// (ГОшные порции трения от 128-сетки). Перф получает кап 380 ниже. Не-перф получает
+	// классический потолок GO 275 (кламп 1.1×250). Дальше 4 тиков — движок как есть.
 	if (kz_kzt_takeoff_speed.GetBool() && this->player->jumped
-		&& timeOnGround > 0.0f && perf
+		&& timeOnGround > 0.0f && timeOnGround <= 4.0f * ENGINE_FIXED_TICK_INTERVAL
 		&& this->lastLandingSpeed > 0.0f
 		&& this->lastLandingSpeedTime == this->player->landingTime)
 	{
 		f32 friction = 5.0f; // = форс KZT sv_friction (kz_mode_kzt.h, modeCvarValues)
 		i32 n128 = (i32)roundf(timeOnGround * 128.0f);
 		f32 target = this->lastLandingSpeed * powf(1.0f - friction / 128.0f, (f32)n128);
+		// Промах: классический потолок GO (кламп 1.1*250) вместо более злого движкового пути.
+		if (!perf)
+		{
+			target = MIN(target, KZT_NONPERF_SPEED_CAP);
+		}
 		if (horiz > 0.1f)
 		{
 			f32 scaleT = target / horiz;

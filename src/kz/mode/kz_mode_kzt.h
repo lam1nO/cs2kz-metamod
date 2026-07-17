@@ -18,6 +18,8 @@
 #define PRE_VELMOD_MAX 1.104f // Max prestrafe velocity modifier: 250 * 1.104 = 276 u/s
 // Bhop related — gokz TweakJump: cap horizontal speed at perf to 380 u/s
 #define PERF_SPEED_CAP 380.0f
+// Потолок скорости промазанного бхопа — классический движковый кламп GO (1.1 * 250).
+#define KZT_NONPERF_SPEED_CAP 275.0f
 // Perf window under legacy jump: jump within this much time after landing = perf.
 // Mode detects perf itself (base sets inPerf only for modern jump). 1/128 s = ~один
 // 128-tick кадр после приземления — строгий KZTimer-перф (важное условие режима).
