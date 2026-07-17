@@ -11,6 +11,10 @@
 // используются без явного инклюда (тянутся транзитивно), но для powf такого прецедента
 // в кодовой базе нет — подключаем явно, чтобы не полагаться на случайную транзитивность.
 #include <cmath>
+// fflush/stdout для debug-леджера GO@128 ниже — прецедента fflush(stdout) в файле не было
+// (Msg идёт через tier0-логгер, а не напрямую в stdio), подключаем явно по той же причине,
+// что и cmath выше.
+#include <cstdio>
 
 KZTimerModePlugin g_KZTimerModePlugin;
 
@@ -217,6 +221,19 @@ void KZTimerModeService::OnStopTouchGround()
 	f32 timeOnGround = this->player->takeoffTime - this->player->landingTime;
 	bool perf = this->player->jumped && timeOnGround <= KZT_PERF_WINDOW && !this->player->possibleLadderHop && !this->player->takeoffFromLadder;
 
+	// Debug-леджер (GO@128): копим значения по ходу функции, печатаем ОДНОЙ строкой в конце
+	// (после капа). -1/1.0 — сентинелы «этот этап не выполнялся».
+	f32 dbgPreC = -1.0f;
+	f32 dbgPostC = -1.0f;
+	i32 dbgN64 = -1;
+	i32 dbgN128 = -1;
+	f32 dbgScale = 1.0f;
+
+	// horiz считаем ДО гейта compensation (просто чтение Length2D, velocity ещё не менялась
+	// с момента GetVelocity выше) — чтобы preC печатался и при kz_kzt_friction_comp=0.
+	f32 horiz = velocity.Length2D();
+	dbgPreC = horiz;
+
 	// GO@128 friction-компенсация: движок применил порции трения на ЦЕЛЫХ 64-границах
 	// (dt=1/64), GO применил бы их на 128-границах (dt=1/128). В bhop-режиме
 	// (v > stopspeed) порция = умножение горизонтали на (1 - friction*dt) — приводим
@@ -227,7 +244,6 @@ void KZTimerModeService::OnStopTouchGround()
 		f32 friction = 5.0f; // = форс KZT sv_friction, modeCvarValues[7] в kz_mode_kzt.h:117 (позиционный
 							  // массив, именованного символа нет — литерал зеркалит именно эту строку)
 		f32 stopspeed = sv_stopspeed.IsValidRef() && sv_stopspeed.IsConVarDataAvailable() ? sv_stopspeed.Get() : 80.0f;
-		f32 horiz = velocity.Length2D();
 		if (horiz > stopspeed)
 		{
 			// Допущение (проверяется L4-логами): takeoff снапнут к границе, движковый friction
@@ -241,20 +257,11 @@ void KZTimerModeService::OnStopTouchGround()
 			velocity.x *= scale;
 			velocity.y *= scale;
 			this->player->SetVelocity(velocity);
-			if (kz_kzt_go128_debug.GetBool())
-			{
-				Msg("[kzt-go128] tog=%.1fms n64=%d n128=%d scale=%.4f v=%.0f\n",
-					timeOnGround * 1000.0f, n64, n128, scale, velocity.Length2D());
-			}
+			dbgN64 = n64;
+			dbgN128 = n128;
+			dbgScale = scale;
+			dbgPostC = velocity.Length2D();
 		}
-		else if (kz_kzt_go128_debug.GetBool())
-		{
-			Msg("[kzt-go128] tog=%.1fms (no comp: v=%.0f <= stopspeed)\n", timeOnGround * 1000.0f, horiz);
-		}
-	}
-	else if (kz_kzt_go128_debug.GetBool() && this->player->jumped)
-	{
-		Msg("[kzt-go128] tog=%.1fms (no comp)\n", timeOnGround * 1000.0f);
 	}
 
 	this->player->inPerf = perf;
@@ -280,6 +287,14 @@ void KZTimerModeService::OnStopTouchGround()
 		origin.z = this->player->GetGroundPosition();
 		this->player->SetOrigin(origin);
 		this->player->takeoffOrigin = origin;
+	}
+
+	if (kz_kzt_go128_debug.GetBool() && this->player->jumped)
+	{
+		Msg("[kzt-go128] %s land=%.0f preC=%.0f postC=%.0f takeoff=%.0f tog=%.1fms n64=%d n128=%d scale=%.4f perf=%d comp=%d\n",
+			this->player->GetName(), this->lastLandingSpeed, dbgPreC, dbgPostC, velocity.Length2D(),
+			timeOnGround * 1000.0f, dbgN64, dbgN128, dbgScale, perf ? 1 : 0, kz_kzt_friction_comp.GetBool() ? 1 : 0);
+		fflush(stdout);
 	}
 }
 
@@ -338,6 +353,12 @@ void KZTimerModeService::OnCheckJumpButtonLegacyPost()
 
 void KZTimerModeService::OnStartTouchGround()
 {
+	if (kz_kzt_go128_debug.GetBool())
+	{
+		Vector v;
+		this->player->GetVelocity(&v);
+		this->lastLandingSpeed = v.Length2D();
+	}
 	this->SlopeFix();
 	bbox_t bounds;
 	this->player->GetBBoxBounds(&bounds);

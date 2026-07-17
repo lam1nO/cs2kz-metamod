@@ -178,6 +178,9 @@ class KZTimerModeService : public KZModeService
 	bool savedOldJumpPressed = false;
 	f32 savedJumpPressedTime = 0.0f;
 
+	// Скорость в момент касания — для debug-леджера (GO@128).
+	f32 lastLandingSpeed = -1.0f;
+
 public:
 	virtual void Reset() override;
 	virtual void Cleanup() override;
