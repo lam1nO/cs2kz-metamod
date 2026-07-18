@@ -257,16 +257,22 @@ void KZTimerModeService::OnStopTouchGround()
 		dbgN = n;
 		f32 target = this->lastLandingSpeed * powf(1.0f - 5.0f / 128.0f, (f32)n);
 		// Потолок промаха деградирует с кривизной тайминга (запрос тестера: «кривое»
-		// действие не должно уносить одинаковые 275). Мера — полутики ошибки: у позднего
-		// клика время на земле (n), у пре-клика — глубина раннего клика. Первый полутик
-		// ошибки — классические 275, каждый следующий режет потолок квантом трения.
-		i32 nPenalty = n;
+		// действие не должно уносить одинаковые 275). Мера — ЦЕЛЫЕ (floor) полутики
+		// ошибки: у позднего клика — сверх окна, у пре-клика — глубина раннего клика;
+		// первый полутик ошибки целиком свободен (275), каждый следующий режет потолок
+		// квантом трения. Реконструкция флотовой кривой: наземный WalkMove прижимает к
+		// 250*velmod (до 276), дальше трение — 265/255/245 по полутикам.
+		i32 nPenalty;
 		if (pressTime > 0.0f && pressDt < 0.0f)
 		{
-			nPenalty = (i32)roundf(-pressDt * 128.0f);
-			nPenalty = MAX(0, MIN(nPenalty, 8));
+			nPenalty = (i32)(-pressDt * 128.0f); // floor: полутики глубины пре-клика
 		}
-		f32 ceiling = KZT_NONPERF_SPEED_CAP * powf(1.0f - 5.0f / 128.0f, (f32)MAX(0, nPenalty - 1));
+		else
+		{
+			nPenalty = MAX(0, (i32)(realTog * 128.0f) - 1); // floor полутиков на земле сверх окна
+		}
+		nPenalty = MAX(0, MIN(nPenalty, 8));
+		f32 ceiling = KZT_NONPERF_SPEED_CAP * powf(1.0f - 5.0f / 128.0f, (f32)nPenalty);
 		dbgPen = nPenalty;
 		target = MIN(target, perf ? PERF_SPEED_CAP : ceiling);
 		f32 horiz = velocity.Length2D();
