@@ -19,6 +19,14 @@ PLUGIN_EXPOSE(KZTimerModePlugin, g_KZTimerModePlugin);
 
 CConVarRef<f32> sv_standable_normal("sv_standable_normal");
 
+// v2 «честный субтик» (спека docs/superpowers/specs/2026-07-18-kzt-v2-subtick-design.md)
+CConVar<bool> kz_kzt_takeoff_speed("kz_kzt_takeoff_speed", FCVAR_NONE,
+                                   "KZT: скорость отрыва бхопа по формуле от скорости касания", true);
+CConVar<float> kz_kzt_perf_window("kz_kzt_perf_window", FCVAR_NONE,
+                                  "KZT: окно перфа в секундах после физического касания", 0.0078125f);
+CConVar<bool> kz_kzt_subtick_debug("kz_kzt_subtick_debug", FCVAR_NONE,
+                                   "KZT: пер-хоповый леджер [kzt-v2] в консоль сервера (временная телеметрия)", false);
+
 bool KZTimerModePlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool late)
 {
 	PLUGIN_SAVEVARS();
@@ -117,6 +125,14 @@ void KZTimerModeService::Reset()
 
 	this->airMoving = {};
 	this->tpmTriggerFixOrigins.RemoveAll();
+
+	for (int i = 0; i < 4; i++)
+	{
+		this->jumpPressTimes[i] = -1.0f;
+	}
+	this->jumpPressIdx = 0;
+	this->lastLandingSpeed = -1.0f;
+	this->lastLandingSpeedTime = -1.0f;
 }
 
 void KZTimerModeService::Cleanup()
@@ -198,30 +214,76 @@ void KZTimerModeService::OnStopTouchGround()
 	Vector velocity;
 	this->player->GetVelocity(&velocity);
 
-	// Перф в KZT — прыжок в окне KZT_PERF_WINDOW после приземления, детектим по времени на
-	// земле (как CKZ). inPerf ПЕРЕЗАПИСЫВАЕМ: Detour_OnJumpLegacy уже поставил его по широкой
-	// эвристике !oldWalkMoved (~целый тик), и без перезаписи HUD красил «перфы», к которым
-	// кап/высота не применялись. Как в GOKZ: один флаг гейтит и кап, и HUD, и старт таймера.
-	// Высоту полной 55.83 на бхопе даёт сам legacy-прыжок движка; здесь — только скорость и
-	// перф-высота (выравнивание origin для консистентности jumpstats).
-	f32 timeOnGround = this->player->takeoffTime - this->player->landingTime;
-	bool perf = this->player->jumped && timeOnGround <= KZT_PERF_WINDOW && !this->player->possibleLadderHop && !this->player->takeoffFromLadder;
-	this->player->inPerf = perf;
-	if (perf)
+	// v2 «честный субтик»: перф — реальный клик в окне СТРОГО ПОСЛЕ физического
+	// касания (landingTimeActual: трейс-фракция/ледж/прогноз, вычисляет core).
+	// inPerf ПЕРЕЗАПИСЫВАЕМ (как в базе): один флаг гейтит кап, HUD и старт таймера.
+	f32 curtime = g_pKZUtils->GetGlobals()->curtime;
+	f32 realTog = this->player->takeoffTime - this->player->landingTimeActual;
+	if (realTog < 0.0f)
 	{
-		// gokz TweakJump: режем горизонталь до PERF_SPEED_CAP (KZTimer-механика, не CKZ-логарифм).
-		f32 horizSpeed = velocity.Length2D();
-		if (horizSpeed > PERF_SPEED_CAP)
+		realTog = 0.0f; // fp-люфт fraction-пути
+	}
+	// Клик, вызвавший этот прыжок — последний валидный пресс не позже отрыва.
+	f32 pressTime = -1.0f;
+	for (int i = 0; i < 4; i++)
+	{
+		f32 t = this->jumpPressTimes[i];
+		if (t > 0.0f && t <= curtime && t <= this->player->takeoffTime + 0.0001f && t > pressTime)
 		{
-			// Масштабируем горизонтальные компоненты, сохраняя направление.
-			f32 scale = PERF_SPEED_CAP / horizSpeed;
+			pressTime = t;
+		}
+	}
+	f32 pressDt = pressTime > 0.0f ? pressTime - this->player->landingTimeActual : -1.0f;
+
+	// Пре-клик (pressDt <= 0, движковый буфер) прыгает — ровно как предсказал клиент —
+	// но перфом не считается: «землит» исчезает по построению, спам наказан скоростью.
+	bool perf = this->player->jumped && pressTime > 0.0f && pressDt > 0.0f
+				&& pressDt <= kz_kzt_perf_window.Get() && !this->player->possibleLadderHop && !this->player->takeoffFromLadder;
+	this->player->inPerf = perf;
+
+	f32 preC = velocity.Length2D();
+	i32 dbgN = -1;
+	bool formulaApplied = false;
+
+	// Скорость отрыва по формуле от скорости касания (порт cyb.46-48 на реальные
+	// времена): трение за фактическое время на земле, перф → кап 380, промах →
+	// классический потолок 275. Дальше 4 тиков на земле — движок как есть.
+	if (kz_kzt_takeoff_speed.GetBool() && this->player->jumped && realTog <= KZT_BHOP_FORMULA_RANGE
+		&& this->lastLandingSpeed > 0.0f && this->lastLandingSpeedTime == this->player->landingTime)
+	{
+		i32 n = (i32)roundf(realTog * 128.0f);
+		n = MAX(0, MIN(n, 8));
+		dbgN = n;
+		f32 target = this->lastLandingSpeed * powf(1.0f - 5.0f / 128.0f, (f32)n);
+		target = MIN(target, perf ? PERF_SPEED_CAP : KZT_NONPERF_SPEED_CAP);
+		f32 horiz = velocity.Length2D();
+		if (horiz > 0.1f)
+		{
+			f32 scale = target / horiz;
 			velocity.x *= scale;
 			velocity.y *= scale;
 			this->player->SetVelocity(velocity);
+			// takeoffVelocity после масштабирования — иначе jumpstats получит устаревшее.
+			this->player->takeoffVelocity = velocity;
+			formulaApplied = true;
 		}
-		// takeoffVelocity обновляем при КАЖДОМ перфе (после возможного cap),
-		// иначе при скорости ≤380 jumpstats получает устаревшее значение.
-		this->player->takeoffVelocity = velocity;
+	}
+
+	if (perf)
+	{
+		if (!formulaApplied)
+		{
+			// Формула не сработала (cvar выключен/гарды) — старый KZTimer-кап.
+			f32 horizSpeed = velocity.Length2D();
+			if (horizSpeed > PERF_SPEED_CAP)
+			{
+				f32 scale = PERF_SPEED_CAP / horizSpeed;
+				velocity.x *= scale;
+				velocity.y *= scale;
+				this->player->SetVelocity(velocity);
+			}
+			this->player->takeoffVelocity = velocity;
+		}
 
 		// Перф-высота: выровнять origin.z по поверхности земли (консистентность jumpstats, как CKZ).
 		Vector origin;
@@ -230,11 +292,28 @@ void KZTimerModeService::OnStopTouchGround()
 		this->player->SetOrigin(origin);
 		this->player->takeoffOrigin = origin;
 	}
+
+	// Временная телеметрия v2 (Msg: KZ_LOG не линкуется в сателлит; fflush: stdout
+	// контейнера буферизуется — уроки cyb.41/45).
+	if (kz_kzt_subtick_debug.GetBool() && this->player->jumped)
+	{
+		Msg("[kzt-v2] %s land=%.0f preC=%.0f takeoff=%.0f press_dt=%.2f tog=%.2f n=%d perf=%d tsp=%d\n",
+			this->player->GetName(), this->lastLandingSpeed, preC, velocity.Length2D(), pressDt * 1000.0f,
+			realTog * 1000.0f, dbgN, perf ? 1 : 0, kz_kzt_takeoff_speed.GetBool() ? 1 : 0);
+		fflush(stdout);
+	}
 }
 
 void KZTimerModeService::OnStartTouchGround()
 {
 	this->SlopeFix();
+	// Захват скорости касания — строго ПОСЛЕ SlopeFix (на склонах он переписывает
+	// горизонталь, конвертируя падение в буст). Привязка к landingTime рвёт
+	// телепорт-эксплойт: HandleTeleport двигает landingTime без нового касания.
+	Vector landingV;
+	this->player->GetVelocity(&landingV);
+	this->lastLandingSpeed = landingV.Length2D();
+	this->lastLandingSpeedTime = this->player->landingTime;
 	bbox_t bounds;
 	this->player->GetBBoxBounds(&bounds);
 	Vector ground = this->player->landingOrigin;
@@ -312,11 +391,19 @@ void KZTimerModeService::OnSetupMove(PlayerCommand *pc)
 				}
 				if (!subtickMove->pressed())
 				{
-					this->lastJumpReleaseTime = (g_pKZUtils->GetGlobals()->tickcount + when - 1) * ENGINE_FIXED_TICK_INTERVAL;
+					this->lastJumpReleaseTime = inputTime;
 				}
 			}
+			// v2: реальное время пресса — опорная точка классификации перфа.
+			if (subtickMove->pressed())
+			{
+				this->jumpPressTimes[this->jumpPressIdx] = inputTime;
+				this->jumpPressIdx = (this->jumpPressIdx + 1) & 3;
+			}
 		}
-		subtickMove->set_when(when >= 0.5 ? 0.5 : 0);
+		// v2: when НЕ квантуем — движок исполняет инпуты в реальные времена (сегменты
+		// режутся по кликам), сервер совпадает с клиентским предиктом. Нулевые when
+		// не создаём и не трогаем — AC-сигнал десабтика (поток when==0) сохранён.
 	}
 }
 
@@ -1038,6 +1125,9 @@ void KZTimerModeService::OnTeleport(const Vector *newPosition, const QAngle *new
 {
 	if (!this->player->processingMovement)
 	{
+		// Внешний телепорт (чекпоинт и т.п.): HandleTeleport двигает landingTime без
+		// нового касания — рвём привязку, чтобы формула не перенесла старую скорость.
+		this->lastLandingSpeedTime = -1.0f;
 		return;
 	}
 	// Only happens when triggerfix happens.

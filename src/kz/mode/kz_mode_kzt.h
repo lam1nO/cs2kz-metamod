@@ -22,6 +22,10 @@
 // Mode detects perf itself (base sets inPerf only for modern jump). 1/128 s = ~один
 // 128-tick кадр после приземления — строгий KZTimer-перф (важное условие режима).
 #define KZT_PERF_WINDOW 0.0078125f // 1/128
+// v2 «честный субтик»: потолок скорости промазанного бхопа (классика KZT, GO-кламп 1.1*250)
+#define KZT_NONPERF_SPEED_CAP 275.0f
+// Дальше этого времени на земле формула скорости не применяется — движок как есть
+#define KZT_BHOP_FORMULA_RANGE (4.0f * ENGINE_FIXED_TICK_INTERVAL)
 // Misc
 #define DUCK_SPEED_NORMAL  8.0f
 #define DUCK_SPEED_MINIMUM 6.0234375f // Equal to if you just ducked/unducked for the first time in a while
@@ -146,6 +150,14 @@ class KZTimerModeService : public KZModeService
 	bool hasValidDesiredViewAngle {};
 	QAngle lastValidDesiredViewAngle;
 	f32 lastJumpReleaseTime {};
+	// v2: реальные времена прессов IN_JUMP (до каких-либо квантовок; кольцо под
+	// скролл-серии). Классификация перфа = последний пресс не позже отрыва против
+	// landingTimeActual (физическое касание, вычисляет апстрим-core).
+	f32 jumpPressTimes[4] = {-1.0f, -1.0f, -1.0f, -1.0f};
+	i32 jumpPressIdx {};
+	// Скорость в момент касания (после SlopeFix) — источник формулы скорости отрыва.
+	f32 lastLandingSpeed = -1.0f;
+	f32 lastLandingSpeedTime = -1.0f; // landingTime, которому соответствует lastLandingSpeed
 	bool oldDuckPressed {};
 	bool oldJumpPressed {};
 	bool forcedUnduck {};
