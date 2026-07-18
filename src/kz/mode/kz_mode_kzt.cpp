@@ -243,6 +243,7 @@ void KZTimerModeService::OnStopTouchGround()
 
 	f32 preC = velocity.Length2D();
 	i32 dbgN = -1;
+	i32 dbgPen = -1;
 	bool formulaApplied = false;
 
 	// Скорость отрыва по формуле от скорости касания (порт cyb.46-48 на реальные
@@ -255,7 +256,19 @@ void KZTimerModeService::OnStopTouchGround()
 		n = MAX(0, MIN(n, 8));
 		dbgN = n;
 		f32 target = this->lastLandingSpeed * powf(1.0f - 5.0f / 128.0f, (f32)n);
-		target = MIN(target, perf ? PERF_SPEED_CAP : KZT_NONPERF_SPEED_CAP);
+		// Потолок промаха деградирует с кривизной тайминга (запрос тестера: «кривое»
+		// действие не должно уносить одинаковые 275). Мера — полутики ошибки: у позднего
+		// клика время на земле (n), у пре-клика — глубина раннего клика. Первый полутик
+		// ошибки — классические 275, каждый следующий режет потолок квантом трения.
+		i32 nPenalty = n;
+		if (pressTime > 0.0f && pressDt < 0.0f)
+		{
+			nPenalty = (i32)roundf(-pressDt * 128.0f);
+			nPenalty = MAX(0, MIN(nPenalty, 8));
+		}
+		f32 ceiling = KZT_NONPERF_SPEED_CAP * powf(1.0f - 5.0f / 128.0f, (f32)MAX(0, nPenalty - 1));
+		dbgPen = nPenalty;
+		target = MIN(target, perf ? PERF_SPEED_CAP : ceiling);
 		f32 horiz = velocity.Length2D();
 		if (horiz > 0.1f)
 		{
@@ -297,9 +310,9 @@ void KZTimerModeService::OnStopTouchGround()
 	// контейнера буферизуется — уроки cyb.41/45).
 	if (kz_kzt_subtick_debug.GetBool() && this->player->jumped)
 	{
-		Msg("[kzt-v2] %s land=%.0f preC=%.0f takeoff=%.0f press_dt=%.2f tog=%.2f n=%d perf=%d tsp=%d\n",
+		Msg("[kzt-v2] %s land=%.0f preC=%.0f takeoff=%.0f press_dt=%.2f tog=%.2f n=%d pen=%d perf=%d tsp=%d\n",
 			this->player->GetName(), this->lastLandingSpeed, preC, velocity.Length2D(), pressDt * 1000.0f,
-			realTog * 1000.0f, dbgN, perf ? 1 : 0, kz_kzt_takeoff_speed.GetBool() ? 1 : 0);
+			realTog * 1000.0f, dbgN, dbgPen, perf ? 1 : 0, kz_kzt_takeoff_speed.GetBool() ? 1 : 0);
 		fflush(stdout);
 	}
 }
