@@ -27,6 +27,9 @@
 // Misc
 #define DUCK_SPEED_NORMAL  8.0f
 #define DUCK_SPEED_MINIMUM 6.0234375f // Equal to if you just ducked/unducked for the first time in a while
+// Движковый дак-кроп скорости (CS_PLAYER_SPEED_DUCK_MODIFIER из HandleDuckingSpeedCrop):
+// потолок клэмпа лерпится 1.0 -> 0.34 по duckAmount
+#define KZT_DUCK_SPEED_MODIFIER 0.34f
 
 class KZTimerModePlugin : public ISmmPlugin, public IMetamodListener
 {
@@ -166,6 +169,9 @@ class KZTimerModeService : public KZModeService
 	f32 effectivePreVelMod {1.0f}; // return value of CalcPrestrafeVelMod for current tick
 	i32 preTickCounter {};
 	f32 preVelModLastChange {};
+	// landingTimeActual касания, уже получившего наземную велмод-итерацию (GO-паритет:
+	// каждое касание, включая нулевой длины при буферном прыжке, даёт >=1 итерацию)
+	f32 velModTouchIterTime {-1.0f};
 	f32 originalMaxSpeed {};
 
 	bool didTPM {};
@@ -220,7 +226,7 @@ public:
 	void RestoreInterpolatedViewAngles();
 
 	// KZTimer prestrafe: tick-counter velMod model (ported from gokz CalcPrestrafeVelMod)
-	f32 CalcPrestrafeVelMod();
+	f32 CalcPrestrafeVelMod(bool forceGround = false);
 	f32 GetClientMovingDirection();
 
 	void CheckVelocityQuantization();

@@ -116,6 +116,7 @@ void KZTimerModeService::Reset()
 	this->effectivePreVelMod = 1.0f;
 	this->preTickCounter = {};
 	this->preVelModLastChange = {};
+	this->velModTouchIterTime = -1.0f;
 
 	this->didTPM = {};
 	this->overrideTPM = {};
@@ -248,6 +249,22 @@ void KZTimerModeService::OnStopTouchGround()
 	i32 dbgPen = -1;
 	bool formulaApplied = false;
 
+	// GO-паритет велмода: в GO CalcPrestrafeVelMod живёт в RunCmd и исполняется и на
+	// тике прыжка (флаг земли уже стоит) — каждое касание даёт >=1 наземную итерацию,
+	// turning-ветка обновляет lastChange и цепочка страйф-бхопов держит велмод. Наш
+	// буферный прыжок происходит в сегменте, где OnProcessMovement ещё видел воздух —
+	// без принудительной итерации велмод протухал (>0.2с) и промахи залипали на 250
+	// (леджер srv-5: ceil=250 в 366 из 383 промахов).
+	if (this->player->jumped && this->velModTouchIterTime != this->player->landingTimeActual)
+	{
+		this->effectivePreVelMod = this->CalcPrestrafeVelMod(true);
+		this->velModTouchIterTime = this->player->landingTimeActual;
+	}
+
+	CCSPlayer_MovementServices *msDuck = this->player->GetMoveServices();
+	bool ducked = msDuck && (msDuck->m_bDucked() || msDuck->m_bDucking);
+	f32 duckFrac = msDuck ? MAX(0.0f, MIN(1.0f, msDuck->m_flDuckAmount())) : 0.0f;
+
 	// Скорость отрыва по формуле от скорости касания (порт cyb.46-48 на реальные
 	// времена): трение за фактическое время на земле, перф → кап 380, промах →
 	// классический потолок 275. Дальше 4 тиков на земле — движок как есть.
@@ -274,13 +291,15 @@ void KZTimerModeService::OnStopTouchGround()
 			f32 ceiling = SPEED_NORMAL * this->effectivePreVelMod;
 			dbgPen = (i32)ceiling;
 			f32 frictionOnly = this->lastLandingSpeed * powf(1.0f - 5.0f / 128.0f, (f32)k);
-			// Дак-промах (GO §8 analyze-файла): движковый кроп режет потолок клэмпа к
-			// 250*велмод*0.34 (~85-94) — движок это уже отсимулировал, формулой НЕ
-			// спасаем. Перф в даке потерь не имеет (ветка перфа) — как в GO.
-			CCSPlayer_MovementServices *msDuck = this->player->GetMoveServices();
-			bool ducked = msDuck && (msDuck->m_bDucked() || msDuck->m_bDucking);
+			// Дак-промах (GO §8 analyze-файла): движковый кроп режет потолок клэмпа
+			// лерпом 1.0->0.34 по duckAmount (HandleDuckingSpeedCrop). Буферный прыжок
+			// пропускает WalkMove-сегмент — кроп эмулируем потолком формулы (без этого
+			// дак-промах уносил до 250, леджер srv-5); если движок успел крапнуть сам,
+			// MIN оставляет его результат (85/160). Перф в даке потерь не имеет — как GO.
 			if (ducked)
 			{
+				ceiling *= KZT_DUCK_SPEED_MODIFIER * duckFrac + 1.0f - duckFrac;
+				dbgPen = (i32)ceiling;
 				target = MIN(preC, ceiling);
 			}
 			else
@@ -332,9 +351,10 @@ void KZTimerModeService::OnStopTouchGround()
 	// контейнера буферизуется — уроки cyb.41/45).
 	if (kz_kzt_subtick_debug.GetBool() && this->player->jumped)
 	{
-		Msg("[kzt-v2] %s land=%.0f preC=%.0f takeoff=%.0f press_dt=%.2f tog=%.2f n=%d ceil=%d perf=%d tsp=%d\n",
+		Msg("[kzt-v2] %s land=%.0f preC=%.0f takeoff=%.0f press_dt=%.2f tog=%.2f n=%d ceil=%d perf=%d tsp=%d duck=%d dfrac=%.2f vm=%.3f\n",
 			this->player->GetName(), this->lastLandingSpeed, preC, velocity.Length2D(), pressDt * 1000.0f,
-			realTog * 1000.0f, dbgN, dbgPen, perf ? 1 : 0, kz_kzt_takeoff_speed.GetBool() ? 1 : 0);
+			realTog * 1000.0f, dbgN, dbgPen, perf ? 1 : 0, kz_kzt_takeoff_speed.GetBool() ? 1 : 0,
+			ducked ? 1 : 0, duckFrac, this->effectivePreVelMod);
 		fflush(stdout);
 	}
 }
@@ -460,7 +480,8 @@ void KZTimerModeService::OnProcessMovement()
 	// Оговорка: углы per-tick (наш форс sv_subtick_movement_view_angles=false,
 	// эксплойт-фикс) — обе итерации тика видят один и тот же доворот.
 	i32 velModIters = 1;
-	if ((this->player->GetPlayerPawn()->m_fFlags & FL_ONGROUND) != 0)
+	bool velModOnGround = (this->player->GetPlayerPawn()->m_fFlags & FL_ONGROUND) != 0;
+	if (velModOnGround)
 	{
 		f32 sinceLanding = g_pKZUtils->GetGlobals()->curtime - this->player->landingTimeActual;
 		velModIters = sinceLanding >= ENGINE_FIXED_TICK_INTERVAL ? 2 : MAX(1, MIN(2, (i32)roundf(sinceLanding * 128.0f)));
@@ -468,6 +489,11 @@ void KZTimerModeService::OnProcessMovement()
 	for (i32 vi = 0; vi < velModIters; vi++)
 	{
 		this->effectivePreVelMod = this->CalcPrestrafeVelMod();
+	}
+	if (velModOnGround)
+	{
+		// Касание получило наземную итерацию — форс в прыжке не нужен
+		this->velModTouchIterTime = this->player->landingTimeActual;
 	}
 }
 
@@ -568,9 +594,11 @@ void KZTimerModeService::ReduceDuckSlowdown()
 // Ported from gokz CalcPrestrafeVelMod (KZTimerGlobal).
 // Returns the current prestrafe velocity modifier; also updates this->preVelMod.
 // Must be called once per movement tick in OnProcessMovement.
-f32 KZTimerModeService::CalcPrestrafeVelMod()
+f32 KZTimerModeService::CalcPrestrafeVelMod(bool forceGround)
 {
-	bool onGround = (this->player->GetPlayerPawn()->m_fFlags & FL_ONGROUND) != 0;
+	// forceGround: итерация касания в момент прыжка (сегмент буферного прыжка видит
+	// игрока ещё в воздухе, а GO на тике прыжка уже считает землю)
+	bool onGround = forceGround || (this->player->GetPlayerPawn()->m_fFlags & FL_ONGROUND) != 0;
 	f32 curtime = g_pKZUtils->GetGlobals()->curtime;
 
 	if (!onGround)
