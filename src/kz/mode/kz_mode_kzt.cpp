@@ -235,10 +235,11 @@ void KZTimerModeService::OnStopTouchGround()
 	}
 	f32 pressDt = pressTime > 0.0f ? pressTime - this->player->landingTimeActual : -1.0f;
 
-	// Пре-клик (pressDt <= 0, движковый буфер) прыгает — ровно как предсказал клиент —
-	// но перфом не считается: «землит» исчезает по построению, спам наказан скоростью.
-	bool perf = this->player->jumped && pressTime > 0.0f && pressDt > 0.0f
-				&& pressDt <= kz_kzt_perf_window.Get() && !this->player->possibleLadderHop && !this->player->takeoffFromLadder;
+	// GOKZ-паритет (analyze-gokz-kzt-nonperf-bhop.md): перф = «ноль наземных тиков до
+	// прыжка» — клик в окне ПОСЛЕ касания ИЛИ буферный пре-клик (движок прыгнул на
+	// первом наземном чеке, как предсказал клиент). Пре-клики отныне перфы, как в GO.
+	bool perf = this->player->jumped && pressTime > 0.0f && pressDt <= kz_kzt_perf_window.Get()
+				&& !this->player->possibleLadderHop && !this->player->takeoffFromLadder;
 	this->player->inPerf = perf;
 
 	f32 preC = velocity.Length2D();
@@ -252,29 +253,26 @@ void KZTimerModeService::OnStopTouchGround()
 	if (kz_kzt_takeoff_speed.GetBool() && this->player->jumped && realTog <= KZT_BHOP_FORMULA_RANGE
 		&& this->lastLandingSpeed > 0.0f && this->lastLandingSpeedTime == this->player->landingTime)
 	{
-		i32 n = (i32)roundf(realTog * 128.0f);
-		n = MAX(0, MIN(n, 8));
-		dbgN = n;
-		f32 target = this->lastLandingSpeed * powf(1.0f - 5.0f / 128.0f, (f32)n);
-		// Потолок промаха деградирует с кривизной тайминга (запрос тестера: «кривое»
-		// действие не должно уносить одинаковые 275). Мера — ЦЕЛЫЕ (floor) полутики
-		// ошибки: у позднего клика — сверх окна, у пре-клика — глубина раннего клика;
-		// первый полутик ошибки целиком свободен (275), каждый следующий режет потолок
-		// квантом трения. Реконструкция флотовой кривой: наземный WalkMove прижимает к
-		// 250*velmod (до 276), дальше трение — 265/255/245 по полутикам.
-		i32 nPenalty;
-		if (pressTime > 0.0f && pressDt < 0.0f)
+		// GOKZ-модель скорости (analyze-gokz-kzt-nonperf-bhop.md §5):
+		// перф — ноль трения (CheckJumpButton в GO шёл до Friction), полный перенос до 380;
+		// промах — min(заход × 0.9609^k, 250 × велмод), k = полные 128-тики на земле,
+		// потолок динамический (престрейф в тик касания → до 276, без — ровно 250).
+		// Не эмулируем только крохи Accelerate-доразгона у глубоких промахов.
+		f32 target;
+		if (perf)
 		{
-			nPenalty = (i32)(-pressDt * 128.0f); // floor: полутики глубины пре-клика
+			dbgN = 0;
+			target = MIN(this->lastLandingSpeed, PERF_SPEED_CAP);
 		}
 		else
 		{
-			nPenalty = MAX(0, (i32)(realTog * 128.0f) - 1); // floor полутиков на земле сверх окна
+			i32 k = (i32)(realTog * 128.0f); // floor: полные наземные 128-тики (GOKZ k)
+			k = MAX(1, MIN(k, 8));
+			dbgN = k;
+			f32 ceiling = SPEED_NORMAL * this->effectivePreVelMod;
+			dbgPen = (i32)ceiling;
+			target = MIN(this->lastLandingSpeed * powf(1.0f - 5.0f / 128.0f, (f32)k), ceiling);
 		}
-		nPenalty = MAX(0, MIN(nPenalty, 8));
-		f32 ceiling = KZT_NONPERF_SPEED_CAP * powf(1.0f - 5.0f / 128.0f, (f32)nPenalty);
-		dbgPen = nPenalty;
-		target = MIN(target, perf ? PERF_SPEED_CAP : ceiling);
 		f32 horiz = velocity.Length2D();
 		if (horiz > 0.1f)
 		{
@@ -316,7 +314,7 @@ void KZTimerModeService::OnStopTouchGround()
 	// контейнера буферизуется — уроки cyb.41/45).
 	if (kz_kzt_subtick_debug.GetBool() && this->player->jumped)
 	{
-		Msg("[kzt-v2] %s land=%.0f preC=%.0f takeoff=%.0f press_dt=%.2f tog=%.2f n=%d pen=%d perf=%d tsp=%d\n",
+		Msg("[kzt-v2] %s land=%.0f preC=%.0f takeoff=%.0f press_dt=%.2f tog=%.2f n=%d ceil=%d perf=%d tsp=%d\n",
 			this->player->GetName(), this->lastLandingSpeed, preC, velocity.Length2D(), pressDt * 1000.0f,
 			realTog * 1000.0f, dbgN, dbgPen, perf ? 1 : 0, kz_kzt_takeoff_speed.GetBool() ? 1 : 0);
 		fflush(stdout);

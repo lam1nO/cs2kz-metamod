@@ -22,8 +22,6 @@
 // Mode detects perf itself (base sets inPerf only for modern jump). 1/128 s = ~один
 // 128-tick кадр после приземления — строгий KZTimer-перф (важное условие режима).
 #define KZT_PERF_WINDOW 0.0078125f // 1/128
-// v2 «честный субтик»: потолок скорости промазанного бхопа (классика KZT, GO-кламп 1.1*250)
-#define KZT_NONPERF_SPEED_CAP 275.0f
 // Дальше этого времени на земле формула скорости не применяется — движок как есть
 #define KZT_BHOP_FORMULA_RANGE (4.0f * ENGINE_FIXED_TICK_INTERVAL)
 // Misc
