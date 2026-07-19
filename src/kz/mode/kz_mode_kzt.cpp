@@ -453,8 +453,22 @@ void KZTimerModeService::OnProcessMovement()
 	this->RemoveCrouchJumpBind();
 	this->ReduceDuckSlowdown();
 	this->InterpolateViewAngles();
-	// Update prestrafe velMod each movement tick; capture effective value for this tick
-	this->effectivePreVelMod = this->CalcPrestrafeVelMod();
+	// Велмод считаем в полутиках (кадры GO@128): полный наземный тик = 2 итерации,
+	// тик с приземлением в середине = 1 (граница по landingTimeActual), воздух = 1
+	// вызов (ранний return без изменений). Константы gokz 1:1 — реальное время
+	// набора/спада совпадает с GO@128 (на 64Гц-вызовах всё шло вдвое медленнее).
+	// Оговорка: углы per-tick (наш форс sv_subtick_movement_view_angles=false,
+	// эксплойт-фикс) — обе итерации тика видят один и тот же доворот.
+	i32 velModIters = 1;
+	if ((this->player->GetPlayerPawn()->m_fFlags & FL_ONGROUND) != 0)
+	{
+		f32 sinceLanding = g_pKZUtils->GetGlobals()->curtime - this->player->landingTimeActual;
+		velModIters = sinceLanding >= ENGINE_FIXED_TICK_INTERVAL ? 2 : MAX(1, MIN(2, (i32)roundf(sinceLanding * 128.0f)));
+	}
+	for (i32 vi = 0; vi < velModIters; vi++)
+	{
+		this->effectivePreVelMod = this->CalcPrestrafeVelMod();
+	}
 }
 
 void KZTimerModeService::OnPlayerMove()
