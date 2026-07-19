@@ -274,10 +274,22 @@ void KZTimerModeService::OnStopTouchGround()
 			f32 ceiling = SPEED_NORMAL * this->effectivePreVelMod;
 			dbgPen = (i32)ceiling;
 			f32 frictionOnly = this->lastLandingSpeed * powf(1.0f - 5.0f / 128.0f, (f32)k);
-			// Волк-фикс: ниже потолка наземный Accelerate легитимно доразгоняет (зажатая
-			// W, «волкать») — движок это уже отсимулировал, берём максимум из GO-трения
-			// и фактического результата; потолок 250*велмод сверху (GOKZ-семантика).
-			target = MIN(MAX(frictionOnly, preC), ceiling);
+			// Дак-промах (GO §8 analyze-файла): движковый кроп режет потолок клэмпа к
+			// 250*велмод*0.34 (~85-94) — движок это уже отсимулировал, формулой НЕ
+			// спасаем. Перф в даке потерь не имеет (ветка перфа) — как в GO.
+			CCSPlayer_MovementServices *msDuck = this->player->GetMoveServices();
+			bool ducked = msDuck && (msDuck->m_bDucked() || msDuck->m_bDucking);
+			if (ducked)
+			{
+				target = MIN(preC, ceiling);
+			}
+			else
+			{
+				// Волк-фикс: ниже потолка наземный Accelerate легитимно доразгоняет (зажатая
+				// W, «волкать») — движок это уже отсимулировал, берём максимум из GO-трения
+				// и фактического результата; потолок 250*велмод сверху (GOKZ-семантика).
+				target = MIN(MAX(frictionOnly, preC), ceiling);
+			}
 		}
 		f32 horiz = velocity.Length2D();
 		if (horiz > 0.1f)
