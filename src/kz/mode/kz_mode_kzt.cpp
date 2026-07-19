@@ -235,11 +235,12 @@ void KZTimerModeService::OnStopTouchGround()
 	}
 	f32 pressDt = pressTime > 0.0f ? pressTime - this->player->landingTimeActual : -1.0f;
 
-	// GOKZ-паритет (analyze-gokz-kzt-nonperf-bhop.md): перф = «ноль наземных тиков до
-	// прыжка» — клик в окне ПОСЛЕ касания ИЛИ буферный пре-клик (движок прыгнул на
-	// первом наземном чеке, как предсказал клиент). Пре-клики отныне перфы, как в GO.
-	bool perf = this->player->jumped && pressTime > 0.0f && pressDt <= kz_kzt_perf_window.Get()
-				&& !this->player->possibleLadderHop && !this->player->takeoffFromLadder;
+	// Перф — клик СТРОГО ПОСЛЕ касания в окне. Буферный пре-клик прыгает (движок,
+	// как предсказал клиент — «землит» не возвращается), но классифицируется промахом
+	// и идёт в общую формулу скорости — осознанный отход от GOKZ (у них HitPerf
+	// структурный и включал буферные прессы), решение пользователя 2026-07-19.
+	bool perf = this->player->jumped && pressTime > 0.0f && pressDt > 0.0f
+				&& pressDt <= kz_kzt_perf_window.Get() && !this->player->possibleLadderHop && !this->player->takeoffFromLadder;
 	this->player->inPerf = perf;
 
 	f32 preC = velocity.Length2D();
@@ -266,12 +267,17 @@ void KZTimerModeService::OnStopTouchGround()
 		}
 		else
 		{
+			// k=1 покрывает и буферный пре-клик (время на земле ~0 → минимальный квант).
 			i32 k = (i32)(realTog * 128.0f); // floor: полные наземные 128-тики (GOKZ k)
 			k = MAX(1, MIN(k, 8));
 			dbgN = k;
 			f32 ceiling = SPEED_NORMAL * this->effectivePreVelMod;
 			dbgPen = (i32)ceiling;
-			target = MIN(this->lastLandingSpeed * powf(1.0f - 5.0f / 128.0f, (f32)k), ceiling);
+			f32 frictionOnly = this->lastLandingSpeed * powf(1.0f - 5.0f / 128.0f, (f32)k);
+			// Волк-фикс: ниже потолка наземный Accelerate легитимно доразгоняет (зажатая
+			// W, «волкать») — движок это уже отсимулировал, берём максимум из GO-трения
+			// и фактического результата; потолок 250*велмод сверху (GOKZ-семантика).
+			target = MIN(MAX(frictionOnly, preC), ceiling);
 		}
 		f32 horiz = velocity.Length2D();
 		if (horiz > 0.1f)
