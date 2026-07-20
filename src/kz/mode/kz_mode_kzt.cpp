@@ -257,7 +257,14 @@ void KZTimerModeService::OnStopTouchGround()
 	// (леджер srv-5: ceil=250 в 366 из 383 промахов).
 	if (this->player->jumped && this->velModTouchIterTime != this->player->landingTimeActual)
 	{
-		this->effectivePreVelMod = this->CalcPrestrafeVelMod(true);
+		// GO-паритет наземного времени: same-tick касание получает столько 128-тиков
+		// велмода, сколько реально пробыло на земле (те же кванты, что k формулы);
+		// буферный пре-клик (tog~0) = 1 итерация.
+		i32 touchIters = MAX(1, MIN((i32)(realTog * 128.0f), 8));
+		for (i32 ti = 0; ti < touchIters; ti++)
+		{
+			this->effectivePreVelMod = this->CalcPrestrafeVelMod(true);
+		}
 		this->velModTouchIterTime = this->player->landingTimeActual;
 	}
 
@@ -608,6 +615,25 @@ f32 KZTimerModeService::CalcPrestrafeVelMod(bool forceGround)
 
 	TurnState turning = this->player->GetTurning();
 
+	// Кнопки стрейфа. GO читает поле usercmd целого тика; наша форс-итерация касания
+	// исполняется в сабтик-момент клика — на смене стрейфа A/D в эту миллисекунду
+	// отпущены (DOWN_UP текущий IsButtonPressed не считает) и велмод нёс ложный
+	// no-commit/сброс. Для касания агрегируем по тику: [0] держат, [1]/[2] — переходы.
+	bool moveLeft, moveRight;
+	CCSPlayer_MovementServices *msBtns = forceGround ? this->player->GetMoveServices() : nullptr;
+	if (msBtns)
+	{
+		u64 tickButtons = msBtns->m_nButtons().m_pButtonStates[0] | msBtns->m_nButtons().m_pButtonStates[1]
+						  | msBtns->m_nButtons().m_pButtonStates[2];
+		moveLeft = (tickButtons & IN_MOVELEFT) != 0;
+		moveRight = (tickButtons & IN_MOVERIGHT) != 0;
+	}
+	else
+	{
+		moveLeft = this->player->IsButtonPressed(IN_MOVELEFT);
+		moveRight = this->player->IsButtonPressed(IN_MOVERIGHT);
+	}
+
 	if (turning == TURN_NONE)
 	{
 		if (curtime - this->preVelModLastChange > 0.2f)
@@ -621,16 +647,15 @@ f32 KZTimerModeService::CalcPrestrafeVelMod(bool forceGround)
 			return PRE_VELMOD_MAX - 0.001f;
 		}
 	}
-	else if ((this->player->IsButtonPressed(IN_MOVELEFT) || this->player->IsButtonPressed(IN_MOVERIGHT))
-		&& this->player->currentMoveData->m_vecVelocity.Length2D() > 248.9f)
+	else if ((moveLeft || moveRight) && this->player->currentMoveData->m_vecVelocity.Length2D() > 248.9f)
 	{
 		f32 increment = (this->preVelMod > 1.04f) ? 0.001f : 0.0009f;
 
 		bool forwards = this->GetClientMovingDirection() > 0.0f;
 
-		bool goodSync = (this->player->IsButtonPressed(IN_MOVERIGHT) && turning == TURN_RIGHT)
+		bool goodSync = (moveRight && turning == TURN_RIGHT)
 			|| (turning == TURN_LEFT && !forwards)
-			|| (this->player->IsButtonPressed(IN_MOVELEFT) && turning == TURN_LEFT)
+			|| (moveLeft && turning == TURN_LEFT)
 			|| (turning == TURN_RIGHT && !forwards);
 
 		if (goodSync)
