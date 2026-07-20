@@ -112,4 +112,7 @@ message ReplayHeader {
 	optional float viewmodel_offset_y = 19 [default = 1];
 	optional float viewmodel_offset_z = 20 [default = -1];
 	optional float viewmodel_fov = 21 [default = 60];
+
+	// Код прицела игрока (CCSPlayerController::m_szCrosshairCodes). Пусто у старых реплеев.
+	optional string crosshair_code = 22;
 }

@@ -34,6 +34,7 @@ public:
 	SCHEMA_FIELD(int32, m_DesiredObserverMode)
 	SCHEMA_FIELD(CHandle<CCSPlayerPawn>, m_hDesiredObserverTarget)
 	SCHEMA_FIELD(CUtlSymbolLarge, m_szClan)
+	SCHEMA_FIELD(CUtlSymbolLarge, m_szCrosshairCodes)
 	SCHEMA_FIELD(int32, m_iCompetitiveRanking)
 	SCHEMA_FIELD(int8, m_iCompetitiveRankType)
 	SCHEMA_FIELD(CCSPlayerController_InventoryServices *, m_pInventoryServices)
@@ -46,6 +47,22 @@ public:
 			return;
 		}
 		this->m_szClan(clan);
+	}
+
+	// Код прицела (клиент присылает сам; CUtlSymbolLarge в схеме CS2).
+	// Зрители рендерят его через cl_show_observer_crosshair.
+	const char *GetCrosshairCodes()
+	{
+		return m_szCrosshairCodes().String();
+	}
+
+	void SetCrosshairCodes(const char *codes)
+	{
+		if (!codes)
+		{
+			return;
+		}
+		this->m_szCrosshairCodes(codes);
 	}
 
 	CStrafeStats *GetCStrafeStats()

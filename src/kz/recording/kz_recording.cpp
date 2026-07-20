@@ -78,6 +78,11 @@ void Recorder::Init(ReplayHeader &hdr, KZPlayer *player, ReplayType type)
 	hdr.set_viewmodel_offset_y(utils::StringToFloat(interfaces::pEngine->GetClientConVarValue(player->GetPlayerSlot(), "viewmodel_offset_y")));
 	hdr.set_viewmodel_offset_z(utils::StringToFloat(interfaces::pEngine->GetClientConVarValue(player->GetPlayerSlot(), "viewmodel_offset_z")));
 	hdr.set_viewmodel_fov(utils::StringToFloat(interfaces::pEngine->GetClientConVarValue(player->GetPlayerSlot(), "viewmodel_fov")));
+
+	if (player->GetController())
+	{
+		hdr.set_crosshair_code(player->GetController()->GetCrosshairCodes());
+	}
 }
 
 void KZRecordingService::Reset()
