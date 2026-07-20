@@ -364,6 +364,11 @@ namespace KZ::replaysystem::playback
 				KZ::replaysystem::item::ApplyItemAttributesToWeapon(*newWeapon, desiredWeapon);
 				cmd.mutable_base()->set_weaponselect(newWeapon->entindex());
 			}
+			// Диагностика скинов бота (нож/пистолет «не те»): что записано в реплее и что выдали.
+			// fflush — stdout контейнера буферизуется (урок kzt-саги).
+			Msg("[replay-item] give '%s' itemDef=%d attrs=%d ok=%d\n", weaponName.c_str(), desiredWeapon.mainInfo.itemDef,
+				desiredWeapon.mainInfo.numAttributes, newWeapon != nullptr);
+			fflush(stdout);
 		}
 	}
 

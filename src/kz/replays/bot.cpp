@@ -117,20 +117,9 @@ namespace KZ::replaysystem::bot
 		}
 		V_strncpy(g_botCrosshairCode, crosshairCode, sizeof(g_botCrosshairCode));
 		bot->SetCrosshairCodes(g_botCrosshairCode);
-		Msg("[replay-xhair] bot code applied: '%s'\n", g_botCrosshairCode);
-
-		// Диагностика рендера (cyb.60): зритель может брать прицел цели из userinfo-cvar'ов,
-		// а не из m_szCrosshairCodes. Ставим боту ОТЛИЧИМУЮ статику (голубой классик без
-		// точки): если зритель увидит её — рендер читает userinfo, фикс = cl_crosshair* в хедер.
-		CPlayerSlot slot = bot->GetPlayerSlot();
-		interfaces::pEngine->SetFakeClientConVarValue(slot, "cl_crosshairstyle", "4");
-		interfaces::pEngine->SetFakeClientConVarValue(slot, "cl_crosshaircolor", "4");
-		interfaces::pEngine->SetFakeClientConVarValue(slot, "cl_crosshairsize", "6");
-		interfaces::pEngine->SetFakeClientConVarValue(slot, "cl_crosshairgap", "-2");
-		interfaces::pEngine->SetFakeClientConVarValue(slot, "cl_crosshairthickness", "1.5");
-		interfaces::pEngine->SetFakeClientConVarValue(slot, "cl_crosshairdot", "0");
-		interfaces::pEngine->SetFakeClientConVarValue(slot, "cl_crosshair_drawoutline", "0");
-		Msg("[replay-xhair] userinfo experiment set (style4 cyan)\n");
+		// Клиент CS2 прицел ботов не рендерит (cl_observed_bot_crosshair, ветка «это бот»
+		// раньше кодов) — код ставим на будущее и для внешних потребителей (сайт/демо);
+		// зрителю даём подсказку в чате при загрузке реплея.
 	}
 
 	void MoveBotToSpec()

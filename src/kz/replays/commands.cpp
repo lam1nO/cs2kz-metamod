@@ -148,6 +148,8 @@ namespace KZ::replaysystem::commands
 					}
 				}
 				player->languageService->PrintChat(true, false, "Replay - Loaded Successfully");
+				// Клиент не рендерит прицел ботов — подсказываем, как видеть свой.
+				player->languageService->PrintChat(true, false, "Replay - Bot Crosshair Hint");
 
 				// Initialize bot and start playback (safe to call on main thread)
 				// The replay data is already stored in the global g_currentReplay
@@ -1089,19 +1091,3 @@ SCMD(kz_rphidelegs, SCFL_REPLAY)
 	return MRES_SUPERCEDE;
 }
 
-// Дебаг: печатает твой m_szCrosshairCodes (снять код для kz_replay_bot_default_crosshair).
-SCMD(kz_dumpxhair, SCFL_HIDDEN)
-{
-	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
-	if (!player || !player->GetController())
-	{
-		return MRES_SUPERCEDE;
-	}
-	utils::PrintConsole(player->GetController(), "crosshair codes: %s", player->GetController()->GetCrosshairCodes());
-	CCSPlayerController *bot = KZ::replaysystem::bot::GetBot();
-	if (bot)
-	{
-		utils::PrintConsole(player->GetController(), "bot crosshair codes: %s", bot->GetCrosshairCodes());
-	}
-	return MRES_SUPERCEDE;
-}

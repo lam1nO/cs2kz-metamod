@@ -291,6 +291,11 @@
 		"ua"		"{lime}Повтор завантажено успішно! Починається відтворення..."
 		"de"		"{lime}Wiederholung erfolgreich geladen! Starte Wiedergabe..."
 	}
+	"Replay - Bot Crosshair Hint"
+	{
+		"en"		"{grey}Tip: {default}cl_observed_bot_crosshair 0{grey} in console — see your own crosshair when watching the replay bot."
+		"ru"		"{grey}Совет: {default}cl_observed_bot_crosshair 0{grey} в консоли — свой прицел при просмотре реплей-бота."
+	}
 	"Replay - No Loading Progress"
 	{
 		"en"		"{grey}No replay loading in progress"
