@@ -1098,5 +1098,10 @@ SCMD(kz_dumpxhair, SCFL_HIDDEN)
 		return MRES_SUPERCEDE;
 	}
 	utils::PrintConsole(player->GetController(), "crosshair codes: %s", player->GetController()->GetCrosshairCodes());
+	CCSPlayerController *bot = KZ::replaysystem::bot::GetBot();
+	if (bot)
+	{
+		utils::PrintConsole(player->GetController(), "bot crosshair codes: %s", bot->GetCrosshairCodes());
+	}
 	return MRES_SUPERCEDE;
 }
