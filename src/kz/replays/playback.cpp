@@ -10,6 +10,9 @@
 
 namespace KZ::replaysystem::playback
 {
+	// Последний itemDef, чей GiveNamedItem вернул null — гард от тикового цикла
+	// раздевания бота. Сбрасывается на старте реплея и при успешной выдаче.
+	static_global i32 g_lastFailedGiveItemDef = -1;
 
 	void OnPhysicsSimulate(KZPlayer *player)
 	{
@@ -342,6 +345,13 @@ namespace KZ::replaysystem::playback
 				}
 			}
 
+			// Стоп-кровь: если выдача этого itemDef уже фейлилась — не пытаться каждый тик
+			// (повторный цикл RemoveAllItems+null-give раздевал бота, включая пистолет).
+			if ((i32)desiredWeapon.mainInfo.itemDef == g_lastFailedGiveItemDef)
+			{
+				return;
+			}
+
 			// Check if we can get away with not stripping all weapons here.
 			gear_slot_t desiredGearSlot = KZ::replaysystem::item::GetWeaponGearSlot(desiredWeapon.mainInfo.itemDef);
 			for (i32 i = 0; i < weapons->Count(); i++)
@@ -363,8 +373,13 @@ namespace KZ::replaysystem::playback
 			{
 				KZ::replaysystem::item::ApplyItemAttributesToWeapon(*newWeapon, desiredWeapon);
 				cmd.mutable_base()->set_weaponselect(newWeapon->entindex());
+				g_lastFailedGiveItemDef = -1;
 			}
-			// Диагностика скинов бота (нож/пистолет «не те»): что записано в реплее и что выдали.
+			else
+			{
+				g_lastFailedGiveItemDef = desiredWeapon.mainInfo.itemDef;
+			}
+			// Диагностика скинов бота: что записано в реплее и что выдали (ok=0 больше не ретраится).
 			// fflush — stdout контейнера буферизуется (урок kzt-саги).
 			Msg("[replay-item] give '%s' itemDef=%d attrs=%d ok=%d\n", weaponName.c_str(), desiredWeapon.mainInfo.itemDef,
 				desiredWeapon.mainInfo.numAttributes, newWeapon != nullptr);
@@ -391,6 +406,7 @@ namespace KZ::replaysystem::playback
 		replay->playingReplay = true;
 		replay->replayPaused = false;
 		replay->currentTick = 0;
+		g_lastFailedGiveItemDef = -1;
 	}
 
 	void ApplyTickState(KZPlayer *player, const TickData *tickData)
