@@ -51,6 +51,7 @@ public:
 
 	// Код прицела (клиент присылает сам; CUtlSymbolLarge в схеме CS2).
 	// Зрители рендерят его через cl_show_observer_crosshair.
+	// ВАЖНО: сеттер сохраняет сырой const char* — передавать только персистентную память.
 	const char *GetCrosshairCodes()
 	{
 		return m_szCrosshairCodes().String();

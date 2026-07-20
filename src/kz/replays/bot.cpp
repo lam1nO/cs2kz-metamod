@@ -8,6 +8,9 @@
 #include "utils/ctimer.h"
 
 static_global CHandle<CCSPlayerController> g_replayBot;
+// Персистентный буфер кода прицела: schema-сеттер хранит сырой указатель,
+// память хедера/cvar ему отдавать нельзя (умирает при смене реплея/значения).
+static_global char g_botCrosshairCode[256];
 extern CConVar<bool> kz_replay_playback_skins_enable;
 extern CConVar<CUtlString> kz_replay_bot_default_crosshair;
 
@@ -105,16 +108,15 @@ namespace KZ::replaysystem::bot
 		bot->GetPlayerPawn()->m_flViewmodelOffsetZ() = header.viewmodel_offset_z();
 		bot->GetPlayerPawn()->m_flViewmodelFOV() = header.viewmodel_fov();
 
-		// Прицел из реплея; для старых реплеев — статический дефолт из cvar. Пусто = не трогаем.
+		// Прицел из реплея; для старых реплеев — дефолт из cvar. Ставим безусловно:
+		// пустая строка = дефолтный прицел клиента, и код прошлого реплея не протекает.
 		const char *crosshairCode = header.crosshair_code().c_str();
 		if (!crosshairCode[0])
 		{
 			crosshairCode = kz_replay_bot_default_crosshair.Get().Get();
 		}
-		if (crosshairCode[0])
-		{
-			bot->SetCrosshairCodes(crosshairCode);
-		}
+		V_strncpy(g_botCrosshairCode, crosshairCode, sizeof(g_botCrosshairCode));
+		bot->SetCrosshairCodes(g_botCrosshairCode);
 	}
 
 	void MoveBotToSpec()
