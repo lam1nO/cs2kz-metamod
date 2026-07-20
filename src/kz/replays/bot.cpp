@@ -9,6 +9,7 @@
 
 static_global CHandle<CCSPlayerController> g_replayBot;
 extern CConVar<bool> kz_replay_playback_skins_enable;
+extern CConVar<CUtlString> kz_replay_bot_default_crosshair;
 
 static_function f64 SetBotModel()
 {
@@ -103,6 +104,17 @@ namespace KZ::replaysystem::bot
 		bot->GetPlayerPawn()->m_flViewmodelOffsetY() = header.viewmodel_offset_y();
 		bot->GetPlayerPawn()->m_flViewmodelOffsetZ() = header.viewmodel_offset_z();
 		bot->GetPlayerPawn()->m_flViewmodelFOV() = header.viewmodel_fov();
+
+		// Прицел из реплея; для старых реплеев — статический дефолт из cvar. Пусто = не трогаем.
+		const char *crosshairCode = header.crosshair_code().c_str();
+		if (!crosshairCode[0])
+		{
+			crosshairCode = kz_replay_bot_default_crosshair.Get().Get();
+		}
+		if (crosshairCode[0])
+		{
+			bot->SetCrosshairCodes(crosshairCode);
+		}
 	}
 
 	void MoveBotToSpec()

@@ -10,6 +10,8 @@
 
 CConVar<bool> kz_replay_playback_skins_enable("kz_replay_playback_skins_enable", FCVAR_NONE, "Enables applying player skins during replay playback.",
 											  true);
+CConVar<CUtlString> kz_replay_bot_default_crosshair("kz_replay_bot_default_crosshair", FCVAR_NONE,
+													"Static crosshair code for the replay bot when the replay has none.", "");
 
 static KZ::replaysystem::data::ReplayPlayback g_currentReplay = {};
 static KZ::replaysystem::data::AsyncLoadStatus g_loadStatus = {};

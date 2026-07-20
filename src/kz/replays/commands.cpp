@@ -1088,3 +1088,15 @@ SCMD(kz_rphidelegs, SCFL_REPLAY)
 	KZ::replaysystem::commands::ToggleLegsVisibility(player);
 	return MRES_SUPERCEDE;
 }
+
+// Дебаг: печатает твой m_szCrosshairCodes (снять код для kz_replay_bot_default_crosshair).
+SCMD(kz_dumpxhair, SCFL_HIDDEN)
+{
+	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
+	if (!player || !player->GetController())
+	{
+		return MRES_SUPERCEDE;
+	}
+	utils::PrintConsole(player->GetController(), "crosshair codes: %s", player->GetController()->GetCrosshairCodes());
+	return MRES_SUPERCEDE;
+}
