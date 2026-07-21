@@ -4,6 +4,9 @@
 #include "sdk/cskeletoninstance.h"
 #include "sdk/entity/ccsplayerpawn.h"
 #include "filesystem.h"
+#include "utils/gameconfig.h"
+
+extern CGameConfig *g_pGameConfig;
 
 extern CConVar<bool> kz_replay_playback_skins_enable;
 
@@ -293,6 +296,20 @@ void KZ::replaysystem::item::ApplyModelAttributesToPawn(CCSPlayerPawn *pawn, con
 	// This might not work with custom models, but oh well.
 	if (setGloves)
 	{
+		// Движок создаёт wearable из m_EconGloves только на спавне (из лоадаута) —
+		// боту пересоздаём руками, как CyberSkins: SetWearables по сигнатуре.
+		static auto setWearables =
+			(void (*)(CCSPlayer_ItemServices *))g_pGameConfig->ResolveSignature("CCSPlayer_ItemServices_SetWearables");
+		if (setWearables && pawn->m_pItemServices())
+		{
+			setWearables(pawn->m_pItemServices());
+			Msg("[replay-item] gloves wearable rebuilt (itemDef=%d)\n", info.mainInfo.itemDef);
+		}
+		else if (!setWearables)
+		{
+			Msg("[replay-item] SetWearables signature NOT resolved — перчатки бота не применятся\n");
+		}
+		fflush(stdout);
 		CSkeletonInstance *pSkeleton = static_cast<CSkeletonInstance *>(pawn->m_CBodyComponent()->m_pSceneNode());
 		u64 mask = pSkeleton->m_modelState().m_MeshGroupMask() & ~1 | 2;
 		pSkeleton->m_modelState().m_MeshGroupMask(mask);
