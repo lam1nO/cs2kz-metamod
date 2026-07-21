@@ -668,12 +668,15 @@ f32 KZTimerModeService::CalcPrestrafeVelMod(bool forceGround)
 		turning = this->player->GetTurning();
 	}
 
-	// Кнопки стрейфа. GO читает поле usercmd целого тика; наша форс-итерация касания
-	// исполняется в сабтик-момент клика — на смене стрейфа A/D в эту миллисекунду
-	// отпущены (DOWN_UP текущий IsButtonPressed не считает) и велмод нёс ложный
-	// no-commit/сброс. Для касания агрегируем по тику: [0] держат, [1]/[2] — переходы.
+	// Кнопки стрейфа — тиковым агрегатом для ВСЕХ итераций (GO читает поле usercmd
+	// целого тика): мгновенный сэмпл на смене стрейфа видит отпущенные A/D
+	// (DOWN_UP текущий IsButtonPressed не считает) → ложный no-commit → потолок 250
+	// на этот прыжок при живом велмоде. До cyb.66 агрегат стоял только в форс-пути,
+	// а наземные касания шли натуральными итерациями с мгновенным сэмплом (леджер
+	// cyb.65: vm=1.000/ceil=250 почти на всех tog=8-37мс при живом хранимом).
+	// [0] держат, [1]/[2] — переходы этого тика.
 	bool moveLeft, moveRight;
-	CCSPlayer_MovementServices *msBtns = forceGround ? this->player->GetMoveServices() : nullptr;
+	CCSPlayer_MovementServices *msBtns = this->player->GetMoveServices();
 	if (msBtns)
 	{
 		u64 tickButtons = msBtns->m_nButtons().m_pButtonStates[0] | msBtns->m_nButtons().m_pButtonStates[1]
