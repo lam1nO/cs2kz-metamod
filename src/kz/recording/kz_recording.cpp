@@ -71,6 +71,30 @@ void Recorder::Init(ReplayHeader &hdr, KZPlayer *player, ReplayType type)
 	CSkeletonInstance *pSkeleton = static_cast<CSkeletonInstance *>(player->GetPlayerPawn()->m_CBodyComponent()->m_pSceneNode());
 	hdr.set_model_name(pSkeleton->m_modelState().m_ModelName().String());
 
+	// Перчатки: снимаем текущий CEconItemView пешки (CyberSkins уже применил лоадаут).
+	// Дефолт (itemDef 0) не пишем — у бота has_gloves() останется false, как раньше.
+	CEconItemView &gloves = player->GetPlayerPawn()->m_EconGloves();
+	if (gloves.m_iItemDefinitionIndex() > 0)
+	{
+		EconInfo glovesInfo(gloves);
+		auto *glovesMsg = hdr.mutable_gloves();
+		auto *mainMsg = glovesMsg->mutable_main_info();
+		mainMsg->set_item_def(glovesInfo.mainInfo.itemDef);
+		mainMsg->set_quality(glovesInfo.mainInfo.quality);
+		mainMsg->set_level(glovesInfo.mainInfo.level);
+		mainMsg->set_account_id(glovesInfo.mainInfo.accountID);
+		mainMsg->set_item_id(glovesInfo.mainInfo.itemID);
+		mainMsg->set_inventory_position(glovesInfo.mainInfo.inventoryPosition);
+		mainMsg->set_custom_name(glovesInfo.mainInfo.customName);
+		mainMsg->set_custom_name_override(glovesInfo.mainInfo.customNameOverride);
+		for (int i = 0; i < glovesInfo.mainInfo.numAttributes; i++)
+		{
+			auto *attrMsg = glovesMsg->add_attributes();
+			attrMsg->set_def_index(glovesInfo.attributes[i].defIndex);
+			attrMsg->set_value(glovesInfo.attributes[i].value);
+		}
+	}
+
 	hdr.set_sensitivity(utils::StringToFloat(interfaces::pEngine->GetClientConVarValue(player->GetPlayerSlot(), "sensitivity")));
 	hdr.set_yaw(utils::StringToFloat(interfaces::pEngine->GetClientConVarValue(player->GetPlayerSlot(), "m_yaw")));
 	hdr.set_pitch(utils::StringToFloat(interfaces::pEngine->GetClientConVarValue(player->GetPlayerSlot(), "m_pitch")));
