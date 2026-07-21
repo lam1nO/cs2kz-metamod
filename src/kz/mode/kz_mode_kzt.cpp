@@ -117,6 +117,10 @@ void KZTimerModeService::Reset()
 	this->preTickCounter = {};
 	this->preVelModLastChange = {};
 	this->velModTouchIterTime = -1.0f;
+	this->tickYaw = 0.0f;
+	this->prevTickYaw = 0.0f;
+	this->tickYawNum = -1;
+	this->tickYawValid = false;
 
 	this->didTPM = {};
 	this->overrideTPM = {};
@@ -358,10 +362,21 @@ void KZTimerModeService::OnStopTouchGround()
 	// контейнера буферизуется — уроки cyb.41/45).
 	if (kz_kzt_subtick_debug.GetBool() && this->player->jumped)
 	{
-		Msg("[kzt-v2] %s land=%.0f preC=%.0f takeoff=%.0f press_dt=%.2f tog=%.2f n=%d ceil=%d perf=%d tsp=%d duck=%d dfrac=%.2f vm=%.3f\n",
+		f32 dbgDyaw = this->tickYaw - this->prevTickYaw;
+		while (dbgDyaw > 180.0f)
+		{
+			dbgDyaw -= 360.0f;
+		}
+		while (dbgDyaw < -180.0f)
+		{
+			dbgDyaw += 360.0f;
+		}
+		f64 dbgWhole;
+		i32 dbgHalf = modf((f64)g_pKZUtils->GetGlobals()->curtime * ENGINE_FIXED_TICK_RATE, &dbgWhole) > 0.25 ? 1 : 0;
+		Msg("[kzt-v2] %s land=%.0f preC=%.0f takeoff=%.0f press_dt=%.2f tog=%.2f n=%d ceil=%d perf=%d tsp=%d duck=%d dfrac=%.2f vm=%.3f dyaw=%.2f half=%d\n",
 			this->player->GetName(), this->lastLandingSpeed, preC, velocity.Length2D(), pressDt * 1000.0f,
 			realTog * 1000.0f, dbgN, dbgPen, perf ? 1 : 0, kz_kzt_takeoff_speed.GetBool() ? 1 : 0,
-			ducked ? 1 : 0, duckFrac, this->effectivePreVelMod);
+			ducked ? 1 : 0, duckFrac, this->effectivePreVelMod, dbgDyaw, dbgHalf);
 		fflush(stdout);
 	}
 }
@@ -475,6 +490,24 @@ void KZTimerModeService::OnProcessMovement()
 	if (this->player->GetPlayerPawn()->m_flVelocityModifier() != 1.0f)
 	{
 		this->player->GetPlayerPawn()->m_flVelocityModifier(1.0f);
+	}
+	// Трекер тикового yaw (сырой, из moveDataPre — до интерполяции): продвигаем
+	// на смене номера тика, второй полувызов того же тика значение не трогает.
+	{
+		f32 rawYaw = this->player->moveDataPre.m_vecViewAngles.y;
+		i32 tickNum = (i32)(g_pKZUtils->GetGlobals()->curtime * ENGINE_FIXED_TICK_RATE + 0.25f);
+		if (!this->tickYawValid)
+		{
+			this->tickYaw = this->prevTickYaw = rawYaw;
+			this->tickYawNum = tickNum;
+			this->tickYawValid = true;
+		}
+		else if (tickNum != this->tickYawNum)
+		{
+			this->prevTickYaw = this->tickYaw;
+			this->tickYaw = rawYaw;
+			this->tickYawNum = tickNum;
+		}
 	}
 	this->CheckVelocityQuantization();
 	this->RemoveCrouchJumpBind();
@@ -613,7 +646,29 @@ f32 KZTimerModeService::CalcPrestrafeVelMod(bool forceGround)
 		return this->preVelMod;
 	}
 
-	TurnState turning = this->player->GetTurning();
+	TurnState turning;
+	if (forceGround && this->tickYawValid)
+	{
+		// Turning касания — по дельте ТИКА (GO RunCmd): GetTurning сравнивает
+		// полувызовы, а углы пер-тиковые — второй полувызов тика давал ложный
+		// TURN_NONE, и с протухшим за полёт 0.2с-таймером это был жёсткий сброс
+		// велмода на ~половине касаний (леджер srv-5 cyb.63). Знак как в GetTurning:
+		// рост yaw = TURN_LEFT.
+		f32 dy = this->tickYaw - this->prevTickYaw;
+		while (dy > 180.0f)
+		{
+			dy -= 360.0f;
+		}
+		while (dy < -180.0f)
+		{
+			dy += 360.0f;
+		}
+		turning = dy == 0.0f ? TURN_NONE : (dy > 0.0f ? TURN_LEFT : TURN_RIGHT);
+	}
+	else
+	{
+		turning = this->player->GetTurning();
+	}
 
 	// Кнопки стрейфа. GO читает поле usercmd целого тика; наша форс-итерация касания
 	// исполняется в сабтик-момент клика — на смене стрейфа A/D в эту миллисекунду

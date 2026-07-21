@@ -172,6 +172,13 @@ class KZTimerModeService : public KZModeService
 	// landingTimeActual касания, уже получившего наземную велмод-итерацию (GO-паритет:
 	// каждое касание, включая нулевой длины при буферном прыжке, даёт >=1 итерацию)
 	f32 velModTouchIterTime {-1.0f};
+	// Пер-тиковый трекер сырого yaw: углы клиента пер-тиковые (форс
+	// sv_subtick_movement_view_angles=false), вызовы движения полутиковые — второй
+	// полувызов тика видит нулевую дельту угла. Turning касания считаем тик-к-тику.
+	f32 tickYaw {};
+	f32 prevTickYaw {};
+	i32 tickYawNum {-1};
+	bool tickYawValid {false};
 	f32 originalMaxSpeed {};
 
 	bool didTPM {};
