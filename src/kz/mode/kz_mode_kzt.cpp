@@ -513,27 +513,23 @@ void KZTimerModeService::OnProcessMovement()
 	this->RemoveCrouchJumpBind();
 	this->ReduceDuckSlowdown();
 	this->InterpolateViewAngles();
-	// Велмод считаем в полутиках (кадры GO@128): полный наземный тик = 2 итерации,
-	// тик с приземлением в середине = 1 (граница по landingTimeActual), воздух = 1
-	// вызов (ранний return без изменений). Константы gokz 1:1 — реальное время
-	// набора/спада совпадает с GO@128 (на 64Гц-вызовах всё шло вдвое медленнее).
-	// Оговорка: углы per-tick (наш форс sv_subtick_movement_view_angles=false,
-	// эксплойт-фикс) — обе итерации тика видят один и тот же доворот.
-	i32 velModIters = 1;
+	// Велмод: 1 итерация на вызов движения. ProcessMovement идёт двумя полувызовами
+	// на тик (128 Гц) → 2 итерации/тик = темп GO@128. Раньше стояло 2 итерации на
+	// вызов (cyb.56): темп сходился с GO только потому, что второй полувызов тика
+	// глох на ложном TURN_NONE (GetTurning сравнивал полувызовы при пер-тиковых
+	// углах) — и этот же ложный TURN_NONE с протухшим за полёт 0.2с-таймером
+	// жёстко сбрасывал велмод на первом наземном вызове касания. Теперь turning
+	// везде считается по дельте тика (см. CalcPrestrafeVelMod), обе итерации живые.
+	// Вызовы с frametime=0 пропускаем — это не RunCmd-кадры GO.
 	bool velModOnGround = (this->player->GetPlayerPawn()->m_fFlags & FL_ONGROUND) != 0;
-	if (velModOnGround)
-	{
-		f32 sinceLanding = g_pKZUtils->GetGlobals()->curtime - this->player->landingTimeActual;
-		velModIters = sinceLanding >= ENGINE_FIXED_TICK_INTERVAL ? 2 : MAX(1, MIN(2, (i32)roundf(sinceLanding * 128.0f)));
-	}
-	for (i32 vi = 0; vi < velModIters; vi++)
+	if (g_pKZUtils->GetGlobals()->frametime > 0.0f)
 	{
 		this->effectivePreVelMod = this->CalcPrestrafeVelMod();
-	}
-	if (velModOnGround)
-	{
-		// Касание получило наземную итерацию — форс в прыжке не нужен
-		this->velModTouchIterTime = this->player->landingTimeActual;
+		if (velModOnGround)
+		{
+			// Касание получило наземную итерацию — форс в прыжке не нужен
+			this->velModTouchIterTime = this->player->landingTimeActual;
+		}
 	}
 }
 
@@ -647,13 +643,15 @@ f32 KZTimerModeService::CalcPrestrafeVelMod(bool forceGround)
 	}
 
 	TurnState turning;
-	if (forceGround && this->tickYawValid)
+	if (this->tickYawValid)
 	{
-		// Turning касания — по дельте ТИКА (GO RunCmd): GetTurning сравнивает
-		// полувызовы, а углы пер-тиковые — второй полувызов тика давал ложный
-		// TURN_NONE, и с протухшим за полёт 0.2с-таймером это был жёсткий сброс
-		// велмода на ~половине касаний (леджер srv-5 cyb.63). Знак как в GetTurning:
-		// рост yaw = TURN_LEFT.
+		// Turning — по дельте ТИКА (GO RunCmd), для ВСЕХ итераций: GetTurning
+		// сравнивает полувызовы, а углы пер-тиковые — второй полувызов тика видел
+		// нулевую дельту → ложный TURN_NONE, и с протухшим за полёт 0.2с-таймером
+		// это был жёсткий сброс велмода на первом наземном вызове касания (леджер
+		// srv-5 cyb.63/64: убивало и натуральные итерации, и — через гард
+		// velModTouchIterTime — касания с посадкой на границе вызовов). Знак как
+		// в GetTurning: рост yaw = TURN_LEFT.
 		f32 dy = this->tickYaw - this->prevTickYaw;
 		while (dy > 180.0f)
 		{
