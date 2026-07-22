@@ -8,6 +8,33 @@
 
 extern CGameConfig *g_pGameConfig;
 
+// Заполнение m_EconGloves пешки из записанного EconInfo. Вызывается дважды:
+// до SetWearables (как раньше) и ПОСЛЕ — движок пересобирает wearable из лоадаута,
+// у бота он пуст и затирает econ дефолтом.
+static_function void FillGlovesItemView(CCSPlayerPawn *pawn, const EconInfo &info)
+{
+	CEconItemView &item = pawn->m_EconGloves();
+	item.m_iItemDefinitionIndex(info.mainInfo.itemDef);
+	item.m_iEntityQuality(info.mainInfo.quality);
+	item.m_iEntityLevel(info.mainInfo.level);
+	item.m_iAccountID(info.mainInfo.accountID);
+	item.m_iItemID(info.mainInfo.itemID);
+	item.m_iItemIDHigh(info.mainInfo.itemID >> 32);
+	item.m_iItemIDLow((u32)info.mainInfo.itemID & 0xFFFFFFFF);
+	item.m_iInventoryPosition(info.mainInfo.inventoryPosition);
+	item.m_bInitialized = true;
+	V_strncpy(item.m_szCustomName(), info.mainInfo.customName, sizeof(info.mainInfo.customName));
+	V_strncpy(item.m_szCustomNameOverride(), info.mainInfo.customNameOverride, sizeof(info.mainInfo.customNameOverride));
+	CAttributeList &attributeList = item.m_NetworkedDynamicAttributes();
+	for (int i = 0; i < info.mainInfo.numAttributes; i++)
+	{
+		int id = info.attributes[i].defIndex;
+		float value = info.attributes[i].value;
+		g_pKZUtils->SetOrAddAttributeValueByName(&item.m_AttributeList(), KZ::replaysystem::item::GetItemAttributeName(id).c_str(), value);
+		g_pKZUtils->SetOrAddAttributeValueByName(&attributeList, KZ::replaysystem::item::GetItemAttributeName(id).c_str(), value);
+	}
+}
+
 extern CConVar<bool> kz_replay_playback_skins_enable;
 
 static_global std::unordered_map<u16, std::string> itemAttributes;
@@ -234,60 +261,32 @@ void KZ::replaysystem::item::ApplyItemAttributesToWeapon(CBasePlayerWeapon &weap
 
 void KZ::replaysystem::item::ApplyModelAttributesToPawn(CCSPlayerPawn *pawn, const EconInfo &info, const char *modelName)
 {
-	bool setGloves = false;
-	if (info.mainInfo.itemDef != 0)
-	{
-		setGloves = true;
-	}
+	bool setGloves = info.mainInfo.itemDef != 0;
 	if (setGloves)
 	{
-		CEconItemView &item = pawn->m_EconGloves();
-		item.m_iItemDefinitionIndex(info.mainInfo.itemDef);
-		item.m_iEntityQuality(info.mainInfo.quality);
-		item.m_iEntityLevel(info.mainInfo.level);
-		item.m_iAccountID(info.mainInfo.accountID);
-		item.m_iItemID(info.mainInfo.itemID);
-		item.m_iItemIDHigh(info.mainInfo.itemID >> 32);
-		item.m_iItemIDLow((u32)info.mainInfo.itemID & 0xFFFFFFFF);
-		item.m_iInventoryPosition(info.mainInfo.inventoryPosition);
-		item.m_bInitialized = true;
-		V_strncpy(item.m_szCustomName(), info.mainInfo.customName, sizeof(info.mainInfo.customName));
-		V_strncpy(item.m_szCustomNameOverride(), info.mainInfo.customNameOverride, sizeof(info.mainInfo.customNameOverride));
-		CAttributeList &attributeList = item.m_NetworkedDynamicAttributes();
-		for (int i = 0; i < info.mainInfo.numAttributes; i++)
-		{
-			int id = info.attributes[i].defIndex;
-			float value = info.attributes[i].value;
-			g_pKZUtils->SetOrAddAttributeValueByName(&item.m_AttributeList(), KZ::replaysystem::item::GetItemAttributeName(id).c_str(), value);
-			g_pKZUtils->SetOrAddAttributeValueByName(&attributeList, KZ::replaysystem::item::GetItemAttributeName(id).c_str(), value);
-		}
+		FillGlovesItemView(pawn, info);
 	}
 	// Don't set model if it doesn't exist.
 	CUtlString modelStr = modelName;
 	modelStr = modelStr.StripExtension();
 	modelStr.Append(".vmdl_c");
 
+	// Итоговое имя модели (с учётом agents/-варианта) — нужно и для рефреша перчаток.
+	CUtlString finalModel;
 	if (g_pFullFileSystem->FileExists(modelStr.Get()))
 	{
 		// If the model starts with "characters/models" and there's a "agents/models" variant, use that instead.
 		// Newer CS2 versions no longer work with the "characters/models" variants.
+		finalModel = modelName;
 		if (V_strstr(modelStr.Get(), "characters/models/"))
 		{
 			CUtlString agentModelStr = modelStr.Replace("characters/models/", "agents/models/");
 			if (g_pFullFileSystem->FileExists(agentModelStr.Get()))
 			{
-				agentModelStr = agentModelStr.Replace(".vmdl_c", ".vmdl");
-				g_pKZUtils->SetModel(pawn, agentModelStr.Get());
-			}
-			else
-			{
-				g_pKZUtils->SetModel(pawn, modelName);
+				finalModel = agentModelStr.Replace(".vmdl_c", ".vmdl");
 			}
 		}
-		else
-		{
-			g_pKZUtils->SetModel(pawn, modelName);
-		}
+		g_pKZUtils->SetModel(pawn, finalModel.Get());
 	}
 	else
 	{
@@ -303,7 +302,11 @@ void KZ::replaysystem::item::ApplyModelAttributesToPawn(CCSPlayerPawn *pawn, con
 		if (setWearables && pawn->m_pItemServices())
 		{
 			setWearables(pawn->m_pItemServices());
-			Msg("[replay-item] gloves wearable rebuilt (itemDef=%d)\n", info.mainInfo.itemDef);
+			// SetWearables пересобирает из лоадаута — у бота он пуст и мог затереть econ.
+			// Диагностика: что осталось в поле после вызова; затем перезаполняем.
+			Msg("[replay-item] gloves after SetWearables: itemDef=%d (want %d)\n", pawn->m_EconGloves().m_iItemDefinitionIndex(),
+				info.mainInfo.itemDef);
+			FillGlovesItemView(pawn, info);
 		}
 		else if (!setWearables)
 		{
@@ -313,5 +316,10 @@ void KZ::replaysystem::item::ApplyModelAttributesToPawn(CCSPlayerPawn *pawn, con
 		CSkeletonInstance *pSkeleton = static_cast<CSkeletonInstance *>(pawn->m_CBodyComponent()->m_pSceneNode());
 		u64 mask = pSkeleton->m_modelState().m_MeshGroupMask() & ~1 | 2;
 		pSkeleton->m_modelState().m_MeshGroupMask(mask);
+		// Клиентский рефреш модели/рук после смены econ (аналог трюка first_or_third_person у CyberSkins).
+		if (!finalModel.IsEmpty())
+		{
+			g_pKZUtils->SetModel(pawn, finalModel.Get());
+		}
 	}
 }
