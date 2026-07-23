@@ -299,7 +299,6 @@ bool KZModeManager::SwitchToMode(KZPlayer *player, const char *modeName, bool si
 	utils::SendMultipleConVarValues(player->GetPlayerSlot(), KZ::mode::modeCvarRefs, player->modeService->GetModeConVarValues(), MODECVAR_COUNT);
 
 	player->SetVelocity({0, 0, 0});
-	player->boosterDebugTracking = false; // диагностика бустеров: смена режима рвёт трекинг пика
 	player->jumpstatsService->InvalidateJumpstats("Externally modified");
 
 	player->profileService->currentRating = -1.0f;

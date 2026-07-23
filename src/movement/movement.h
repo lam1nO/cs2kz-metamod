@@ -314,16 +314,6 @@ public:
 	Vector landingOriginActual;
 	f32 landingTimeActual {};
 
-	// Диагностика вертикальных бустеров (kz_booster_debug, временная телеметрия).
-	// Состояние пишется и ядром (ApplyPushes/OnTeleport/SwitchMode), и mode-сателлитами
-	// (ckz/kzt) — живёт на общем KZPlayer, поэтому здесь. boosterDebugLastPushTime —
-	// время последнего trigger_push (ставит ядро), гейтит лог отрыва по «пуш был недавно».
-	// tracking/takeoffZ/maxZ — трекинг пика высоты от boosted-отрыва до касания земли.
-	f32 boosterDebugLastPushTime {-1000.0f};
-	bool boosterDebugTracking {};
-	f32 boosterDebugTakeoffZ {};
-	f32 boosterDebugMaxZ {};
-
 	bool enableWaterFix {};
 	bool ignoreNextCategorizePosition {};
 

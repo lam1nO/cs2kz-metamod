@@ -8,13 +8,6 @@
 #include "kz/language/kz_language.h"
 #include "kz/replays/kz_replaysystem.h"
 
-// Диагностика вертикальных бустеров (trigger_push вверх): временный лог за cvar, по
-// умолчанию ВЫКЛ, физику НЕ меняет. Владелец cvar'а — ядро (регистрируется общим
-// ConVar_Register() в cs2kz.cpp); mode-сателлиты ckz/kzt читают его по имени через
-// CConVarRef. Тестер прыгает на бустерах в обоих режимах — сравниваем пуш/отрыв/пик.
-CConVar<bool> kz_booster_debug("kz_booster_debug", FCVAR_NONE,
-							   "Диагностика бустеров: лог пуш/отрыв/пик в консоль сервера (временная телеметрия)", false);
-
 /*
 	Note: Whether touching is allowed is set determined by the mode, while Mapping API effects will be applied after touching events.
 */
@@ -158,17 +151,6 @@ void KZTriggerService::ApplyPushes()
 		}
 		this->pushEvents[i].applied = true;
 		auto &push = this->pushEvents[i].source->push;
-		// Диагностика бустеров: снимок скорости/земли ДО применения импульса (гейт за cvar,
-		// только ненулевой импульс). velBefore/velAfter — полная m_vecVelocity (важен Z).
-		bool boosterDbg =
-			kz_booster_debug.GetBool() && (push.impulse[0] != 0.0f || push.impulse[1] != 0.0f || push.impulse[2] != 0.0f);
-		Vector boosterVelBefore = vec3_origin;
-		bool boosterGrounded = false;
-		if (boosterDbg)
-		{
-			this->player->GetVelocity(&boosterVelBefore);
-			boosterGrounded = (this->player->GetPlayerPawn()->m_fFlags & FL_ONGROUND) != 0;
-		}
 		for (u32 i = 0; i < 3; i++)
 		{
 			Vector vel;
@@ -207,30 +189,6 @@ void KZTriggerService::ApplyPushes()
 				this->player->SetVelocity(vel);
 			}
 			this->player->jumpstatsService->InvalidateJumpstats("Disabled By Map");
-		}
-		if (boosterDbg)
-		{
-			Vector boosterVelAfter;
-			this->player->GetVelocity(&boosterVelAfter);
-			// Флаг «пуш был недавно» — гейт для лога отрыва в OnStopTouchGround режима.
-			this->player->boosterDebugLastPushTime = curtime;
-			Msg("[booster] push name=%s mode=%s impulse=(%.1f %.1f %.1f) velBefore=(%.1f %.1f %.1f) velAfter=(%.1f %.1f %.1f) grounded=%d\n",
-				this->player->GetName(), this->player->modeService->GetModeName(), push.impulse[0], push.impulse[1], push.impulse[2],
-				boosterVelBefore.x, boosterVelBefore.y, boosterVelBefore.z, boosterVelAfter.x, boosterVelAfter.y, boosterVelAfter.z,
-				boosterGrounded ? 1 : 0);
-			fflush(stdout);
-			// Вертикальный пуш: стартуем трекинг пика ПРЯМО ЗДЕСЬ (для воздушного буста
-			// grounded=0 наземный отрыв OnStopTouchGround не сработает, а высоту мерить надо).
-			// takeoffZ = origin в момент пуша → gainZ = набор над точкой пуша. Для наземного
-			// буста режимный отрыв ниже переинициализирует те же поля к уровню земли — не конфликт.
-			if (push.impulse[2] != 0.0f)
-			{
-				Vector boosterOrigin;
-				this->player->GetOrigin(&boosterOrigin);
-				this->player->boosterDebugTracking = true;
-				this->player->boosterDebugTakeoffZ = boosterOrigin.z;
-				this->player->boosterDebugMaxZ = boosterOrigin.z;
-			}
 		}
 	}
 	// Try to nullify velocity if needed.
