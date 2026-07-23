@@ -235,14 +235,8 @@ void KZCheckpointService::DoTeleport(const Checkpoint cp, bool stayOnGround)
 		return;
 	}
 
-	// В паузе телепорты запрещены (сознательное поведение — инвариант kz-профиля).
-	if (this->player->timerService->GetPaused())
-	{
-		this->player->languageService->PrintChat(true, false, "Can't Teleport (Paused)");
-		this->PlayTeleportErrorSound();
-		return;
-	}
-
+	// Телепорты при паузе разрешены (решение 23.07: как в GOKZ); пауза при этом
+	// не снимается — ladder-ветки ниже это учитывают.
 	Vector currentOrigin;
 	this->player->GetOrigin(&currentOrigin);
 
