@@ -71,6 +71,8 @@ namespace KZ::replaysystem::data
 		replay->startTime = 0.0f;
 		replay->paused = false;
 		replay->pausedTime = 0.0f;
+		replay->accumulatedPauseTime = 0.0f;
+		replay->pauseStartTime = 0.0f;
 		replay->endTime = 0.0f;
 		replay->stopTick = 0;
 		replay->lastSplitTime = 0.0f;
@@ -134,10 +136,11 @@ namespace KZ::replaysystem::data
 		}
 		if (g_currentReplay.paused)
 		{
-			// На паузе время заякорено (TIMER_PAUSE в events.cpp).
+			// На записанной паузе время заморожено (TIMER_PAUSE в events.cpp).
 			return g_currentReplay.pausedTime;
 		}
-		return g_pKZUtils->GetServerGlobals()->curtime - g_currentReplay.startTime;
+		// Активное время ВСЕГДА исключает всю накопленную паузу.
+		return g_pKZUtils->GetServerGlobals()->curtime - g_currentReplay.startTime - g_currentReplay.accumulatedPauseTime;
 	}
 
 	f32 GetEndTime()

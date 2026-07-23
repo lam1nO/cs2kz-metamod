@@ -97,6 +97,10 @@ namespace KZ::replaysystem::events
 				replay->stopTick = 0;
 				V_snprintf(replay->courseName, sizeof(replay->courseName), "%s", course->GetName().Get());
 				replay->paused = false;
+				// Свежий ран — обнуляем аккумулятор пауз и его якорь.
+				replay->pausedTime = 0.0f;
+				replay->accumulatedPauseTime = 0.0f;
+				replay->pauseStartTime = 0.0f;
 				break;
 			}
 
@@ -145,6 +149,11 @@ namespace KZ::replaysystem::events
 				replay->startTime = 0.0f;
 				replay->stopTick = replay->currentTick;
 				replay->courseName[0] = '\0';
+				// Ран завершён — сбрасываем аккумулятор пауз.
+				replay->paused = false;
+				replay->pausedTime = 0.0f;
+				replay->accumulatedPauseTime = 0.0f;
+				replay->pauseStartTime = 0.0f;
 				break;
 			}
 
@@ -164,6 +173,11 @@ namespace KZ::replaysystem::events
 				replay->stopTick = replay->currentTick;
 				replay->startTime = 0.0f;
 				replay->courseName[0] = '\0';
+				// Ран остановлен — сбрасываем аккумулятор пауз.
+				replay->paused = false;
+				replay->pausedTime = 0.0f;
+				replay->accumulatedPauseTime = 0.0f;
+				replay->pauseStartTime = 0.0f;
 				break;
 			}
 
@@ -242,22 +256,30 @@ namespace KZ::replaysystem::events
 
 			case RpEvent::RpEventData::TimerEvent::TIMER_PAUSE:
 			{
-				// Якорим время: в событии — точное время таймера на момент паузы.
-				replay->pausedTime = event->data.timer.time > 0.0f
-										 ? event->data.timer.time
-										 : (replay->startTime > 0.0f ? g_pKZUtils->GetServerGlobals()->curtime - replay->startTime : 0.0f);
+				// Замораживаем отображаемое время = чистое активное на момент паузы.
+				// В событии — точное время таймера (таймер стоит на паузе, без пауз);
+				// фолбэк — считаем из модели (curtime - startTime - накопленная пауза).
+				replay->pausedTime =
+					event->data.timer.time > 0.0f
+						? event->data.timer.time
+						: (replay->startTime > 0.0f
+							   ? g_pKZUtils->GetServerGlobals()->curtime - replay->startTime - replay->accumulatedPauseTime
+							   : 0.0f);
+				// Якорь аккумулятора: curtime входа в паузу. startTime НЕ трогаем.
+				replay->pauseStartTime = g_pKZUtils->GetServerGlobals()->curtime;
 				replay->paused = true;
 				break;
 			}
 
 			case RpEvent::RpEventData::TimerEvent::TIMER_RESUME:
 			{
-				if (replay->startTime > 0.0f)
+				// Прибавляем длительность паузы (playback wall-clock) к аккумулятору;
+				// startTime остаётся якорем старта рана — не пересинхронизируем.
+				if (replay->paused && replay->pauseStartTime > 0.0f)
 				{
-					// Пересинхронизируем startTime, чтобы время продолжилось с якоря.
-					f32 resumeTime = event->data.timer.time > 0.0f ? event->data.timer.time : replay->pausedTime;
-					replay->startTime = g_pKZUtils->GetServerGlobals()->curtime - resumeTime;
+					replay->accumulatedPauseTime += g_pKZUtils->GetServerGlobals()->curtime - replay->pauseStartTime;
 				}
+				replay->pauseStartTime = 0.0f;
 				replay->paused = false;
 				break;
 			}
@@ -345,6 +367,9 @@ namespace KZ::replaysystem::events
 			replay->courseName[0] = '\0';
 			replay->startTime = 0.0f;
 			replay->paused = false;
+			replay->pausedTime = 0.0f;
+			replay->accumulatedPauseTime = 0.0f;
+			replay->pauseStartTime = 0.0f;
 			replay->endTime = 0.0f;
 			replay->stopTick = 0;
 			replay->lastSplitTime = 0.0f;
@@ -403,6 +428,10 @@ namespace KZ::replaysystem::events
 							}
 							V_snprintf(replay->courseName, sizeof(replay->courseName), "%s", courseDesc->GetName().Get());
 							replay->paused = false;
+							replay->pausedTime = 0.0f;
+							// Свежий ран внутри seek — обнуляем аккумулятор пауз (та же модель, что в live).
+							replay->accumulatedPauseTime = 0.0f;
+							replay->pauseStartTime = 0.0f;
 							replay->endTime = 0.0f;
 							replay->stopTick = 0;
 							replay->lastSplitTime = 0.0f;
@@ -431,6 +460,9 @@ namespace KZ::replaysystem::events
 							replay->stopTick = event->serverTick;
 							replay->startTime = 0.0f;
 							replay->pausedTime = 0.0f;
+							// Ран завершён/остановлен — сбрасываем аккумулятор пауз.
+							replay->accumulatedPauseTime = 0.0f;
+							replay->pauseStartTime = 0.0f;
 							replay->courseName[0] = '\0';
 							inActiveTimerRun = false;
 							inPause = false;
@@ -532,10 +564,21 @@ namespace KZ::replaysystem::events
 			}
 		}
 
-		// Apply pause time adjustment to startTime if we have an active timer
+		// Аккумулятор пауз (та же модель, что в live-пути): startTime остаётся сырым
+		// якорем старта рана, накопленная пауза учитывается отдельно и вычитается в
+		// GetReplayTime. NavigateReplay всегда зовёт ResetReplayState перед reprocess'ом
+		// (accumulatedPauseTime/pauseStartTime уже обнулены), а TIMER_START внутри цикла
+		// обнуляет их повторно на свежий ран — поэтому += задаёт полную паузу до target.
 		if (replay->startTime > 0.0f)
 		{
-			replay->startTime += totalPauseTime;
+			replay->accumulatedPauseTime += totalPauseTime;
+			// Если перемотка приземлилась ВНУТРИ записанной паузы — заякорить её для
+			// последующего live-TIMER_RESUME, чтобы остаток паузы (от target до фактического
+			// резюма) тоже попал в аккумулятор. pauseStartTime до сюда == 0 (ResetReplayState).
+			if (replay->paused)
+			{
+				replay->pauseStartTime = g_pKZUtils->GetServerGlobals()->curtime;
+			}
 		}
 
 		// Update jump tracking - optimize for forward seeking

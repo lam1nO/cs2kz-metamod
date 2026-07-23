@@ -170,7 +170,15 @@ namespace KZ::replaysystem::playback
 			// Don't advance tick or process events/jumps
 			if (replay->startTime > 0.0f)
 			{
+				// Зрительская пауза (не записанная): тик заморожен, а curtime идёт —
+				// двигаем startTime, чтобы активное время не росло.
 				replay->startTime += ENGINE_FIXED_TICK_INTERVAL;
+				// Если ОДНОВРЕМЕННО активна записанная пауза — сдвигаем и её якорь, чтобы
+				// замороженные зрительской паузой тики не попали в accumulatedPauseTime на резюме.
+				if (replay->paused && replay->pauseStartTime > 0.0f)
+				{
+					replay->pauseStartTime += ENGINE_FIXED_TICK_INTERVAL;
+				}
 			}
 			return;
 		}
@@ -187,9 +195,10 @@ namespace KZ::replaysystem::playback
 		events::CheckJumps(*player);
 		events::CheckEvents(*player);
 
-		// Компенсация startTime на записанной паузе убрана: время теперь якорится
-		// в TIMER_PAUSE/TIMER_RESUME (events.cpp) — тиковая компенсация была дырявой,
-		// когда физика бота на паузе не тикала, и время «убегало».
+		// Время рана считается через аккумулятор пауз (GetReplayTime):
+		// активное = (curtime - startTime) - accumulatedPauseTime. Записанная пауза
+		// набирается в accumulatedPauseTime на TIMER_RESUME (events.cpp), поэтому здесь
+		// тиковая компенсация startTime на записанной паузе НЕ нужна.
 
 		replay->currentTick++;
 		if (replay->currentTick >= replay->tickCount)

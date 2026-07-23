@@ -40,9 +40,15 @@ namespace KZ::replaysystem::data
 		char courseName[256];
 		f32 startTime;
 		bool paused;
-		// Якорь отображаемого времени на паузе записанного игрока: тиковая
-		// компенсация startTime дырявая (физика бота на паузе может не тикать).
+		// Заморозка отображаемого времени на записанной паузе: чистое активное
+		// время рана на момент входа в паузу.
 		f32 pausedTime;
+		// Суммарная длительность записанных пауз (в секундах playback-времени).
+		// GetReplayTime вычитает её из wall-clock (curtime - startTime), чтобы пауза
+		// НЕ попадала в активное время ни в одном состоянии. Та же модель, что в seek-пути.
+		f32 accumulatedPauseTime;
+		// curtime входа в текущую записанную паузу — якорь аккумулятора; 0 = не в паузе.
+		f32 pauseStartTime;
 		f32 endTime;
 		u32 stopTick;
 		f32 lastSplitTime;
