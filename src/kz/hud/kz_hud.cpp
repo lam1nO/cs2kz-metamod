@@ -98,6 +98,18 @@ void KZHUDService::Reset()
 	this->DestroyAllParticles();
 }
 
+void KZHUDService::OnJoinSpectator()
+{
+	if (this->particlesActive)
+	{
+		// Вернуть клиенту дефолты viewpunch, которые particle-путь подменял.
+		utils::SendConVarValue(this->player->GetPlayerSlot(), sv_suppress_viewpunch, "0");
+		utils::SendConVarValue(this->player->GetPlayerSlot(), "view_punch_decay", "18");
+	}
+	this->particlesActive = false;
+	this->DestroyAllParticles();
+}
+
 std::string KZHUDService::GetSpeedText(const char *language, KZPlayer *dataSource)
 {
 	// dataSource — источник ДАННЫХ (скорость/перф/крауч-джамп), settings (цвета, через

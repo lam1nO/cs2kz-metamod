@@ -426,6 +426,9 @@ void KZ::misc::JoinTeam(KZPlayer *player, int newTeam, bool restorePos)
 			player->timerService->TimerStop();
 		}
 		player->GetController()->ChangeTeam(CS_TEAM_SPECTATOR);
+		// Партикли мхуда гасим сразу: у обсервера движение не тикает и штатное
+		// выключение в OnProcessMovement не сработает (жалоба: висят в спеках).
+		player->hudService->OnJoinSpectator();
 		player->quietService->SendFullUpdate();
 		// TODO: put spectators of this player to freecam, and send them full updates
 	}

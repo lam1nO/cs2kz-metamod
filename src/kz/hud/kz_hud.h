@@ -114,6 +114,10 @@ public:
 	// Destroy all active MHUD particles (e.g. on death or disconnect).
 	void DestroyAllParticles();
 
+	// Погасить particle-MHUD немедленно при уходе в спеки: OnProcessMovement у
+	// обсервера не тикает, штатный транзишен не сработает — партикли зависают.
+	void OnJoinSpectator();
+
 	void OnClientDisconnect();
 
 	// CheckTransmit support (see kz_quiet.cpp).
