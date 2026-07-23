@@ -7,8 +7,8 @@
 	}
 	"Mcustom - Ready"
 	{
-		"en"	"Map ready, switching…"
-		"ru"	"Карта готова, переключаю…"
+		"en"	"Map {darkred}%s{default} ready, switching…"
+		"ru"	"Карта {darkred}%s{default} готова, переключаю…"
 	}
 	"Mcustom - Retry"
 	{

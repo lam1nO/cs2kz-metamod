@@ -11,6 +11,8 @@
 
 #include "public/steam/isteamugc.h"
 
+#include <filesystem>
+
 #include "tier0/memdbgon.h"
 
 extern CSteamGameServerAPIContext g_steamAPI;
@@ -41,6 +43,34 @@ void SwitchToMap(PublishedFileId_t id)
 	interfaces::pEngine->ServerCommand(command.c_str());
 }
 
+// Название карты установленного айтема = имя .vpk в его папке (титул из Steam
+// доступен только асинхронным UGC-запросом — не тянем ради строки в чате).
+// Фолбэк — сам workshop-ID строкой.
+std::string GetInstalledMapName(PublishedFileId_t id)
+{
+	u64 sizeOnDisk = 0;
+	char folder[512] = {};
+	u32 timestamp = 0;
+	if (!g_steamAPI.SteamUGC()->GetItemInstallInfo(id, &sizeOnDisk, folder, sizeof(folder), &timestamp) || folder[0] == '\0')
+	{
+		return std::to_string(id);
+	}
+	std::error_code ec;
+	for (const auto &entry : std::filesystem::directory_iterator(folder, ec))
+	{
+		if (entry.path().extension() == ".vpk")
+		{
+			std::string name = entry.path().stem().string();
+			if (name.size() > 4 && name.compare(name.size() - 4, 4, "_dir") == 0)
+			{
+				name.resize(name.size() - 4);
+			}
+			return name;
+		}
+	}
+	return std::to_string(id);
+}
+
 void StartDownload(PublishedFileId_t id)
 {
 	g_steamAPI.SteamUGC()->DownloadItem(id, true);
@@ -63,7 +93,7 @@ void CustomMapDownloadHandler::OnDownloadResult(DownloadItemResult_t *pParam)
 	{
 		KZ_LOG_INFO(LogChannel::General, "kz_customchangemap: попытка %d/%d для %llu — успех\n", s_state.attempt,
 					CUSTOMMAP_MAX_ATTEMPTS, s_state.workshopId);
-		KZLanguageService::PrintChatAll(true, "Mcustom - Ready");
+		KZLanguageService::PrintChatAll(true, "Mcustom - Ready", GetInstalledMapName(s_state.workshopId).c_str());
 		SwitchToMap(s_state.workshopId);
 		s_state = {};
 		return;
@@ -111,6 +141,7 @@ CON_COMMAND_F(kz_customchangemap, "Switch to a workshop map, downloading it with
 		// pending-запрос (другой ID, чья докачка ещё идёт) не был подхвачен колбэком
 		// и не откатил это переключение на свою карту при своём успехе.
 		s_state = {};
+		KZLanguageService::PrintChatAll(true, "Mcustom - Ready", GetInstalledMapName(id).c_str());
 		SwitchToMap(id);
 		return;
 	}
