@@ -2,8 +2,8 @@
 // чекпоинты/старт, HUD, видимость, звуки, джампстаты, paint. Подменю HUD и
 // джампстатов строят их модули (CreateHUDMenu/CreateJumpstatsMenu) — там же
 // живут их per-slot хэндлы; здесь только локальные подменю и корень.
-// Навигация: пункт корня → подменю (AddSubMenu), первый пункт подменю «← Назад»
-// (и Back-клавиша) возвращают в корень.
+// Навигация: пункт корня → подменю (AddSubMenu); назад — бинд R движка меню
+// (возврат по parent), выход — бинд F. Пунктов «← Назад» больше нет (решение 23.07).
 #include "kz/option/kz_option.h"
 #include "kz/language/kz_language.h"
 #include "kz/checkpoint/kz_checkpoint.h"
@@ -210,17 +210,6 @@ static_function void OnOptionsSubmenuSelect(MenuHandle menu, int slot, int item)
 		return;
 	}
 
-	if (KZ_STREQ(tag, "back"))
-	{
-		// Возврат в корень: корень жив — создан вместе с подменю.
-		MenuHandle root = s_optMenus[slot].root;
-		if (root != kInvalidMenuHandle)
-		{
-			g_pMenus->DisplayMenu(root, slot, 0);
-		}
-		return;
-	}
-
 	const OptionsMenuItem *it = FindOptionsItem(tag);
 	if (!it)
 	{
@@ -277,7 +266,8 @@ static_function void OnOptionsSubmenuSelect(MenuHandle menu, int slot, int item)
 	g_pMenus->SetItemText(menu, item, OptionsItemText(p, *it, p->languageService->GetLanguage()).c_str());
 }
 
-// Собрать локальное подменю: первый пункт «← Назад», дальше пункты таблицы.
+// Собрать локальное подменю из таблицы пунктов. «Назад» — бинд R движка меню
+// (parent от AddSubMenu), отдельный пункт больше не нужен (решение 23.07).
 static_function MenuHandle BuildOptionsSubmenu(KZPlayer *player, const char *titleKey, const OptionsMenuItem *items, i32 count)
 {
 	const char *lang = player->languageService->GetLanguage();
@@ -287,8 +277,6 @@ static_function MenuHandle BuildOptionsSubmenu(KZPlayer *player, const char *tit
 	{
 		return m;
 	}
-	std::string back = KZLanguageService::PrepareMessageWithLang(lang, "Options - Menu Back");
-	g_pMenus->AddItem(m, back.c_str(), "back", false);
 	for (i32 i = 0; i < count; i++)
 	{
 		g_pMenus->AddItem(m, OptionsItemText(player, items[i], lang).c_str(), items[i].tag, false);
@@ -335,7 +323,7 @@ void KZ::option::OpenOptionsMenu(KZPlayer *player)
 	{
 		return;
 	}
-	// Хэндл корня сохраняем ДО постройки детей: их пункт «Назад» ссылается на него.
+	// Хэндл корня сохраняем ДО постройки детей: AddSubMenu ниже свяжет их parent с ним.
 	handles.root = root;
 
 	handles.sub[OPTSUB_CHECKPOINT] = BuildOptionsSubmenu(player, "Options - Menu Cat Checkpoint", s_cpItems, (i32)KZ_ARRAYSIZE(s_cpItems));
@@ -343,8 +331,8 @@ void KZ::option::OpenOptionsMenu(KZPlayer *player)
 	handles.sub[OPTSUB_SOUND] = BuildOptionsSubmenu(player, "Options - Menu Cat Sound", s_sndItems, (i32)KZ_ARRAYSIZE(s_sndItems));
 	handles.sub[OPTSUB_PAINT] = BuildOptionsSubmenu(player, "Options - Menu Cat Paint", s_paintItems, (i32)KZ_ARRAYSIZE(s_paintItems));
 	// HUD/JS-подменю строят их модули (свои per-slot хэндлы, пункт «Назад» внутри).
-	MenuHandle hudMenu = (MenuHandle)player->hudService->CreateHUDMenu(true);
-	MenuHandle jsMenu = (MenuHandle)player->jumpstatsService->CreateJumpstatsMenu(true);
+	MenuHandle hudMenu = (MenuHandle)player->hudService->CreateHUDMenu();
+	MenuHandle jsMenu = (MenuHandle)player->jumpstatsService->CreateJumpstatsMenu();
 
 	// Порядок корня — по частоте использования.
 	auto addCat = [&](const char *catKey, MenuHandle child)

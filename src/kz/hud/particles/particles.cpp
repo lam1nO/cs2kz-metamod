@@ -942,7 +942,6 @@ static constexpr const char *HUD_MENU_TYPE_TAG = "__hudType__";
 static constexpr const char *HUD_MENU_PANEL_TAG = "__showPanel__";
 static constexpr const char *HUD_MENU_COMPACT_TAG = "__compactPanel__";
 static constexpr const char *HUD_MENU_FONT_TAG = "__mhudFont__";
-static constexpr const char *HUD_MENU_BACK_TAG = "back:options";
 
 // Обновить текст тумблер-пункта «<подпись>: On/Off».
 static_function void SetHUDToggleItemText(MenuHandle menu, int item, const char *lang, const char *labelKey, bool on)
@@ -969,13 +968,6 @@ static_function void OnHUDMenuSelect(MenuHandle menu, int slot, int item)
 	}
 
 	const char *lang = p->languageService->GetLanguage();
-
-	// «← Назад» (есть только у экземпляра, встроенного в !options) — в корень настроек.
-	if (KZ_STREQ(key, HUD_MENU_BACK_TAG))
-	{
-		KZ::option::OpenOptionsMenu(p);
-		return;
-	}
 
 	// HTML-панель: TogglePanel держит кэш showPanel в синхроне с префом.
 	if (KZ_STREQ(key, HUD_MENU_PANEL_TAG))
@@ -1056,7 +1048,7 @@ static_function void OnHUDMenuSelect(MenuHandle menu, int slot, int item)
 // (и из !hud, и из подменю !options — экземпляр всегда один).
 static_global MenuHandle s_hudMenu[MAXPLAYERS + 1] = {};
 
-u32 KZHUDService::CreateHUDMenu(bool backToOptions)
+u32 KZHUDService::CreateHUDMenu()
 {
 	if (g_pMenus == nullptr)
 	{
@@ -1092,13 +1084,6 @@ u32 KZHUDService::CreateHUDMenu(bool backToOptions)
 		V_snprintf(text, sizeof(text), "%s: %s", elemLabel.c_str(), stateStr.c_str());
 		g_pMenus->AddItem(m, text, tag, false);
 	};
-
-	// «← Назад» — только у экземпляра, встроенного в !options.
-	if (backToOptions)
-	{
-		std::string back = KZLanguageService::PrepareMessageWithLang(lang, "Options - Menu Back");
-		g_pMenus->AddItem(m, back.c_str(), HUD_MENU_BACK_TAG, false);
-	}
 
 	// Тип худа (int-pref).
 	int hudType = this->GetHudType();
@@ -1143,7 +1128,7 @@ void KZHUDService::OpenHUDMenu()
 		return;
 	}
 
-	MenuHandle m = (MenuHandle)this->CreateHUDMenu(false);
+	MenuHandle m = (MenuHandle)this->CreateHUDMenu();
 	if (m == kInvalidMenuHandle)
 	{
 		this->PrintHUDSummary();

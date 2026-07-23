@@ -577,7 +577,7 @@ public:
 	void OpenJumpstatsMenu();
 
 	// Построить JS-меню без показа (возвращает MenuHandle == u32; 0 = не построено).
-	// backToOptions — добавить первым пунктом «← Назад» в корень !options
+	// «Назад» — бинд R движка меню (parent от AddSubMenu в !options).
 	// (используется подменю джампстатов в kz_option_menu.cpp).
-	u32 CreateJumpstatsMenu(bool backToOptions);
+	u32 CreateJumpstatsMenu();
 };

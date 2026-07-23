@@ -478,12 +478,6 @@ static_function void OnJSMenuSelect(MenuHandle menu, int slot, int item)
 	{
 		return;
 	}
-	// «← Назад» (есть только у экземпляра, встроенного в !options) — в корень настроек.
-	if (KZ_STREQ(key, "back:options"))
-	{
-		KZ::option::OpenOptionsMenu(p);
-		return;
-	}
 	for (const auto &it : s_jsMenuItems)
 	{
 		if (!KZ_STREQ(key, it.prefKey))
@@ -530,7 +524,7 @@ static_function void OnJSMenuSelect(MenuHandle menu, int slot, int item)
 // (и из !js, и из подменю !options — экземпляр всегда один).
 static_global MenuHandle s_jsMenu[MAXPLAYERS + 1] = {};
 
-u32 KZJumpstatsService::CreateJumpstatsMenu(bool backToOptions)
+u32 KZJumpstatsService::CreateJumpstatsMenu()
 {
 	if (g_pMenus == nullptr)
 	{
@@ -552,12 +546,6 @@ u32 KZJumpstatsService::CreateJumpstatsMenu(bool backToOptions)
 		return kInvalidMenuHandle;
 	}
 	const char *lang = this->player->languageService->GetLanguage();
-	// «← Назад» — только у экземпляра, встроенного в !options.
-	if (backToOptions)
-	{
-		std::string back = KZLanguageService::PrepareMessageWithLang(lang, "Options - Menu Back");
-		g_pMenus->AddItem(m, back.c_str(), "back:options", false);
-	}
 	for (const auto &it : s_jsMenuItems)
 	{
 		std::string text = JSMenuItemText(this->player, it, lang);
@@ -575,7 +563,7 @@ void KZJumpstatsService::OpenJumpstatsMenu()
 		PrintJumpstatsMenuSummary(this->player);
 		return;
 	}
-	MenuHandle m = (MenuHandle)this->CreateJumpstatsMenu(false);
+	MenuHandle m = (MenuHandle)this->CreateJumpstatsMenu();
 	if (m == kInvalidMenuHandle)
 	{
 		PrintJumpstatsMenuSummary(this->player);
