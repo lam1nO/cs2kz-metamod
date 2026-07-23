@@ -219,6 +219,18 @@ void KZTriggerService::ApplyPushes()
 				boosterVelBefore.x, boosterVelBefore.y, boosterVelBefore.z, boosterVelAfter.x, boosterVelAfter.y, boosterVelAfter.z,
 				boosterGrounded ? 1 : 0);
 			fflush(stdout);
+			// Вертикальный пуш: стартуем трекинг пика ПРЯМО ЗДЕСЬ (для воздушного буста
+			// grounded=0 наземный отрыв OnStopTouchGround не сработает, а высоту мерить надо).
+			// takeoffZ = origin в момент пуша → gainZ = набор над точкой пуша. Для наземного
+			// буста режимный отрыв ниже переинициализирует те же поля к уровню земли — не конфликт.
+			if (push.impulse[2] != 0.0f)
+			{
+				Vector boosterOrigin;
+				this->player->GetOrigin(&boosterOrigin);
+				this->player->boosterDebugTracking = true;
+				this->player->boosterDebugTakeoffZ = boosterOrigin.z;
+				this->player->boosterDebugMaxZ = boosterOrigin.z;
+			}
 		}
 	}
 	// Try to nullify velocity if needed.
