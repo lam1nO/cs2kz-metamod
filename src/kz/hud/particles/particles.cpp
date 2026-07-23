@@ -935,10 +935,11 @@ static const HUDMenuToggle s_hudToggles[] = {
 	{"HUD - Menu Label Outline",      "hudOutline",     true,  "MHUD - Outline Enabled",       "MHUD - Outline Disabled"      },
 };
 
-// info-теги специальных пунктов (тип худа, HTML-панель, компактный режим).
+// info-теги специальных пунктов (тип худа, HTML-панель, компактный режим, шрифт).
 static constexpr const char *HUD_MENU_TYPE_TAG = "__hudType__";
 static constexpr const char *HUD_MENU_PANEL_TAG = "__showPanel__";
 static constexpr const char *HUD_MENU_COMPACT_TAG = "__compactPanel__";
+static constexpr const char *HUD_MENU_FONT_TAG = "__mhudFont__";
 static constexpr const char *HUD_MENU_BACK_TAG = "back:options";
 
 // Обновить текст тумблер-пункта «<подпись>: On/Off».
@@ -986,6 +987,31 @@ static_function void OnHUDMenuSelect(MenuHandle menu, int slot, int item)
 	{
 		p->hudService->ToggleCompactPanel();
 		SetHUDToggleItemText(menu, item, lang, "HUD - Menu Label CompactPanel", p->hudService->IsCompactPanel());
+		return;
+	}
+
+	// Шрифт particle-MHUD — цикл по доступным (lato/verdana).
+	if (KZ_STREQ(key, HUD_MENU_FONT_TAG))
+	{
+		char fontBuf[32];
+		GetUpstreamFont(p, fontBuf, sizeof(fontBuf));
+		i32 idx = 0;
+		for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(UPSTREAM_AVAILABLE_FONTS); i++)
+		{
+			if (KZ_STREQ(fontBuf, UPSTREAM_AVAILABLE_FONTS[i]))
+			{
+				idx = i;
+				break;
+			}
+		}
+		const char *next = UPSTREAM_AVAILABLE_FONTS[(idx + 1) % KZ_ARRAYSIZE(UPSTREAM_AVAILABLE_FONTS)];
+		p->optionService->SetPreferenceStr("mhudFont", next);
+		// Смена шрифта меняет .vpcf-пути → пересоздать particle'ы.
+		p->hudService->DestroyAllParticles();
+		std::string label = KZLanguageService::PrepareMessageWithLang(lang, "HUD - Menu Label Font");
+		char newText[128];
+		V_snprintf(newText, sizeof(newText), "%s: %s", label.c_str(), next);
+		g_pMenus->SetItemText(menu, item, newText);
 		return;
 	}
 
@@ -1082,6 +1108,16 @@ u32 KZHUDService::CreateHUDMenu(bool backToOptions)
 	// HTML-панель и компактный режим.
 	addToggle("HUD - Menu Label Panel", HUD_MENU_PANEL_TAG, this->IsShowingPanel());
 	addToggle("HUD - Menu Label CompactPanel", HUD_MENU_COMPACT_TAG, this->IsCompactPanel());
+
+	// Шрифт particle-MHUD.
+	{
+		char fontBuf[32];
+		GetUpstreamFont(this->player, fontBuf, sizeof(fontBuf));
+		std::string fontLabel = KZLanguageService::PrepareMessageWithLang(lang, "HUD - Menu Label Font");
+		char text[128];
+		V_snprintf(text, sizeof(text), "%s: %s", fontLabel.c_str(), fontBuf);
+		g_pMenus->AddItem(m, text, HUD_MENU_FONT_TAG, false);
+	}
 
 	// Per-element тумблеры.
 	for (const auto &t : s_hudToggles)
@@ -1331,6 +1367,35 @@ static META_RES HandleHUDSubcmd(KZPlayer *player, const CCommand *args)
 		player->optionService->SetPreferenceBool("hudOutline", next);
 		player->hudService->DestroyAllParticles();
 		player->languageService->PrintChat(true, false, next ? "MHUD - Outline Enabled" : "MHUD - Outline Disabled");
+	}
+	else if (KZ_STREQI(element, "font"))
+	{
+		char cur[32];
+		GetUpstreamFont(player, cur, sizeof(cur));
+		char requested[32] = "";
+		if (prop)
+		{
+			V_strncpy(requested, prop, sizeof(requested));
+			V_strlower(requested);
+		}
+		bool valid = false;
+		for (const char *f : UPSTREAM_AVAILABLE_FONTS)
+		{
+			if (KZ_STREQ(requested, f))
+			{
+				valid = true;
+				break;
+			}
+		}
+		if (!valid)
+		{
+			player->languageService->PrintChat(true, false, "MHUD - Font Usage", cur);
+			return MRES_SUPERCEDE;
+		}
+		player->optionService->SetPreferenceStr("mhudFont", requested);
+		// Смена шрифта меняет .vpcf-пути → пересоздать particle'ы.
+		player->hudService->DestroyAllParticles();
+		player->languageService->PrintChat(true, false, "MHUD - Font Set", requested);
 	}
 	else
 	{

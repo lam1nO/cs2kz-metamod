@@ -853,6 +853,24 @@
 		"en"		"Compact panel"
 		"ru"		"Компактная панель"
 	}
+	// Шрифт particle-MHUD (пункт меню и kz_hud font).
+	"HUD - Menu Label Font"
+	{
+		"en"		"MHUD font"
+		"ru"		"Шрифт MHUD"
+	}
+	"MHUD - Font Usage"
+	{
+		"#format"	"current:s"
+		"en"		"{grey}Usage: {default}kz_hud font <lato|verdana>{grey}. Current font: {default}{current}{grey}."
+		"ru"		"{grey}Применение: {default}kz_hud font <lato|verdana>{grey}. Текущий шрифт: {default}{current}{grey}."
+	}
+	"MHUD - Font Set"
+	{
+		"#format"	"font:s"
+		"en"		"{grey}MHUD font set to {default}{font}{grey}."
+		"ru"		"{grey}Шрифт MHUD: {default}{font}{grey}."
+	}
 	// Метки элементов в меню тумблеров.
 	"HUD - Menu Label Speed"
 	{
