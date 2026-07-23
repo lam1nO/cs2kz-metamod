@@ -50,6 +50,21 @@
 		"ko"		"{grey}{player}님에게 텔레포트되었습니다."
 		"lv"		"{grey}Teleportēts pie {player}."
 	}
+	"Goto Menu - Title"
+	{
+		"en"		"Teleport to whom?"
+		"ru"		"К кому телепорт?"
+	}
+	"Goto - No Players Available"
+	{
+		"en"		"{grey}There are no players to teleport to."
+		"ru"		"{grey}Нет игроков, к которым можно телепортироваться."
+	}
+	"Goto - Player Unavailable"
+	{
+		"en"		"{darkred}That player is no longer available."
+		"ru"		"{darkred}Этот игрок больше недоступен."
+	}
 	"Goto - Command Usage"
 	{
 		"en"		"{grey}Usage: {default}kz_goto <player name>"

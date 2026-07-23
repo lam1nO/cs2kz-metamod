@@ -6,15 +6,59 @@
 #include "../language/kz_language.h"
 #include "../timer/kz_timer.h"
 
+#include <vendor/mm-cs2menus/src/public/ics2menus.h>
+
+// Меню-движок cs2menus (определён в cs2kz.cpp); может быть nullptr, если плагин не загружен.
+extern ICS2Menus *g_pMenus;
+
 void KZGotoService::Init() {}
 
 void KZGotoService::Reset() {}
 
-bool KZGotoService::GotoPlayer(const char *playerNamePart)
+i32 KZGotoService::CollectGotoCandidates(const char *query, KZPlayer **candidates, i32 maxCandidates)
 {
-	if (!playerNamePart || !V_stricmp("", playerNamePart))
+	KZPlayer *exact[MAXPLAYERS + 1] = {};
+	KZPlayer *sub[MAXPLAYERS + 1] = {};
+	i32 exactCount = 0;
+	i32 subCount = 0;
+	bool wantAll = !query || !query[0];
+	for (i32 i = 0; i <= MAXPLAYERS; i++)
 	{
-		player->languageService->PrintChat(true, false, "Goto - Command Usage");
+		KZPlayer *other = g_pKZPlayerManager->ToPlayer(i);
+		if (!other || other == this->player || !other->GetController())
+		{
+			continue;
+		}
+		if (other->GetController()->GetTeam() == CS_TEAM_SPECTATOR)
+		{
+			continue;
+		}
+		if (wantAll)
+		{
+			sub[subCount++] = other;
+		}
+		else if (KZ_STREQI(other->GetName(), query))
+		{
+			exact[exactCount++] = other;
+		}
+		else if (V_stristr(other->GetName(), query))
+		{
+			sub[subCount++] = other;
+		}
+	}
+	KZPlayer **src = exactCount > 0 ? exact : sub;
+	i32 total = exactCount > 0 ? exactCount : subCount;
+	for (i32 i = 0; i < total && i < maxCandidates; i++)
+	{
+		candidates[i] = src[i];
+	}
+	return total;
+}
+
+bool KZGotoService::GotoPlayer(KZPlayer *targetPlayer)
+{
+	if (!targetPlayer || !targetPlayer->GetController())
+	{
 		return false;
 	}
 
@@ -24,58 +68,9 @@ bool KZGotoService::GotoPlayer(const char *playerNamePart)
 		return false;
 	}
 
-	KZPlayer *targetPlayer = nullptr;
-
-	// Prefer exact matches over partial matches.
-	for (i32 i = 0; i <= MAXPLAYERS; i++)
+	if (targetPlayer->GetController()->GetTeam() == CS_TEAM_SPECTATOR)
 	{
-		CBasePlayerController *controller = g_pKZPlayerManager->players[i]->GetController();
-		KZPlayer *otherPlayer = g_pKZPlayerManager->ToPlayer(i);
-
-		if (!controller || this->player == otherPlayer)
-		{
-			continue;
-		}
-
-		if (KZ_STREQI(otherPlayer->GetName(), playerNamePart))
-		{
-			if (otherPlayer->GetController()->GetTeam() == CS_TEAM_SPECTATOR)
-			{
-				continue;
-			}
-			targetPlayer = otherPlayer;
-			break;
-		}
-	}
-
-	// If no exact match was found, try partial matches.
-	if (!targetPlayer)
-	{
-		for (i32 i = 0; i <= MAXPLAYERS; i++)
-		{
-			CBasePlayerController *controller = g_pKZPlayerManager->players[i]->GetController();
-			KZPlayer *otherPlayer = g_pKZPlayerManager->ToPlayer(i);
-
-			if (!controller || this->player == otherPlayer)
-			{
-				continue;
-			}
-
-			if (V_strstr(V_strlower((char *)otherPlayer->GetName()), V_strlower((char *)playerNamePart)))
-			{
-				if (otherPlayer->GetController()->GetTeam() == CS_TEAM_SPECTATOR)
-				{
-					continue;
-				}
-				targetPlayer = otherPlayer;
-				break;
-			}
-		}
-	}
-
-	if (!targetPlayer)
-	{
-		player->languageService->PrintChat(true, false, "Error Message (Player Not Found)", playerNamePart);
+		this->player->languageService->PrintChat(true, false, "Goto - Error Message (Player In Spec)", targetPlayer->GetName());
 		return false;
 	}
 
@@ -112,10 +107,120 @@ bool KZGotoService::GotoPlayer(const char *playerNamePart)
 	return true;
 }
 
+// Колбэк меню !goto: info — userID кандидата строкой; ревалидация обязательна —
+// цель могла выйти или уйти в спеки, пока меню висело.
+static_function void OnGotoMenuSelect(MenuHandle menu, int slot, int item)
+{
+	KZPlayer *p = g_pKZPlayerManager->ToPlayer(CPlayerSlot(slot));
+	if (!p)
+	{
+		return;
+	}
+	const char *info = g_pMenus->GetItemInfo(menu, item);
+	if (!info || !info[0])
+	{
+		return;
+	}
+	KZPlayer *target = g_pKZPlayerManager->ToPlayer(CPlayerUserId(V_StringToInt32(info, -1)));
+	if (!target || !target->GetController() || target->GetController()->GetTeam() == CS_TEAM_SPECTATOR)
+	{
+		p->languageService->PrintChat(true, false, "Goto - Player Unavailable");
+		return;
+	}
+	p->gotoService->GotoPlayer(target);
+}
+
+// Меню выбора цели !goto (cs2menus, одноразовый выбор — паттерн kz_spec_menu).
+// Вызывается только при загруженном g_pMenus (фолбэки — в GotoPlayer(const char*)).
+static_function void OpenGotoMenu(KZPlayer *player, KZPlayer **candidates, i32 count)
+{
+	if (!player || count <= 0)
+	{
+		return;
+	}
+
+	int slot = player->GetPlayerSlot().Get();
+	if (slot < 0 || slot > MAXPLAYERS)
+	{
+		return;
+	}
+
+	// Один хэндл на слот — пересоздаём при повторном вызове.
+	static MenuHandle s_gotoMenu[MAXPLAYERS + 1] = {};
+	if (s_gotoMenu[slot] != kInvalidMenuHandle)
+	{
+		g_pMenus->DestroyMenu(s_gotoMenu[slot]);
+		s_gotoMenu[slot] = kInvalidMenuHandle;
+	}
+
+	const char *lang = player->languageService->GetLanguage();
+	std::string title = KZLanguageService::PrepareMessageWithLang(lang, "Goto Menu - Title");
+	MenuHandle m = g_pMenus->CreateMenu(MenuType::Default, title.c_str(), &OnGotoMenuSelect);
+	if (m == kInvalidMenuHandle)
+	{
+		return;
+	}
+
+	for (i32 i = 0; i < count; i++)
+	{
+		char info[16];
+		V_snprintf(info, sizeof(info), "%d", candidates[i]->GetClient()->GetUserID().Get());
+		g_pMenus->AddItem(m, candidates[i]->GetName(), info, false);
+	}
+
+	// Одноразовый выбор — меню закрывается по клику.
+	g_pMenus->SetCloseOnSelect(m, true);
+
+	s_gotoMenu[slot] = m;
+	g_pMenus->DisplayMenu(m, slot, 0);
+}
+
+bool KZGotoService::GotoPlayer(const char *playerNamePart)
+{
+	// Чек таймера до резолва — как раньше, чтобы не дразнить меню при беге.
+	if (this->player->timerService->GetTimerRunning())
+	{
+		this->player->languageService->PrintChat(true, false, "Goto - Error Message (Timer Running)");
+		return false;
+	}
+
+	bool hasQuery = playerNamePart && playerNamePart[0];
+	KZPlayer *candidates[MAXPLAYERS + 1] = {};
+	i32 total = this->CollectGotoCandidates(playerNamePart, candidates, MAXPLAYERS + 1);
+	if (total == 0)
+	{
+		if (hasQuery)
+		{
+			this->player->languageService->PrintChat(true, false, "Error Message (Player Not Found)", playerNamePart);
+		}
+		else
+		{
+			this->player->languageService->PrintChat(true, false, "Goto - No Players Available");
+		}
+		return false;
+	}
+	if (total == 1 && hasQuery)
+	{
+		return this->GotoPlayer(candidates[0]);
+	}
+	// Без движка меню — прежнее поведение: подстрока → первый кандидат, пусто → подсказка.
+	if (g_pMenus == nullptr)
+	{
+		if (hasQuery)
+		{
+			return this->GotoPlayer(candidates[0]);
+		}
+		this->player->languageService->PrintChat(true, false, "Goto - Command Usage");
+		return false;
+	}
+	// Без аргумента или неоднозначная подстрока — меню выбора.
+	OpenGotoMenu(this->player, candidates, total);
+	return true;
+}
+
 SCMD(kz_goto, SCFL_PLAYER)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
-	const char *targetNamePart = args->ArgS();
-	player->gotoService->GotoPlayer(targetNamePart);
+	player->gotoService->GotoPlayer(args->ArgS());
 	return MRES_SUPERCEDE;
 }
