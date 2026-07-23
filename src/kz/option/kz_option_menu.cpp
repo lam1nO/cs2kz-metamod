@@ -338,10 +338,10 @@ void KZ::option::OpenOptionsMenu(KZPlayer *player)
 	// Хэндл корня сохраняем ДО постройки детей: их пункт «Назад» ссылается на него.
 	handles.root = root;
 
-	handles.sub[OPTSUB_CHECKPOINT] = BuildOptionsSubmenu(player, "Options - Menu Cat Checkpoint", s_cpItems, KZ_ARRAYSIZE(s_cpItems));
-	handles.sub[OPTSUB_VISIBILITY] = BuildOptionsSubmenu(player, "Options - Menu Cat Visibility", s_visItems, KZ_ARRAYSIZE(s_visItems));
-	handles.sub[OPTSUB_SOUND] = BuildOptionsSubmenu(player, "Options - Menu Cat Sound", s_sndItems, KZ_ARRAYSIZE(s_sndItems));
-	handles.sub[OPTSUB_PAINT] = BuildOptionsSubmenu(player, "Options - Menu Cat Paint", s_paintItems, KZ_ARRAYSIZE(s_paintItems));
+	handles.sub[OPTSUB_CHECKPOINT] = BuildOptionsSubmenu(player, "Options - Menu Cat Checkpoint", s_cpItems, (i32)KZ_ARRAYSIZE(s_cpItems));
+	handles.sub[OPTSUB_VISIBILITY] = BuildOptionsSubmenu(player, "Options - Menu Cat Visibility", s_visItems, (i32)KZ_ARRAYSIZE(s_visItems));
+	handles.sub[OPTSUB_SOUND] = BuildOptionsSubmenu(player, "Options - Menu Cat Sound", s_sndItems, (i32)KZ_ARRAYSIZE(s_sndItems));
+	handles.sub[OPTSUB_PAINT] = BuildOptionsSubmenu(player, "Options - Menu Cat Paint", s_paintItems, (i32)KZ_ARRAYSIZE(s_paintItems));
 	// HUD/JS-подменю строят их модули (свои per-slot хэндлы, пункт «Назад» внутри).
 	MenuHandle hudMenu = (MenuHandle)player->hudService->CreateHUDMenu(true);
 	MenuHandle jsMenu = (MenuHandle)player->jumpstatsService->CreateJumpstatsMenu(true);
