@@ -384,9 +384,9 @@ void KZTimerModeService::OnStopTouchGround()
 		}
 		f64 dbgWhole;
 		i32 dbgHalf = modf((f64)g_pKZUtils->GetGlobals()->curtime * ENGINE_FIXED_TICK_RATE, &dbgWhole) > 0.25 ? 1 : 0;
-		Msg("[kzt-v2] %s land=%.0f preC=%.0f takeoff=%.0f press_dt=%.2f tog=%.2f n=%d ceil=%d perf=%d tsp=%d duck=%d dfrac=%.2f vm=%.3f dyaw=%.2f half=%d\n",
+		Msg("[kzt-v2] %s land=%.0f preC=%.0f takeoff=%.0f press_dt=%.2f tog=%.2f n=%d ceil=%d perf=%d tsp=%d boost=%d duck=%d dfrac=%.2f vm=%.3f dyaw=%.2f half=%d\n",
 			this->player->GetName(), this->lastLandingSpeed, preC, velocity.Length2D(), pressDt * 1000.0f,
-			realTog * 1000.0f, dbgN, dbgPen, perf ? 1 : 0, kz_kzt_takeoff_speed.GetBool() ? 1 : 0,
+			realTog * 1000.0f, dbgN, dbgPen, perf ? 1 : 0, kz_kzt_takeoff_speed.GetBool() ? 1 : 0, hasBoost ? 1 : 0,
 			ducked ? 1 : 0, duckFrac, this->effectivePreVelMod, dbgDyaw, dbgHalf);
 		fflush(stdout);
 	}
