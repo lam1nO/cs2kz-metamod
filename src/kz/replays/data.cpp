@@ -70,6 +70,7 @@ namespace KZ::replaysystem::data
 		replay->courseName[0] = '\0';
 		replay->startTime = 0.0f;
 		replay->paused = false;
+		replay->pausedTime = 0.0f;
 		replay->endTime = 0.0f;
 		replay->stopTick = 0;
 		replay->lastSplitTime = 0.0f;
@@ -127,7 +128,16 @@ namespace KZ::replaysystem::data
 
 	f32 GetReplayTime()
 	{
-		return g_currentReplay.startTime == 0.0f ? 0.0f : (g_pKZUtils->GetServerGlobals()->curtime - g_currentReplay.startTime);
+		if (g_currentReplay.startTime == 0.0f)
+		{
+			return 0.0f;
+		}
+		if (g_currentReplay.paused)
+		{
+			// На паузе время заякорено (TIMER_PAUSE в events.cpp).
+			return g_currentReplay.pausedTime;
+		}
+		return g_pKZUtils->GetServerGlobals()->curtime - g_currentReplay.startTime;
 	}
 
 	f32 GetEndTime()

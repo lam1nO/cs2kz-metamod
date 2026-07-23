@@ -40,6 +40,9 @@ namespace KZ::replaysystem::data
 		char courseName[256];
 		f32 startTime;
 		bool paused;
+		// Якорь отображаемого времени на паузе записанного игрока: тиковая
+		// компенсация startTime дырявая (физика бота на паузе может не тикать).
+		f32 pausedTime;
 		f32 endTime;
 		u32 stopTick;
 		f32 lastSplitTime;

@@ -242,12 +242,22 @@ namespace KZ::replaysystem::events
 
 			case RpEvent::RpEventData::TimerEvent::TIMER_PAUSE:
 			{
+				// Якорим время: в событии — точное время таймера на момент паузы.
+				replay->pausedTime = event->data.timer.time > 0.0f
+										 ? event->data.timer.time
+										 : (replay->startTime > 0.0f ? g_pKZUtils->GetServerGlobals()->curtime - replay->startTime : 0.0f);
 				replay->paused = true;
 				break;
 			}
 
 			case RpEvent::RpEventData::TimerEvent::TIMER_RESUME:
 			{
+				if (replay->startTime > 0.0f)
+				{
+					// Пересинхронизируем startTime, чтобы время продолжилось с якоря.
+					f32 resumeTime = event->data.timer.time > 0.0f ? event->data.timer.time : replay->pausedTime;
+					replay->startTime = g_pKZUtils->GetServerGlobals()->curtime - resumeTime;
+				}
 				replay->paused = false;
 				break;
 			}
@@ -428,6 +438,7 @@ namespace KZ::replaysystem::events
 						case RpEvent::RpEventData::TimerEvent::TIMER_PAUSE:
 						{
 							replay->paused = true;
+							replay->pausedTime = event->data.timer.time;
 							if (inActiveTimerRun && !inPause)
 							{
 								inPause = true;

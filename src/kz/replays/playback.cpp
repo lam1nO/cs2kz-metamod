@@ -187,10 +187,9 @@ namespace KZ::replaysystem::playback
 		events::CheckJumps(*player);
 		events::CheckEvents(*player);
 
-		if (replay->paused && replay->startTime > 0.0f)
-		{
-			replay->startTime += ENGINE_FIXED_TICK_INTERVAL;
-		}
+		// Компенсация startTime на записанной паузе убрана: время теперь якорится
+		// в TIMER_PAUSE/TIMER_RESUME (events.cpp) — тиковая компенсация была дырявой,
+		// когда физика бота на паузе не тикала, и время «убегало».
 
 		replay->currentTick++;
 		if (replay->currentTick >= replay->tickCount)
