@@ -276,10 +276,19 @@ void KZTimerModeService::OnStopTouchGround()
 	bool ducked = msDuck && (msDuck->m_bDucked() || msDuck->m_bDucking);
 	f32 duckFrac = msDuck ? MAX(0.0f, MIN(1.0f, msDuck->m_flDuckAmount())) : 0.0f;
 
+	// Бустеры (trigger_push): при активной baseVelocity формулу НЕ применяем —
+	// её потолок (250*велмод / кап перфа 380) срезал бустерную скорость, отсюда
+	// «бустеры на kzt слабее ckz» (kz_variety_fix, жёлтый блок). GO-паритет:
+	// GOKZ push-триггеры не трогал вовсе — отпрыг с буста отдаём движку как есть.
+	Vector boostBaseVel;
+	this->player->GetBaseVelocity(&boostBaseVel);
+	bool hasBoost =
+		(this->player->GetPlayerPawn()->m_fFlags() & FL_BASEVELOCITY) || boostBaseVel.Length2DSqr() > 1.0f || boostBaseVel.z * boostBaseVel.z > 1.0f;
+
 	// Скорость отрыва по формуле от скорости касания (порт cyb.46-48 на реальные
 	// времена): трение за фактическое время на земле, перф → кап 380, промах →
 	// классический потолок 275. Дальше 4 тиков на земле — движок как есть.
-	if (kz_kzt_takeoff_speed.GetBool() && this->player->jumped && realTog <= KZT_BHOP_FORMULA_RANGE
+	if (kz_kzt_takeoff_speed.GetBool() && !hasBoost && this->player->jumped && realTog <= KZT_BHOP_FORMULA_RANGE
 		&& this->lastLandingSpeed > 0.0f && this->lastLandingSpeedTime == this->player->landingTime)
 	{
 		// GOKZ-модель скорости (analyze-gokz-kzt-nonperf-bhop.md §5):
@@ -339,8 +348,10 @@ void KZTimerModeService::OnStopTouchGround()
 		if (!formulaApplied)
 		{
 			// Формула не сработала (cvar выключен/гарды) — старый KZTimer-кап.
+			// При активном бусте (hasBoost) кап тоже не применяем — иначе бустерный
+			// перф всё равно резался бы до 380.
 			f32 horizSpeed = velocity.Length2D();
-			if (horizSpeed > PERF_SPEED_CAP)
+			if (!hasBoost && horizSpeed > PERF_SPEED_CAP)
 			{
 				f32 scale = PERF_SPEED_CAP / horizSpeed;
 				velocity.x *= scale;
