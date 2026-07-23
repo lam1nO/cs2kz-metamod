@@ -10,6 +10,7 @@
 #include "kz/language/kz_language.h"
 #include "kz/checkpoint/kz_checkpoint.h"
 #include "kz/replays/kz_replaysystem.h"
+#include "kz/style/kz_style.h" // GetStyleName для лейбла стиля (деф. Normal) в строке 1
 
 #include <vendor/MultiAddonManager/public/imultiaddonmanager.h>
 extern IMultiAddonManager *g_pMultiAddonManager;
@@ -18,6 +19,29 @@ extern IMultiAddonManager *g_pMultiAddonManager;
 extern ICS2Menus *g_pMenus;
 
 #include "tier0/memdbgon.h"
+
+// Формат времени для худа: mm:ss.cc (сотые), как у кибершока. Отдельно от utils::FormatTime
+// (тысячные) — тот нужен другим местам (чат/сабмишен/реплеи), его формат не трогаем.
+// Часы добавляются при необходимости. time всегда >= 0 (таймер/PB/WR).
+static_function void FormatTimeHud(f64 time, char *output, u32 length)
+{
+	i32 rounded = RoundFloatToInt(time * 100); // время в сотых долях секунды
+	i32 centis = rounded % 100;
+	rounded = (rounded - centis) / 100;
+	i32 seconds = rounded % 60;
+	rounded = (rounded - seconds) / 60;
+	i32 minutes = rounded % 60;
+	rounded = (rounded - minutes) / 60;
+	i32 hours = rounded;
+	if (hours == 0)
+	{
+		snprintf(output, length, "%02i:%02i.%02i", minutes, seconds, centis);
+	}
+	else
+	{
+		snprintf(output, length, "%i:%02i:%02i.%02i", hours, minutes, seconds, centis);
+	}
+}
 
 static CConVar<bool> kz_force_mhud("kz_force_mhud", FCVAR_NONE, "Force the particle-based MHUD even when MultiAddonManager is not available.", false);
 
@@ -222,20 +246,85 @@ std::string KZHUDService::GetTimerText(const char *language)
 	return std::string("");
 }
 
-// --- Версия C: палитра HUD (см. artifacts_from_outside/MovementHud.cs) ---
-#define KZ_HUD_C_ACCENT "#3AA0F5" // активная клавиша / время
-#define KZ_HUD_C_WHITE  "#FFFFFF" // скорость / основные числа
-#define KZ_HUD_C_DIM    "#5B616D" // неактивная клавиша / разделители / стейдж
-#define KZ_HUD_C_MUTED  "#9AA3AF" // подписи (U/S, CP, TP)
+// Разбор состояния таймера для кибершоковского худа: время (сотые) и суффикс паузы/стопа
+// раздельно, чтобы красить их разными цветами (время — зелёный, суффикс — DIM). Логика та же,
+// что в GetTimerText (реплей-бот / обычный забег / grace после стопа); данные — this->player,
+// суффикс-фразы — в языке получателя. Возвращает false, если таймер показывать не нужно.
+bool KZHUDService::GetTimerParts(const char *language, std::string &outTime, std::string &outSuffix)
+{
+	f64 time = 0.0;
+	bool timerRunning = false;
+	bool paused = false;
+
+	if (KZ::replaysystem::IsReplayBot(this->player))
+	{
+		time = KZ::replaysystem::GetTime();
+		paused = KZ::replaysystem::GetPaused();
+		timerRunning = KZ::replaysystem::GetEndTime() == 0.0f;
+		// Таймер не показываем, если и текущее, и конечное время нулевые.
+		if (time == 0.0f && KZ::replaysystem::GetEndTime() == 0.0f)
+		{
+			return false;
+		}
+		if (!timerRunning)
+		{
+			time = KZ::replaysystem::GetEndTime();
+		}
+	}
+	else if (this->player->timerService->GetTimerRunning() || this->ShouldShowTimerAfterStop())
+	{
+		timerRunning = this->player->timerService->GetTimerRunning();
+		time = timerRunning ? this->player->timerService->GetTime() : this->currentTimeWhenTimerStopped;
+		paused = this->player->timerService->GetPaused();
+	}
+	else
+	{
+		return false;
+	}
+
+	char timeText[64];
+	FormatTimeHud(time, timeText, sizeof(timeText));
+	outTime = timeText;
+	outSuffix.clear();
+	if (!timerRunning)
+	{
+		outSuffix += KZLanguageService::PrepareMessageWithLang(language, "HUD - Stopped Text");
+	}
+	if (paused)
+	{
+		outSuffix += KZLanguageService::PrepareMessageWithLang(language, "HUD - Paused Text");
+	}
+	return true;
+}
+
+// --- Кибершоковский стандартный худ: палитра и скобки таймера --------------------------
+// KZ_HUD_C_ACCENT НЕ трогаем — на нём держатся активные клавиши (см. ряд W A S D J C ниже).
+// Новый зелёный KZ_HUD_C_TIMER — только для таймера и WR-времени, клавиши не перекрашивает.
+#define KZ_HUD_C_ACCENT "#3AA0F5" // активная клавиша (как было)
+#define KZ_HUD_C_WHITE  "#FFFFFF" // скорость / время PB / числа
+#define KZ_HUD_C_DIM    "#5B616D" // разделители / рамки || | / суффикс паузы-стопа / "--"
+#define KZ_HUD_C_MUTED  "#9AA3AF" // подписи (стиль, PB, WR, Stage, CP, TP)
+#define KZ_HUD_C_TIMER  "#4CD964" // таймер и WR-время (кибершоковский зелёный)
+
+// Скобки вокруг таймера. Уголковые ⌈ ⌋ (U+2308/230B) «кибершоковее», но лежат в
+// Mathematical-блоке Unicode — вне гарантированного набора игрового шрифта, риск tofu на
+// живом сервере (см. дизайн-спеку). Поэтому по умолчанию ASCII; чтобы проверить уголковые —
+// закомментировать ASCII-пару и раскомментировать HTML-entity-пару ниже, прогнать
+// glyph-тест на dev-боксе.
+#define KZ_HUD_BRACKET_OPEN  "["
+#define KZ_HUD_BRACKET_CLOSE "]"
+// #define KZ_HUD_BRACKET_OPEN  "&#8968;" // ⌈ U+2308
+// #define KZ_HUD_BRACKET_CLOSE "&#8971;" // ⌋ U+230B
 
 std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSpeed, bool suppressTimer, bool suppressKeys, bool masterMode,
 										   const char *language)
 {
-	// Данные (скорость/клавиши/таймер/CP-TP) — из dataSource (наблюдаемый при спектировании).
-	// Настройки (тумблеры/цвета) — из this (сам игрок/спектатор): своя раскладка, чужие данные.
-	// В мастер-режиме элемент рисуется, только если его per-element тумблер ВКЛ (opt-in).
+	// Данные (скорость/таймер/стейдж/PB-WR/CP-TP) — из dataSource (наблюдаемый при спектировании).
+	// Настройки (тумблеры/цвета/язык/раскладка) — из this (сам игрок/спектатор): своя раскладка,
+	// чужие данные. В мастер-режиме элемент рисуется, только если его per-element тумблер ВКЛ.
 	// В обычном — как раньше: рисуем всё, кроме suppress* (дублируемого particle-MHUD).
 	const bool isReplay = KZ::replaysystem::IsReplayBot(dataSource);
+	const bool compact = this->IsCompactPanel();
 	char buf[512];
 
 	// Накапливаем строки в html, разделяя <br> только между непустыми (без висячих тегов).
@@ -249,16 +338,45 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		html += line;
 	};
 
-	// В мастер-режиме показываем элемент только при включённом тумблере И если его не
-	// рисует particle-MHUD (suppress*), иначе двойной рендер. Вне мастера — как раньше.
-	// CP/TP particle-путём не рисуется (только HTML), поэтому suppress к нему не применяется.
-	bool showSpeed = masterMode ? (this->IsMHUDSpeedEnabled() && !suppressSpeed) : !suppressSpeed;
-	bool showKeys = masterMode ? (this->IsMHUDKeysEnabled() && !suppressKeys) : !suppressKeys;
-	bool showTimer = masterMode ? (this->IsMHUDTimerEnabled() && !suppressTimer) : !suppressTimer;
-	bool showCpTp = masterMode ? this->IsMHUDCpTpEnabled() : true;
+	// Компакт-режим: только строки 1-2 (таймер+скорость), всегда — как в прежнем компакте
+	// (per-element тумблеры в компакте не смотрим). Полный режим: прежняя логика тумблеров.
+	// showExtra — стейдж/PB-WR (только полный режим). CP-TP/клавиши/showpos — по своим тумблерам.
+	bool showTimer = compact ? true : (masterMode ? (this->IsMHUDTimerEnabled() && !suppressTimer) : !suppressTimer);
+	bool showSpeed = compact ? true : (masterMode ? (this->IsMHUDSpeedEnabled() && !suppressSpeed) : !suppressSpeed);
+	bool showKeys = compact ? false : (masterMode ? (this->IsMHUDKeysEnabled() && !suppressKeys) : !suppressKeys);
+	bool showCpTp = compact ? false : (masterMode ? this->IsMHUDCpTpEnabled() : true);
+	bool showExtra = !compact;
 
-	// --- 1. Скорость: крупное число + подпись U/S, при отрыве — престрейф-скорость
-	//        в перф/CJ-цвете (логика как в GetSpeedText). ---
+	// Типографика: скорость — fontSize-m, таймер — fontSize-sm, всё прочее — fontSize-s.
+	// Классы вкладываем В color-теги: <font class='...'><font color='...'>X</font></font>.
+	// Это прогрессивное улучшение — если движок не подхватит класс, размер молча дефолтный,
+	// но цвета и раскладка остаются корректными (класс лишь меняет кегль, не текст/цвет).
+
+	// --- Строка 1: [ 00:07.96 ] Стиль — таймер зелёный в скобках (sm), суффикс паузы/стопа
+	//        DIM (sm), рядом стиль/режим MUTED (s). Символ скобки — через KZ_HUD_BRACKET_*. ---
+	if (showTimer)
+	{
+		std::string tTime, tSuffix;
+		if (dataSource->hudService->GetTimerParts(language, tTime, tSuffix))
+		{
+			// Имя стиля: первый активный стиль, иначе "Normal" (поля ранга у нас нет).
+			const char *styleLabel = "Normal";
+			if (!isReplay && dataSource->styleServices.Count() > 0)
+			{
+				styleLabel = dataSource->styleServices[0]->GetStyleName();
+			}
+			V_snprintf(buf, sizeof(buf),
+					   "<font class='fontSize-sm'><font color='" KZ_HUD_C_TIMER "'>" KZ_HUD_BRACKET_OPEN "&#160;%s&#160;" KZ_HUD_BRACKET_CLOSE
+					   "</font><font color='" KZ_HUD_C_DIM "'>%s</font></font>"
+					   "&#160;&#160;<font class='fontSize-s'><font color='" KZ_HUD_C_MUTED "'>%s</font></font>",
+					   tTime.c_str(), tSuffix.c_str(), styleLabel);
+			addLine(buf);
+		}
+	}
+
+	// --- Строка 2: 2064 (784) [C] — крупная белая скорость (m), мелкий престрейф (s) в
+	//        перф/jumpbug/базовом цвете, приписка C при crouch-jump в cj-цвете. Всё — по
+	//        текущему условию onGroundSettled (престрейф/C скрыты, когда игрок осел на земле). ---
 	if (showSpeed)
 	{
 		Vector velocity, baseVelocity;
@@ -282,21 +400,96 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 			{
 				tintCol = dataSource->hudService->fromDuckbug ? jumpbugCol : perfCol;
 			}
-			char tk[96];
-			V_snprintf(tk, sizeof(tk), " <font color='#%02x%02x%02x'>(%d)</font>", tintCol.r(), tintCol.g(), tintCol.b(),
-					   RoundFloatToInt(dataSource->takeoffVelocity.Length2D()));
+			char tk[128];
+			V_snprintf(tk, sizeof(tk), " <font class='fontSize-s'><font color='#%02x%02x%02x'>(%d)</font></font>", tintCol.r(), tintCol.g(),
+					   tintCol.b(), RoundFloatToInt(dataSource->takeoffVelocity.Length2D()));
 			takeoff = tk;
 			if (dataSource->hudService->crouchJumping)
 			{
-				takeoff += " <font color='" KZ_HUD_C_ACCENT "'>C</font>";
+				// Приписка C в cj-цвете (mhudSpeedCjColor, деф. #71EEB8) — как в GetSpeedText.
+				const Color cjCol = this->GetMHUDColorPref("mhudSpeedCjColor", Color(0x71, 0xEE, 0xB8, 0xFF));
+				char cj[96];
+				V_snprintf(cj, sizeof(cj), " <font class='fontSize-s'><font color='#%02x%02x%02x'>C</font></font>", cjCol.r(), cjCol.g(), cjCol.b());
+				takeoff += cj;
 			}
 		}
-		V_snprintf(buf, sizeof(buf), "<font color='" KZ_HUD_C_WHITE "'>%d</font> <font color='" KZ_HUD_C_MUTED "'>U/S</font>%s", speed,
-				   takeoff.c_str());
+		V_snprintf(buf, sizeof(buf), "<font class='fontSize-m'><font color='" KZ_HUD_C_WHITE "'>%d</font></font>%s", speed, takeoff.c_str());
 		addLine(buf);
 	}
 
-	// --- 2. Ряд клавиш W A S D  J C (активная — accent, неактивная — dim) ---
+	// Активный курс наблюдаемого (в забеге / grace после стопа). Строки 3-4 привязаны к нему:
+	// без курса (свежий спавн, не начинал бег) стейдж/PB-WR не показываем — чтобы "PB -- | WR --"
+	// не висел вечно. "Строка не прыгает" (через "--") относится к async-догрузке ВО ВРЕМЯ бега:
+	// внутри забега курс есть → строка стабильна, пока PB/WR подтягиваются.
+	const KZCourseDescriptor *course = (showExtra && !isReplay) ? dataSource->timerService->GetCourse() : nullptr;
+
+	// --- Строка 3: Stage n/N — ТОЛЬКО многостейджевые карты (stageCount > 1). Лейбл MUTED,
+	//        число WHITE. На линейных картах строки нет (без слова Linear). ---
+	if (course && course->stageCount > 1)
+	{
+		V_snprintf(buf, sizeof(buf),
+				   "<font class='fontSize-s'><font color='" KZ_HUD_C_MUTED "'>Stage</font> <font color='" KZ_HUD_C_WHITE "'>%d/%d</font></font>",
+				   dataSource->timerService->GetCurrentStage(), course->stageCount);
+		addLine(buf);
+	}
+
+	// --- Строка 4: || PB 00:55.25 | WR 00:53.50 || — рамки/разделители ||/| DIM, лейблы PB/WR
+	//        MUTED, время PB белое, время WR зелёное. Незаполненное время — "--" DIM (строка не
+	//        прыгает при догрузке). PB — из PB-кэша наблюдаемого; WR — из статического wrCache
+	//        (наполняется лишь на глобальных картах; на локальных/нуб → "WR --"). ---
+	if (course)
+	{
+		f64 pbTime = 0.0, wrTime = 0.0;
+		bool hasPB = dataSource->timerService->GetHudPBTime(pbTime);
+		bool hasWR = dataSource->timerService->GetHudWorldRecordTime(wrTime);
+
+		char pbVal[96], wrVal[96];
+		if (hasPB)
+		{
+			char pbBuf[32];
+			FormatTimeHud(pbTime, pbBuf, sizeof(pbBuf));
+			V_snprintf(pbVal, sizeof(pbVal), "<font color='" KZ_HUD_C_WHITE "'>%s</font>", pbBuf);
+		}
+		else
+		{
+			V_snprintf(pbVal, sizeof(pbVal), "<font color='" KZ_HUD_C_DIM "'>--</font>");
+		}
+		if (hasWR)
+		{
+			char wrBuf[32];
+			FormatTimeHud(wrTime, wrBuf, sizeof(wrBuf));
+			V_snprintf(wrVal, sizeof(wrVal), "<font color='" KZ_HUD_C_TIMER "'>%s</font>", wrBuf);
+		}
+		else
+		{
+			V_snprintf(wrVal, sizeof(wrVal), "<font color='" KZ_HUD_C_DIM "'>--</font>");
+		}
+		V_snprintf(buf, sizeof(buf),
+				   "<font class='fontSize-s'><font color='" KZ_HUD_C_DIM "'>||&#160;</font><font color='" KZ_HUD_C_MUTED "'>PB</font>&#160;%s"
+				   "<font color='" KZ_HUD_C_DIM "'>&#160;|&#160;</font><font color='" KZ_HUD_C_MUTED "'>WR</font>&#160;%s"
+				   "<font color='" KZ_HUD_C_DIM "'>&#160;||</font></font>",
+				   pbVal, wrVal);
+		addLine(buf);
+	}
+
+	// --- CP/TP (per-element тумблер hudCpTp, деф. вкл) — не входит в кибершоковские строки 1-4,
+	//        но тумблер существует и был включён; сохраняем строку опционально, чтобы не
+	//        регрессировать существующую функциональность и не делать тумблер инертным.
+	//        Стиль под общую палитру (лейблы MUTED, числа WHITE, разделитель DIM). ---
+	if (showCpTp)
+	{
+		i32 cpIndex = isReplay ? KZ::replaysystem::GetCurrentCpIndex() : dataSource->checkpointService->GetCurrentCpIndex();
+		i32 cpCount = isReplay ? KZ::replaysystem::GetCheckpointCount() : dataSource->checkpointService->GetCheckpointCount();
+		i32 tpCount = isReplay ? KZ::replaysystem::GetTeleportCount() : (i32)dataSource->checkpointService->GetTeleportCount();
+		V_snprintf(buf, sizeof(buf),
+				   "<font class='fontSize-s'><font color='" KZ_HUD_C_MUTED "'>CP</font> <font color='" KZ_HUD_C_WHITE "'>%d/%d</font> "
+				   "<font color='" KZ_HUD_C_DIM "'>|</font> <font color='" KZ_HUD_C_MUTED "'>TP</font> <font color='" KZ_HUD_C_WHITE "'>%d</font></font>",
+				   cpIndex, cpCount, tpCount);
+		addLine(buf);
+	}
+
+	// --- Ряд клавиш W A S D  J C (активная — accent, неактивная — dim). Оставлен как раньше
+	//        (цвета клавиш не трогаем), только вынесен в опциональный блок после строк 1-4. ---
 	if (showKeys)
 	{
 		auto key = [&](const char *label, bool down)
@@ -312,45 +505,9 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		addLine(row);
 	}
 
-	// --- 3. CP/TP в стиле версии C (per-element тумблер hudCpTp) ---
-	if (showCpTp)
-	{
-		i32 cpIndex = isReplay ? KZ::replaysystem::GetCurrentCpIndex() : dataSource->checkpointService->GetCurrentCpIndex();
-		i32 cpCount = isReplay ? KZ::replaysystem::GetCheckpointCount() : dataSource->checkpointService->GetCheckpointCount();
-		i32 tpCount = isReplay ? KZ::replaysystem::GetTeleportCount() : (i32)dataSource->checkpointService->GetTeleportCount();
-		V_snprintf(buf, sizeof(buf),
-				   "<font color='" KZ_HUD_C_MUTED "'>CP</font> <font color='" KZ_HUD_C_WHITE "'>%d/%d</font> "
-				   "<font color='" KZ_HUD_C_DIM "'>|</font> <font color='" KZ_HUD_C_MUTED "'>TP</font> <font color='" KZ_HUD_C_WHITE "'>%d</font>",
-				   cpIndex, cpCount, tpCount);
-		addLine(buf);
-	}
-
-	// --- 4. Время | STAGE n/total (время — accent, стейдж — dim) ---
-	if (showTimer)
-	{
-		std::string timer = dataSource->hudService->GetTimerText(language);
-		if (!timer.empty())
-		{
-			std::string stage;
-			if (!isReplay)
-			{
-				const KZCourseDescriptor *course = dataSource->timerService->GetCourse();
-				if (course && course->stageCount > 0)
-				{
-					char st[64];
-					V_snprintf(st, sizeof(st), " <font color='" KZ_HUD_C_DIM "'>| STAGE %d/%d</font>", dataSource->timerService->GetCurrentStage(),
-							   course->stageCount);
-					stage = st;
-				}
-			}
-			V_snprintf(buf, sizeof(buf), "<font color='" KZ_HUD_C_ACCENT "'>%s</font>%s", timer.c_str(), stage.c_str());
-			addLine(buf);
-		}
-	}
-
-	// --- 5. Координаты и углы (!showpos). Тумблер — настройка получателя (this),
-	//        данные — наблюдаемого (dataSource), как у остальных полей. ---
-	if (this->player->optionService->GetPreferenceBool("showPos", false))
+	// --- Координаты и углы (!showpos). Тумблер — настройка получателя (this), данные —
+	//        наблюдаемого (dataSource). В компакте скрыто (как раньше). Стиль как раньше. ---
+	if (!compact && this->player->optionService->GetPreferenceBool("showPos", false))
 	{
 		Vector origin;
 		QAngle angles;
@@ -419,29 +576,12 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	bool needHtml = !available || cfg->GetHudType() == 0 || !useParticles;
 	if (needHtml)
 	{
-		// HTML версия C, masterMode=true (per-element тумблеры).
-		if (cfg->IsCompactPanel())
-		{
-			// Таймер — чистые данные, без per-игрочных настроек, берём прямо с наблюдаемого.
-			// Скорость подмешивает цвета (настройка получателя) — вызываем на cfg с явным
-			// dataSource=player, иначе цвета текли бы с наблюдаемого вместо спектатора.
-			std::string timerText = player->hudService->GetTimerText(language);
-			std::string speedText = cfg->GetSpeedText(language, player);
-			if (!timerText.empty() && !speedText.empty())
-			{
-				htmlText = timerText + "<br>" + speedText;
-			}
-			else
-			{
-				htmlText = timerText + speedText;
-			}
-		}
-		else
-		{
-			// masterMode=true: показывать элемент только если его per-element тумблер ВКЛ.
-			htmlText = cfg->BuildVersionCHud(player, /*suppressSpeed=*/false, /*suppressTimer=*/false, /*suppressKeys=*/false,
-											 /*masterMode=*/true, language);
-		}
+		// Единый HTML-путь: BuildVersionCHud сам уважает компакт-режим (только строки 1-2,
+		// внутри по cfg->IsCompactPanel()). masterMode=true — per-element тумблеры. Развязка
+		// data/settings сохраняется: вызываем на cfg (настройки получателя) с dataSource=player
+		// (данные наблюдаемого), внутри цвета/язык берутся с this=cfg, данные — с dataSource.
+		htmlText = cfg->BuildVersionCHud(player, /*suppressSpeed=*/false, /*suppressTimer=*/false, /*suppressKeys=*/false,
+										 /*masterMode=*/true, language);
 	}
 
 	htmlText = htmlText.substr(0, htmlText.find_last_not_of('\n') + 1);

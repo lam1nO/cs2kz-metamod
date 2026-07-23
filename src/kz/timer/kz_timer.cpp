@@ -1224,6 +1224,47 @@ const PBData *KZTimerService::GetCompareTarget(PBDataKey key)
 	return nullptr;
 }
 
+bool KZTimerService::GetHudPBTime(f64 &outTime)
+{
+	const KZCourseDescriptor *course = this->GetCourse();
+	if (!course)
+	{
+		return false;
+	}
+	auto modeInfo = KZ::mode::GetModeInfo(this->player->modeService->GetModeName());
+	PBDataKey key = ToPBDataKey(modeInfo.id, course->guid);
+	// Глобальный PB важнее локального; берём первый наполненный overall (зачёт с ТП).
+	const PBData *pb = this->GetCompareTargetForType(COMPARE_GPB, key);
+	if (!pb || pb->overall.pbTime <= 0)
+	{
+		pb = this->GetCompareTargetForType(COMPARE_SPB, key);
+	}
+	if (!pb || pb->overall.pbTime <= 0)
+	{
+		return false;
+	}
+	outTime = pb->overall.pbTime;
+	return true;
+}
+
+bool KZTimerService::GetHudWorldRecordTime(f64 &outTime)
+{
+	const KZCourseDescriptor *course = this->GetCourse();
+	if (!course)
+	{
+		return false;
+	}
+	auto modeInfo = KZ::mode::GetModeInfo(this->player->modeService->GetModeName());
+	PBDataKey key = ToPBDataKey(modeInfo.id, course->guid);
+	const PBData *wr = this->GetCompareTargetForType(COMPARE_WR, key);
+	if (!wr || wr->overall.pbTime <= 0)
+	{
+		return false;
+	}
+	outTime = wr->overall.pbTime;
+	return true;
+}
+
 void KZTimerService::ClearRecordCache()
 {
 	KZTimerService::srCache.clear();

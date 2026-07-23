@@ -159,9 +159,17 @@ private:
 	std::string GetCheckpointText(const char *language = KZ_DEFAULT_LANGUAGE);
 	std::string GetTimerText(const char *language = KZ_DEFAULT_LANGUAGE);
 
-	// Версия C: единый HTML-center HUD (крупная скорость, ряд клавиш, CP/TP, время|стейдж).
-	// Вызывается на hudService ПОЛУЧАТЕЛЯ (спектатора): настройки берутся из this->player,
-	// данные — из dataSource (наблюдаемый при спектировании; == this->player в норме).
+	// Разбор состояния таймера для кибершоковского худа: время (формат до сотых) и суффикс
+	// паузы/стопа раздельно, чтобы красить их разными цветами (время зелёное, суффикс DIM).
+	// Данные — this->player; суффикс-фразы — в языке получателя (аргумент language).
+	// Возвращает false, если таймер показывать не нужно (нет забега / grace истёк).
+	bool GetTimerParts(const char *language, std::string &outTime, std::string &outSuffix);
+
+	// Единый HTML-center HUD в стиле кибершока: строка 1 — таймер в скобках (зелёный) + стиль,
+	// строка 2 — крупная скорость + престрейф, строка 3 — Stage (только многостейдж), строка 4 —
+	// || PB | WR ||; плюс опциональные CP/TP, ряд клавиш, showpos по тумблерам. Компакт (по
+	// this->IsCompactPanel()) — только строки 1-2. Вызывается на hudService ПОЛУЧАТЕЛЯ
+	// (спектатора): настройки/язык — из this->player, данные — из dataSource (наблюдаемый).
 	// suppress* — элементы, дублируемые particle-MHUD, чтобы не рисовать их дважды.
 	// masterMode — мастер-тумблер: показываем ТОЛЬКО включённые per-element тумблеры.
 	std::string BuildVersionCHud(KZPlayer *dataSource, bool suppressSpeed, bool suppressTimer, bool suppressKeys, bool masterMode,
