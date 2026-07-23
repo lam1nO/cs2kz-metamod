@@ -96,7 +96,9 @@ namespace KZ::replaysystem::commands
 			V_snprintf(replayPath, sizeof(replayPath), KZ_REPLAY_DOWNLOADS_PATH "/%s.replay", parsedUuid.ToString().c_str());
 			if (!g_pFullFileSystem->FileExists(replayPath))
 			{
-				KZGlobalService::RequestReplay(player, parsedUuid);
+				// Глобал у нас отключён (KZGlobalService::RequestReplay — мёртвый путь,
+				// из-за него !replay <id> не работал) — качаем из центрального хранилища.
+				CybReplayDownload::RequestAndPlayByUuid(player, parsedUuid.ToString().c_str());
 				return;
 			}
 		}

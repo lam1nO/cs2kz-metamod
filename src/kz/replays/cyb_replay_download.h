@@ -37,4 +37,9 @@ namespace CybReplayDownload
 	// заранее — см. commands.cpp). Для Kind::WR параметр игнорируется:
 	// резолв WR не фильтрует по игроку.
 	void RequestAndPlay(KZPlayer *player, Kind kind, u64 targetSteamId64);
+
+	// !replay <uuid>: докачка конкретного реплея по UUID (api GET
+	// /replays/v1/by-uuid). Вызывается из LoadReplay, когда файла нет локально —
+	// глобал-сервис у нас отключён, KZGlobalService::RequestReplay мёртвый путь.
+	void RequestAndPlayByUuid(KZPlayer *player, const char *uuid);
 } // namespace CybReplayDownload

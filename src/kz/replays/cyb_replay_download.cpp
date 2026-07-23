@@ -247,3 +247,48 @@ void CybReplayDownload::RequestAndPlay(KZPlayer *player, Kind kind, u64 targetSt
 				 }
 			 });
 }
+
+void CybReplayDownload::RequestAndPlayByUuid(KZPlayer *player, const char *uuid)
+{
+	if (!player || !uuid || uuid[0] == '\0')
+	{
+		return;
+	}
+
+	const char *url = KZOptionService::GetOptionStr("cybEmitUrl", "");
+	if (!url || url[0] == '\0')
+	{
+		// Центральные реплеи выключены на этом сервере.
+		player->languageService->PrintChat(true, false, "Replay - Central Not Found");
+		return;
+	}
+	const char *token = KZOptionService::GetOptionStr("cybEmitToken", "");
+
+	std::string fullUrl = url;
+	if (!fullUrl.empty() && fullUrl.back() == '/')
+	{
+		fullUrl.pop_back();
+	}
+	fullUrl += "/replays/v1/by-uuid";
+
+	HTTP::Request req(HTTP::Method::GET, fullUrl);
+	req.SetQuery("uuid", uuid);
+	if (token && token[0] != '\0')
+	{
+		req.SetHeader("Authorization", std::string("Bearer ") + token);
+	}
+
+	CPlayerUserId userID = player->GetClient()->GetUserID();
+
+	// Формат ответа идентичен resolve (url + replayUuid) — общий обработчик.
+	req.Send([userID](HTTP::Response resp) { OnResolveResponse(userID, resp); },
+			 [userID]()
+			 {
+				 KZ_LOG_INFO(LogChannel::Replays, "[cyb_replay] by-uuid network error\n");
+				 KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
+				 if (player)
+				 {
+					 player->languageService->PrintChat(true, false, "Replay Request - Error");
+				 }
+			 });
+}
