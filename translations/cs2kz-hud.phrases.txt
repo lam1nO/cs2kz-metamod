@@ -951,4 +951,54 @@
 		"chi"		"轮廓"
 		"ua"		"Обводка"
 	}
+	// Подменю «Внешний вид MHUD»: позиция/размер/цвет particle-элементов.
+	"HUD - Menu Label Appearance"
+	{
+		"en"		"MHUD appearance"
+		"ru"		"Внешний вид MHUD"
+		"chi"		"MHUD 外观"
+		"ua"		"Вигляд MHUD"
+	}
+	"HUD - Menu Label PosX"
+	{
+		"en"		"Position X"
+		"ru"		"Позиция X"
+		"chi"		"位置 X"
+		"ua"		"Позиція X"
+	}
+	"HUD - Menu Label PosY"
+	{
+		"en"		"Position Y"
+		"ru"		"Позиция Y"
+		"chi"		"位置 Y"
+		"ua"		"Позиція Y"
+	}
+	"HUD - Menu Label Size"
+	{
+		"en"		"Size"
+		"ru"		"Размер"
+		"chi"		"大小"
+		"ua"		"Розмір"
+	}
+	"HUD - Menu Label Color"
+	{
+		"en"		"Color"
+		"ru"		"Цвет"
+		"chi"		"颜色"
+		"ua"		"Колір"
+	}
+	"HUD - Menu Label ColorCustom"
+	{
+		"en"		"custom"
+		"ru"		"свой"
+		"chi"		"自定义"
+		"ua"		"власний"
+	}
+	"HUD - Menu Label Reset"
+	{
+		"en"		"Reset"
+		"ru"		"Сброс"
+		"chi"		"重置"
+		"ua"		"Скидання"
+	}
 }

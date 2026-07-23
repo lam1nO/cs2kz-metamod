@@ -1044,6 +1044,330 @@ static_function void OnHUDMenuSelect(MenuHandle menu, int slot, int item)
 	}
 }
 
+// === Подменю «Внешний вид MHUD» (регулируемые A/D-строки, интерфейс cs2menus 004) =====
+
+// Диапазоны/шаги регулировки. Шаг приходит в колбэк как ±delta, клэмп — по min/max.
+#define MHUD_AP_OFFSET_STEP 0.5f
+#define MHUD_AP_OFFSET_MIN  (-50.0f)
+#define MHUD_AP_OFFSET_MAX  50.0f
+#define MHUD_AP_SCALE_STEP  0.005f
+#define MHUD_AP_SCALE_MIN   0.005f
+#define MHUD_AP_SCALE_MAX   0.5f
+
+// Палитра цвета — тот же набор, что понимает utils::ParseColorName (и option-меню paint).
+static_global constexpr const char *s_mhudColors[] = {"red", "white", "black", "blue", "brown", "green", "yellow", "purple"};
+
+// Элемент MHUD, у которого настраивается позиция/размер/цвет. Порядок массива = порядок
+// пунктов «Внешнего вида» и индексы 1.. в s_hudAppearanceMenu[slot].
+struct MHUDAppearanceElement
+{
+	const char *titleKey; // фраза-заголовок подменю элемента
+	const char *offXPref;
+	f32 defOffX;
+	const char *offYPref;
+	f32 defOffY;
+	const char *scalePref;
+	f32 defScale;
+	const char *colorPref;
+	Color defColor;
+};
+
+// clang-format off
+static_global const MHUDAppearanceElement s_apElements[] = {
+	{"HUD - Menu Label Speed",    "mhudSpeedOffsetX",    MHUD_DEF_SPEED_OFFSET_X,    "mhudSpeedOffsetY",    MHUD_DEF_SPEED_OFFSET_Y,
+	 "mhudSpeedScale",    MHUD_DEF_SPEED_SCALE,    "mhudSpeedColor",    MHUD_DEF_BASE_COLOR    },
+	{"HUD - Menu Label Prespeed", "mhudPrespeedOffsetX", MHUD_DEF_PRESPEED_OFFSET_X, "mhudPrespeedOffsetY", MHUD_DEF_PRESPEED_OFFSET_Y,
+	 "mhudPrespeedScale", MHUD_DEF_PRESPEED_SCALE, "mhudPrespeedColor", MHUD_DEF_BASE_COLOR    },
+	{"HUD - Menu Label Timer",    "mhudTimerOffsetX",    MHUD_DEF_TIMER_OFFSET_X,    "mhudTimerOffsetY",    MHUD_DEF_TIMER_OFFSET_Y,
+	 "mhudTimerScale",    MHUD_DEF_TIMER_SCALE,    "mhudTimerTpColor",  MHUD_DEF_TIMER_TP_COLOR},
+	{"HUD - Menu Label Keys",     "mhudKeysOffsetX",     MHUD_DEF_KEYS_OFFSET_X,     "mhudKeysOffsetY",     MHUD_DEF_KEYS_OFFSET_Y,
+	 "mhudKeysScale",     MHUD_DEF_KEYS_SCALE,     "mhudKeysColor",     MHUD_DEF_BASE_COLOR    },
+};
+// clang-format on
+
+// Позиции строк в подменю элемента (фиксированный порядок построения).
+enum
+{
+	MHUD_AP_ROW_POSX = 0,
+	MHUD_AP_ROW_POSY,
+	MHUD_AP_ROW_SIZE,
+	MHUD_AP_ROW_COLOR,
+	MHUD_AP_ROW_RESET,
+};
+
+// Поддерево «Внешний вид MHUD» на слот: [0] = корень «Внешний вид», [1..N] = подменю элементов
+// (в порядке s_apElements). Уничтожается вместе с s_hudMenu при пересборке HUD-меню.
+static_global MenuHandle s_hudAppearanceMenu[MAXPLAYERS + 1][1 + KZ_ARRAYSIZE(s_apElements)] = {};
+
+// Текст регулируемой строки: «<подпись>: <значение>».
+static_function void MHUDAppearanceRowText(const char *lang, const char *labelKey, const char *fmt, f32 value, char *out, int outSize)
+{
+	std::string label = KZLanguageService::PrepareMessageWithLang(lang, labelKey);
+	char vbuf[32];
+	V_snprintf(vbuf, sizeof(vbuf), fmt, value);
+	V_snprintf(out, outSize, "%s: %s", label.c_str(), vbuf);
+}
+
+// Имя палитры для упакованного цвета (сравнение по RGB, альфа игнорируется); nullptr — цвет
+// не из палитры (выставлен через !mhud ... color RGB).
+static_function const char *MHUDColorName(i64 packed)
+{
+	Color cur = UnpackColor(packed);
+	for (const char *name : s_mhudColors)
+	{
+		Color c;
+		if (utils::ParseColorName(name, c) && c.r() == cur.r() && c.g() == cur.g() && c.b() == cur.b())
+		{
+			return name;
+		}
+	}
+	return nullptr;
+}
+
+// Текст строки цвета: «<Цвет>: <имя|свой>».
+static_function void MHUDColorRowText(const char *lang, i64 packed, char *out, int outSize)
+{
+	std::string label = KZLanguageService::PrepareMessageWithLang(lang, "HUD - Menu Label Color");
+	const char *name = MHUDColorName(packed);
+	if (name)
+	{
+		V_snprintf(out, outSize, "%s: %s", label.c_str(), name);
+	}
+	else
+	{
+		std::string custom = KZLanguageService::PrepareMessageWithLang(lang, "HUD - Menu Label ColorCustom");
+		V_snprintf(out, outSize, "%s: %s", label.c_str(), custom.c_str());
+	}
+}
+
+// Дескриптор регулируемого свойства по ключу префа (для A/D-колбэка): дефолт + подпись + формат.
+static_function bool MHUDFindAdjustProp(const char *prefKey, f32 &defOut, const char *&labelKeyOut, const char *&fmtOut)
+{
+	for (const auto &e : s_apElements)
+	{
+		if (KZ_STREQ(prefKey, e.offXPref))
+		{
+			defOut = e.defOffX;
+			labelKeyOut = "HUD - Menu Label PosX";
+			fmtOut = "%.1f";
+			return true;
+		}
+		if (KZ_STREQ(prefKey, e.offYPref))
+		{
+			defOut = e.defOffY;
+			labelKeyOut = "HUD - Menu Label PosY";
+			fmtOut = "%.1f";
+			return true;
+		}
+		if (KZ_STREQ(prefKey, e.scalePref))
+		{
+			defOut = e.defScale;
+			labelKeyOut = "HUD - Menu Label Size";
+			fmtOut = "%.3f";
+			return true;
+		}
+	}
+	return false;
+}
+
+static_function const MHUDAppearanceElement *MHUDFindElementByColorPref(const char *colorPref)
+{
+	for (const auto &e : s_apElements)
+	{
+		if (KZ_STREQ(colorPref, e.colorPref))
+		{
+			return &e;
+		}
+	}
+	return nullptr;
+}
+
+// A/D по регулируемой строке (позиция/размер): применить ±delta к префу, клэмп по [min,max],
+// обновить текст строки. Преф читается рендером каждый тик — на худе видно вживую.
+static_function void OnMHUDAppearanceAdjust(MenuHandle menu, int slot, int item, f32 delta, f32 minValue, f32 maxValue)
+{
+	KZPlayer *p = g_pKZPlayerManager->ToPlayer(CPlayerSlot(slot));
+	if (!p)
+	{
+		return;
+	}
+	const char *pref = g_pMenus->GetItemInfo(menu, item);
+	if (!pref || !pref[0])
+	{
+		return;
+	}
+	f32 def = 0.0f;
+	const char *labelKey = nullptr;
+	const char *fmt = "%.2f";
+	if (!MHUDFindAdjustProp(pref, def, labelKey, fmt))
+	{
+		return;
+	}
+	f32 next = (f32)p->optionService->GetPreferenceFloat(pref, def) + delta;
+	if (next < minValue)
+	{
+		next = minValue;
+	}
+	if (next > maxValue)
+	{
+		next = maxValue;
+	}
+	p->optionService->SetPreferenceFloat(pref, next);
+
+	char text[128];
+	MHUDAppearanceRowText(p->languageService->GetLanguage(), labelKey, fmt, next, text, sizeof(text));
+	g_pMenus->SetItemText(menu, item, text);
+}
+
+// E по строке цвета (цикл палитры) или «Сброс» (дефолты элемента). Регулируемые строки
+// (позиция/размер) селект игнорируют — их тег не совпадает ни с «reset:», ни с цвет-префом.
+static_function void OnMHUDAppearanceSelect(MenuHandle menu, int slot, int item)
+{
+	KZPlayer *p = g_pKZPlayerManager->ToPlayer(CPlayerSlot(slot));
+	if (!p)
+	{
+		return;
+	}
+	const char *tag = g_pMenus->GetItemInfo(menu, item);
+	if (!tag || !tag[0])
+	{
+		return;
+	}
+	const char *lang = p->languageService->GetLanguage();
+
+	// «Сброс»: тег «reset:<индекс элемента>». Возвращаем к дефолтам ТОЛЬКО то, что настраивает
+	// это подменю (позиция/размер/цвет) — тумблер элемента и вспомогательные цвета не трогаем
+	// (иначе текст тумблера в родительском HUD-меню разъехался бы: R его не перестраивает).
+	if (KZ_STREQLEN(tag, "reset:", 6))
+	{
+		int idx = atoi(tag + 6);
+		if (idx < 0 || idx >= (int)KZ_ARRAYSIZE(s_apElements))
+		{
+			return;
+		}
+		const MHUDAppearanceElement &e = s_apElements[idx];
+		auto *opts = p->optionService;
+		opts->SetPreferenceFloat(e.offXPref, e.defOffX);
+		opts->SetPreferenceFloat(e.offYPref, e.defOffY);
+		opts->SetPreferenceFloat(e.scalePref, e.defScale);
+		opts->SetPreferenceInt(e.colorPref, PackColor(e.defColor));
+		char text[128];
+		MHUDAppearanceRowText(lang, "HUD - Menu Label PosX", "%.1f", e.defOffX, text, sizeof(text));
+		g_pMenus->SetItemText(menu, MHUD_AP_ROW_POSX, text);
+		MHUDAppearanceRowText(lang, "HUD - Menu Label PosY", "%.1f", e.defOffY, text, sizeof(text));
+		g_pMenus->SetItemText(menu, MHUD_AP_ROW_POSY, text);
+		MHUDAppearanceRowText(lang, "HUD - Menu Label Size", "%.3f", e.defScale, text, sizeof(text));
+		g_pMenus->SetItemText(menu, MHUD_AP_ROW_SIZE, text);
+		MHUDColorRowText(lang, PackColor(e.defColor), text, sizeof(text));
+		g_pMenus->SetItemText(menu, MHUD_AP_ROW_COLOR, text);
+		return;
+	}
+
+	// Иначе тег = ключ цвет-префа: цикл по палитре (E).
+	const MHUDAppearanceElement *e = MHUDFindElementByColorPref(tag);
+	if (!e)
+	{
+		return;
+	}
+	i64 packed = p->optionService->GetPreferenceInt(e->colorPref, PackColor(e->defColor));
+	const char *curName = MHUDColorName(packed);
+	int idx = -1; // -1 → следующий = первый цвет палитры (текущий не из палитры)
+	for (int i = 0; i < (int)KZ_ARRAYSIZE(s_mhudColors); i++)
+	{
+		if (curName && KZ_STREQ(curName, s_mhudColors[i]))
+		{
+			idx = i;
+			break;
+		}
+	}
+	const char *nextName = s_mhudColors[(idx + 1) % (int)KZ_ARRAYSIZE(s_mhudColors)];
+	Color c;
+	utils::ParseColorName(nextName, c);
+	i64 nextPacked = PackColor(c);
+	p->optionService->SetPreferenceInt(e->colorPref, nextPacked);
+
+	char text[128];
+	MHUDColorRowText(lang, nextPacked, text, sizeof(text));
+	g_pMenus->SetItemText(menu, item, text);
+}
+
+// Подменю одного элемента: позиция X/Y + размер (регулируемые A/D) + цвет (E) + сброс.
+static_function MenuHandle BuildMHUDElementMenu(KZPlayer *player, const MHUDAppearanceElement &e)
+{
+	const char *lang = player->languageService->GetLanguage();
+	std::string title = KZLanguageService::PrepareMessageWithLang(lang, e.titleKey);
+	MenuHandle m = g_pMenus->CreateMenu(MenuType::Default, title.c_str(), &OnMHUDAppearanceSelect);
+	if (m == kInvalidMenuHandle)
+	{
+		return m;
+	}
+	auto *opts = player->optionService;
+	char text[128];
+
+	MHUDAppearanceRowText(lang, "HUD - Menu Label PosX", "%.1f", (f32)opts->GetPreferenceFloat(e.offXPref, e.defOffX), text, sizeof(text));
+	g_pMenus->AddAdjustableItem(m, text, e.offXPref, MHUD_AP_OFFSET_STEP, MHUD_AP_OFFSET_MIN, MHUD_AP_OFFSET_MAX);
+	MHUDAppearanceRowText(lang, "HUD - Menu Label PosY", "%.1f", (f32)opts->GetPreferenceFloat(e.offYPref, e.defOffY), text, sizeof(text));
+	g_pMenus->AddAdjustableItem(m, text, e.offYPref, MHUD_AP_OFFSET_STEP, MHUD_AP_OFFSET_MIN, MHUD_AP_OFFSET_MAX);
+	MHUDAppearanceRowText(lang, "HUD - Menu Label Size", "%.3f", (f32)opts->GetPreferenceFloat(e.scalePref, e.defScale), text, sizeof(text));
+	g_pMenus->AddAdjustableItem(m, text, e.scalePref, MHUD_AP_SCALE_STEP, MHUD_AP_SCALE_MIN, MHUD_AP_SCALE_MAX);
+	// Цвет — обычный пункт (E циклит палитру), не регулируемый.
+	MHUDColorRowText(lang, opts->GetPreferenceInt(e.colorPref, PackColor(e.defColor)), text, sizeof(text));
+	g_pMenus->AddItem(m, text, e.colorPref, false);
+	// Сброс — тег с индексом элемента.
+	{
+		std::string resetLabel = KZLanguageService::PrepareMessageWithLang(lang, "HUD - Menu Label Reset");
+		int idx = (int)(&e - s_apElements);
+		char resetTag[16];
+		V_snprintf(resetTag, sizeof(resetTag), "reset:%d", idx);
+		g_pMenus->AddItem(m, resetLabel.c_str(), resetTag, false);
+	}
+
+	g_pMenus->SetAdjustCallback(m, &OnMHUDAppearanceAdjust);
+	// Пункт «Назад» не добавляем (назад = бинд R). Не закрываем при выборе — текст вживую.
+	g_pMenus->SetCloseOnSelect(m, false);
+	return m;
+}
+
+static_function void DestroyMHUDAppearanceMenus(int slot)
+{
+	for (auto &h : s_hudAppearanceMenu[slot])
+	{
+		if (h != kInvalidMenuHandle)
+		{
+			g_pMenus->DestroyMenu(h);
+			h = kInvalidMenuHandle;
+		}
+	}
+}
+
+// Построить поддерево «Внешний вид MHUD» и вернуть корень (kInvalidMenuHandle при неудаче).
+// Хэндлы (корень + элементы) складываются в s_hudAppearanceMenu[slot] для уничтожения при пересборке.
+static_function MenuHandle BuildMHUDAppearanceMenu(KZPlayer *player, int slot)
+{
+	const char *lang = player->languageService->GetLanguage();
+	std::string title = KZLanguageService::PrepareMessageWithLang(lang, "HUD - Menu Label Appearance");
+	// У корня «Внешний вид» только submenu-навигация по элементам — свой select-колбэк не нужен.
+	MenuHandle root = g_pMenus->CreateMenu(MenuType::Default, title.c_str(), nullptr);
+	if (root == kInvalidMenuHandle)
+	{
+		return kInvalidMenuHandle;
+	}
+	// Корень сохраняем ДО постройки детей: AddSubMenu ниже свяжет их parent с ним (R = назад).
+	s_hudAppearanceMenu[slot][0] = root;
+	for (int i = 0; i < (int)KZ_ARRAYSIZE(s_apElements); i++)
+	{
+		MenuHandle child = BuildMHUDElementMenu(player, s_apElements[i]);
+		s_hudAppearanceMenu[slot][1 + i] = child;
+		if (child != kInvalidMenuHandle)
+		{
+			std::string label = KZLanguageService::PrepareMessageWithLang(lang, s_apElements[i].titleKey);
+			g_pMenus->AddSubMenu(root, label.c_str(), child, "");
+		}
+	}
+	g_pMenus->SetCloseOnSelect(root, false);
+	return root;
+}
+
 // Один хэндл HUD-меню на слот — пересоздаётся при каждом построении
 // (и из !hud, и из подменю !options — экземпляр всегда один).
 static_global MenuHandle s_hudMenu[MAXPLAYERS + 1] = {};
@@ -1066,6 +1390,8 @@ u32 KZHUDService::CreateHUDMenu()
 		g_pMenus->DestroyMenu(s_hudMenu[slot]);
 		s_hudMenu[slot] = kInvalidMenuHandle;
 	}
+	// Старое поддерево «Внешний вид MHUD» — уничтожаем вместе с корнем HUD-меню.
+	DestroyMHUDAppearanceMenus(slot);
 
 	MenuHandle m = g_pMenus->CreateMenu(MenuType::Default, "HUD", &OnHUDMenuSelect);
 	if (m == kInvalidMenuHandle)
@@ -1110,6 +1436,14 @@ u32 KZHUDService::CreateHUDMenu()
 	for (const auto &t : s_hudToggles)
 	{
 		addToggle(t.label, t.prefKey, opts->GetPreferenceBool(t.prefKey, t.defaultValue));
+	}
+
+	// Подменю тонкой настройки внешнего вида particle-элементов (позиция/размер/цвет).
+	MenuHandle appearance = BuildMHUDAppearanceMenu(this->player, slot);
+	if (appearance != kInvalidMenuHandle)
+	{
+		std::string apLabel = KZLanguageService::PrepareMessageWithLang(lang, "HUD - Menu Label Appearance");
+		g_pMenus->AddSubMenu(m, apLabel.c_str(), appearance, "");
 	}
 
 	// Не закрываем при выборе — текст пункта обновляется вживую.
