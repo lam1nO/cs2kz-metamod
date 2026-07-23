@@ -80,6 +80,9 @@ public:
 		}
 		prefKV.FindOrCreateMember(optionName)->SetBool(value);
 		CALL_FORWARD(eventListeners, OnPlayerPreferenceChanged, this->player, optionName);
+		// Флаш в БД сразу: сохранение только на дисконнекте теряло настройки при
+		// рестарте/краше сервера (жалоба «paint/таймер слетают после реконнекта»).
+		SaveLocalPrefs();
 	}
 
 	bool GetPreferenceBool(const char *optionName, bool defaultValue = false)
@@ -100,6 +103,9 @@ public:
 		}
 		prefKV.FindOrCreateMember(optionName)->SetDouble(value);
 		CALL_FORWARD(eventListeners, OnPlayerPreferenceChanged, this->player, optionName);
+		// Флаш в БД сразу: сохранение только на дисконнекте теряло настройки при
+		// рестарте/краше сервера (жалоба «paint/таймер слетают после реконнекта»).
+		SaveLocalPrefs();
 	}
 
 	f64 GetPreferenceFloat(const char *optionName, f64 defaultValue = 0.0)
@@ -120,6 +126,9 @@ public:
 		}
 		prefKV.FindOrCreateMember(optionName)->SetInt64(value);
 		CALL_FORWARD(eventListeners, OnPlayerPreferenceChanged, this->player, optionName);
+		// Флаш в БД сразу: сохранение только на дисконнекте теряло настройки при
+		// рестарте/краше сервера (жалоба «paint/таймер слетают после реконнекта»).
+		SaveLocalPrefs();
 	}
 
 	i64 GetPreferenceInt(const char *optionName, i64 defaultValue = 0)
@@ -140,6 +149,9 @@ public:
 		}
 		prefKV.FindOrCreateMember(optionName)->SetString(value);
 		CALL_FORWARD(eventListeners, OnPlayerPreferenceChanged, this->player, optionName);
+		// Флаш в БД сразу: сохранение только на дисконнекте теряло настройки при
+		// рестарте/краше сервера (жалоба «paint/таймер слетают после реконнекта»).
+		SaveLocalPrefs();
 	}
 
 	const char *GetPreferenceStr(const char *optionName, const char *defaultValue = "")
@@ -161,6 +173,9 @@ public:
 		}
 		prefKV.FindOrCreateMember(optionName)->SetVector(value);
 		CALL_FORWARD(eventListeners, OnPlayerPreferenceChanged, this->player, optionName);
+		// Флаш в БД сразу: сохранение только на дисконнекте теряло настройки при
+		// рестарте/краше сервера (жалоба «paint/таймер слетают после реконнекта»).
+		SaveLocalPrefs();
 	}
 
 	Vector GetPreferenceVector(const char *optionName, const Vector &defaultValue = Vector(0.0f, 0.0f, 0.0f))
@@ -183,6 +198,9 @@ public:
 		option->SetToEmptyTable();
 		*option = value;
 		CALL_FORWARD(eventListeners, OnPlayerPreferenceChanged, this->player, optionName);
+		// Флаш в БД сразу: сохранение только на дисконнекте теряло настройки при
+		// рестарте/краше сервера (жалоба «paint/таймер слетают после реконнекта»).
+		SaveLocalPrefs();
 	}
 
 	void GetPreferenceTable(const char *optionName, KeyValues3 &output, const KeyValues3 &defaultValue = KeyValues3())

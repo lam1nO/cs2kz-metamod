@@ -17,7 +17,9 @@ void KZDatabaseService::SavePrefs(CUtlString prefs)
 	Transaction txn;
 
 	CUtlString query;
-	query.Format(sql_players_set_prefs, prefs.Get(), steamID64);
+	// cleanedPrefs, не prefs: сырой JSON с одинарной кавычкой ломал запрос
+	// (Escape считался, но не использовался).
+	query.Format(sql_players_set_prefs, cleanedPrefs.c_str(), steamID64);
 
 	txn.queries.push_back(query.Get());
 
