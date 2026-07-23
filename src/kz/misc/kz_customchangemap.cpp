@@ -55,20 +55,30 @@ std::string GetInstalledMapName(PublishedFileId_t id)
 	{
 		return std::to_string(id);
 	}
+	// Ручной инкремент через increment(ec): range-for operator++ бросает при
+	// ошибке чтения каталога, а сборка с -fno-exceptions (AMBuildScript).
+	std::string firstVpk;
 	std::error_code ec;
-	for (const auto &entry : std::filesystem::directory_iterator(folder, ec))
+	std::filesystem::directory_iterator it(folder, ec), end;
+	while (!ec && it != end)
 	{
-		if (entry.path().extension() == ".vpk")
+		if (it->path().extension() == ".vpk")
 		{
-			std::string name = entry.path().stem().string();
+			std::string name = it->path().stem().string();
+			// Split-vpk: предпочитаем «foo_dir» (индекс), а не случайный «foo_000».
 			if (name.size() > 4 && name.compare(name.size() - 4, 4, "_dir") == 0)
 			{
 				name.resize(name.size() - 4);
+				return name;
 			}
-			return name;
+			if (firstVpk.empty())
+			{
+				firstVpk = name;
+			}
 		}
+		it.increment(ec);
 	}
-	return std::to_string(id);
+	return firstVpk.empty() ? std::to_string(id) : firstVpk;
 }
 
 void StartDownload(PublishedFileId_t id)

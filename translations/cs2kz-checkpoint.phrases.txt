@@ -124,11 +124,6 @@
 		"de"		"{darkred}Du kannst nicht teleportieren, weil du dein Teleportationslimit erreicht hast."
 		"es"		"{darkred}No puedes teletransportarte porque has llegado al limite de teletransportes."
 	}
-	"Can't Teleport (Paused)"
-	{
-		"en"		"{darkred}You can't teleport while paused."
-		"ru"		"{darkred}Нельзя телепортироваться на паузе."
-	}
 	"Can't Prev CP (No Checkpoints)"
 	{
 		"en"		"{darkred}You have no checkpoints to go back to."

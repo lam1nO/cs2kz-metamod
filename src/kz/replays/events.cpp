@@ -430,6 +430,7 @@ namespace KZ::replaysystem::events
 							replay->endTime = event->data.timer.time;
 							replay->stopTick = event->serverTick;
 							replay->startTime = 0.0f;
+							replay->pausedTime = 0.0f;
 							replay->courseName[0] = '\0';
 							inActiveTimerRun = false;
 							inPause = false;
