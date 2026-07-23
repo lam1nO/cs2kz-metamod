@@ -255,6 +255,12 @@
 		"ru"		"{darkred}Бонус {default}{bonus}{darkred} не найден на этой карте."
 	}
 
+	"Courses Menu - Title"
+	{
+		"en"		"Course select"
+		"ru"		"Выбор маршрута"
+	}
+
 	"Tier Info"
 	{
 		// Main (Ranked) - Tier 1/2: Simple jumps all around.

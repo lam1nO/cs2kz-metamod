@@ -17,7 +17,12 @@
 #include "utils/tables.h"
 #include "UtlSortVector.h"
 
+#include <vendor/mm-cs2menus/src/public/ics2menus.h>
+
 #include "tier0/memdbgon.h"
+
+// Меню-движок cs2menus (определён в cs2kz.cpp); может быть nullptr, если плагин не загружен.
+extern ICS2Menus *g_pMenus;
 
 #define KEY_TRIGGER_TYPE         "timer_trigger_type"
 #define KEY_IS_COURSE_DESCRIPTOR "timer_course_descriptor"
@@ -983,10 +988,101 @@ static void ListCourses(KZPlayer *player)
 	KZ::course::PrintCourses(player);
 }
 
+// Колбэк меню !courses: info-тег — map-defined id курса строкой.
+// Ревалидация обязательна: карта могла смениться, пока меню висело.
+static_function void OnCoursesMenuSelect(MenuHandle menu, int slot, int item)
+{
+	KZPlayer *p = g_pKZPlayerManager->ToPlayer(CPlayerSlot(slot));
+	if (!p)
+	{
+		return;
+	}
+	const char *info = g_pMenus->GetItemInfo(menu, item);
+	if (!info || !info[0])
+	{
+		return;
+	}
+	const KZCourseDescriptor *course = KZ::course::GetCourseByCourseID(V_StringToInt32(info, -1));
+	if (!course)
+	{
+		return;
+	}
+	if (!course->hasStartPosition)
+	{
+		p->languageService->PrintChat(true, false, "No Start Position For Course", course->name);
+		return;
+	}
+	KZ::misc::TeleportToCourse(p, course);
+}
+
+// Меню !courses: main первым, затем бонусы по номерам, затем прочие курсы.
+static_function void OpenCoursesMenu(KZPlayer *player)
+{
+	// Без движка меню — прежнее поведение (список в чат/консоль).
+	if (g_pMenus == nullptr)
+	{
+		ListCourses(player);
+		return;
+	}
+	int slot = player->GetPlayerSlot().Get();
+	if (slot < 0 || slot > MAXPLAYERS)
+	{
+		return;
+	}
+
+	// Один хэндл на слот — пересоздаём при повторном вызове (паттерн kz_option_menu).
+	static MenuHandle s_coursesMenu[MAXPLAYERS + 1] = {};
+	if (s_coursesMenu[slot] != kInvalidMenuHandle)
+	{
+		g_pMenus->DestroyMenu(s_coursesMenu[slot]);
+		s_coursesMenu[slot] = kInvalidMenuHandle;
+	}
+
+	const char *lang = player->languageService->GetLanguage();
+	std::string title = KZLanguageService::PrepareMessageWithLang(lang, "Courses Menu - Title");
+	MenuHandle m = g_pMenus->CreateMenu(MenuType::Default, title.c_str(), &OnCoursesMenuSelect);
+	if (m == kInvalidMenuHandle)
+	{
+		ListCourses(player);
+		return;
+	}
+
+	// Сортировка вставками по cyber-номеру (0 = main, 1..99 = бонусы, 100+ = прочие);
+	// дубликаты номеров сохраняют исходный порядок по id (g_sortedCourses).
+	const KZCourseDescriptor *ordered[KZ_MAX_COURSE_COUNT];
+	i32 count = 0;
+	FOR_EACH_VEC(g_sortedCourses, i)
+	{
+		const KZCourseDescriptor *course = g_sortedCourses[i];
+		i32 num = KZ::course::GetCyberCourseNumber(course);
+		i32 pos = count;
+		while (pos > 0 && KZ::course::GetCyberCourseNumber(ordered[pos - 1]) > num)
+		{
+			ordered[pos] = ordered[pos - 1];
+			pos--;
+		}
+		ordered[pos] = course;
+		count++;
+	}
+
+	for (i32 i = 0; i < count; i++)
+	{
+		char info[16];
+		V_snprintf(info, sizeof(info), "%d", ordered[i]->id);
+		// Курс без стартовой позиции — неактивный (серый) пункт.
+		g_pMenus->AddItem(m, ordered[i]->name, info, !ordered[i]->hasStartPosition);
+	}
+
+	// Одноразовый выбор — меню закрывается по клику (в отличие от !options).
+	g_pMenus->SetCloseOnSelect(m, true);
+	s_coursesMenu[slot] = m;
+	g_pMenus->DisplayMenu(m, slot, 0);
+}
+
 SCMD(kz_courses, SCFL_MAP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
-	ListCourses(player);
+	OpenCoursesMenu(player);
 	return MRES_SUPERCEDE;
 }
 
