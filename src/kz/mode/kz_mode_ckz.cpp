@@ -19,6 +19,14 @@ PLUGIN_EXPOSE(KZClassicModePlugin, g_KZClassicModePlugin);
 
 CConVarRef<f32> sv_standable_normal("sv_standable_normal");
 
+// Диагностика бустеров: cvar владеет ядро (cs2kz), сюда приходит по имени (как sv_*).
+CConVarRef<bool> kz_booster_debug("kz_booster_debug");
+
+static_function bool BoosterDebugEnabled()
+{
+	return kz_booster_debug.IsValidRef() && kz_booster_debug.IsConVarDataAvailable() && kz_booster_debug.Get();
+}
+
 bool KZClassicModePlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool late)
 {
 	PLUGIN_SAVEVARS();
@@ -181,7 +189,8 @@ void KZClassicModeService::OnStopTouchGround()
 
 	f32 timeOnGround = this->player->takeoffTime - this->player->landingTime;
 	// Perf
-	if (timeOnGround <= BH_PERF_WINDOW && !this->player->possibleLadderHop)
+	bool perf = timeOnGround <= BH_PERF_WINDOW && !this->player->possibleLadderHop;
+	if (perf)
 	{
 		this->player->inPerf = true;
 		// Perf speed
@@ -206,6 +215,23 @@ void KZClassicModeService::OnStopTouchGround()
 		this->player->SetOrigin(origin);
 		this->player->takeoffOrigin = origin;
 	}
+
+	// Диагностика бустеров: момент отрыва + старт трекинга пика. Гейт — «пуш был недавно»
+	// (флаг ставит ядро в ApplyPushes), НЕ jumped: вертикальный бустер подкидывает и без
+	// прыжка. velZ/horiz читаем после perf-обработки — это фактическая скорость отрыва.
+	f32 curtime = g_pKZUtils->GetGlobals()->curtime;
+	if (BoosterDebugEnabled() && curtime - this->player->boosterDebugLastPushTime <= 0.5f)
+	{
+		Vector tvel, torigin;
+		this->player->GetVelocity(&tvel);
+		this->player->GetOrigin(&torigin);
+		Msg("[booster] takeoff name=%s mode=%s velZ=%.1f horiz=%.1f originZ=%.1f perf=%d\n", this->player->GetName(),
+			this->GetModeName(), tvel.z, tvel.Length2D(), torigin.z, perf ? 1 : 0);
+		fflush(stdout);
+		this->player->boosterDebugTracking = true;
+		this->player->boosterDebugTakeoffZ = torigin.z;
+		this->player->boosterDebugMaxZ = torigin.z;
+	}
 }
 
 void KZClassicModeService::OnStartTouchGround()
@@ -216,6 +242,20 @@ void KZClassicModeService::OnStartTouchGround()
 	Vector ground = this->player->landingOrigin;
 	ground.z = this->player->GetGroundPosition() - 0.03125f;
 	this->player->TouchTriggersAlongPath(this->player->landingOrigin, ground, bounds);
+
+	// Диагностика бустеров: пик высоты после boosted-отрыва при касании земли. Флаг гасим
+	// всегда (даже если cvar выключили в полёте) — не оставляем висячий трекинг.
+	if (this->player->boosterDebugTracking)
+	{
+		this->player->boosterDebugTracking = false;
+		if (BoosterDebugEnabled())
+		{
+			f32 gainZ = this->player->boosterDebugMaxZ - this->player->boosterDebugTakeoffZ;
+			Msg("[booster] peak name=%s mode=%s gainZ=%.1f takeoffZ=%.1f maxZ=%.1f\n", this->player->GetName(), this->GetModeName(),
+				gainZ, this->player->boosterDebugTakeoffZ, this->player->boosterDebugMaxZ);
+			fflush(stdout);
+		}
+	}
 }
 
 void KZClassicModeService::OnPhysicsSimulate()
@@ -334,6 +374,18 @@ void KZClassicModeService::OnProcessMovementPost()
 	if (this->player->GetPlayerPawn()->m_flVelocityModifier() != velMod)
 	{
 		this->player->GetPlayerPawn()->m_flVelocityModifier(velMod);
+	}
+
+	// Диагностика бустеров: трекинг пика во время boosted-полёта (короткое замыкание по
+	// флагу — когда выключено, флаг никогда не взводится, оверхед = чтение одного bool).
+	if (this->player->boosterDebugTracking && BoosterDebugEnabled())
+	{
+		Vector bo;
+		this->player->GetOrigin(&bo);
+		if (bo.z > this->player->boosterDebugMaxZ)
+		{
+			this->player->boosterDebugMaxZ = bo.z;
+		}
 	}
 }
 

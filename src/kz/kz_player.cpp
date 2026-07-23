@@ -883,6 +883,12 @@ void KZPlayer::OnTeleport(const Vector *origin, const QAngle *angles, const Vect
 {
 	VPROF_BUDGET(__func__, "CS2KZ");
 	this->lastTeleportTime = g_pKZUtils->GetServerGlobals()->curtime;
+	// Диагностика бустеров: внешний телепорт (чекпоинт/goto, НЕ triggerfix во время
+	// движения) рвёт трекинг пика — origin прыгает, gainZ был бы мусорным.
+	if (origin && !this->processingMovement)
+	{
+		this->boosterDebugTracking = false;
+	}
 	this->jumpstatsService->HandleTeleport();
 	this->modeService->OnTeleport(origin, angles, velocity);
 	this->timerService->OnTeleport(origin, angles, velocity);

@@ -407,6 +407,11 @@ void MovementPlayer::Reset()
 	this->landingTimeServer = 0.0f;
 	this->landingOriginActual.Init();
 	this->landingTimeActual = 0.0f;
+	// Диагностика бустеров: сброс на респаун/реконнект.
+	this->boosterDebugLastPushTime = -1000.0f;
+	this->boosterDebugTracking = false;
+	this->boosterDebugTakeoffZ = 0.0f;
+	this->boosterDebugMaxZ = 0.0f;
 	this->enableWaterFix = false;
 	this->ignoreNextCategorizePosition = false;
 	this->collidingWithWorld = false;
