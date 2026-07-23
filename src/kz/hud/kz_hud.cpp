@@ -348,6 +348,20 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		}
 	}
 
+	// --- 5. Координаты и углы (!showpos). Тумблер — настройка получателя (this),
+	//        данные — наблюдаемого (dataSource), как у остальных полей. ---
+	if (this->player->optionService->GetPreferenceBool("showPos", false))
+	{
+		Vector origin;
+		QAngle angles;
+		dataSource->GetOrigin(&origin);
+		dataSource->GetAngles(&angles);
+		std::string posText =
+			KZLanguageService::PrepareMessageWithLang(language, "HUD - Position Text", origin.x, origin.y, origin.z, angles.x, angles.y);
+		V_snprintf(buf, sizeof(buf), "<font color='" KZ_HUD_C_MUTED "'>%s</font>", posText.c_str());
+		addLine(buf);
+	}
+
 	return html;
 }
 
@@ -484,6 +498,15 @@ bool KZHUDService::IsCompactPanel()
 void KZHUDService::ToggleCompactPanel()
 {
 	this->player->optionService->SetPreferenceBool("compactPanel", !this->IsCompactPanel());
+}
+
+SCMD(kz_showpos, SCFL_HUD | SCFL_PREFERENCE)
+{
+	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
+	bool next = !player->optionService->GetPreferenceBool("showPos", false);
+	player->optionService->SetPreferenceBool("showPos", next);
+	player->languageService->PrintChat(true, false, next ? "HUD Option - Show Pos - Enable" : "HUD Option - Show Pos - Disable");
+	return MRES_SUPERCEDE;
 }
 
 SCMD(kz_panel, SCFL_HUD)

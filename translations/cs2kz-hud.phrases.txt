@@ -853,6 +853,29 @@
 		"en"		"Compact panel"
 		"ru"		"Компактная панель"
 	}
+	// Строка координат/углов (!showpos) в HTML-панели.
+	"HUD - Position Text"
+	{
+		// pos: 128 -256 64 ang: -12.5 90.0
+		"#format"	"x:.0f,y:.0f,z:.0f,pitch:.1f,yaw:.1f"
+		"en"		"pos: {x} {y} {z} ang: {pitch} {yaw}"
+		"ru"		"pos: {x} {y} {z} ang: {pitch} {yaw}"
+	}
+	"HUD - Menu Label ShowPos"
+	{
+		"en"		"Coordinates (pos/ang)"
+		"ru"		"Координаты (pos/ang)"
+	}
+	"HUD Option - Show Pos - Enable"
+	{
+		"en"		"{grey}Position display {green}enabled{grey}."
+		"ru"		"{grey}Показ координат {green}включён{grey}."
+	}
+	"HUD Option - Show Pos - Disable"
+	{
+		"en"		"{grey}Position display {darkred}disabled{grey}."
+		"ru"		"{grey}Показ координат {darkred}выключен{grey}."
+	}
 	// Шрифт particle-MHUD (пункт меню и kz_hud font).
 	"HUD - Menu Label Font"
 	{

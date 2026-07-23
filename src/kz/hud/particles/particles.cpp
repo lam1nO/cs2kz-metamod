@@ -933,6 +933,8 @@ static const HUDMenuToggle s_hudToggles[] = {
 	{"HUD - Menu Label KeysOverlap",  "hudKeysOverlap", true,  "MHUD - Keys Overlap Enabled",  "MHUD - Keys Overlap Disabled" },
 	{"HUD - Menu Label CpTp",         "hudCpTp",        true,  "MHUD - CP/TP Enabled",         "MHUD - CP/TP Disabled"        },
 	{"HUD - Menu Label Outline",      "hudOutline",     true,  "MHUD - Outline Enabled",       "MHUD - Outline Disabled"      },
+	// showPos — строка координат HTML-панели (!showpos), не particle-элемент.
+	{"HUD - Menu Label ShowPos",      "showPos",        false, "HUD Option - Show Pos - Enable", "HUD Option - Show Pos - Disable"},
 };
 
 // info-теги специальных пунктов (тип худа, HTML-панель, компактный режим, шрифт).
