@@ -18,6 +18,11 @@ static_global CVValue_t *mp_roundtime_hostage_cvvalue_max;
 
 static_global CVValue_t hardcodedTimeLimit(1440.0f);
 static_global bool cvarLoaded = false;
+// Карты перетирают mp_timelimit/mp_roundtime своими cfg/point_servercommand
+// (репро: kz_variety_fix -> 120). Чужие записи откатываем к defaultTimeLimit
+// отложенно (следующий кадр), чтобы не входить в Set из колбэка конвара.
+static_global bool g_timeLimitDirty = false;
+static_global bool g_ownTimeLimitWrite = false;
 CConVarRef<float> mp_timelimit("mp_timelimit");
 CConVarRef<float> mp_roundtime("mp_roundtime");
 CConVarRef<float> mp_roundtime_defuse("mp_roundtime_defuse");
@@ -77,6 +82,15 @@ static_global void OnCvarChanged(ConVarRefAbstract *ref, CSplitScreenSlot nSlot,
 	if (!replicate)
 	{
 		return;
+	}
+	if (!g_ownTimeLimitWrite)
+	{
+		f32 def = KZOptionService::GetOptionFloat("defaultTimeLimit", 60.0f);
+		if (fabsf((f32)atof(pNewValue) - def) > 0.01f && !g_timeLimitDirty)
+		{
+			Msg("[kz] timelimit: внешняя запись %s (карта/cfg), откатываю к %.0f\n", pNewValue, def);
+			g_timeLimitDirty = true;
+		}
 	}
 	for (ConVarRefAbstract *cvar : convars)
 	{
@@ -140,5 +154,20 @@ void KZ::misc::UnrestrictTimeLimit()
 
 void KZ::misc::InitTimeLimit()
 {
+	g_ownTimeLimitWrite = true;
 	mp_timelimit.Set(KZOptionService::GetOptionFloat("defaultTimeLimit", 60.0f));
+	g_ownTimeLimitWrite = false;
+	g_timeLimitDirty = false;
+}
+
+void KZ::misc::CheckTimeLimitOverride()
+{
+	if (!g_timeLimitDirty)
+	{
+		return;
+	}
+	g_timeLimitDirty = false;
+	g_ownTimeLimitWrite = true;
+	mp_timelimit.Set(KZOptionService::GetOptionFloat("defaultTimeLimit", 60.0f));
+	g_ownTimeLimitWrite = false;
 }

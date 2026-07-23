@@ -272,6 +272,7 @@ namespace KZ
 		void OnRoundStart();
 		void InitTimeLimit();
 		void EnforceTimeLimit();
+		void CheckTimeLimitOverride();
 		void UnrestrictTimeLimit();
 		void OnPhysicsGameSystemFrameBoundary(void *pThis);
 		void HandleTeleportToCourse(KZPlayer *player, const CCommand *args);

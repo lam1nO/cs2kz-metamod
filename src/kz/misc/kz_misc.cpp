@@ -792,6 +792,7 @@ static_function void DrawTriggers()
 
 void KZ::misc::OnPhysicsGameSystemFrameBoundary(void *pThis)
 {
+	KZ::misc::CheckTimeLimitOverride();
 	static_persist CPhysicsGameSystem *physicsGameSystem = nullptr;
 	// Map probably reloaded, mark clips as not drawn.
 	if (pThis != physicsGameSystem)
