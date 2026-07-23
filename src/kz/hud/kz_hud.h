@@ -140,6 +140,11 @@ public:
 	// Фолбэк на PrintHUDSummary(), если меню-движок недоступен.
 	void OpenHUDMenu();
 
+	// Построить HUD-меню без показа (возвращает MenuHandle == u32; 0 = не построено).
+	// backToOptions — добавить первым пунктом «← Назад» в корень !options
+	// (используется подменю HUD в kz_option_menu.cpp).
+	u32 CreateHUDMenu(bool backToOptions);
+
 	// kz_mhud без аргументов — алиас OpenHUDMenu (обратная совместимость).
 	void OpenMHUDMenu();
 

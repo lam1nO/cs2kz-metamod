@@ -935,8 +935,21 @@ static const HUDMenuToggle s_hudToggles[] = {
 	{"HUD - Menu Label Outline",      "hudOutline",     true,  "MHUD - Outline Enabled",       "MHUD - Outline Disabled"      },
 };
 
-// info-тег специального первого пункта (тип худа).
+// info-теги специальных пунктов (тип худа, HTML-панель, компактный режим).
 static constexpr const char *HUD_MENU_TYPE_TAG = "__hudType__";
+static constexpr const char *HUD_MENU_PANEL_TAG = "__showPanel__";
+static constexpr const char *HUD_MENU_COMPACT_TAG = "__compactPanel__";
+static constexpr const char *HUD_MENU_BACK_TAG = "back:options";
+
+// Обновить текст тумблер-пункта «<подпись>: On/Off».
+static_function void SetHUDToggleItemText(MenuHandle menu, int item, const char *lang, const char *labelKey, bool on)
+{
+	std::string elemLabel = KZLanguageService::PrepareMessageWithLang(lang, labelKey);
+	std::string stateStr = KZLanguageService::PrepareMessageWithLang(lang, on ? "HUD - Menu On" : "HUD - Menu Off");
+	char newText[128];
+	V_snprintf(newText, sizeof(newText), "%s: %s", elemLabel.c_str(), stateStr.c_str());
+	g_pMenus->SetItemText(menu, item, newText);
+}
 
 // Колбэк выбора пункта меню !hud.
 static_function void OnHUDMenuSelect(MenuHandle menu, int slot, int item)
@@ -954,7 +967,29 @@ static_function void OnHUDMenuSelect(MenuHandle menu, int slot, int item)
 
 	const char *lang = p->languageService->GetLanguage();
 
-	// Первый пункт — переключение hudType (Standard ↔ MHUD).
+	// «← Назад» (есть только у экземпляра, встроенного в !options) — в корень настроек.
+	if (KZ_STREQ(key, HUD_MENU_BACK_TAG))
+	{
+		KZ::option::OpenOptionsMenu(p);
+		return;
+	}
+
+	// HTML-панель: TogglePanel держит кэш showPanel в синхроне с префом.
+	if (KZ_STREQ(key, HUD_MENU_PANEL_TAG))
+	{
+		p->hudService->TogglePanel();
+		SetHUDToggleItemText(menu, item, lang, "HUD - Menu Label Panel", p->hudService->IsShowingPanel());
+		return;
+	}
+
+	if (KZ_STREQ(key, HUD_MENU_COMPACT_TAG))
+	{
+		p->hudService->ToggleCompactPanel();
+		SetHUDToggleItemText(menu, item, lang, "HUD - Menu Label CompactPanel", p->hudService->IsCompactPanel());
+		return;
+	}
+
+	// Переключение hudType (Standard ↔ MHUD).
 	if (KZ_STREQ(key, HUD_MENU_TYPE_TAG))
 	{
 		int current = p->hudService->GetHudType();
@@ -983,15 +1018,82 @@ static_function void OnHUDMenuSelect(MenuHandle menu, int slot, int item)
 			{
 				p->hudService->DestroyAllParticles();
 			}
-			std::string elemLabel = KZLanguageService::PrepareMessageWithLang(lang, t.label);
-			const char *statePhrase = nowOn ? "HUD - Menu On" : "HUD - Menu Off";
-			std::string stateStr = KZLanguageService::PrepareMessageWithLang(lang, statePhrase);
-			char newText[128];
-			V_snprintf(newText, sizeof(newText), "%s: %s", elemLabel.c_str(), stateStr.c_str());
-			g_pMenus->SetItemText(menu, item, newText);
+			SetHUDToggleItemText(menu, item, lang, t.label, nowOn);
 			return;
 		}
 	}
+}
+
+// Один хэндл HUD-меню на слот — пересоздаётся при каждом построении
+// (и из !hud, и из подменю !options — экземпляр всегда один).
+static_global MenuHandle s_hudMenu[MAXPLAYERS + 1] = {};
+
+u32 KZHUDService::CreateHUDMenu(bool backToOptions)
+{
+	if (g_pMenus == nullptr)
+	{
+		return kInvalidMenuHandle;
+	}
+
+	int slot = this->player->GetPlayerSlot().Get();
+	if (slot < 0 || slot > MAXPLAYERS)
+	{
+		return kInvalidMenuHandle;
+	}
+
+	if (s_hudMenu[slot] != kInvalidMenuHandle)
+	{
+		g_pMenus->DestroyMenu(s_hudMenu[slot]);
+		s_hudMenu[slot] = kInvalidMenuHandle;
+	}
+
+	MenuHandle m = g_pMenus->CreateMenu(MenuType::Default, "HUD", &OnHUDMenuSelect);
+	if (m == kInvalidMenuHandle)
+	{
+		return kInvalidMenuHandle;
+	}
+
+	auto *opts = this->MHUDSettingsSource()->optionService;
+	const char *lang = this->player->languageService->GetLanguage();
+
+	auto addToggle = [&](const char *labelKey, const char *tag, bool on)
+	{
+		std::string elemLabel = KZLanguageService::PrepareMessageWithLang(lang, labelKey);
+		std::string stateStr = KZLanguageService::PrepareMessageWithLang(lang, on ? "HUD - Menu On" : "HUD - Menu Off");
+		char text[128];
+		V_snprintf(text, sizeof(text), "%s: %s", elemLabel.c_str(), stateStr.c_str());
+		g_pMenus->AddItem(m, text, tag, false);
+	};
+
+	// «← Назад» — только у экземпляра, встроенного в !options.
+	if (backToOptions)
+	{
+		std::string back = KZLanguageService::PrepareMessageWithLang(lang, "Options - Menu Back");
+		g_pMenus->AddItem(m, back.c_str(), HUD_MENU_BACK_TAG, false);
+	}
+
+	// Тип худа (int-pref).
+	int hudType = this->GetHudType();
+	const char *typePhrase = (hudType == 0) ? "HUD - Menu Type Standard" : "HUD - Menu Type MHUD";
+	std::string typeName = KZLanguageService::PrepareMessageWithLang(lang, typePhrase);
+	std::string typeText = KZLanguageService::PrepareMessageWithLang(lang, "HUD - Menu Label Type", typeName.c_str());
+	g_pMenus->AddItem(m, typeText.c_str(), HUD_MENU_TYPE_TAG, false);
+
+	// HTML-панель и компактный режим.
+	addToggle("HUD - Menu Label Panel", HUD_MENU_PANEL_TAG, this->IsShowingPanel());
+	addToggle("HUD - Menu Label CompactPanel", HUD_MENU_COMPACT_TAG, this->IsCompactPanel());
+
+	// Per-element тумблеры.
+	for (const auto &t : s_hudToggles)
+	{
+		addToggle(t.label, t.prefKey, opts->GetPreferenceBool(t.prefKey, t.defaultValue));
+	}
+
+	// Не закрываем при выборе — текст пункта обновляется вживую.
+	g_pMenus->SetCloseOnSelect(m, false);
+
+	s_hudMenu[slot] = m;
+	return m;
 }
 
 void KZHUDService::OpenHUDMenu()
@@ -1003,54 +1105,13 @@ void KZHUDService::OpenHUDMenu()
 		return;
 	}
 
-	int slot = this->player->GetPlayerSlot().Get();
-	if (slot < 0 || slot > MAXPLAYERS)
-	{
-		return;
-	}
-
-	// Один хэндл на слот — пересоздаём при повторном вызове.
-	static MenuHandle s_hudMenu[MAXPLAYERS + 1] = {};
-	if (s_hudMenu[slot] != kInvalidMenuHandle)
-	{
-		g_pMenus->DestroyMenu(s_hudMenu[slot]);
-		s_hudMenu[slot] = kInvalidMenuHandle;
-	}
-
-	MenuHandle m = g_pMenus->CreateMenu(MenuType::Default, "HUD", &OnHUDMenuSelect);
+	MenuHandle m = (MenuHandle)this->CreateHUDMenu(false);
 	if (m == kInvalidMenuHandle)
 	{
 		this->PrintHUDSummary();
 		return;
 	}
-
-	auto *opts = this->MHUDSettingsSource()->optionService;
-	const char *lang = this->player->languageService->GetLanguage();
-
-	// Пункт 1: тип худа (int-pref).
-	int hudType = this->GetHudType();
-	const char *typePhrase = (hudType == 0) ? "HUD - Menu Type Standard" : "HUD - Menu Type MHUD";
-	std::string typeName = KZLanguageService::PrepareMessageWithLang(lang, typePhrase);
-	std::string typeText = KZLanguageService::PrepareMessageWithLang(lang, "HUD - Menu Label Type", typeName.c_str());
-	g_pMenus->AddItem(m, typeText.c_str(), HUD_MENU_TYPE_TAG, false);
-
-	// Пункты 2-9: per-element тумблеры.
-	for (const auto &t : s_hudToggles)
-	{
-		bool on = opts->GetPreferenceBool(t.prefKey, t.defaultValue);
-		std::string elemLabel = KZLanguageService::PrepareMessageWithLang(lang, t.label);
-		const char *statePhrase = on ? "HUD - Menu On" : "HUD - Menu Off";
-		std::string stateStr = KZLanguageService::PrepareMessageWithLang(lang, statePhrase);
-		char text[128];
-		V_snprintf(text, sizeof(text), "%s: %s", elemLabel.c_str(), stateStr.c_str());
-		g_pMenus->AddItem(m, text, t.prefKey, false);
-	}
-
-	// Не закрываем при выборе — текст пункта обновляется вживую.
-	g_pMenus->SetCloseOnSelect(m, false);
-
-	s_hudMenu[slot] = m;
-	g_pMenus->DisplayMenu(m, slot, 0);
+	g_pMenus->DisplayMenu(m, this->player->GetPlayerSlot().Get(), 0);
 }
 
 // Hierarchy:

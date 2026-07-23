@@ -75,6 +75,7 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 	KZSpecService::Init();
 	KZGotoService::Init();
 	KZHUDService::Init();
+	KZ::option::InitOptionsMenu();
 	KZLanguageService::Init();
 	KZBeamService::Init();
 	KZPistolService::Init();

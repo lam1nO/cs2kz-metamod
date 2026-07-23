@@ -575,4 +575,9 @@ public:
 	// kz_js — interactive jumpstats preferences menu (cs2menus).
 	// Falls back to a chat summary of current preferences if the menu engine isn't loaded.
 	void OpenJumpstatsMenu();
+
+	// Построить JS-меню без показа (возвращает MenuHandle == u32; 0 = не построено).
+	// backToOptions — добавить первым пунктом «← Назад» в корень !options
+	// (используется подменю джампстатов в kz_option_menu.cpp).
+	u32 CreateJumpstatsMenu(bool backToOptions);
 };

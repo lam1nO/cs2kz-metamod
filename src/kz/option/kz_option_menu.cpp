@@ -1,11 +1,17 @@
-// Интерактивное меню !options (cs2menus) — замена RadioPanel-группы menu_option (radio2),
-// которая не умеет самопереоткрываться (у нативного RadioPanel-хака CS2 есть только 2
-// самопереоткрывающихся слота — radio/radio1, третьего "radio2" не существует).
+// Интерактивное меню !options (cs2menus) — корень с подменю по категориям:
+// чекпоинты/старт, HUD, видимость, звуки, джампстаты, paint. Подменю HUD и
+// джампстатов строят их модули (CreateHUDMenu/CreateJumpstatsMenu) — там же
+// живут их per-slot хэндлы; здесь только локальные подменю и корень.
+// Навигация: пункт корня → подменю (AddSubMenu), первый пункт подменю «← Назад»
+// (и Back-клавиша) возвращают в корень.
 #include "kz/option/kz_option.h"
 #include "kz/language/kz_language.h"
 #include "kz/checkpoint/kz_checkpoint.h"
 #include "kz/quiet/kz_quiet.h"
 #include "kz/jumpstats/kz_jumpstats.h"
+#include "kz/hud/kz_hud.h"
+#include "kz/paint/kz_paint.h"
+#include "kz/timer/kz_timer.h"
 #include "utils/utils.h"
 #include "utils/simplecmds.h"
 
@@ -13,98 +19,288 @@
 
 #include "tier0/memdbgon.h"
 
-// Меню-движок cs2menus (определён в kz_hud.cpp); может быть nullptr, если плагин не загружен.
+// Меню-движок cs2menus (определён в cs2kz.cpp); может быть nullptr, если плагин не загружен.
 extern ICS2Menus *g_pMenus;
 
-static void ToggleHidePlayersOpt(KZPlayer *player)
+// Локальные подменю этого файла (HUD/JS — в своих модулях).
+enum OptSubmenu : u8
 {
-	player->quietService->ToggleHide();
-}
-
-static void ToggleHideWeaponOpt(KZPlayer *player)
-{
-	player->quietService->ToggleHideWeapon();
-}
-
-static void ToggleHideLegsOpt(KZPlayer *player)
-{
-	player->ToggleHideLegs();
-}
-
-static void ToggleJsDisplayOpt(KZPlayer *player)
-{
-	player->jumpstatsService->ToggleJumpstatsReporting();
-}
-
-static void ToggleJsAlwaysOpt(KZPlayer *player)
-{
-	player->jumpstatsService->ToggleJSAlways();
-}
-
-struct OptionMenuToggle
-{
-	const char *labelKey;
-	const char *prefKey;
-	bool defaultValue;
-	void (*toggle)(KZPlayer *player);
+	OPTSUB_CHECKPOINT = 0,
+	OPTSUB_VISIBILITY,
+	OPTSUB_SOUND,
+	OPTSUB_PAINT,
+	OPTSUB_COUNT
 };
 
-// Таблица per-пункт тумблеров меню !options.
-static const OptionMenuToggle s_optionToggles[] = {
-	{"Options - Menu Label HidePlayers", "hideOtherPlayers", false, &ToggleHidePlayersOpt},
-	{"Options - Menu Label HideWeapon",  "hideWeapon",       false, &ToggleHideWeaponOpt },
-	{"Options - Menu Label HideLegs",    "hideLegs",         true,  &ToggleHideLegsOpt   },
-	{"Options - Menu Label JsDisplay",   "jsReporting",      true,  &ToggleJsDisplayOpt  },
-	{"Options - Menu Label JsAlways",    "jsAlways",         false, &ToggleJsAlwaysOpt   },
+struct OptionsMenuSlotHandles
+{
+	MenuHandle root;
+	MenuHandle sub[OPTSUB_COUNT];
 };
 
-// Колбэк выбора пункта меню !options.
-static_function void OnOptionsMenuSelect(MenuHandle menu, int slot, int item)
+static_global OptionsMenuSlotHandles s_optMenus[MAXPLAYERS + 1] = {};
+
+enum class OptItemKind : u8
+{
+	Toggle,     // bool-преф: on/off
+	Action,     // действие без состояния (текст пункта не обновляется)
+	Volume,     // float-преф: цикл по пресетам громкости
+	PaintColor, // цикл по именованной палитре paint
+};
+
+struct OptionsMenuItem
+{
+	OptItemKind kind;
+	const char *labelKey;      // phrase-ключ подписи
+	const char *tag;           // info-тег пункта; для Toggle/Volume — имя префа
+	bool defaultValue;         // для Toggle
+	f32 defaultFloat;          // для Volume
+	void (*apply)(KZPlayer *); // кастомное применение; для Toggle nullptr = прямой тоггл префа
+};
+
+// Тоггл-функции сервисов: держат в синхроне кэш сервиса и/или шлют апдейты.
+static void ApplySetStartPos(KZPlayer *p)
+{
+	p->checkpointService->SetStartPosition();
+}
+
+static void ApplyClearStartPos(KZPlayer *p)
+{
+	p->checkpointService->ClearStartPosition();
+}
+
+static void ApplyHidePlayers(KZPlayer *p)
+{
+	p->quietService->ToggleHide();
+}
+
+static void ApplyHideWeapon(KZPlayer *p)
+{
+	p->quietService->ToggleHideWeapon();
+}
+
+static void ApplyHideLegs(KZPlayer *p)
+{
+	p->ToggleHideLegs();
+}
+
+static void ApplyTimerStopSound(KZPlayer *p)
+{
+	p->timerService->ToggleTimerStopSound();
+}
+
+static void ApplyShowAllPaint(KZPlayer *p)
+{
+	p->paintService->ToggleShowAllPaint();
+}
+
+// clang-format off
+
+// Чекпоинты и старт-позиция.
+static const OptionsMenuItem s_cpItems[] = {
+	{OptItemKind::Action, "Options - Menu Label SetStartPos",       "action:ssp",        false, 0.0f, &ApplySetStartPos  },
+	{OptItemKind::Action, "Options - Menu Label ClearStartPos",     "action:csp",        false, 0.0f, &ApplyClearStartPos},
+	{OptItemKind::Toggle, "Options - Menu Label CheckpointMessage", "checkpointMessage", true,  0.0f, nullptr            },
+};
+
+// Видимость.
+static const OptionsMenuItem s_visItems[] = {
+	{OptItemKind::Toggle, "Options - Menu Label HidePlayers", "hideOtherPlayers", false, 0.0f, &ApplyHidePlayers},
+	{OptItemKind::Toggle, "Options - Menu Label HideWeapon",  "hideWeapon",       false, 0.0f, &ApplyHideWeapon },
+	{OptItemKind::Toggle, "Options - Menu Label HideLegs",    "hideLegs",         true,  0.0f, &ApplyHideLegs   },
+};
+
+// Звуки (громкость/тир звуков джампстатов — в подменю джампстатов).
+static const OptionsMenuItem s_sndItems[] = {
+	{OptItemKind::Toggle, "Options - Menu Label CheckpointSound", "checkpointSound", true, 0.0f, nullptr              },
+	{OptItemKind::Toggle, "Options - Menu Label TeleportSound",   "teleportSound",   true, 0.0f, nullptr              },
+	{OptItemKind::Toggle, "Options - Menu Label TimerStopSound",  "timerStopSound",  true, 0.0f, &ApplyTimerStopSound },
+	{OptItemKind::Volume, "Options - Menu Label RecordVolume",    "recordVolume",    false, 1.0f, nullptr             },
+};
+
+// Paint.
+static const OptionsMenuItem s_paintItems[] = {
+	{OptItemKind::Toggle,     "Options - Menu Label ShowAllPaint", "showAllPaint", false, 0.0f, &ApplyShowAllPaint},
+	{OptItemKind::PaintColor, "Options - Menu Label PaintColor",   "paintColor",   false, 0.0f, nullptr           },
+};
+
+// clang-format on
+
+// Пресеты громкости (как в меню джампстатов).
+static_global constexpr f32 s_volumePresets[] = {0.0f, 0.25f, 0.5f, 0.75f, 1.0f};
+
+// Палитра paint — тот же список, что понимает utils::ParseColorName.
+static_global constexpr const char *s_paintColors[] = {"red", "white", "black", "blue", "brown", "green", "yellow", "purple"};
+
+static_function const OptionsMenuItem *FindOptionsItem(const char *tag)
+{
+	for (const auto &it : s_cpItems)
+	{
+		if (KZ_STREQ(tag, it.tag))
+		{
+			return &it;
+		}
+	}
+	for (const auto &it : s_visItems)
+	{
+		if (KZ_STREQ(tag, it.tag))
+		{
+			return &it;
+		}
+	}
+	for (const auto &it : s_sndItems)
+	{
+		if (KZ_STREQ(tag, it.tag))
+		{
+			return &it;
+		}
+	}
+	for (const auto &it : s_paintItems)
+	{
+		if (KZ_STREQ(tag, it.tag))
+		{
+			return &it;
+		}
+	}
+	return nullptr;
+}
+
+// Текст пункта «<подпись>: <значение>» по текущему префу.
+static_function std::string OptionsItemText(KZPlayer *p, const OptionsMenuItem &it, const char *lang)
+{
+	std::string label = KZLanguageService::PrepareMessageWithLang(lang, it.labelKey);
+	char text[128];
+	switch (it.kind)
+	{
+		case OptItemKind::Action:
+			return label;
+		case OptItemKind::Toggle:
+		{
+			bool on = p->optionService->GetPreferenceBool(it.tag, it.defaultValue);
+			std::string state = KZLanguageService::PrepareMessageWithLang(lang, on ? "HUD - Menu On" : "HUD - Menu Off");
+			V_snprintf(text, sizeof(text), "%s: %s", label.c_str(), state.c_str());
+			return std::string(text);
+		}
+		case OptItemKind::Volume:
+		{
+			f32 vol = (f32)p->optionService->GetPreferenceFloat(it.tag, it.defaultFloat);
+			V_snprintf(text, sizeof(text), "%s: %.0f%%", label.c_str(), vol * 100.0f);
+			return std::string(text);
+		}
+		case OptItemKind::PaintColor:
+		{
+			V_snprintf(text, sizeof(text), "%s: %s", label.c_str(), p->paintService->GetColorName());
+			return std::string(text);
+		}
+	}
+	return label;
+}
+
+// Колбэк локальных подменю (чекпоинты/видимость/звуки/paint).
+static_function void OnOptionsSubmenuSelect(MenuHandle menu, int slot, int item)
 {
 	KZPlayer *p = g_pKZPlayerManager->ToPlayer(CPlayerSlot(slot));
 	if (!p)
 	{
 		return;
 	}
-	const char *key = g_pMenus->GetItemInfo(menu, item);
-	if (!key || !key[0])
+	const char *tag = g_pMenus->GetItemInfo(menu, item);
+	if (!tag || !tag[0])
 	{
 		return;
 	}
 
-	// Действия без состояния — не обновляют текст пункта, просто выполняются.
-	if (KZ_STREQ(key, "action:ssp"))
+	if (KZ_STREQ(tag, "back"))
 	{
-		p->checkpointService->SetStartPosition();
-		return;
-	}
-	if (KZ_STREQ(key, "action:csp"))
-	{
-		p->checkpointService->ClearStartPosition();
-		return;
-	}
-
-	const char *lang = p->languageService->GetLanguage();
-	for (const auto &t : s_optionToggles)
-	{
-		if (KZ_STREQ(key, t.prefKey))
+		// Возврат в корень: корень жив — создан вместе с подменю.
+		MenuHandle root = s_optMenus[slot].root;
+		if (root != kInvalidMenuHandle)
 		{
-			t.toggle(p);
-			bool nowOn = p->optionService->GetPreferenceBool(t.prefKey, t.defaultValue);
-			std::string elemLabel = KZLanguageService::PrepareMessageWithLang(lang, t.labelKey);
-			const char *statePhrase = nowOn ? "HUD - Menu On" : "HUD - Menu Off";
-			std::string stateStr = KZLanguageService::PrepareMessageWithLang(lang, statePhrase);
-			char newText[128];
-			V_snprintf(newText, sizeof(newText), "%s: %s", elemLabel.c_str(), stateStr.c_str());
-			g_pMenus->SetItemText(menu, item, newText);
+			g_pMenus->DisplayMenu(root, slot, 0);
+		}
+		return;
+	}
+
+	const OptionsMenuItem *it = FindOptionsItem(tag);
+	if (!it)
+	{
+		return;
+	}
+
+	switch (it->kind)
+	{
+		case OptItemKind::Action:
+			it->apply(p);
 			return;
+		case OptItemKind::Toggle:
+			if (it->apply)
+			{
+				it->apply(p);
+			}
+			else
+			{
+				p->optionService->SetPreferenceBool(it->tag, !p->optionService->GetPreferenceBool(it->tag, it->defaultValue));
+			}
+			break;
+		case OptItemKind::Volume:
+		{
+			f32 cur = (f32)p->optionService->GetPreferenceFloat(it->tag, it->defaultFloat);
+			f32 next = s_volumePresets[0]; // за последним пресетом — снова первый
+			for (f32 v : s_volumePresets)
+			{
+				if (v > cur + 0.001f)
+				{
+					next = v;
+					break;
+				}
+			}
+			p->optionService->SetPreferenceFloat(it->tag, next);
+			break;
+		}
+		case OptItemKind::PaintColor:
+		{
+			// Следующий цвет палитры; "Custom" (выставлен через kz_paintcolor RGB) → первый.
+			const char *current = p->paintService->GetColorName();
+			i32 idx = -1;
+			for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(s_paintColors); i++)
+			{
+				if (KZ_STREQI(current, s_paintColors[i]))
+				{
+					idx = i;
+					break;
+				}
+			}
+			p->paintService->SetColor(s_paintColors[(idx + 1) % KZ_ARRAYSIZE(s_paintColors)]);
+			break;
 		}
 	}
+	g_pMenus->SetItemText(menu, item, OptionsItemText(p, *it, p->languageService->GetLanguage()).c_str());
 }
 
-static void OpenOptionsMenu(KZPlayer *player)
+// Собрать локальное подменю: первый пункт «← Назад», дальше пункты таблицы.
+static_function MenuHandle BuildOptionsSubmenu(KZPlayer *player, const char *titleKey, const OptionsMenuItem *items, i32 count)
 {
-	if (g_pMenus == nullptr)
+	const char *lang = player->languageService->GetLanguage();
+	std::string title = KZLanguageService::PrepareMessageWithLang(lang, titleKey);
+	MenuHandle m = g_pMenus->CreateMenu(MenuType::Default, title.c_str(), &OnOptionsSubmenuSelect);
+	if (m == kInvalidMenuHandle)
+	{
+		return m;
+	}
+	std::string back = KZLanguageService::PrepareMessageWithLang(lang, "Options - Menu Back");
+	g_pMenus->AddItem(m, back.c_str(), "back", false);
+	for (i32 i = 0; i < count; i++)
+	{
+		g_pMenus->AddItem(m, OptionsItemText(player, items[i], lang).c_str(), items[i].tag, false);
+	}
+	// Не закрываем при выборе — тумблеры обновляют текст вживую.
+	g_pMenus->SetCloseOnSelect(m, false);
+	return m;
+}
+
+void KZ::option::OpenOptionsMenu(KZPlayer *player)
+{
+	if (g_pMenus == nullptr || !player)
 	{
 		return;
 	}
@@ -115,48 +311,88 @@ static void OpenOptionsMenu(KZPlayer *player)
 		return;
 	}
 
-	// Один хэндл на слот — пересоздаём при повторном вызове.
-	static MenuHandle s_optionsMenu[MAXPLAYERS + 1] = {};
-	if (s_optionsMenu[slot] != kInvalidMenuHandle)
+	// Пересоздаём весь куст (корень + локальные подменю) при каждом открытии.
+	OptionsMenuSlotHandles &handles = s_optMenus[slot];
+	if (handles.root != kInvalidMenuHandle)
 	{
-		g_pMenus->DestroyMenu(s_optionsMenu[slot]);
-		s_optionsMenu[slot] = kInvalidMenuHandle;
+		g_pMenus->DestroyMenu(handles.root);
+		handles.root = kInvalidMenuHandle;
 	}
-
-	MenuHandle m = g_pMenus->CreateMenu(MenuType::Default, "Options", &OnOptionsMenuSelect);
-	if (m == kInvalidMenuHandle)
+	for (auto &h : handles.sub)
 	{
-		return;
+		if (h != kInvalidMenuHandle)
+		{
+			g_pMenus->DestroyMenu(h);
+			h = kInvalidMenuHandle;
+		}
 	}
 
 	const char *lang = player->languageService->GetLanguage();
-
-	for (const auto &t : s_optionToggles)
+	std::string title = KZLanguageService::PrepareMessageWithLang(lang, "Options - Menu Title");
+	// У корня нет собственных select-пунктов — только submenu-навигация, колбэк не нужен.
+	MenuHandle root = g_pMenus->CreateMenu(MenuType::Default, title.c_str(), nullptr);
+	if (root == kInvalidMenuHandle)
 	{
-		bool on = player->optionService->GetPreferenceBool(t.prefKey, t.defaultValue);
-		std::string elemLabel = KZLanguageService::PrepareMessageWithLang(lang, t.labelKey);
-		const char *statePhrase = on ? "HUD - Menu On" : "HUD - Menu Off";
-		std::string stateStr = KZLanguageService::PrepareMessageWithLang(lang, statePhrase);
-		char text[128];
-		V_snprintf(text, sizeof(text), "%s: %s", elemLabel.c_str(), stateStr.c_str());
-		g_pMenus->AddItem(m, text, t.prefKey, false);
+		return;
 	}
+	// Хэндл корня сохраняем ДО постройки детей: их пункт «Назад» ссылается на него.
+	handles.root = root;
 
-	std::string sspLabel = KZLanguageService::PrepareMessageWithLang(lang, "Options - Menu Label SetStartPos");
-	g_pMenus->AddItem(m, sspLabel.c_str(), "action:ssp", false);
-	std::string cspLabel = KZLanguageService::PrepareMessageWithLang(lang, "Options - Menu Label ClearStartPos");
-	g_pMenus->AddItem(m, cspLabel.c_str(), "action:csp", false);
+	handles.sub[OPTSUB_CHECKPOINT] = BuildOptionsSubmenu(player, "Options - Menu Cat Checkpoint", s_cpItems, KZ_ARRAYSIZE(s_cpItems));
+	handles.sub[OPTSUB_VISIBILITY] = BuildOptionsSubmenu(player, "Options - Menu Cat Visibility", s_visItems, KZ_ARRAYSIZE(s_visItems));
+	handles.sub[OPTSUB_SOUND] = BuildOptionsSubmenu(player, "Options - Menu Cat Sound", s_sndItems, KZ_ARRAYSIZE(s_sndItems));
+	handles.sub[OPTSUB_PAINT] = BuildOptionsSubmenu(player, "Options - Menu Cat Paint", s_paintItems, KZ_ARRAYSIZE(s_paintItems));
+	// HUD/JS-подменю строят их модули (свои per-slot хэндлы, пункт «Назад» внутри).
+	MenuHandle hudMenu = (MenuHandle)player->hudService->CreateHUDMenu(true);
+	MenuHandle jsMenu = (MenuHandle)player->jumpstatsService->CreateJumpstatsMenu(true);
 
-	// Не закрываем при выборе — меню держится, пока игрок сам не закроет (0/ESC).
-	g_pMenus->SetCloseOnSelect(m, false);
+	// Порядок корня — по частоте использования.
+	auto addCat = [&](const char *catKey, MenuHandle child)
+	{
+		if (child == kInvalidMenuHandle)
+		{
+			return;
+		}
+		std::string label = KZLanguageService::PrepareMessageWithLang(lang, catKey);
+		g_pMenus->AddSubMenu(root, label.c_str(), child, "");
+	};
+	addCat("Options - Menu Cat Checkpoint", handles.sub[OPTSUB_CHECKPOINT]);
+	addCat("Options - Menu Cat HUD", hudMenu);
+	addCat("Options - Menu Cat Visibility", handles.sub[OPTSUB_VISIBILITY]);
+	addCat("Options - Menu Cat Sound", handles.sub[OPTSUB_SOUND]);
+	addCat("Options - Menu Cat Jumpstats", jsMenu);
+	addCat("Options - Menu Cat Paint", handles.sub[OPTSUB_PAINT]);
 
-	s_optionsMenu[slot] = m;
-	g_pMenus->DisplayMenu(m, slot, 0);
+	g_pMenus->DisplayMenu(root, slot, 0);
+}
+
+// Старт забега закрывает любое открытое cs2menus-меню игрока: NavSelect на серверах —
+// E (см. gameops core.cfg), и оставленное открытым незакрывающееся меню превращало
+// каждый E (кнопки/двери карты) в тычок по пункту меню посреди рана.
+static_global class KZTimerServiceEventListener_OptionsMenu : public KZTimerServiceEventListener
+{
+	virtual void OnTimerStartPost(KZPlayer *player, u32 courseGUID) override
+	{
+		if (g_pMenus == nullptr || !player)
+		{
+			return;
+		}
+		int slot = player->GetPlayerSlot().Get();
+		if (slot >= 0 && slot <= MAXPLAYERS && g_pMenus->HasMenu(slot))
+		{
+			g_pMenus->CancelMenu(slot);
+		}
+	}
+} s_optionsMenuTimerListener;
+
+void KZ::option::InitOptionsMenu()
+{
+	KZTimerService::RegisterEventListener(&s_optionsMenuTimerListener);
 }
 
 SCMD(kz_options, SCFL_PLAYER | SCFL_PREFERENCE)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
-	OpenOptionsMenu(player);
+	KZ::option::OpenOptionsMenu(player);
 	return MRES_SUPERCEDE;
 }

@@ -842,6 +842,17 @@
 		"chi"		"关"
 		"ua"		"вимк"
 	}
+	// HTML-панель и компактный режим (пункты меню !hud / подменю HUD в !options).
+	"HUD - Menu Label Panel"
+	{
+		"en"		"Info panel"
+		"ru"		"Инфо-панель"
+	}
+	"HUD - Menu Label CompactPanel"
+	{
+		"en"		"Compact panel"
+		"ru"		"Компактная панель"
+	}
 	// Метки элементов в меню тумблеров.
 	"HUD - Menu Label Speed"
 	{

@@ -413,6 +413,7 @@ struct JSMenuItem
 // kz_js menu items, in display order.
 static const JSMenuItem s_jsMenuItems[] = {
 	{"Jumpstats - Menu Label Reporting",         "jsReporting",             JSMenuItemKind::Toggle,    1,                       0.0f },
+	{"Jumpstats - Menu Label Always",            "jsAlways",                JSMenuItemKind::Toggle,    0,                       0.0f },
 	{"Jumpstats - Menu Label MinTier",           "jsMinTier",               JSMenuItemKind::TierCycle, DistanceTier_Impressive, 0.0f },
 	{"Jumpstats - Menu Label SoundMinTier",      "jsSoundMinTier",          JSMenuItemKind::TierCycle, DistanceTier_Impressive, 0.0f },
 	{"Jumpstats - Menu Label Volume",            "jsVolume",                JSMenuItemKind::Volume,    0,                       0.75f},
@@ -477,6 +478,12 @@ static_function void OnJSMenuSelect(MenuHandle menu, int slot, int item)
 	{
 		return;
 	}
+	// «← Назад» (есть только у экземпляра, встроенного в !options) — в корень настроек.
+	if (KZ_STREQ(key, "back:options"))
+	{
+		KZ::option::OpenOptionsMenu(p);
+		return;
+	}
 	for (const auto &it : s_jsMenuItems)
 	{
 		if (!KZ_STREQ(key, it.prefKey))
@@ -519,19 +526,21 @@ static_function void OnJSMenuSelect(MenuHandle menu, int slot, int item)
 	}
 }
 
-void KZJumpstatsService::OpenJumpstatsMenu()
+// Один хэндл JS-меню на слот — пересоздаётся при каждом построении
+// (и из !js, и из подменю !options — экземпляр всегда один).
+static_global MenuHandle s_jsMenu[MAXPLAYERS + 1] = {};
+
+u32 KZJumpstatsService::CreateJumpstatsMenu(bool backToOptions)
 {
 	if (g_pMenus == nullptr)
 	{
-		PrintJumpstatsMenuSummary(this->player);
-		return;
+		return kInvalidMenuHandle;
 	}
 	int slot = this->player->GetPlayerSlot().Get();
 	if (slot < 0 || slot > MAXPLAYERS)
 	{
-		return;
+		return kInvalidMenuHandle;
 	}
-	static MenuHandle s_jsMenu[MAXPLAYERS + 1] = {};
 	if (s_jsMenu[slot] != kInvalidMenuHandle)
 	{
 		g_pMenus->DestroyMenu(s_jsMenu[slot]);
@@ -540,10 +549,15 @@ void KZJumpstatsService::OpenJumpstatsMenu()
 	MenuHandle m = g_pMenus->CreateMenu(MenuType::Default, "Jumpstats", &OnJSMenuSelect);
 	if (m == kInvalidMenuHandle)
 	{
-		PrintJumpstatsMenuSummary(this->player);
-		return;
+		return kInvalidMenuHandle;
 	}
 	const char *lang = this->player->languageService->GetLanguage();
+	// «← Назад» — только у экземпляра, встроенного в !options.
+	if (backToOptions)
+	{
+		std::string back = KZLanguageService::PrepareMessageWithLang(lang, "Options - Menu Back");
+		g_pMenus->AddItem(m, back.c_str(), "back:options", false);
+	}
 	for (const auto &it : s_jsMenuItems)
 	{
 		std::string text = JSMenuItemText(this->player, it, lang);
@@ -551,7 +565,23 @@ void KZJumpstatsService::OpenJumpstatsMenu()
 	}
 	g_pMenus->SetCloseOnSelect(m, false); // item text updates live
 	s_jsMenu[slot] = m;
-	g_pMenus->DisplayMenu(m, slot, 0);
+	return m;
+}
+
+void KZJumpstatsService::OpenJumpstatsMenu()
+{
+	if (g_pMenus == nullptr)
+	{
+		PrintJumpstatsMenuSummary(this->player);
+		return;
+	}
+	MenuHandle m = (MenuHandle)this->CreateJumpstatsMenu(false);
+	if (m == kInvalidMenuHandle)
+	{
+		PrintJumpstatsMenuSummary(this->player);
+		return;
+	}
+	g_pMenus->DisplayMenu(m, this->player->GetPlayerSlot().Get(), 0);
 }
 
 SCMD(kz_js, SCFL_JUMPSTATS | SCFL_PREFERENCE)

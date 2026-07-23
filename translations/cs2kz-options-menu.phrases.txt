@@ -1,6 +1,46 @@
 "Phrases"
 {
-	// Метки пунктов интерактивного меню !options (замена RadioPanel menu_option/radio2).
+	// Меню !options: заголовок, категории корня, пункт «Назад» и метки пунктов подменю.
+	"Options - Menu Title"
+	{
+		"en"	"Options"
+		"ru"	"Настройки"
+	}
+	"Options - Menu Back"
+	{
+		"en"	"← Back"
+		"ru"	"← Назад"
+	}
+	"Options - Menu Cat Checkpoint"
+	{
+		"en"	"Checkpoints & start"
+		"ru"	"Чекпоинты и старт"
+	}
+	"Options - Menu Cat HUD"
+	{
+		"en"	"HUD"
+		"ru"	"HUD"
+	}
+	"Options - Menu Cat Visibility"
+	{
+		"en"	"Visibility"
+		"ru"	"Видимость"
+	}
+	"Options - Menu Cat Sound"
+	{
+		"en"	"Sounds"
+		"ru"	"Звуки"
+	}
+	"Options - Menu Cat Jumpstats"
+	{
+		"en"	"Jumpstats"
+		"ru"	"Джампстаты"
+	}
+	"Options - Menu Cat Paint"
+	{
+		"en"	"Paint"
+		"ru"	"Краска"
+	}
 	"Options - Menu Label HidePlayers"
 	{
 		"en"	"Hide players"
@@ -16,16 +56,6 @@
 		"en"	"Hide legs"
 		"ru"	"Скрыть ноги"
 	}
-	"Options - Menu Label JsDisplay"
-	{
-		"en"	"Jumpstats display"
-		"ru"	"Показ джампстатов"
-	}
-	"Options - Menu Label JsAlways"
-	{
-		"en"	"Jumpstats always"
-		"ru"	"Джампстаты всегда"
-	}
 	"Options - Menu Label SetStartPos"
 	{
 		"en"	"Set custom start position"
@@ -35,5 +65,40 @@
 	{
 		"en"	"Clear custom start position"
 		"ru"	"Сбросить свою точку старта"
+	}
+	"Options - Menu Label CheckpointMessage"
+	{
+		"en"	"Checkpoint messages"
+		"ru"	"Сообщения чекпоинтов"
+	}
+	"Options - Menu Label CheckpointSound"
+	{
+		"en"	"Checkpoint sound"
+		"ru"	"Звук чекпоинта"
+	}
+	"Options - Menu Label TeleportSound"
+	{
+		"en"	"Teleport sound"
+		"ru"	"Звук телепорта"
+	}
+	"Options - Menu Label TimerStopSound"
+	{
+		"en"	"Timer stop sound"
+		"ru"	"Звук остановки таймера"
+	}
+	"Options - Menu Label RecordVolume"
+	{
+		"en"	"Record sound volume"
+		"ru"	"Громкость звука рекорда"
+	}
+	"Options - Menu Label ShowAllPaint"
+	{
+		"en"	"Show everyone's paint"
+		"ru"	"Показывать чужую краску"
+	}
+	"Options - Menu Label PaintColor"
+	{
+		"en"	"Paint color"
+		"ru"	"Цвет краски"
 	}
 }

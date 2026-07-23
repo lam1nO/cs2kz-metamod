@@ -1135,6 +1135,11 @@
 		"en"		"Chat reporting"
 		"ru"		"Отчёты в чат"
 	}
+	"Jumpstats - Menu Label Always"
+	{
+		"en"		"Always show (invalid too)"
+		"ru"		"Показывать всегда (и невалидные)"
+	}
 	"Jumpstats - Menu Label MinTier"
 	{
 		"en"		"Minimum tier (chat)"

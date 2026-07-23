@@ -214,3 +214,13 @@ public:
 		output = *option;
 	}
 };
+
+namespace KZ::option
+{
+	// Открыть (пересоздав) корневое меню !options. Используется командой kz_options
+	// и как «← Назад» из HUD/JS-подменю (kz_option_menu.cpp).
+	void OpenOptionsMenu(KZPlayer *player);
+	// Регистрация слушателя таймера: старт забега закрывает открытое cs2menus-меню
+	// (иначе NavSelect=E дёргал пункты оставленного меню посреди рана).
+	void InitOptionsMenu();
+} // namespace KZ::option
