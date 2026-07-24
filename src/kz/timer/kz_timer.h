@@ -401,9 +401,10 @@ public:
 	// режима игрока и активного курса; overall = зачёт с телепортами. Только чтение PB-кэшей,
 	// без сети. Возвращает false, если курса нет или PB не наполнен.
 	bool GetHudPBTime(f64 &outTime);
-	// WR-время (overall) из статического wrCache для текущего режима+курса. Наполняется лишь на
-	// глобальных картах (KZGlobalService::OnWorldRecordsForCache); на локальных/нуб кэш пуст →
-	// false → худ покажет "WR --".
+	// WR-время (overall) для текущего режима+курса. Приоритет — глобальный wrCache (наполняется
+	// лишь на глобальных картах, KZGlobalService::OnWorldRecordsForCache); если он пуст (локальные/
+	// нуб-карты) — фолбэк на srCache (рекорд наших серверов). false только когда нет ни того, ни
+	// другого (нет курса / рекорд не наполнен).
 	bool GetHudWorldRecordTime(f64 &outTime);
 
 	void SetCourse(u32 courseGUID)
