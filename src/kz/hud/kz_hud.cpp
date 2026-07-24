@@ -247,14 +247,17 @@ std::string KZHUDService::GetTimerText(const char *language)
 }
 
 // Разбор состояния таймера для кибершоковского худа: время (сотые) и суффикс паузы/стопа
-// раздельно, чтобы красить их разными цветами (время — зелёный, суффикс — DIM). Логика та же,
-// что в GetTimerText (реплей-бот / обычный забег / grace после стопа); данные — this->player,
-// суффикс-фразы — в языке получателя. Возвращает false, если таймер показывать не нужно.
-bool KZHUDService::GetTimerParts(const char *language, std::string &outTime, std::string &outSuffix)
+// раздельно, чтобы красить их разными цветами. outRunning — идёт ли активный забег (пауза =
+// идёт → true); цвет/обнуление времени по нему решает BuildVersionCHud. Логика как в
+// GetTimerText (реплей-бот / обычный забег / grace после стопа); данные — this->player,
+// суффикс-фразы — в языке получателя. Обычному игроку в простое (idle) отдаём нулевой таймер
+// (outRunning=false); false — только реплей-боту, которому показывать нечего.
+bool KZHUDService::GetTimerParts(const char *language, std::string &outTime, std::string &outSuffix, bool &outRunning)
 {
 	f64 time = 0.0;
 	bool timerRunning = false;
 	bool paused = false;
+	outRunning = false;
 
 	if (KZ::replaysystem::IsReplayBot(this->player))
 	{
@@ -279,9 +282,16 @@ bool KZHUDService::GetTimerParts(const char *language, std::string &outTime, std
 	}
 	else
 	{
-		return false;
+		// Обычный игрок в простое: показываем нулевой таймер (цвет белый / текст 00:00.00
+		// задаёт BuildVersionCHud по outRunning=false), без суффикса.
+		char zeroText[64];
+		FormatTimeHud(0.0, zeroText, sizeof(zeroText));
+		outTime = zeroText;
+		outSuffix.clear();
+		return true;
 	}
 
+	outRunning = timerRunning;
 	char timeText[64];
 	FormatTimeHud(time, timeText, sizeof(timeText));
 	outTime = timeText;
@@ -364,13 +374,25 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 	// Это прогрессивное улучшение — если движок не подхватит класс, размер молча дефолтный,
 	// но цвета и раскладка остаются корректными (класс лишь меняет кегль, не текст/цвет).
 
-	// --- Строка 1: [ 00:07.96 ] Стиль — таймер зелёный в скобках (sm), суффикс паузы/стопа
-	//        DIM (sm), рядом стиль/режим MUTED (s). Символ скобки — через KZ_HUD_BRACKET_*. ---
+	// --- Строка 1: [ 00:07.96 ] Стиль — таймер в скобках (m): зелёный когда идёт/пауза, белый
+	//        00:00.00 когда стоп/idle; суффикс паузы/стопа DIM, рядом метка стиля MUTED (s, только
+	//        активный не-деф. стиль). Символ скобки — через KZ_HUD_BRACKET_*. ---
 	if (showTimer)
 	{
 		std::string tTime, tSuffix;
-		if (dataSource->hudService->GetTimerParts(language, tTime, tSuffix))
+		bool tRunning = false;
+		if (dataSource->hudService->GetTimerParts(language, tTime, tSuffix, tRunning))
 		{
+			// Идёт забег или пауза (tRunning) → зелёный + фактическое время. Стоп/idle обычного
+			// игрока → белый + 00:00.00. Реплей-бот не трогаем (свой финальный тайм остаётся).
+			bool notRunning = !tRunning && !isReplay;
+			const char *timerColor = notRunning ? KZ_HUD_C_WHITE : KZ_HUD_C_TIMER;
+			if (notRunning)
+			{
+				char zeroText[64];
+				FormatTimeHud(0.0, zeroText, sizeof(zeroText));
+				tTime = zeroText;
+			}
 			// Метка стиля — только для активного не-дефолтного стиля. "Normal" как шум убран:
 			// без активных стилей метки нет вовсе (пустой styleTag → без висячего разделителя).
 			std::string styleTag;
@@ -382,9 +404,9 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 				styleTag = st;
 			}
 			V_snprintf(buf, sizeof(buf),
-					   "<font class='" KZ_HUD_FS_TIMER "'><font color='" KZ_HUD_C_TIMER "'>" KZ_HUD_BRACKET_OPEN "&#160;%s&#160;" KZ_HUD_BRACKET_CLOSE
+					   "<font class='" KZ_HUD_FS_TIMER "'><font color='%s'>" KZ_HUD_BRACKET_OPEN "&#160;%s&#160;" KZ_HUD_BRACKET_CLOSE
 					   "</font><font color='" KZ_HUD_C_DIM "'>%s</font></font>%s",
-					   tTime.c_str(), tSuffix.c_str(), styleTag.c_str());
+					   timerColor, tTime.c_str(), tSuffix.c_str(), styleTag.c_str());
 			addLine(buf);
 		}
 	}
