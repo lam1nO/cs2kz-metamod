@@ -310,9 +310,9 @@ bool KZHUDService::GetTimerParts(const char *language, std::string &outTime, std
 }
 
 // --- Кибершоковский стандартный худ: палитра и скобки таймера --------------------------
-// KZ_HUD_C_ACCENT НЕ трогаем — на нём держатся активные клавиши (см. ряд W A S D J C ниже).
-// Новый зелёный KZ_HUD_C_TIMER — только для таймера и WR-времени, клавиши не перекрашивает.
-#define KZ_HUD_C_ACCENT "#3AA0F5" // активная клавиша (как было)
+// Активные клавиши теперь на KZ_HUD_C_CYAN (см. ряд W A S D J C ниже), как число скорости.
+// Зелёный KZ_HUD_C_TIMER — только для таймера и WR-времени, клавиши не перекрашивает.
+#define KZ_HUD_C_ACCENT "#3AA0F5" // синий акцент (сейчас не используется, оставлен под подстройку)
 #define KZ_HUD_C_WHITE  "#FFFFFF" // скорость / время PB / числа
 #define KZ_HUD_C_DIM    "#5B616D" // разделители / рамки || | / суффикс паузы-стопа / "--"
 #define KZ_HUD_C_MUTED  "#9AA3AF" // подписи (режим, стиль, Stage, координаты)
@@ -598,7 +598,7 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 	}
 
 	// --- Клавиши в стиле MHUD: 2 строки раскладкой клавиатуры, каждая — отдельный addLine
-	//        (движок центрирует ряды сам, W встаёт над S). Буквы ВСЕГДА видны: нажата → accent,
+	//        (движок центрирует ряды сам, W встаёт над S). Буквы ВСЕГДА видны: нажата → циан,
 	//        отпущена → dim, чтобы читалась раскладка. Подпись «Keys:» убрана — раскладка
 	//        самодостаточна. Ряд 1: C W J (C=duck слева, W=forward центр, J=jump справа),
 	//        ряд 2: A S D. Зазор между буквами — пара nbsp. ---
@@ -607,7 +607,7 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		auto key = [&](const char *label, bool down)
 		{
 			char k[64];
-			V_snprintf(k, sizeof(k), "<font color='%s'>%s</font>", down ? KZ_HUD_C_ACCENT : KZ_HUD_C_DIM, label);
+			V_snprintf(k, sizeof(k), "<font color='%s'>%s</font>", down ? KZ_HUD_C_CYAN : KZ_HUD_C_DIM, label);
 			return std::string(k);
 		};
 		bool jump = dataSource->hudService->jumpedThisTick || dataSource->IsButtonPressed(IN_JUMP);
