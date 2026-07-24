@@ -746,14 +746,6 @@
 		"ru"		"{grey}Применение: {default}!mhud keys {grey}<свойство>  •  Свойства: {default}overlap offset scale color overlapcolor reset"
 		"ua"		"{grey}Використання: {default}!mhud keys {grey}<властивість>  •  Список властивостей: {default}overlap offset scale color overlapcolor reset"
 	}
-	"MHUD - Font Usage"
-	{
-		"#format"	"font_list:s"
-		"en"		"{grey}Usage: {default}!mhud font {grey}<font>  •  Available fonts: {default}{font_list}"
-		"ru"		"{grey}Применение: {default}!mhud font {grey}<шрифт>  •  Доступные шрифты: {default}{font_list}"
-		"chi"		"{grey}用法: {default}!mhud font {grey}<字体>  •  可用字体: {default}{font_list}"
-		"ua"		"{grey}Використання: {default}!mhud font {grey}<шрифт>  •  Доступні шрифти: {default}{font_list}"
-	}
 	"MHUD - Font"
 	{
 		"#format"	"value:s"
