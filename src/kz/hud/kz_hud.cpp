@@ -336,7 +336,7 @@ bool KZHUDService::GetTimerParts(const char *language, std::string &outTime, std
 #define KZ_HUD_FS_SPEED     "fontSize-l"  // скорость — главный акцент
 #define KZ_HUD_FS_TIMER     "fontSize-l"  // таймер — крупный, одного кегля со скоростью (по фото кибершока)
 #define KZ_HUD_FS_SECONDARY "fontSize-sm" // PB/WR, CP/TP, престрейф, Stage, координаты — вторичная инфа
-#define KZ_HUD_FS_KEYS      "fontSize-m"  // ряд клавиш W A S D J C — крупный, как на кибершоке
+#define KZ_HUD_FS_KEYS      "fontSize-m"  // 2 ряда клавиш (C W J / A S D). m — безопасно по высоте; l крупнее, но 2 ряда+таймер-l рискуют обрезкой
 #define KZ_HUD_FS_MINOR     "fontSize-s"  // метка стиля — наименее заметное
 
 std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSpeed, bool suppressTimer, bool suppressKeys, bool masterMode,
@@ -565,21 +565,6 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		addLine(buf);
 	}
 
-	// Кибершок-вид «две панели»: клавиши + CP/TP отделяются от инфо-блока ВИДИМОЙ линией-разделителем.
-	// Живой тест cyb.79 показал: фон center-HTML СПЛОШНОЙ — пустая строка-зазор его не рвёт, а даёт
-	// лишь отступ. Поэтому рисуем тонкую приглушённую (DIM) линию по центру (kegel MINOR), имитируя
-	// разрыв на две секции. Глиф — ASCII-дефисы (надёжно рендерятся в игровом шрифте; риск tofu у
-	// box-drawing/юникода — см. коммент про скобки таймера выше). Юникод-вариант «&#8213;» оставлен
-	// закомментированным — проверить на dev-боксе, если ASCII-линия выглядит бедно. Только полный
-	// режим (в компакте второй панели нет) и только когда во второй панели реально есть контент.
-	bool secondPanel = !compact && (showCpTp || showKeys || this->player->optionService->GetPreferenceBool("showPos", false));
-	if (secondPanel && !html.empty())
-	{
-		// addLine сам добавит <br> перед линией (html непустой), а следующий блок — <br> после неё.
-		addLine("<font class='" KZ_HUD_FS_MINOR "'><font color='" KZ_HUD_C_DIM "'>---------</font></font>");
-		// Юникод-альтернатива (проверить вживую): "&#8213;&#8213;&#8213;&#8213;&#8213;" (U+2015 ―).
-	}
-
 	// --- CP/TP (per-element тумблер hudCpTp, деф. вкл) — не входит в кибершоковские строки 1-4,
 	//        но тумблер существует и был включён; сохраняем строку опционально, чтобы не
 	//        регрессировать существующую функциональность и не делать тумблер инертным.
@@ -596,23 +581,28 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		addLine(buf);
 	}
 
-	// --- Ряд клавиш в стиле кибершока (по фото пользователя): подпись «Keys:» + буква при
-	//        нажатии (accent), подчёркивание «_» когда клавиша не нажата (dim). Лейбл «Keys:»
-	//        оставлен латиницей как на кибершоке; при желании меняется на «Клавиши:». ---
+	// --- Клавиши в стиле MHUD: 2 строки раскладкой клавиатуры, каждая — отдельный addLine
+	//        (движок центрирует ряды сам, W встаёт над S). Буквы ВСЕГДА видны: нажата → accent,
+	//        отпущена → dim, чтобы читалась раскладка. Подпись «Keys:» убрана — раскладка
+	//        самодостаточна. Ряд 1: C W J (C=duck слева, W=forward центр, J=jump справа),
+	//        ряд 2: A S D. Зазор между буквами — пара nbsp. ---
 	if (showKeys)
 	{
 		auto key = [&](const char *label, bool down)
 		{
 			char k[64];
-			// нажата → буква (accent); не нажата → «_» (dim) — как «_ _ _ _ _» на кибершоке.
-			V_snprintf(k, sizeof(k), "<font color='%s'>%s</font>", down ? KZ_HUD_C_ACCENT : KZ_HUD_C_DIM, down ? label : "_");
+			V_snprintf(k, sizeof(k), "<font color='%s'>%s</font>", down ? KZ_HUD_C_ACCENT : KZ_HUD_C_DIM, label);
 			return std::string(k);
 		};
 		bool jump = dataSource->hudService->jumpedThisTick || dataSource->IsButtonPressed(IN_JUMP);
-		std::string row = key("W", dataSource->IsButtonPressed(IN_FORWARD)) + " " + key("A", dataSource->IsButtonPressed(IN_MOVELEFT)) + " "
-						  + key("S", dataSource->IsButtonPressed(IN_BACK)) + " " + key("D", dataSource->IsButtonPressed(IN_MOVERIGHT))
-						  + "&#160;&#160;" + key("J", jump) + " " + key("C", dataSource->IsButtonPressed(IN_DUCK));
-		addLine(std::string("<font class='" KZ_HUD_FS_KEYS "'><font color='" KZ_HUD_C_MUTED "'>Keys:</font> ") + row + "</font>");
+		const char *sep = "&#160;&#160;"; // пара nbsp — читаемый зазор между буквами
+		// Ряд 1 (верх): C W J.
+		std::string row1 = key("C", dataSource->IsButtonPressed(IN_DUCK)) + sep + key("W", dataSource->IsButtonPressed(IN_FORWARD)) + sep + key("J", jump);
+		// Ряд 2 (низ): A S D — W окажется над S при центровке движком.
+		std::string row2 = key("A", dataSource->IsButtonPressed(IN_MOVELEFT)) + sep + key("S", dataSource->IsButtonPressed(IN_BACK)) + sep
+						   + key("D", dataSource->IsButtonPressed(IN_MOVERIGHT));
+		addLine(std::string("<font class='" KZ_HUD_FS_KEYS "'>") + row1 + "</font>");
+		addLine(std::string("<font class='" KZ_HUD_FS_KEYS "'>") + row2 + "</font>");
 	}
 
 	// --- Координаты и углы (!showpos). Тумблер — настройка получателя (this), данные —
