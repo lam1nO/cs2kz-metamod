@@ -22,7 +22,7 @@
 		"en"		" (STOPPED)"
 		"chi"		" (停止)"
 		"pl"		" (ZATRZYMANY)"
-		"ru"		" (ОСТАНОВЛЕНО)"
+		"ru"		" (СТОП)"
 		"fi"		" (PYSÄYTETTY)"
 		"sv"		" (STOPPAD)"
 		"ua"		" (ЗУПИНЕНО)"
