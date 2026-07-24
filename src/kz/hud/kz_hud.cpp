@@ -476,21 +476,15 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 				// std::string-сборка (не char-буфер): padCount растёт с множителем, буфер бы переполнился.
 				leftPad = "<font class='" KZ_HUD_FS_SECONDARY "'>" + fs + "</font>";
 			}
-			// Суффикс паузы/стопа — мельче времени (SECONDARY, как PB/WR), а не в кегле таймера;
-			// само время остаётся крупным. Вынесен из font таймера отдельным спаном (как режим/стиль).
-			// Пустой суффикс (таймер идёт) → suffixTag пуст, ничего лишнего не рисуется.
-			std::string suffixTag;
-			if (!tSuffix.empty())
-			{
-				char sf[128];
-				V_snprintf(sf, sizeof(sf), "<font class='" KZ_HUD_FS_SECONDARY "'><font color='" KZ_HUD_C_DIM "'>%s</font></font>", tSuffix.c_str());
-				suffixTag = sf;
-			}
-			// Порядок как на кибершоке: (паддинг) → PRO/NUB → время → суффикс → режим → стиль-если-есть.
+			// Суффикс состояния «(СТОП)»/«(НА ПАУЗЕ)» УБРАН из худа целиком (ломал перенос строки).
+			// Состояние читается по цвету времени: идёт → зелёное фактическое время,
+			// не идёт → белое 00:00.00 (см. timerColor/notRunning выше). tSuffix из GetTimerParts
+			// больше не используется (сам метод его по-прежнему может отдавать — здесь игнорируем).
+			// Порядок как на кибершоке: (паддинг) → PRO/NUB → время → режим → стиль-если-есть.
 			V_snprintf(buf, sizeof(buf),
 					   "%s%s<font class='" KZ_HUD_FS_TIMER "'><font color='%s'>" KZ_HUD_BRACKET_OPEN "&#160;%s&#160;" KZ_HUD_BRACKET_CLOSE
-					   "</font></font>%s%s%s",
-					   leftPad.c_str(), proNubTag.c_str(), timerColor, tTime.c_str(), suffixTag.c_str(), modeTag.c_str(), styleTag.c_str());
+					   "</font></font>%s%s",
+					   leftPad.c_str(), proNubTag.c_str(), timerColor, tTime.c_str(), modeTag.c_str(), styleTag.c_str());
 			addLine(buf);
 		}
 	}
