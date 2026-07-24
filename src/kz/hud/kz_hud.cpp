@@ -530,35 +530,29 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 	}
 
 	// --- Строка 4: || PB 00:55.25 || WR 00:53.50 || — рамки/разделители везде ДВОЙНЫЕ ||  DIM,
-	//        лейблы PB/WR MUTED, время PB белое, время WR зелёное. Незаполненное время — "--" DIM
-	//        (строка не прыгает при догрузке). PB/WR — из платформенного api-кэша (совпадает с
-	//        сайтом), при его промахе/недоступности — фолбэк на локальные кэши плагина
-	//        (globalPBCache/localPBCache для PB; wrCache→srCache для WR). Курс — pbwrCourse
-	//        (активный или главный вне старт-зоны).
-	//        Центрирование: значения PB/WR добиваются figure-space (U+2007, ширина цифры) до
-	//        ФИКСИРОВАННОЙ видимой ширины (cellW символов, «00:00.00» = 8), «--» тоже. Левое поле
-	//        «|| PB <val8>» и правое « WR <val8> ||» одной пиксельной ширины (figure-space ≈ цифра,
-	//        поэтому «--»+добивка = как полное время), центральный || не съезжает. Паддинг — ПОСЛЕ
-	//        значения: цифры держатся у метки PB/WR, пустой хвост уходит к разделителю. ---
+	//        лейблы PB/WR MUTED, время PB белое, время WR зелёное. PB/WR — из платформенного
+	//        api-кэша (совпадает с сайтом), при его промахе/недоступности — фолбэк на локальные
+	//        кэши плагина (globalPBCache/localPBCache для PB; wrCache→srCache для WR). Курс —
+	//        pbwrCourse (активный или главный вне старт-зоны).
+	//        Центрирование: оба поля ВСЕГДА одной знаковой ширины — реальное «MM:SS.CC» (8 симв.,
+	//        FormatTimeHud при hours=0) ИЛИ равноширинный плейсхолдер «--:--.--» (8, DIM) при
+	//        отсутствии значения. Равная ширина ⇒ центральный || стоит по построению, без паддинга. ---
 	if (pbwrCourse)
 	{
-		const int cellW = 8; // видимая ширина поля времени: «00:00.00» = 8 символов (правится тут)
+		// Плейсхолдер отсутствующего значения — той же знаковой ширины, что формат времени
+		// «MM:SS.CC» (8 символов). Держит поля PB/WR равными ⇒ || по центру без добивки.
+		const char *timePlaceholder = "--:--.--";
 
 		f64 pbTime = 0.0, wrTime = 0.0;
 		bool hasPB = dataSource->timerService->GetHudPBTime(pbTime, pbwrCourse);
 		bool hasWR = dataSource->timerService->GetHudWorldRecordTime(wrTime, pbwrCourse);
 
-		// Ячейка значения: <font color>text</font> + добивка figure-space (U+2007) до cellW видимых символов.
-		auto padCell = [&](const char *color, const char *text) -> std::string
+		// Ячейка значения: <font color>text</font> без паддинга (ширину держит формат/плейсхолдер).
+		auto cell = [&](const char *color, const char *text) -> std::string
 		{
-			char cell[96];
-			V_snprintf(cell, sizeof(cell), "<font color='%s'>%s</font>", color, text);
-			std::string s = cell;
-			for (int i = (int)V_strlen(text); i < cellW; i++)
-			{
-				s += "&#8199;"; // figure-space U+2007 (ширина цифры) — «--»+хвост ≈ пиксельная ширина полного времени
-			}
-			return s;
+			char c[64];
+			V_snprintf(c, sizeof(c), "<font color='%s'>%s</font>", color, text);
+			return std::string(c);
 		};
 
 		std::string pbVal, wrVal;
@@ -566,21 +560,21 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		{
 			char pbBuf[32];
 			FormatTimeHud(pbTime, pbBuf, sizeof(pbBuf));
-			pbVal = padCell(KZ_HUD_C_WHITE, pbBuf);
+			pbVal = cell(KZ_HUD_C_WHITE, pbBuf);
 		}
 		else
 		{
-			pbVal = padCell(KZ_HUD_C_DIM, "--");
+			pbVal = cell(KZ_HUD_C_DIM, timePlaceholder);
 		}
 		if (hasWR)
 		{
 			char wrBuf[32];
 			FormatTimeHud(wrTime, wrBuf, sizeof(wrBuf));
-			wrVal = padCell(KZ_HUD_C_TIMER, wrBuf);
+			wrVal = cell(KZ_HUD_C_TIMER, wrBuf);
 		}
 		else
 		{
-			wrVal = padCell(KZ_HUD_C_DIM, "--");
+			wrVal = cell(KZ_HUD_C_DIM, timePlaceholder);
 		}
 		V_snprintf(buf, sizeof(buf),
 				   "<font class='" KZ_HUD_FS_SECONDARY "'><font color='" KZ_HUD_C_DIM "'>||&#160;</font><font color='" KZ_HUD_C_MUTED "'>PB</font>&#160;%s"
