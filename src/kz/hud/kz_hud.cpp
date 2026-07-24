@@ -315,7 +315,7 @@ bool KZHUDService::GetTimerParts(const char *language, std::string &outTime, std
 #define KZ_HUD_C_ACCENT "#3AA0F5" // активная клавиша (как было)
 #define KZ_HUD_C_WHITE  "#FFFFFF" // скорость / время PB / числа
 #define KZ_HUD_C_DIM    "#5B616D" // разделители / рамки || | / суффикс паузы-стопа / "--"
-#define KZ_HUD_C_MUTED  "#9AA3AF" // подписи (стиль, PB, WR, Stage, CP, TP)
+#define KZ_HUD_C_MUTED  "#9AA3AF" // подписи (режим, стиль, Stage, координаты)
 #define KZ_HUD_C_TIMER  "#4CD964" // таймер и WR-время (кибершоковский зелёный)
 #define KZ_HUD_C_CYAN   "#22D3EE" // число скорости (циан); подстроить: #00E5FF/#00FFFF
 
@@ -581,8 +581,8 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 			wrVal = cell(KZ_HUD_C_DIM, timePlaceholder);
 		}
 		V_snprintf(buf, sizeof(buf),
-				   "<font class='" KZ_HUD_FS_SECONDARY "'><font color='" KZ_HUD_C_DIM "'>||&#160;</font><font color='" KZ_HUD_C_MUTED "'>PB</font>&#160;%s"
-				   "<font color='" KZ_HUD_C_DIM "'>&#160;||&#160;</font><font color='" KZ_HUD_C_MUTED "'>WR</font>&#160;%s"
+				   "<font class='" KZ_HUD_FS_SECONDARY "'><font color='" KZ_HUD_C_DIM "'>||&#160;</font><font color='" KZ_HUD_C_WHITE "'>PB</font>&#160;%s"
+				   "<font color='" KZ_HUD_C_DIM "'>&#160;||&#160;</font><font color='" KZ_HUD_C_WHITE "'>WR</font>&#160;%s"
 				   "<font color='" KZ_HUD_C_DIM "'>&#160;||</font></font>",
 				   pbVal.c_str(), wrVal.c_str());
 		addLine(buf);
@@ -631,8 +631,8 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		i32 cpCount = isReplay ? KZ::replaysystem::GetCheckpointCount() : dataSource->checkpointService->GetCheckpointCount();
 		i32 tpCount = isReplay ? KZ::replaysystem::GetTeleportCount() : (i32)dataSource->checkpointService->GetTeleportCount();
 		V_snprintf(buf, sizeof(buf),
-				   "<font class='" KZ_HUD_FS_SECONDARY "'><font color='" KZ_HUD_C_MUTED "'>CP</font> <font color='" KZ_HUD_C_WHITE "'>%d/%d</font> "
-				   "<font color='" KZ_HUD_C_DIM "'>|</font> <font color='" KZ_HUD_C_MUTED "'>TP</font> <font color='" KZ_HUD_C_WHITE "'>%d</font></font>",
+				   "<font class='" KZ_HUD_FS_SECONDARY "'><font color='" KZ_HUD_C_WHITE "'>CP</font> <font color='" KZ_HUD_C_WHITE "'>%d/%d</font> "
+				   "<font color='" KZ_HUD_C_DIM "'>|</font> <font color='" KZ_HUD_C_WHITE "'>TP</font> <font color='" KZ_HUD_C_WHITE "'>%d</font></font>",
 				   cpIndex, cpCount, tpCount);
 		addLine(buf);
 	}
