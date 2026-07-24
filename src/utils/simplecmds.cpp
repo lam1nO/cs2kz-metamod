@@ -340,6 +340,73 @@ META_RES scmd::OnClientCommand(CPlayerSlot &slot, const CCommand &args)
 	return result;
 }
 
+// Ремап кириллицы в латиницу по ПОЗИЦИИ КЛАВИШ (раскладка ЙЦУКЕН → QWERTY):
+// й→q, ц→w, у→e, ... — чтобы команда, набранная в русской раскладке, сматчилась
+// как латинская (пример: «ыыз» → «ssp», «рудз» → «help»). ASCII-символы
+// копируются как есть (в нижнем регистре). Возвращает true ТОЛЬКО если во входе
+// была хотя бы одна кириллическая буква и вся строка успешно перекодирована;
+// иначе повторный матч бессмыслен (латиница уже пробовалась как есть).
+static_function bool RemapCyrillicToLatin(const char *in, char *out, int outSize)
+{
+	// Таблица для строчных а(U+0430)..я(U+044F) по позиции клавиши в QWERTY.
+	static const char kLayout[32] = {
+		/* а */ 'f',  /* б */ ',', /* в */ 'd', /* г */ 'u', /* д */ 'l',  /* е */ 't', /* ж */ ';', /* з */ 'p',
+		/* и */ 'b',  /* й */ 'q', /* к */ 'r', /* л */ 'k', /* м */ 'v',  /* н */ 'y', /* о */ 'j', /* п */ 'g',
+		/* р */ 'h',  /* с */ 'c', /* т */ 'n', /* у */ 'e', /* ф */ 'a',  /* х */ '[', /* ц */ 'w', /* ч */ 'x',
+		/* ш */ 'i',  /* щ */ 'o', /* ъ */ ']', /* ы */ 's', /* ь */ 'm',  /* э */ '\'', /* ю */ '.', /* я */ 'z',
+	};
+
+	bool hadCyrillic = false;
+	int o = 0;
+	const unsigned char *p = (const unsigned char *)in;
+
+	while (*p)
+	{
+		if (o >= outSize - 1)
+		{
+			return false; // не влезает — не рискуем частичным матчем
+		}
+		unsigned char c = *p;
+		if (c < 0x80)
+		{
+			// ASCII (латиница/цифры/подчёркивание) — как есть, в нижний регистр.
+			out[o++] = (char)tolower(c);
+			p++;
+			continue;
+		}
+		// Двухбайтовая кириллица UTF-8 (ведущий байт 0xD0/0xD1).
+		if ((c == 0xD0 || c == 0xD1) && p[1])
+		{
+			unsigned int cp = ((c & 0x1Fu) << 6) | (p[1] & 0x3Fu);
+			char latin = 0;
+			if (cp >= 0x410 && cp <= 0x42F) // прописные А..Я → та же клавиша
+			{
+				latin = kLayout[cp - 0x410];
+			}
+			else if (cp >= 0x430 && cp <= 0x44F) // строчные а..я
+			{
+				latin = kLayout[cp - 0x430];
+			}
+			else if (cp == 0x401 || cp == 0x451) // Ё/ё
+			{
+				latin = '`';
+			}
+			if (latin == 0)
+			{
+				return false; // кириллица вне таблицы — не наш случай
+			}
+			out[o++] = latin;
+			hadCyrillic = true;
+			p += 2;
+			continue;
+		}
+		// Прочий не-ASCII (3+ байта: эмодзи и т.п.) — точно не команда.
+		return false;
+	}
+	out[o] = '\0';
+	return hadCyrillic;
+}
+
 // Проходит реестр и вызывает колбэки всех команд с чат-именем cmdName (имя без
 // kz_-префикса и без триггера). Возвращает true, если хоть одна сматчилась.
 // suppress ← true, если чат-строку надо проглотить (тихий триггер '/' либо колбэк
@@ -417,6 +484,20 @@ META_RES scmd::OnDispatchConCommand(ConCommandRef cmd, const CCommandContext &ct
 
 		bool suppress = false;
 		bool matched = DispatchChatByName(controller, cmdArgs, cmdName, trigger, suppress);
+
+		// Русская раскладка: если как есть не сматчилось — ремапнуть кириллицу в
+		// латиницу по позиции клавиш (ЙЦУКЕН→QWERTY) и попробовать снова. Латинские
+		// команды матчатся на первом проходе, поэтому не ломаются (RemapCyrillicToLatin
+		// без кириллицы вернёт false). Аргументы команды остаются как есть — в callback
+		// уходит исходный cmdArgs.
+		if (!matched)
+		{
+			char remapped[SCMD_MAX_NAME_LEN];
+			if (RemapCyrillicToLatin(cmdName, remapped, sizeof(remapped)))
+			{
+				matched = DispatchChatByName(controller, cmdArgs, remapped, trigger, suppress);
+			}
+		}
 
 		if (suppress)
 		{
