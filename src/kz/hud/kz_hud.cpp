@@ -319,6 +319,13 @@ bool KZHUDService::GetTimerParts(const char *language, std::string &outTime, std
 #define KZ_HUD_C_TIMER  "#4CD964" // таймер и WR-время (кибершоковский зелёный)
 #define KZ_HUD_C_CYAN   "#22D3EE" // число скорости (циан); подстроить: #00E5FF/#00FFFF
 #define KZ_HUD_C_RED    "#FF3B3B" // overlap клавиш (W+S / A+D при hudKeysOverlap): все нажатые красным
+// Престрейф в скобках и приписка C — тоже ФИКСИРОВАННАЯ палитра, не MHUD-префы игрока:
+// префы mhud*Color принадлежат particle-MHUD («Внешний вид MHUD»), и сохранённое там
+// экзотическое значение красило престрейф в невидимый цвет на тёмной панели (баг 25.07:
+// у игрока mhudSpeedColor = чёрный ⇒ (престрейф) не виден вне перфа).
+#define KZ_HUD_C_PERF    "#40FF40" // престрейф после перфа
+#define KZ_HUD_C_JUMPBUG "#FFFF20" // престрейф после jumpbug/duckbug
+#define KZ_HUD_C_CJ      "#71EEB8" // приписка C (crouch-jump)
 
 // Скобки вокруг таймера. Уголковые ⌈ ⌋ (U+2308/230B) «кибершоковее», но лежат в
 // Mathematical-блоке Unicode — вне гарантированного набора игрового шрифта, риск tofu на
@@ -507,25 +514,21 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		std::string takeoff;
 		if (!onGroundSettled)
 		{
-			const Color baseCol = this->GetMHUDColorPref("mhudSpeedColor", Color(0xFF, 0xFF, 0xFF, 0xFF));
-			const Color perfCol = this->GetMHUDColorPref("mhudPrespeedPerfColor", Color(0x40, 0xFF, 0x40, 0xFF));
-			const Color jumpbugCol = this->GetMHUDColorPref("mhudPrespeedJumpbugColor", Color(0xFF, 0xFF, 0x20, 0xFF));
-			Color tintCol = baseCol;
+			// Цвет — из палитры стандартного худа (см. KZ_HUD_C_PERF рядом с ней), а НЕ из
+			// mhud*Color игрока: те префы про particle-MHUD, и чужое значение делало престрейф
+			// невидимым. Зазор — nbsp, как во всех остальных строках (обычный пробел схлопывается).
+			const char *tint = KZ_HUD_C_WHITE;
 			if (dataSource->IsPerfing() && !dataSource->possibleLadderHop && !dataSource->takeoffFromLadder)
 			{
-				tintCol = dataSource->hudService->fromDuckbug ? jumpbugCol : perfCol;
+				tint = dataSource->hudService->fromDuckbug ? KZ_HUD_C_JUMPBUG : KZ_HUD_C_PERF;
 			}
 			char tk[128];
-			V_snprintf(tk, sizeof(tk), " <font class='" KZ_HUD_FS_SECONDARY "'><font color='#%02x%02x%02x'>(%d)</font></font>", tintCol.r(), tintCol.g(),
-					   tintCol.b(), RoundFloatToInt(dataSource->takeoffVelocity.Length2D()));
+			V_snprintf(tk, sizeof(tk), "&#160;<font class='" KZ_HUD_FS_SECONDARY "'><font color='%s'>(%d)</font></font>", tint,
+					   RoundFloatToInt(dataSource->takeoffVelocity.Length2D()));
 			takeoff = tk;
 			if (dataSource->hudService->crouchJumping)
 			{
-				// Приписка C в cj-цвете (mhudSpeedCjColor, деф. #71EEB8) — как в GetSpeedText.
-				const Color cjCol = this->GetMHUDColorPref("mhudSpeedCjColor", Color(0x71, 0xEE, 0xB8, 0xFF));
-				char cj[96];
-				V_snprintf(cj, sizeof(cj), " <font class='" KZ_HUD_FS_SECONDARY "'><font color='#%02x%02x%02x'>C</font></font>", cjCol.r(), cjCol.g(), cjCol.b());
-				takeoff += cj;
+				takeoff += "&#160;<font class='" KZ_HUD_FS_SECONDARY "'><font color='" KZ_HUD_C_CJ "'>C</font></font>";
 			}
 		}
 		V_snprintf(buf, sizeof(buf), "<font class='" KZ_HUD_FS_SPEED "'><font color='" KZ_HUD_C_CYAN "'>%d</font></font>%s", speed, takeoff.c_str());

@@ -1825,8 +1825,8 @@
 	}
 	"Command Description - kz_options"
 	{
-		"en"		"Open the settings menu."
-		"ru"		"Меню всех настроек."
+		"en"		"Open the settings menu (short: !o)."
+		"ru"		"Меню всех настроек (кратко: !o)."
 	}
 	"Command Description - kz_rpmenu"
 	{

@@ -447,3 +447,7 @@ SCMD(kz_options, SCFL_PLAYER | SCFL_PREFERENCE | SCFL_HELP)
 	KZ::option::OpenOptionsMenu(player);
 	return MRES_SUPERCEDE;
 }
+
+// Короткий алиас !o. Без SCFL_HELP: в чат-списке !help остаётся одна строка !options
+// (алиас упомянут в её описании), иначе список дублируется.
+SCMD_LINK(kz_o, kz_options);
