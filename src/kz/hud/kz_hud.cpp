@@ -348,7 +348,7 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 	// В обычном — как раньше: рисуем всё, кроме suppress* (дублируемого particle-MHUD).
 	const bool isReplay = KZ::replaysystem::IsReplayBot(dataSource);
 	const bool compact = this->IsCompactPanel();
-	char buf[512];
+	char buf[768]; // с запасом: строка 1 = левый паддинг figure-space + таймер + режим + стиль
 
 	// Накапливаем строки в html, разделяя <br> только между непустыми (без висячих тегов).
 	std::string html;
@@ -401,6 +401,9 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 			// маппинг/вайтлист, что у PB/WR-фетча в kz_timer.cpp) → ckz/vnl/kzt, апаем в верхний
 			// регистр. Пустая строка = кастомный режим сверх этих трёх → метку не показываем.
 			// Реплей-бот пропускаем (своего режима как у игрока нет).
+			// Видимая ширина правой части («&#160;&#160;режим» + «&#160;&#160;стиль») в «символах» —
+			// нужна для левого паддинга, чтобы ВРЕМЯ встало по центру экрана (см. leftPad ниже).
+			int rightVisChars = 0;
 			std::string modeTag;
 			if (!isReplay && dataSource->modeService)
 			{
@@ -415,6 +418,7 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 					char mt[128];
 					V_snprintf(mt, sizeof(mt), "&#160;&#160;<font class='" KZ_HUD_FS_SECONDARY "'><font color='" KZ_HUD_C_MUTED "'>%s</font></font>", up);
 					modeTag = mt;
+					rightVisChars += 2 + (int)V_strlen(up); // 2 разделителя + буквы режима
 				}
 			}
 			// Метка стиля — только для активного не-дефолтного стиля. "Normal" как шум убран:
@@ -422,16 +426,33 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 			std::string styleTag;
 			if (!isReplay && dataSource->styleServices.Count() > 0)
 			{
+				const char *styleName = dataSource->styleServices[0]->GetStyleName();
 				char st[128];
-				V_snprintf(st, sizeof(st), "&#160;&#160;<font class='" KZ_HUD_FS_MINOR "'><font color='" KZ_HUD_C_MUTED "'>%s</font></font>",
-						   dataSource->styleServices[0]->GetStyleName());
+				V_snprintf(st, sizeof(st), "&#160;&#160;<font class='" KZ_HUD_FS_MINOR "'><font color='" KZ_HUD_C_MUTED "'>%s</font></font>", styleName);
 				styleTag = st;
+				rightVisChars += 2 + (int)V_strlen(styleName); // 2 разделителя + имя стиля
 			}
-			// Порядок как на кибершоке: время → режим → стиль-если-есть.
+			// Левый паддинг figure-space'ами (U+2007, ширина цифры) шириной ≈ правой части, чтобы центр
+			// ВРЕМЕНИ совпал с центром экрана (движок центрирует строку целиком). Приблизительно: правая
+			// часть режима — sm, стиль — s, паддинг — sm; но заметно точнее «[время] режим» без него.
+			// Пусто, если ни режима, ни стиля нет (реплей-бот / кастомный режим) → время и так по центру.
+			std::string leftPad;
+			if (rightVisChars > 0)
+			{
+				std::string fs;
+				for (int i = 0; i < rightVisChars; i++)
+				{
+					fs += "&#8199;"; // figure-space U+2007 — невидимая добивка цифровой ширины
+				}
+				char lp[320];
+				V_snprintf(lp, sizeof(lp), "<font class='" KZ_HUD_FS_SECONDARY "'>%s</font>", fs.c_str());
+				leftPad = lp;
+			}
+			// Порядок как на кибершоке: (паддинг) → время → режим → стиль-если-есть.
 			V_snprintf(buf, sizeof(buf),
-					   "<font class='" KZ_HUD_FS_TIMER "'><font color='%s'>" KZ_HUD_BRACKET_OPEN "&#160;%s&#160;" KZ_HUD_BRACKET_CLOSE
+					   "%s<font class='" KZ_HUD_FS_TIMER "'><font color='%s'>" KZ_HUD_BRACKET_OPEN "&#160;%s&#160;" KZ_HUD_BRACKET_CLOSE
 					   "</font><font color='" KZ_HUD_C_DIM "'>%s</font></font>%s%s",
-					   timerColor, tTime.c_str(), tSuffix.c_str(), modeTag.c_str(), styleTag.c_str());
+					   leftPad.c_str(), timerColor, tTime.c_str(), tSuffix.c_str(), modeTag.c_str(), styleTag.c_str());
 			addLine(buf);
 		}
 	}
