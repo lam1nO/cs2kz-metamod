@@ -54,7 +54,14 @@ public:
 	// Requires MultiAddonManager to be available, unless kz_force_mhud is set.
 	static bool IsMHUDAvailable();
 
-	// Тип худа: 0 = Standard (HTML-панель), 1 = MHUD (particle-оверлей). Персистентный int-pref.
+	// Тип худа (персистентный int-pref "hudType"). Цикл в меню: MHUD → Standard → Off.
+	// Off — не рисуется НИЧЕГО (ни HTML-панель, ни particle-MHUD), см. DrawPanels.
+	enum
+	{
+		HUD_TYPE_STANDARD = 0, // классическая HTML-панель по центру
+		HUD_TYPE_MHUD     = 1, // particle-оверлей
+		HUD_TYPE_OFF      = 2, // ничего не рисуется
+	};
 	int GetHudType();
 	void SetHudType(int type);
 

@@ -82,7 +82,7 @@ void KZHUDService::OnProcessMovement()
 	if (sv_suppress_viewpunch.IsValidRef())
 	{
 		// Particle-путь активен при выбранном MHUD, доступных ассетах и хотя бы одном включённом элементе.
-		bool wantParticles = KZHUDService::IsMHUDAvailable() && this->GetHudType() == 1
+		bool wantParticles = KZHUDService::IsMHUDAvailable() && this->GetHudType() == HUD_TYPE_MHUD
 							 && (this->IsMHUDSpeedEnabled() || this->IsMHUDPrespeedEnabled() || this->IsMHUDTimerEnabled()
 								 || this->IsMHUDKeysEnabled());
 		if (wantParticles != this->particlesActive)
@@ -536,7 +536,7 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	KZHUDService *cfg = target->hudService;
 
 	bool available = KZHUDService::IsMHUDAvailable();
-	// hudType: 0 = Standard (HTML-панель), 1 = MHUD (particle-оверлей).
+	// hudType: 0 = Standard (HTML-панель), 1 = MHUD (particle-оверлей), 2 = Off (ничего).
 	//
 	// Particle-путь — ТОЛЬКО для живого владельца (player == target && target->IsAlive()).
 	// Причина не в правах, а в движке: у CS2 нет честного screen-space API для HUD поверх
@@ -550,7 +550,7 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	// Мёртвый игрок без цели наблюдения (свой труп / фриролл) сюда вообще не попадает —
 	// DrawPanels для него не вызывается, particle'ы гасятся отдельно в
 	// KZPlayer::OnPhysicsSimulatePost.
-	bool useParticles = available && cfg->GetHudType() == 1 && player == target && target->IsAlive();
+	bool useParticles = available && cfg->GetHudType() == HUD_TYPE_MHUD && player == target && target->IsAlive();
 
 	if (useParticles)
 	{
@@ -564,12 +564,15 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 		target->hudService->DestroyAllParticles();
 	}
 
-	// Yield the center channel while a cs2menus HTML menu is open.
-	if (g_pMenus && g_pMenus->GetActiveMenuType(target->GetPlayerSlot().Get()) == MenuType::Html)
+	// Тип Off — единственный рычаг «выключить худ целиком»: не рисуем ни particle (уже
+	// погашены выше), ни HTML-панель. Заменил прежний тумблер showPanel (см. kz_panel).
+	if (cfg->GetHudType() == HUD_TYPE_OFF)
 	{
 		return;
 	}
-	if (!target->hudService->IsShowingPanel())
+
+	// Yield the center channel while a cs2menus HTML menu is open.
+	if (g_pMenus && g_pMenus->GetActiveMenuType(target->GetPlayerSlot().Get()) == MenuType::Html)
 	{
 		return;
 	}
@@ -581,8 +584,8 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	// (no MultiAddonManager/assets), OR the particle path isn't active for some other
 	// reason — target is dead, or this is a spectator (player != target, see the gate
 	// above). needHtml and useParticles must stay mutually exclusive, otherwise the
-	// recipient ends up with no HUD at all.
-	bool needHtml = !available || cfg->GetHudType() == 0 || !useParticles;
+	// recipient ends up with no HUD at all. (Off уже отсеян ранним return выше.)
+	bool needHtml = !available || cfg->GetHudType() == HUD_TYPE_STANDARD || !useParticles;
 	if (needHtml)
 	{
 		// Единый HTML-путь: BuildVersionCHud сам уважает компакт-режим (только строки 1-2,
@@ -682,13 +685,16 @@ SCMD(kz_panel, SCFL_HUD)
 			return MRES_SUPERCEDE;
 		}
 	}
-	player->hudService->TogglePanel();
-	if (player->hudService->IsShowingPanel())
+	// Без аргумента: включить/выключить худ целиком. Роль бывшего тумблера showPanel теперь
+	// у типа Off (единый рычаг), поэтому !panel переключает тип Off ↔ Standard.
+	if (player->hudService->GetHudType() == KZHUDService::HUD_TYPE_OFF)
 	{
+		player->hudService->SetHudType(KZHUDService::HUD_TYPE_STANDARD);
 		player->languageService->PrintChat(true, false, "HUD Option - Info Panel - Enable");
 	}
 	else
 	{
+		player->hudService->SetHudType(KZHUDService::HUD_TYPE_OFF);
 		player->languageService->PrintChat(true, false, "HUD Option - Info Panel - Disable");
 	}
 	return MRES_SUPERCEDE;

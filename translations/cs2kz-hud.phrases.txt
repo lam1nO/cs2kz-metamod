@@ -827,6 +827,14 @@
 		"chi"		"MHUD"
 		"ua"		"MHUD"
 	}
+	// Отображаемое имя типа Off (худ выключен полностью) в пункте меню.
+	"HUD - Menu Type Off"
+	{
+		"en"		"Off"
+		"ru"		"Выкл"
+		"chi"		"关闭"
+		"ua"		"Вимк"
+	}
 	// Состояние тумблера в меню.
 	"HUD - Menu On"
 	{
@@ -852,6 +860,28 @@
 	{
 		"en"		"Compact panel"
 		"ru"		"Компактная панель"
+	}
+	// Заголовки подменю HUD-меню (пункты-разделы).
+	"HUD - Menu Label Elements"
+	{
+		"en"		"Elements (visibility)"
+		"ru"		"Элементы (видимость)"
+		"chi"		"元素 (显示)"
+		"ua"		"Елементи (видимість)"
+	}
+	"HUD - Menu Label NormalHud"
+	{
+		"en"		"Normal HUD"
+		"ru"		"Обычный HUD"
+		"chi"		"普通 HUD"
+		"ua"		"Звичайний HUD"
+	}
+	"HUD - Menu Label MHUDGroup"
+	{
+		"en"		"MHUD"
+		"ru"		"MHUD"
+		"chi"		"MHUD"
+		"ua"		"MHUD"
 	}
 	// Строка координат/углов (!showpos) в HTML-панели.
 	"HUD - Position Text"

@@ -214,7 +214,8 @@ void KZHUDService::OnClientDisconnect()
 // === Preferences ====================================================================
 
 // === Тип худа (hudType) ============================================================
-// 0 = Standard (классическая HTML-панель по центру), 1 = MHUD (particle-оверлей).
+// 0 = Standard (классическая HTML-панель по центру), 1 = MHUD (particle-оверлей),
+// 2 = Off (не рисуется ничего). Цикл в меню: MHUD → Standard → Off (см. HudTypeNext).
 // Нарисованный cyberkz-HUD выпилен в cyb.27 — Standard теперь всегда HTML-путь.
 
 int KZHUDService::GetHudType()
@@ -937,11 +938,52 @@ static const HUDMenuToggle s_hudToggles[] = {
 	{"HUD - Menu Label ShowPos",      "showPos",        false, "HUD Option - Show Pos - Enable", "HUD Option - Show Pos - Disable"},
 };
 
-// info-теги специальных пунктов (тип худа, HTML-панель, компактный режим, шрифт).
+// Дескриптор тумблера по ключу префа (тумблеры разложены по подменю, но select-диспатч
+// и добавление пунктов ищут описание в общей таблице).
+static_function const HUDMenuToggle *FindHudToggle(const char *prefKey)
+{
+	for (const auto &t : s_hudToggles)
+	{
+		if (KZ_STREQ(t.prefKey, prefKey))
+		{
+			return &t;
+		}
+	}
+	return nullptr;
+}
+
+// info-теги специальных пунктов (тип худа, компактный режим, шрифт).
 static constexpr const char *HUD_MENU_TYPE_TAG = "__hudType__";
-static constexpr const char *HUD_MENU_PANEL_TAG = "__showPanel__";
 static constexpr const char *HUD_MENU_COMPACT_TAG = "__compactPanel__";
 static constexpr const char *HUD_MENU_FONT_TAG = "__mhudFont__";
+
+// Следующий тип в цикле меню: MHUD → Standard → Off → MHUD.
+static_function int HudTypeNext(int current)
+{
+	switch (current)
+	{
+		case KZHUDService::HUD_TYPE_MHUD:
+			return KZHUDService::HUD_TYPE_STANDARD;
+		case KZHUDService::HUD_TYPE_STANDARD:
+			return KZHUDService::HUD_TYPE_OFF;
+		default: // Off или неизвестное
+			return KZHUDService::HUD_TYPE_MHUD;
+	}
+}
+
+// Фраза-ключ отображаемого имени типа худа.
+static_function const char *HudTypePhrase(int type)
+{
+	switch (type)
+	{
+		case KZHUDService::HUD_TYPE_MHUD:
+			return "HUD - Menu Type MHUD";
+		case KZHUDService::HUD_TYPE_OFF:
+			return "HUD - Menu Type Off";
+		default:
+			return "HUD - Menu Type Standard";
+	}
+}
 
 // Обновить текст тумблер-пункта «<подпись>: On/Off».
 static_function void SetHUDToggleItemText(MenuHandle menu, int item, const char *lang, const char *labelKey, bool on)
@@ -968,14 +1010,6 @@ static_function void OnHUDMenuSelect(MenuHandle menu, int slot, int item)
 	}
 
 	const char *lang = p->languageService->GetLanguage();
-
-	// HTML-панель: TogglePanel держит кэш showPanel в синхроне с префом.
-	if (KZ_STREQ(key, HUD_MENU_PANEL_TAG))
-	{
-		p->hudService->TogglePanel();
-		SetHUDToggleItemText(menu, item, lang, "HUD - Menu Label Panel", p->hudService->IsShowingPanel());
-		return;
-	}
 
 	if (KZ_STREQ(key, HUD_MENU_COMPACT_TAG))
 	{
@@ -1009,18 +1043,16 @@ static_function void OnHUDMenuSelect(MenuHandle menu, int slot, int item)
 		return;
 	}
 
-	// Переключение hudType (Standard ↔ MHUD).
+	// Переключение hudType по циклу MHUD → Standard → Off.
 	if (KZ_STREQ(key, HUD_MENU_TYPE_TAG))
 	{
-		int current = p->hudService->GetHudType();
-		int next = (current == 0) ? 1 : 0;
+		int next = HudTypeNext(p->hudService->GetHudType());
 		p->hudService->SetHudType(next);
-		if (next == 1 && !KZHUDService::IsMHUDAvailable())
+		if (next == KZHUDService::HUD_TYPE_MHUD && !KZHUDService::IsMHUDAvailable())
 		{
 			p->languageService->PrintChat(true, false, "MHUD - Unavailable");
 		}
-		const char *typePhrase = (next == 0) ? "HUD - Menu Type Standard" : "HUD - Menu Type MHUD";
-		std::string typeName = KZLanguageService::PrepareMessageWithLang(lang, typePhrase);
+		std::string typeName = KZLanguageService::PrepareMessageWithLang(lang, HudTypePhrase(next));
 		std::string typeLabel = KZLanguageService::PrepareMessageWithLang(lang, "HUD - Menu Label Type", typeName.c_str());
 		g_pMenus->SetItemText(menu, item, typeLabel.c_str());
 		return;
@@ -1372,6 +1404,29 @@ static_function MenuHandle BuildMHUDAppearanceMenu(KZPlayer *player, int slot)
 // (и из !hud, и из подменю !options — экземпляр всегда один).
 static_global MenuHandle s_hudMenu[MAXPLAYERS + 1] = {};
 
+// Промежуточные подменю HUD (пересоздаются вместе с корнем): порядок = HudSubIndex.
+enum HudSubIndex
+{
+	HUD_SUB_ELEMENTS = 0, // «Элементы (видимость)»
+	HUD_SUB_NORMAL,       // «Обычный HUD»
+	HUD_SUB_MHUD,         // «MHUD»
+	HUD_SUB_COUNT,
+};
+static_global MenuHandle s_hudSubMenu[MAXPLAYERS + 1][HUD_SUB_COUNT] = {};
+
+// Уничтожить подменю HUD-ветки слота (DestroyMenu не рекурсивен — каждый хэндл гасим отдельно).
+static_function void DestroyHudSubMenus(int slot)
+{
+	for (auto &h : s_hudSubMenu[slot])
+	{
+		if (h != kInvalidMenuHandle)
+		{
+			g_pMenus->DestroyMenu(h);
+			h = kInvalidMenuHandle;
+		}
+	}
+}
+
 u32 KZHUDService::CreateHUDMenu()
 {
 	if (g_pMenus == nullptr)
@@ -1390,7 +1445,9 @@ u32 KZHUDService::CreateHUDMenu()
 		g_pMenus->DestroyMenu(s_hudMenu[slot]);
 		s_hudMenu[slot] = kInvalidMenuHandle;
 	}
-	// Старое поддерево «Внешний вид MHUD» — уничтожаем вместе с корнем HUD-меню.
+	// Старые подменю (Элементы/Обычный/MHUD) и поддерево «Внешний вид MHUD» — уничтожаем
+	// вместе с корнем HUD-меню (DestroyMenu не рекурсивен, каждый хэндл гасим отдельно).
+	DestroyHudSubMenus(slot);
 	DestroyMHUDAppearanceMenus(slot);
 
 	MenuHandle m = g_pMenus->CreateMenu(MenuType::Default, "HUD", &OnHUDMenuSelect);
@@ -1402,51 +1459,106 @@ u32 KZHUDService::CreateHUDMenu()
 	auto *opts = this->MHUDSettingsSource()->optionService;
 	const char *lang = this->player->languageService->GetLanguage();
 
-	auto addToggle = [&](const char *labelKey, const char *tag, bool on)
+	// Тумблер «<подпись>: вкл/выкл» в заданное меню.
+	auto addToggle = [&](MenuHandle target, const char *labelKey, const char *tag, bool on)
 	{
 		std::string elemLabel = KZLanguageService::PrepareMessageWithLang(lang, labelKey);
 		std::string stateStr = KZLanguageService::PrepareMessageWithLang(lang, on ? "HUD - Menu On" : "HUD - Menu Off");
 		char text[128];
 		V_snprintf(text, sizeof(text), "%s: %s", elemLabel.c_str(), stateStr.c_str());
-		g_pMenus->AddItem(m, text, tag, false);
+		g_pMenus->AddItem(target, text, tag, false);
+	};
+	// Тумблер per-element по ключу префа (подпись/дефолт — из общей таблицы s_hudToggles).
+	auto addToggleKey = [&](MenuHandle target, const char *prefKey)
+	{
+		const HUDMenuToggle *t = FindHudToggle(prefKey);
+		if (t)
+		{
+			addToggle(target, t->label, t->prefKey, opts->GetPreferenceBool(t->prefKey, t->defaultValue));
+		}
+	};
+	// Создать подменю HUD-ветки (свой select-колбэк — тумблеры внутри), запомнить хэндл слота.
+	auto makeSub = [&](int idx, const char *titleKey) -> MenuHandle
+	{
+		std::string title = KZLanguageService::PrepareMessageWithLang(lang, titleKey);
+		MenuHandle sub = g_pMenus->CreateMenu(MenuType::Default, title.c_str(), &OnHUDMenuSelect);
+		if (sub != kInvalidMenuHandle)
+		{
+			s_hudSubMenu[slot][idx] = sub;
+		}
+		return sub;
+	};
+	// Прикрепить готовое подменю к корню (R = назад к корню); не закрывать при выборе.
+	auto attachSub = [&](MenuHandle sub, const char *titleKey)
+	{
+		if (sub == kInvalidMenuHandle)
+		{
+			return;
+		}
+		g_pMenus->SetCloseOnSelect(sub, false);
+		std::string label = KZLanguageService::PrepareMessageWithLang(lang, titleKey);
+		g_pMenus->AddSubMenu(m, label.c_str(), sub, "");
 	};
 
-	// Тип худа (int-pref).
-	int hudType = this->GetHudType();
-	const char *typePhrase = (hudType == 0) ? "HUD - Menu Type Standard" : "HUD - Menu Type MHUD";
-	std::string typeName = KZLanguageService::PrepareMessageWithLang(lang, typePhrase);
+	// --- Пункт «Тип HUD» (3-позиционный цикл MHUD / Стандартный / Выкл) ---
+	std::string typeName = KZLanguageService::PrepareMessageWithLang(lang, HudTypePhrase(this->GetHudType()));
 	std::string typeText = KZLanguageService::PrepareMessageWithLang(lang, "HUD - Menu Label Type", typeName.c_str());
 	g_pMenus->AddItem(m, typeText.c_str(), HUD_MENU_TYPE_TAG, false);
 
-	// HTML-панель и компактный режим.
-	addToggle("HUD - Menu Label Panel", HUD_MENU_PANEL_TAG, this->IsShowingPanel());
-	addToggle("HUD - Menu Label CompactPanel", HUD_MENU_COMPACT_TAG, this->IsCompactPanel());
-
-	// Шрифт particle-MHUD.
+	// --- Подменю «Элементы (видимость)»: тумблеры видимости строк худа ---
 	{
-		char fontBuf[32];
-		GetUpstreamFont(this->player, fontBuf, sizeof(fontBuf));
-		std::string fontLabel = KZLanguageService::PrepareMessageWithLang(lang, "HUD - Menu Label Font");
-		char text[128];
-		V_snprintf(text, sizeof(text), "%s: %s", fontLabel.c_str(), fontBuf);
-		g_pMenus->AddItem(m, text, HUD_MENU_FONT_TAG, false);
+		MenuHandle sub = makeSub(HUD_SUB_ELEMENTS, "HUD - Menu Label Elements");
+		if (sub != kInvalidMenuHandle)
+		{
+			addToggleKey(sub, "hudSpeed");
+			addToggleKey(sub, "hudPrespeed");
+			addToggleKey(sub, "hudTimer");
+			addToggleKey(sub, "hudKeys");
+			addToggleKey(sub, "hudCpTp");
+		}
+		attachSub(sub, "HUD - Menu Label Elements");
 	}
 
-	// Per-element тумблеры.
-	for (const auto &t : s_hudToggles)
+	// --- Подменю «Обычный HUD»: настройки HTML-панели ---
 	{
-		addToggle(t.label, t.prefKey, opts->GetPreferenceBool(t.prefKey, t.defaultValue));
+		MenuHandle sub = makeSub(HUD_SUB_NORMAL, "HUD - Menu Label NormalHud");
+		if (sub != kInvalidMenuHandle)
+		{
+			addToggle(sub, "HUD - Menu Label CompactPanel", HUD_MENU_COMPACT_TAG, this->IsCompactPanel());
+			addToggleKey(sub, "showPos");
+		}
+		attachSub(sub, "HUD - Menu Label NormalHud");
 	}
 
-	// Подменю тонкой настройки внешнего вида particle-элементов (позиция/размер/цвет).
-	MenuHandle appearance = BuildMHUDAppearanceMenu(this->player, slot);
-	if (appearance != kInvalidMenuHandle)
+	// --- Подменю «MHUD»: настройки particle-оверлея + подраздел «Внешний вид MHUD» ---
 	{
-		std::string apLabel = KZLanguageService::PrepareMessageWithLang(lang, "HUD - Menu Label Appearance");
-		g_pMenus->AddSubMenu(m, apLabel.c_str(), appearance, "");
+		MenuHandle sub = makeSub(HUD_SUB_MHUD, "HUD - Menu Label MHUDGroup");
+		if (sub != kInvalidMenuHandle)
+		{
+			// Шрифт particle-MHUD.
+			{
+				char fontBuf[32];
+				GetUpstreamFont(this->player, fontBuf, sizeof(fontBuf));
+				std::string fontLabel = KZLanguageService::PrepareMessageWithLang(lang, "HUD - Menu Label Font");
+				char text[128];
+				V_snprintf(text, sizeof(text), "%s: %s", fontLabel.c_str(), fontBuf);
+				g_pMenus->AddItem(sub, text, HUD_MENU_FONT_TAG, false);
+			}
+			addToggleKey(sub, "hudTimerDetail");
+			addToggleKey(sub, "hudKeysOverlap");
+			addToggleKey(sub, "hudOutline");
+			// «Внешний вид MHUD» — подраздел внутри MHUD (позиция/размер/цвет particle-элементов).
+			MenuHandle appearance = BuildMHUDAppearanceMenu(this->player, slot);
+			if (appearance != kInvalidMenuHandle)
+			{
+				std::string apLabel = KZLanguageService::PrepareMessageWithLang(lang, "HUD - Menu Label Appearance");
+				g_pMenus->AddSubMenu(sub, apLabel.c_str(), appearance, "");
+			}
+		}
+		attachSub(sub, "HUD - Menu Label MHUDGroup");
 	}
 
-	// Не закрываем при выборе — текст пункта обновляется вживую.
+	// Не закрываем при выборе — текст пункта «Тип HUD» обновляется вживую.
 	g_pMenus->SetCloseOnSelect(m, false);
 
 	s_hudMenu[slot] = m;
