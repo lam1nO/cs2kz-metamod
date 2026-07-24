@@ -5,6 +5,57 @@
 		"en"		"{gold}Available commands (type in chat):"
 		"ru"		"{gold}Доступные команды (введите в чат):"
 	}
+	// Заголовки категорий для чат-версии !help (whitelist).
+	"Help Category - Checkpoints"
+	{
+		"en"		"{gold}Checkpoints:"
+		"ru"		"{gold}Чекпоинты:"
+	}
+	"Help Category - Timer"
+	{
+		"en"		"{gold}Timer:"
+		"ru"		"{gold}Таймер:"
+	}
+	"Help Category - Records"
+	{
+		"en"		"{gold}Records:"
+		"ru"		"{gold}Рекорды:"
+	}
+	"Help Category - Replay"
+	{
+		"en"		"{gold}Replay:"
+		"ru"		"{gold}Реплей:"
+	}
+	"Help Category - Map"
+	{
+		"en"		"{gold}Map:"
+		"ru"		"{gold}Карта:"
+	}
+	"Help Category - Mode"
+	{
+		"en"		"{gold}Mode:"
+		"ru"		"{gold}Режим:"
+	}
+	"Help Category - Spectate"
+	{
+		"en"		"{gold}Spectate:"
+		"ru"		"{gold}Спеки:"
+	}
+	"Help Category - Measure"
+	{
+		"en"		"{gold}Measure:"
+		"ru"		"{gold}Измерение:"
+	}
+	"Help Category - Safeguard"
+	{
+		"en"		"{gold}Safeguards:"
+		"ru"		"{gold}Предохранители:"
+	}
+	"Help Category - Misc"
+	{
+		"en"		"{gold}Other:"
+		"ru"		"{gold}Прочее:"
+	}
 	"Command Help Response (Chat)"
 	{
 		"en"		"{grey}Look in your console for a list of commands!"
@@ -425,10 +476,10 @@
 	}
 	"Command Description - kz_setstartpos"
 	{
-		"en"		"Set your custom start position to your current position."
+		"en"		"Set a custom start position at your current spot."
 		"chi"		"设置你的自定义起点为当前位置."
 		"pl"		"Ustaw własną pozycję startową."
-		"ru"		"Поставить стартовую позицию на вашу текущую позицию."
+		"ru"		"Поставить кастомную стартовую позицию (на текущей позиции)."
 		"fi"		"Aseta custom aloituspisteesi tämänhetkiseen sijaintiisi."
 		"sv"		"Skapa ny startposition på nuvarande position."
 		"ua"		"Встановити поточну позицію як стартову."
@@ -441,10 +492,10 @@
 	}
 	"Command Description - kz_ssp"
 	{
-		"en"		"Set your custom start position to your current position."
+		"en"		"Set a custom start position at your current spot."
 		"chi"		"设置你的自定义起点为当前位置."
 		"pl"		"Ustaw własną pozycję startową."
-		"ru"		"Поставить стартовую позицию на вашу текущую позицию."
+		"ru"		"Поставить кастомную стартовую позицию (на текущей позиции)."
 		"fi"		"Aseta custom aloituspisteesi tämänhetkiseen sijaintiisi."
 		"sv"		"Skapa ny startposition på nuvarande position."
 		"ua"		"Встановити поточну позицію як стартову."
@@ -460,7 +511,7 @@
 		"en"		"Clear your custom start position."
 		"chi"		"清除你的自定义起点."
 		"pl"		"Usuń własną pozycję startową."
-		"ru"		"Сбросить вашу стартовую позицию."
+		"ru"		"Сбросить кастомную стартовую позицию."
 		"fi"		"Tyhjennä custom aloituspisteesi."
 		"sv"		"Rensa justerad startposition."
 		"ua"		"Очистити власну стартову позицію."
@@ -476,7 +527,7 @@
 		"en"		"Clear your custom start position."
 		"chi"		"清除你的自定义起点."
 		"pl"		"Usuń własną pozycję startową."
-		"ru"		"Сбросить вашу стартовую позицию."
+		"ru"		"Сбросить кастомную стартовую позицию."
 		"fi"		"Tyhjennä custom aloituspisteesi."
 		"sv"		"Rensa justerad startposition."
 		"ua"		"Очистити власну стартову позицію."
@@ -955,10 +1006,10 @@
 	}
 	"Command Description - kz_restart"
 	{
-		"en"		"Restart."
+		"en"		"Restart: teleport to the course start."
 		"chi"		"重新开始."
 		"pl"		"Restart."
-		"ru"		"Рестарт."
+		"ru"		"Рестарт: телепорт на старт курса."
 		"fi"		"Aloita alusta."
 		"sv"		"Starta om."
 		"ua"		"Рестарт."
@@ -971,10 +1022,10 @@
 	}
 	"Command Description - kz_r"
 	{
-		"en"		"Restart."
+		"en"		"Restart: teleport to the course start."
 		"chi"		"重新开始."
 		"pl"		"Restart."
-		"ru"		"Рестарт."
+		"ru"		"Рестарт: телепорт на старт курса."
 		"fi"		"Aloita alusta."
 		"sv"		"Starta om."
 		"ua"		"Рестарт."
@@ -1117,12 +1168,17 @@
 		"ko"		"클래식 모드로 전환합니다."
 		"lv"		"Pāriet uz klasisko režīmu."
 	}
+	"Command Description - kz_kzt"
+	{
+		"en"		"Switch to KZTimer mode."
+		"ru"		"Переключить режим на KZTimer (KZT)."
+	}
 	"Command Description - kz_pb"
 	{
-		"en"		"Retrieve personal best statistics."
+		"en"		"Your personal best (server and global)."
 		"chi"		"查询个人最佳数据."
 		"pl"		"Wyświetl statystyki rekordów życiowych."
-		"ru"		"Показать личный рекорд."
+		"ru"		"Ваш личный рекорд (сервер и глобал)."
 		"fi"		"Hae henkilökohtaiset parhaat statistiikat."
 		"sv"		"Hämta personlig bästa statistik."
 		"ua"		"Показати персональний найкращий час."
@@ -1167,10 +1223,10 @@
 	}
 	"Command Description - kz_ctop"
 	{
-		"en"		"Retrieve top course times of a map."
+		"en"		"Top-10 of the course/map (pro and nub) in console."
 		"chi"		"查询地图的排行榜前列."
 		"pl"		"Wyświetl najlepsze czasy trasy na danej mapie."
-		"ru"		"Показать рекорды маршрута карты."
+		"ru"		"Топ-10 курса/карты (pro и nub) в консоль."
 		"sv"		"Hämta topptider av en karta."
 		"tr"		"Haritadaki en iyi süreyi göster."
 		"ua"		"Показати топ проходжень курсу на мапі."
@@ -1182,10 +1238,10 @@
 	}
 	"Command Description - kz_coursetop"
 	{
-		"en"		"Retrieve top course times of a map."
+		"en"		"Top-10 of the course/map (pro and nub) in console."
 		"chi"		"查询地图的排行榜前列."
 		"pl"		"Wyświetl najlepsze czasy trasy na danej mapie."
-		"ru"		"Показать рекорды маршрута карты."
+		"ru"		"Топ-10 курса/карты (pro и nub) в консоль."
 		"sv"		"Hämta topptider av en karta."
 		"tr"		"Haritadaki en iyi süreyi göster."
 		"ua"		"Показати топ проходжень курсу на мапі."
@@ -1197,10 +1253,10 @@
 	}
 	"Command Description - kz_maptop"
 	{
-		"en"		"Retrieve top course times of a map."
+		"en"		"Top-10 of the course/map (pro and nub) in console."
 		"chi"		"查询地图的排行榜前列."
 		"pl"		"Wyświetl najlepsze czasy trasy na danej mapie."
-		"ru"		"Показать рекорды маршрута карты."
+		"ru"		"Топ-10 курса/карты (pro и nub) в консоль."
 		"sv"		"Hämta topptider av en karta."
 		"tr"		"Haritadaki en iyi süreyi göster."
 		"ua"		"Показати топ проходжень курсу на мапі."
@@ -1470,9 +1526,9 @@
 	}
 	"Command Description - kz_ztopwatch"
 	{
-		"en"		"Toggle the zone stopwatch on/off, or use subcommands: place (set next corner), clear (reset zones), startjump/sj (toggle start on jump), stopland/sl (toggle stop on land), status."
+		"en"		"Zone stopwatch on/off. Subcommands: place, clear, sj, sl, status."
 		"chi"		"切换区域计时开关, 或使用子命令: place (设置下一角), clear (重置区域), startjump/sj (跳跃时开始), stopland/sl (着陆时停止), status."
-		"ru"		"Вкл./Выкл. Zone Stopwatch или использовать подкоманды: place (поставить след. угол), clear (сбросить зоны), startjump/sj (вкл./выкл. старт при прыжке), stopland/sl (вкл./выкл. остановку при приземлении), status."
+		"ru"		"Зональный секундомер вкл/выкл. Подкоманды: place, clear, sj, sl, status."
 		"ua"		"Увімк./вимк. Zone Stopwatch або використати підкоманди: place (встановити наступний кут), clear (скинути зони), startjump/sj (увімк./вимк. старт при стрибку), stopland/sl (увімк./вимк. зупинку при приземленні), status."
 	}
 	"Command Description - kz_measureblock"
@@ -1756,5 +1812,25 @@
 		"en"		"Configure the HUD. Usage: kz_mhud <speed|prespeed|timer|keys> [property] [value...]"
 		"ua"		"Налаштувати HUD. Використання: kz_mhud <speed|prespeed|timer|keys> [властивість] [значення...]"
 		"ru"		"Настроить HUD. Применение: kz_mhud <speed|prespeed|timer|keys> [свойство] [значение...]"
+	}
+	"Command Description - kz_safeguard"
+	{
+		"en"		"Safeguard: block timer reset in a run (noclip/restart/stop)."
+		"ru"		"Предохранитель: блок сброса таймера в ране (noclip/рестарт/стоп)."
+	}
+	"Command Description - kz_pro"
+	{
+		"en"		"Pro mode: block teleports during a run."
+		"ru"		"Pro-режим: блок телепортов в ране."
+	}
+	"Command Description - kz_options"
+	{
+		"en"		"Open the settings menu."
+		"ru"		"Меню всех настроек."
+	}
+	"Command Description - kz_rpmenu"
+	{
+		"en"		"Open the replay control menu."
+		"ru"		"Меню управления реплеем."
 	}
 }
