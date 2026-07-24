@@ -371,17 +371,20 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		std::string tTime, tSuffix;
 		if (dataSource->hudService->GetTimerParts(language, tTime, tSuffix))
 		{
-			// Имя стиля: первый активный стиль, иначе "Normal" (поля ранга у нас нет).
-			const char *styleLabel = "Normal";
+			// Метка стиля — только для активного не-дефолтного стиля. "Normal" как шум убран:
+			// без активных стилей метки нет вовсе (пустой styleTag → без висячего разделителя).
+			std::string styleTag;
 			if (!isReplay && dataSource->styleServices.Count() > 0)
 			{
-				styleLabel = dataSource->styleServices[0]->GetStyleName();
+				char st[128];
+				V_snprintf(st, sizeof(st), "&#160;&#160;<font class='" KZ_HUD_FS_MINOR "'><font color='" KZ_HUD_C_MUTED "'>%s</font></font>",
+						   dataSource->styleServices[0]->GetStyleName());
+				styleTag = st;
 			}
 			V_snprintf(buf, sizeof(buf),
 					   "<font class='" KZ_HUD_FS_TIMER "'><font color='" KZ_HUD_C_TIMER "'>" KZ_HUD_BRACKET_OPEN "&#160;%s&#160;" KZ_HUD_BRACKET_CLOSE
-					   "</font><font color='" KZ_HUD_C_DIM "'>%s</font></font>"
-					   "&#160;&#160;<font class='" KZ_HUD_FS_MINOR "'><font color='" KZ_HUD_C_MUTED "'>%s</font></font>",
-					   tTime.c_str(), tSuffix.c_str(), styleLabel);
+					   "</font><font color='" KZ_HUD_C_DIM "'>%s</font></font>%s",
+					   tTime.c_str(), tSuffix.c_str(), styleTag.c_str());
 			addLine(buf);
 		}
 	}
