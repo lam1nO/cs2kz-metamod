@@ -1256,7 +1256,13 @@ bool KZTimerService::GetHudWorldRecordTime(f64 &outTime)
 	}
 	auto modeInfo = KZ::mode::GetModeInfo(this->player->modeService->GetModeName());
 	PBDataKey key = ToPBDataKey(modeInfo.id, course->guid);
+	// WR — глобальный рекорд (wrCache, наполняется лишь на глобальных картах). На нуб-сервере
+	// глобального WR нет → фолбэк на рекорд нашей сети (srCache — лучшее время в общей БД флота).
 	const PBData *wr = this->GetCompareTargetForType(COMPARE_WR, key);
+	if (!wr || wr->overall.pbTime <= 0)
+	{
+		wr = this->GetCompareTargetForType(COMPARE_SR, key);
+	}
 	if (!wr || wr->overall.pbTime <= 0)
 	{
 		return false;
