@@ -178,7 +178,10 @@ static_function std::string OptionsItemText(KZPlayer *p, const OptionsMenuItem &
 		{
 			bool on = p->optionService->GetPreferenceBool(it.tag, it.defaultValue);
 			std::string state = KZLanguageService::PrepareMessageWithLang(lang, on ? "HUD - Menu On" : "HUD - Menu Off");
-			V_snprintf(text, sizeof(text), "%s: %s", label.c_str(), state.c_str());
+			// ВКЛ зелёным, ВЫКЛ красным: чат-цвет-байт перед значением (cs2menus ColorizeChat
+			// переводит 0x04→зелёный / 0x07→красный в <font color>; текст пункта не эскейпит цвет-байты).
+			const char *stateColor = on ? "\x04" : "\x07";
+			V_snprintf(text, sizeof(text), "%s: %s%s", label.c_str(), stateColor, state.c_str());
 			return std::string(text);
 		}
 		case OptItemKind::Volume:

@@ -435,7 +435,9 @@ static_function std::string JSMenuItemText(KZPlayer *p, const JSMenuItem &it, co
 		{
 			bool on = p->optionService->GetPreferenceBool(it.prefKey, it.defaultInt != 0);
 			std::string state = KZLanguageService::PrepareMessageWithLang(lang, on ? "HUD - Menu On" : "HUD - Menu Off");
-			V_snprintf(text, sizeof(text), "%s: %s", label.c_str(), state.c_str());
+			// ВКЛ зелёным, ВЫКЛ красным (чат-цвет-байт 0x04/0x07 → cs2menus ColorizeChat в <font color>).
+			const char *stateColor = on ? "\x04" : "\x07";
+			V_snprintf(text, sizeof(text), "%s: %s%s", label.c_str(), stateColor, state.c_str());
 			break;
 		}
 		case JSMenuItemKind::TierCycle:

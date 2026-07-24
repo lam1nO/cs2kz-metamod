@@ -991,7 +991,9 @@ static_function void SetHUDToggleItemText(MenuHandle menu, int item, const char 
 	std::string elemLabel = KZLanguageService::PrepareMessageWithLang(lang, labelKey);
 	std::string stateStr = KZLanguageService::PrepareMessageWithLang(lang, on ? "HUD - Menu On" : "HUD - Menu Off");
 	char newText[128];
-	V_snprintf(newText, sizeof(newText), "%s: %s", elemLabel.c_str(), stateStr.c_str());
+	// ВКЛ зелёным, ВЫКЛ красным (чат-цвет-байт 0x04/0x07 → cs2menus ColorizeChat в <font color>).
+	const char *stateColor = on ? "\x04" : "\x07";
+	V_snprintf(newText, sizeof(newText), "%s: %s%s", elemLabel.c_str(), stateColor, stateStr.c_str());
 	g_pMenus->SetItemText(menu, item, newText);
 }
 
@@ -1465,7 +1467,9 @@ u32 KZHUDService::CreateHUDMenu()
 		std::string elemLabel = KZLanguageService::PrepareMessageWithLang(lang, labelKey);
 		std::string stateStr = KZLanguageService::PrepareMessageWithLang(lang, on ? "HUD - Menu On" : "HUD - Menu Off");
 		char text[128];
-		V_snprintf(text, sizeof(text), "%s: %s", elemLabel.c_str(), stateStr.c_str());
+		// ВКЛ зелёным, ВЫКЛ красным (чат-цвет-байт 0x04/0x07 → cs2menus ColorizeChat в <font color>).
+		const char *stateColor = on ? "\x04" : "\x07";
+		V_snprintf(text, sizeof(text), "%s: %s%s", elemLabel.c_str(), stateColor, stateStr.c_str());
 		g_pMenus->AddItem(target, text, tag, false);
 	};
 	// Тумблер per-element по ключу префа (подпись/дефолт — из общей таблицы s_hudToggles).
