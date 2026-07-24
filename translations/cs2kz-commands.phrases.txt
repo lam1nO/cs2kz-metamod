@@ -1,5 +1,10 @@
 "Phrases"
 {
+	"Command List - Chat Header"
+	{
+		"en"		"{gold}Available commands (type in chat):"
+		"ru"		"{gold}Доступные команды (введите в чат):"
+	}
 	"Command Help Response (Chat)"
 	{
 		"en"		"{grey}Look in your console for a list of commands!"

@@ -7,6 +7,8 @@
 #include "../kz/option/kz_option.h"
 #include "utils/tables.h"
 
+#include <cctype>
+
 #include "tier0/memdbgon.h"
 // private structs
 #define SCMD_MAX_NAME_LEN 128
@@ -111,9 +113,61 @@ static_global void PrintCategoryCommands(KZPlayer *player, i32 category, bool pr
 	player->PrintConsole(false, false, table.GetSeparator("="));
 }
 
+// Печатает игроку в чат компактный список ВСЕХ !-команд (имена без kz_-префикса,
+// с '!'). Псевдонимы (SCMD_LINK) сворачиваются по общему descKey — команда
+// показывается один раз. Длинный список разбивается на несколько строк.
+static_function void PrintChatCommandList(KZPlayer *player)
+{
+	if (!player)
+	{
+		return;
+	}
+	player->languageService->PrintChat(true, false, "Command List - Chat Header");
+
+	Scmd *cmds = g_cmdManager.cmds;
+	CUtlVector<CUtlString> seen; // уже показанные descKey (свёртка псевдонимов)
+
+	std::string line;
+	const size_t kMaxLineLen = 160; // запас под 512-байтный буфер PrintChat с цвет-кодами
+
+	for (i32 i = 0; i < g_cmdManager.cmdCount; i++)
+	{
+		if (seen.Find(cmds[i].descKey) != -1)
+		{
+			continue;
+		}
+		seen.AddToTail(cmds[i].descKey);
+
+		const char *chatName = cmds[i].hasConsolePrefix ? cmds[i].name + strlen(SCMD_CONSOLE_PREFIX) : cmds[i].name;
+		std::string entry = "!";
+		entry += chatName;
+
+		if (!line.empty() && line.size() + 1 + entry.size() > kMaxLineLen)
+		{
+			player->PrintChat(false, false, "{grey}%s", line.c_str());
+			line.clear();
+		}
+		if (!line.empty())
+		{
+			line += ' ';
+		}
+		line += entry;
+	}
+	if (!line.empty())
+	{
+		player->PrintChat(false, false, "{grey}%s", line.c_str());
+	}
+}
+
 SCMD(kz_help, SCFL_MISC)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
+	// Голый !help — быстрый список всех !-команд прямо в чат этому игроку
+	// (детальные таблицы по категориям по-прежнему уходят в консоль ниже).
+	if (args->ArgC() < 2)
+	{
+		PrintChatCommandList(player);
+	}
 	player->languageService->PrintChat(true, false, "Command Help Response (Chat)");
 	player->languageService->PrintConsole(false, false, "Command Help Response (Console)");
 	u64 category = 0;
