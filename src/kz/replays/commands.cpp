@@ -33,12 +33,19 @@ namespace KZ::replaysystem::commands
 	{
 		auto replay = data::GetCurrentReplay();
 
+		// Сик внутрь записанной паузы приземляем на кадр возобновления (её интерьер —
+		// застывшие кадры, в skip-режиме не показываются). Снап ДО reprocess, чтобы
+		// таймер-состояние считалось для того же тика, что и позиция бота.
+		targetTick = playback::SnapSeekTargetOutOfPause(targetTick);
+
 		// Reset replay state and reprocess events up to target tick
 		data::ResetReplayState(replay);
 		events::ReprocessEventsUpToTick(replay, targetTick);
 
 		// Set current tick
 		replay->currentTick = targetTick;
+		// Курсор пропуска пауз — на первый сегмент, который ещё впереди цели.
+		playback::ResetPauseCursor(targetTick);
 
 		// Apply the target tick's state immediately
 		auto bot = bot::GetBot();
@@ -472,6 +479,7 @@ namespace KZ::replaysystem::commands
 		// выгружаем — его можно запустить снова.
 		bot::KickBot();
 		data::GetCurrentReplay()->playingReplay = false;
+		playback::ClearPauseSegments();
 
 		if (player)
 		{

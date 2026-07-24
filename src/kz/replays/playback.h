@@ -28,6 +28,14 @@ namespace KZ::replaysystem::playback
 	// Playback state management
 	void StartReplay();
 
+	// Пропуск записанных пауз при воспроизведении: сегменты строятся из событий
+	// TIMER_PAUSE→TIMER_RESUME. BuildPauseSegments — на старте, ClearPauseSegments — на
+	// остановке/конце. SnapSeekTargetOutOfPause/ResetPauseCursor — на навигации (сик).
+	void BuildPauseSegments();
+	void ClearPauseSegments();
+	u32 SnapSeekTargetOutOfPause(u32 tick);
+	void ResetPauseCursor(u32 tick);
+
 	// Navigation support
 	void NavigateToTick(u32 targetTick);
 	void ApplyTickState(KZPlayer *player, const TickData *tickData);

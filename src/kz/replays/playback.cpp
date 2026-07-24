@@ -7,12 +7,157 @@
 #include "item.h"
 #include "events.h"
 #include "sdk/usercmd.h"
+#include <vector>
 
 namespace KZ::replaysystem::playback
 {
 	// Последний itemDef, чей GiveNamedItem вернул null — гард от тикового цикла
 	// раздевания бота. Сбрасывается на старте реплея и при успешной выдаче.
 	static_global i32 g_lastFailedGiveItemDef = -1;
+
+	// Паузные сегменты в ИНДЕКСАХ тиков плейбека (не serverTick). Выводятся из пар
+	// событий TIMER_PAUSE→TIMER_RESUME один раз на старте/навигации, чтобы в тик-цикле
+	// проверка была O(1) по курсору без аллокаций. Единственный активный реплей — один
+	// глобальный бот, поэтому состояние статическое (как g_lastFailedGiveItemDef).
+	struct PauseSegment
+	{
+		u32 startTick; // индекс первого тика паузы
+		u32 endTick;   // индекс кадра возобновления (полуинтервал [startTick, endTick))
+	};
+
+	static_global std::vector<PauseSegment> g_pauseSegments;
+	// Курсор следующего непройденного сегмента (плейбек монотонен вперёд).
+	static_global size_t g_nextPauseSegment = 0;
+
+	// Первый индекс тика с tickData[idx].serverTick >= serverTick. serverTick в записи
+	// монотонно не убывает (движковый tickcount), поэтому бинарный поиск корректен.
+	// Может вернуть tickCount, если такого тика нет.
+	static_function u32 TickIndexForServerTick(const data::ReplayPlayback *replay, u32 serverTick)
+	{
+		u32 lo = 0, hi = replay->tickCount;
+		while (lo < hi)
+		{
+			u32 mid = lo + (hi - lo) / 2;
+			if (replay->tickData[mid].serverTick < serverTick)
+			{
+				lo = mid + 1;
+			}
+			else
+			{
+				hi = mid;
+			}
+		}
+		return lo;
+	}
+
+	void ClearPauseSegments()
+	{
+		g_pauseSegments.clear();
+		g_nextPauseSegment = 0;
+	}
+
+	void BuildPauseSegments()
+	{
+		ClearPauseSegments();
+
+		auto replay = data::GetCurrentReplay();
+		if (!replay->events || replay->numEvents == 0 || !replay->tickData || replay->tickCount == 0)
+		{
+			return;
+		}
+
+		bool inPause = false;
+		u32 pauseStartServerTick = 0;
+		for (u32 i = 0; i < replay->numEvents; i++)
+		{
+			const RpEvent *e = &replay->events[i];
+			if (e->type != RPEVENT_TIMER_EVENT)
+			{
+				continue;
+			}
+			switch (e->data.timer.type)
+			{
+				case RpEvent::RpEventData::TimerEvent::TIMER_PAUSE:
+					// Паузы не вкладываются (CanPause запрещает паузу в паузе) — берём первую.
+					if (!inPause)
+					{
+						inPause = true;
+						pauseStartServerTick = e->serverTick;
+					}
+					break;
+				case RpEvent::RpEventData::TimerEvent::TIMER_RESUME:
+					if (inPause)
+					{
+						inPause = false;
+						u32 startIdx = TickIndexForServerTick(replay, pauseStartServerTick);
+						u32 endIdx = TickIndexForServerTick(replay, e->serverTick);
+						// Кадр возобновления обязан существовать; сегмент — хотя бы 1 тик.
+						if (endIdx < replay->tickCount && startIdx < endIdx)
+						{
+							g_pauseSegments.push_back({startIdx, endIdx});
+						}
+					}
+					break;
+				case RpEvent::RpEventData::TimerEvent::TIMER_START:
+				case RpEvent::RpEventData::TimerEvent::TIMER_END:
+				case RpEvent::RpEventData::TimerEvent::TIMER_STOP:
+					// Границы рана рвут незакрытую паузу — не тащим её через ран.
+					inPause = false;
+					break;
+				default:
+					break;
+			}
+		}
+	}
+
+	// Пропуск паузных сегментов при монотонном продвижении вперёд. O(1) амортизированно
+	// по курсору g_nextPauseSegment, без аллокаций — безопасно для тик-пути.
+	static_function u32 AdvancePastPauses(u32 tick)
+	{
+		while (g_nextPauseSegment < g_pauseSegments.size())
+		{
+			const PauseSegment &seg = g_pauseSegments[g_nextPauseSegment];
+			if (tick < seg.startTick)
+			{
+				break; // до ближайшей паузы ещё не дошли
+			}
+			if (tick < seg.endTick)
+			{
+				// Вошли внутрь паузы — прыжок на кадр возобновления.
+				tick = seg.endTick;
+			}
+			// tick >= seg.endTick: сегмент пройден — к следующему (на случай смежных).
+			g_nextPauseSegment++;
+		}
+		return tick;
+	}
+
+	u32 SnapSeekTargetOutOfPause(u32 tick)
+	{
+		for (const PauseSegment &seg : g_pauseSegments)
+		{
+			if (tick >= seg.startTick && tick < seg.endTick)
+			{
+				// Интерьер паузы — застывшие кадры (в skip-режиме не показываются);
+				// приземляем сик на кадр возобновления.
+				return seg.endTick;
+			}
+			if (tick < seg.startTick)
+			{
+				break; // сегменты упорядочены — дальше начала только позже
+			}
+		}
+		return tick;
+	}
+
+	void ResetPauseCursor(u32 tick)
+	{
+		g_nextPauseSegment = 0;
+		while (g_nextPauseSegment < g_pauseSegments.size() && g_pauseSegments[g_nextPauseSegment].endTick <= tick)
+		{
+			g_nextPauseSegment++;
+		}
+	}
 
 	void OnPhysicsSimulate(KZPlayer *player)
 	{
@@ -201,10 +346,18 @@ namespace KZ::replaysystem::playback
 		// тиковая компенсация startTime на записанной паузе НЕ нужна.
 
 		replay->currentTick++;
+		// Пропуск записанных пауз: если следующий тик попал в паузный сегмент, прыгаем
+		// сразу на кадр возобновления — бот не стоит на месте всю паузу записанного игрока.
+		// Активное время не разъезжается: пропускаются РОВНО паузные тики, поэтому число
+		// реально проигранных кадров = число активных тиков, и curtime-startTime и так даёт
+		// активное время (accumulatedPauseTime остаётся ~0: TIMER_PAUSE и TIMER_RESUME
+		// обрабатываются в CheckEvents одним кадром на возобновлении).
+		replay->currentTick = AdvancePastPauses(replay->currentTick);
 		if (replay->currentTick >= replay->tickCount)
 		{
 			bot::KickBot();
 			replay->playingReplay = false;
+			ClearPauseSegments();
 		}
 	}
 
@@ -415,6 +568,8 @@ namespace KZ::replaysystem::playback
 		replay->replayPaused = false;
 		replay->currentTick = 0;
 		g_lastFailedGiveItemDef = -1;
+		// Разбор диапазонов записанных пауз (для их пропуска при воспроизведении).
+		BuildPauseSegments();
 	}
 
 	void ApplyTickState(KZPlayer *player, const TickData *tickData)
