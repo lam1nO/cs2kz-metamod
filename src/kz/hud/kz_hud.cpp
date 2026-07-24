@@ -461,6 +461,15 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 	// внутри забега курс есть → строка стабильна, пока PB/WR подтягиваются.
 	const KZCourseDescriptor *course = (showExtra && !isReplay) ? dataSource->timerService->GetCourse() : nullptr;
 
+	// Курс для строки PB/WR: активный курс, а если игрок ещё НЕ в старт-зоне (только зашёл / стоит
+	// вне зоны) — главный курс карты (cyber 0). Так PB/WR (из платформенного api-кэша) показываются
+	// сразу при заходе, не дожидаясь входа в старт-зону. Только для живого игрока (не реплей).
+	const KZCourseDescriptor *pbwrCourse = course;
+	if (!pbwrCourse && showExtra && !isReplay)
+	{
+		pbwrCourse = KZ::course::GetCourseByCyberNumber(0);
+	}
+
 	// --- Строка 3: Stage n/N — ТОЛЬКО многостейджевые карты (stageCount > 1). Лейбл MUTED,
 	//        число WHITE. На линейных картах строки нет (без слова Linear). ---
 	if (course && course->stageCount > 1)
@@ -473,13 +482,14 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 
 	// --- Строка 4: || PB 00:55.25 | WR 00:53.50 || — рамки/разделители ||/| DIM, лейблы PB/WR
 	//        MUTED, время PB белое, время WR зелёное. Незаполненное время — "--" DIM (строка не
-	//        прыгает при догрузке). PB — из PB-кэша наблюдаемого; WR — глобальный wrCache, а на
-	//        локальных/нуб-картах фолбэк на рекорд наших серверов (srCache). ---
-	if (course)
+	//        прыгает при догрузке). PB/WR — из платформенного api-кэша (совпадает с сайтом), при его
+	//        промахе/недоступности — фолбэк на локальные кэши плагина (globalPBCache/localPBCache для
+	//        PB; wrCache→srCache для WR). Курс — pbwrCourse (активный или главный вне старт-зоны). ---
+	if (pbwrCourse)
 	{
 		f64 pbTime = 0.0, wrTime = 0.0;
-		bool hasPB = dataSource->timerService->GetHudPBTime(pbTime);
-		bool hasWR = dataSource->timerService->GetHudWorldRecordTime(wrTime);
+		bool hasPB = dataSource->timerService->GetHudPBTime(pbTime, pbwrCourse);
+		bool hasWR = dataSource->timerService->GetHudWorldRecordTime(wrTime, pbwrCourse);
 
 		char pbVal[96], wrVal[96];
 		if (hasPB)
