@@ -113,9 +113,62 @@ static_global void PrintCategoryCommands(KZPlayer *player, i32 category, bool pr
 	player->PrintConsole(false, false, table.GetSeparator("="));
 }
 
-// Печатает игроку в чат компактный список ВСЕХ !-команд (имена без kz_-префикса,
-// с '!'). Псевдонимы (SCMD_LINK) сворачиваются по общему descKey — команда
-// показывается один раз. Длинный список разбивается на несколько строк.
+// Whitelist чат-версии !help: только отобранные команды, сгруппированные по
+// категориям. Имена — консольные (kz_...), именно тех вариантов, что хотим видеть
+// в чате (для алиасов — сам алиас, напр. kz_cp / kz_maptop / kz_sg). Показывается
+// строка, только если команда есть в реестре И помечена флагом SCFL_HELP; иначе
+// (режим не загружен / флаг снят) молча пропускается. Порядок и группировку задаёт
+// таблица ниже, а видимость — флаг: снятие SCFL_HELP убирает команду из !help.
+// clang-format off
+static_global const char *helpCheckpoint[] = {"kz_cp", "kz_tp", "kz_undo", "kz_pcp", "kz_ncp", "kz_ssp", "kz_csp"};
+static_global const char *helpTimer[]      = {"kz_stop", "kz_pause", "kz_r"};
+static_global const char *helpRecords[]    = {"kz_pb", "kz_wr", "kz_maptop"};
+static_global const char *helpReplay[]     = {"kz_replay", "kz_rpmenu"};
+static_global const char *helpMap[]        = {"kz_courses", "kz_mapinfo", "kz_tier", "kz_end", "kz_lj"};
+static_global const char *helpMode[]       = {"kz_kzt", "kz_ckz", "kz_vnl"};
+static_global const char *helpSpec[]       = {"kz_spec", "kz_goto"};
+static_global const char *helpMeasure[]    = {"kz_measure", "kz_measurestart", "kz_measureend", "kz_measureblock", "kz_ztopwatch"};
+static_global const char *helpSafeguard[]  = {"kz_sg", "kz_pro"};
+static_global const char *helpMisc[]       = {"kz_fov", "kz_beam", "kz_options", "kz_language", "kz_globalcheck", "kz_help"};
+
+struct HelpCategory
+{
+	const char *titleKey; // ключ фразы заголовка категории
+	const char **names;   // консольные имена команд в порядке показа
+	i32 count;
+};
+
+static_global const HelpCategory helpCategories[] = {
+	{"Help Category - Checkpoints", helpCheckpoint, (i32)KZ_ARRAYSIZE(helpCheckpoint)},
+	{"Help Category - Timer",       helpTimer,      (i32)KZ_ARRAYSIZE(helpTimer)},
+	{"Help Category - Records",     helpRecords,    (i32)KZ_ARRAYSIZE(helpRecords)},
+	{"Help Category - Replay",      helpReplay,     (i32)KZ_ARRAYSIZE(helpReplay)},
+	{"Help Category - Map",         helpMap,        (i32)KZ_ARRAYSIZE(helpMap)},
+	{"Help Category - Mode",        helpMode,       (i32)KZ_ARRAYSIZE(helpMode)},
+	{"Help Category - Spectate",    helpSpec,       (i32)KZ_ARRAYSIZE(helpSpec)},
+	{"Help Category - Measure",     helpMeasure,    (i32)KZ_ARRAYSIZE(helpMeasure)},
+	{"Help Category - Safeguard",   helpSafeguard,  (i32)KZ_ARRAYSIZE(helpSafeguard)},
+	{"Help Category - Misc",        helpMisc,       (i32)KZ_ARRAYSIZE(helpMisc)},
+};
+// clang-format on
+
+// Ищет команду в реестре по консольному имени (регистронезависимо). nullptr — нет.
+static_function Scmd *FindCmdByName(const char *name)
+{
+	for (i32 i = 0; i < g_cmdManager.cmdCount; i++)
+	{
+		if (!V_stricmp(g_cmdManager.cmds[i].name, name))
+		{
+			return &g_cmdManager.cmds[i];
+		}
+	}
+	return nullptr;
+}
+
+// Печатает игроку whitelist-список команд в чат: заголовок категории, затем
+// по строке на команду в формате «!команда — описание» (команда зелёным 0x04,
+// описание белым/default 0x01). Одна команда = одна строка, поэтому в 512-байтный
+// буфер PrintChat помещается с запасом.
 static_function void PrintChatCommandList(KZPlayer *player)
 {
 	if (!player)
@@ -124,42 +177,31 @@ static_function void PrintChatCommandList(KZPlayer *player)
 	}
 	player->languageService->PrintChat(true, false, "Command List - Chat Header");
 
-	Scmd *cmds = g_cmdManager.cmds;
-	CUtlVector<CUtlString> seen; // уже показанные descKey (свёртка псевдонимов)
-
-	std::string line;
-	const size_t kMaxLineLen = 160; // запас под 512-байтный буфер PrintChat с цвет-кодами
-
-	for (i32 i = 0; i < g_cmdManager.cmdCount; i++)
+	for (i32 c = 0; c < (i32)KZ_ARRAYSIZE(helpCategories); c++)
 	{
-		if (seen.Find(cmds[i].descKey) != -1)
+		const HelpCategory &cat = helpCategories[c];
+		bool headerPrinted = false;
+		for (i32 n = 0; n < cat.count; n++)
 		{
-			continue;
+			Scmd *cmd = FindCmdByName(cat.names[n]);
+			if (!cmd || !(cmd->flags & SCFL_HELP))
+			{
+				continue; // не зарегистрирована или не в whitelist
+			}
+			if (!headerPrinted)
+			{
+				player->languageService->PrintChat(false, false, cat.titleKey);
+				headerPrinted = true;
+			}
+			const char *chatName = cmd->hasConsolePrefix ? cmd->name + strlen(SCMD_CONSOLE_PREFIX) : cmd->name;
+			std::string desc = player->languageService->PrepareMessage(cmd->descKey);
+			// Описание уходит аргументом %s — любые '%' внутри него безопасны.
+			player->PrintChat(false, false, "{green}!%s{default} — %s", chatName, desc.c_str());
 		}
-		seen.AddToTail(cmds[i].descKey);
-
-		const char *chatName = cmds[i].hasConsolePrefix ? cmds[i].name + strlen(SCMD_CONSOLE_PREFIX) : cmds[i].name;
-		std::string entry = "!";
-		entry += chatName;
-
-		if (!line.empty() && line.size() + 1 + entry.size() > kMaxLineLen)
-		{
-			player->PrintChat(false, false, "{grey}%s", line.c_str());
-			line.clear();
-		}
-		if (!line.empty())
-		{
-			line += ' ';
-		}
-		line += entry;
-	}
-	if (!line.empty())
-	{
-		player->PrintChat(false, false, "{grey}%s", line.c_str());
 	}
 }
 
-SCMD(kz_help, SCFL_MISC)
+SCMD(kz_help, SCFL_MISC | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	// Голый !help — быстрый список всех !-команд прямо в чат этому игроку
@@ -269,13 +311,14 @@ bool scmd::RegisterCmd(const char *name, scmd::Callback_t *callback, const char 
 	return true;
 }
 
-bool scmd::LinkCmd(const char *name, const char *linkedName)
+bool scmd::LinkCmd(const char *name, const char *linkedName, u64 extraFlags)
 {
 	for (i32 i = 0; i < g_cmdManager.cmdCount; i++)
 	{
 		if (!V_stricmp(g_cmdManager.cmds[i].name, linkedName))
 		{
-			return scmd::RegisterCmd(name, g_cmdManager.cmds[i].callback, g_cmdManager.cmds[i].descKey, g_cmdManager.cmds[i].flags);
+			return scmd::RegisterCmd(name, g_cmdManager.cmds[i].callback, g_cmdManager.cmds[i].descKey,
+									 g_cmdManager.cmds[i].flags | extraFlags);
 		}
 	}
 	return false;

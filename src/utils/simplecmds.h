@@ -25,7 +25,10 @@ enum
 	SCFL_GLOBAL = 1 << 13,
 	SCFL_MISC = 1 << 14,
 	SCFL_MAP = 1 << 15,
-	SCFL_HUD = 1 << 16
+	SCFL_HUD = 1 << 16,
+	// Пометка «показывать в чат-версии !help» (whitelist). НЕ категория: в
+	// cmdFlagNames не входит, поэтому на console-таблицы по категориям не влияет.
+	SCFL_HELP = 1 << 17
 };
 
 #define SCMD_CALLBACK(name) META_RES name(CCSPlayerController *controller, const CCommand *args)
@@ -39,7 +42,9 @@ namespace scmd
 {
 	typedef SCMD_CALLBACK(Callback_t);
 	bool RegisterCmd(const char *name, Callback_t *callback, const char *descKey = nullptr, u64 flags = 0);
-	bool LinkCmd(const char *name, const char *linkedName);
+	// extraFlags — флаги, добавляемые псевдониму ПОВЕРХ унаследованных от основной
+	// команды (нужно, чтобы пометить конкретный алиас, напр. kz_cp, флагом SCFL_HELP).
+	bool LinkCmd(const char *name, const char *linkedName, u64 extraFlags = 0);
 	bool UnregisterCmd(const char *name);
 
 	META_RES OnClientCommand(CPlayerSlot &slot, const CCommand &args);
@@ -60,9 +65,9 @@ public:
 class SCmdLink
 {
 public:
-	SCmdLink(const char *name, const char *linkedName)
+	SCmdLink(const char *name, const char *linkedName, u64 extraFlags = 0)
 	{
-		scmd::LinkCmd(name, linkedName);
+		scmd::LinkCmd(name, linkedName, extraFlags);
 	}
 };
 
@@ -71,6 +76,6 @@ public:
 	static_global SCmdRegister name##_reg(#name, name##_callback, ##__VA_ARGS__); \
 	static_function SCMD_CALLBACK(name##_callback)
 
-#define SCMD_LINK(name, linkedName) static_global SCmdLink name##_reg(#name, #linkedName);
+#define SCMD_LINK(name, linkedName, ...) static_global SCmdLink name##_reg(#name, #linkedName, ##__VA_ARGS__);
 
 #endif // SIMPLECMDS_H
