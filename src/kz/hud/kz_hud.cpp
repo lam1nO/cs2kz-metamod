@@ -349,7 +349,7 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 	// В обычном — как раньше: рисуем всё, кроме suppress* (дублируемого particle-MHUD).
 	const bool isReplay = KZ::replaysystem::IsReplayBot(dataSource);
 	const bool compact = this->IsCompactPanel();
-	char buf[768]; // с запасом: строка 1 = левый паддинг figure-space + таймер + режим + стиль
+	char buf[1024]; // с запасом: строка 1 = левый nbsp-паддинг (× множитель) + таймер + режим + стиль
 
 	// Накапливаем строки в html, разделяя <br> только между непустыми (без висячих тегов).
 	std::string html;
@@ -436,21 +436,25 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 				styleTag = st;
 				rightVisChars += 2 + (int)V_strlen(styleName); // 2 разделителя + имя стиля
 			}
-			// Левый паддинг figure-space'ами (U+2007, ширина цифры) шириной ≈ правой части, чтобы центр
-			// ВРЕМЕНИ совпал с центром экрана (движок центрирует строку целиком). Приблизительно: правая
-			// часть режима — sm, стиль — s, паддинг — sm; но заметно точнее «[время] режим» без него.
+			// Левый паддинг nbsp'ами (&#160;, рендерится с шириной) ≈ ширины правой части, чтобы центр
+			// ВРЕМЕНИ (область «:» в «00:00.00») встал под центр экрана (движок центрирует строку целиком):
+			// тогда одиночная скорость снизу окажется ровно под серединой времени. nbsp У́ЖЕ буквы
+			// (≈0.5–0.6), поэтому его нужно БОЛЬШЕ, чем «символов» правой части — множитель
+			// kLeftPadNbspPerChar под живую подстройку (цель «визуально по центру», не пиксель).
+			// Паддинг в том же кегле, что правая часть (SECONDARY), чтобы ширины сопоставлялись.
 			// Пусто, если ни режима, ни стиля нет (реплей-бот / кастомный режим) → время и так по центру.
+			const int kLeftPadNbspPerChar = 2; // nbsp на 1 «символ» правой части; крутить после теста
 			std::string leftPad;
 			if (rightVisChars > 0)
 			{
 				std::string fs;
-				for (int i = 0; i < rightVisChars; i++)
+				int padCount = rightVisChars * kLeftPadNbspPerChar;
+				for (int i = 0; i < padCount; i++)
 				{
-					fs += "&#8199;"; // figure-space U+2007 — невидимая добивка цифровой ширины
+					fs += "&#160;"; // nbsp — добивка с шириной (≈0.5–0.6 буквы) под центровку времени
 				}
-				char lp[320];
-				V_snprintf(lp, sizeof(lp), "<font class='" KZ_HUD_FS_SECONDARY "'>%s</font>", fs.c_str());
-				leftPad = lp;
+				// std::string-сборка (не char-буфер): padCount растёт с множителем, буфер бы переполнился.
+				leftPad = "<font class='" KZ_HUD_FS_SECONDARY "'>" + fs + "</font>";
 			}
 			// Порядок как на кибершоке: (паддинг) → время → режим → стиль-если-есть.
 			V_snprintf(buf, sizeof(buf),
