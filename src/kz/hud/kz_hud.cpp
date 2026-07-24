@@ -536,21 +536,23 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		addLine(buf);
 	}
 
-	// --- Ряд клавиш W A S D  J C (активная — accent, неактивная — dim). Оставлен как раньше
-	//        (цвета клавиш не трогаем), только вынесен в опциональный блок после строк 1-4. ---
+	// --- Ряд клавиш в стиле кибершока (по фото пользователя): подпись «Keys:» + буква при
+	//        нажатии (accent), подчёркивание «_» когда клавиша не нажата (dim). Лейбл «Keys:»
+	//        оставлен латиницей как на кибершоке; при желании меняется на «Клавиши:». ---
 	if (showKeys)
 	{
 		auto key = [&](const char *label, bool down)
 		{
 			char k[64];
-			V_snprintf(k, sizeof(k), "<font color='%s'>%s</font>", down ? KZ_HUD_C_ACCENT : KZ_HUD_C_DIM, label);
+			// нажата → буква (accent); не нажата → «_» (dim) — как «_ _ _ _ _» на кибершоке.
+			V_snprintf(k, sizeof(k), "<font color='%s'>%s</font>", down ? KZ_HUD_C_ACCENT : KZ_HUD_C_DIM, down ? label : "_");
 			return std::string(k);
 		};
 		bool jump = dataSource->hudService->jumpedThisTick || dataSource->IsButtonPressed(IN_JUMP);
 		std::string row = key("W", dataSource->IsButtonPressed(IN_FORWARD)) + " " + key("A", dataSource->IsButtonPressed(IN_MOVELEFT)) + " "
 						  + key("S", dataSource->IsButtonPressed(IN_BACK)) + " " + key("D", dataSource->IsButtonPressed(IN_MOVERIGHT))
 						  + "&#160;&#160;" + key("J", jump) + " " + key("C", dataSource->IsButtonPressed(IN_DUCK));
-		addLine(std::string("<font class='" KZ_HUD_FS_KEYS "'>") + row + "</font>");
+		addLine(std::string("<font class='" KZ_HUD_FS_KEYS "'><font color='" KZ_HUD_C_MUTED "'>Keys:</font> ") + row + "</font>");
 	}
 
 	// --- Координаты и углы (!showpos). Тумблер — настройка получателя (this), данные —
