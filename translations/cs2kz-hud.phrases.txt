@@ -871,10 +871,10 @@
 	}
 	"HUD - Menu Label NormalHud"
 	{
-		"en"		"Normal HUD"
-		"ru"		"Обычный HUD"
-		"chi"		"普通 HUD"
-		"ua"		"Звичайний HUD"
+		"en"		"Standard HUD"
+		"ru"		"Стандартный HUD"
+		"chi"		"标准 HUD"
+		"ua"		"Стандартний HUD"
 	}
 	"HUD - Menu Label MHUDGroup"
 	{
