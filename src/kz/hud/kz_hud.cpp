@@ -317,6 +317,7 @@ bool KZHUDService::GetTimerParts(const char *language, std::string &outTime, std
 #define KZ_HUD_C_DIM    "#5B616D" // разделители / рамки || | / суффикс паузы-стопа / "--"
 #define KZ_HUD_C_MUTED  "#9AA3AF" // подписи (стиль, PB, WR, Stage, CP, TP)
 #define KZ_HUD_C_TIMER  "#4CD964" // таймер и WR-время (кибершоковский зелёный)
+#define KZ_HUD_C_CYAN   "#22D3EE" // число скорости (циан); подстроить: #00E5FF/#00FFFF
 
 // Скобки вокруг таймера. Уголковые ⌈ ⌋ (U+2308/230B) «кибершоковее», но лежат в
 // Mathematical-блоке Unicode — вне гарантированного набора игрового шрифта, риск tofu на
@@ -496,7 +497,7 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 				takeoff += cj;
 			}
 		}
-		V_snprintf(buf, sizeof(buf), "<font class='" KZ_HUD_FS_SPEED "'><font color='" KZ_HUD_C_WHITE "'>%d</font></font>%s", speed, takeoff.c_str());
+		V_snprintf(buf, sizeof(buf), "<font class='" KZ_HUD_FS_SPEED "'><font color='" KZ_HUD_C_CYAN "'>%d</font></font>%s", speed, takeoff.c_str());
 		addLine(buf);
 	}
 
