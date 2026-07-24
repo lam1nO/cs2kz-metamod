@@ -1518,6 +1518,7 @@ u32 KZHUDService::CreateHUDMenu()
 			addToggleKey(sub, "hudPrespeed");
 			addToggleKey(sub, "hudTimer");
 			addToggleKey(sub, "hudKeys");
+			addToggleKey(sub, "hudKeysOverlap"); // overlap применяется и к стандартному, и к MHUD-худу
 			addToggleKey(sub, "hudCpTp");
 		}
 		attachSub(sub, "HUD - Menu Label Elements");
@@ -1549,7 +1550,6 @@ u32 KZHUDService::CreateHUDMenu()
 				g_pMenus->AddItem(sub, text, HUD_MENU_FONT_TAG, false);
 			}
 			addToggleKey(sub, "hudTimerDetail");
-			addToggleKey(sub, "hudKeysOverlap");
 			addToggleKey(sub, "hudOutline");
 			// «Внешний вид MHUD» — подраздел внутри MHUD (позиция/размер/цвет particle-элементов).
 			MenuHandle appearance = BuildMHUDAppearanceMenu(this->player, slot);

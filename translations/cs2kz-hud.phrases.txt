@@ -963,7 +963,7 @@
 	"HUD - Menu Label KeysOverlap"
 	{
 		"en"		"Keys overlap"
-		"ru"		"Наложение клавиш"
+		"ru"		"overlap"
 		"chi"		"按键冲突"
 		"ua"		"Накладання клавіш"
 	}

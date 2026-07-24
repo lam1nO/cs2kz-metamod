@@ -318,6 +318,7 @@ bool KZHUDService::GetTimerParts(const char *language, std::string &outTime, std
 #define KZ_HUD_C_MUTED  "#9AA3AF" // подписи (режим, стиль, Stage, координаты)
 #define KZ_HUD_C_TIMER  "#4CD964" // таймер и WR-время (кибершоковский зелёный)
 #define KZ_HUD_C_CYAN   "#22D3EE" // число скорости (циан); подстроить: #00E5FF/#00FFFF
+#define KZ_HUD_C_RED    "#FF3B3B" // overlap клавиш (W+S / A+D при hudKeysOverlap): все нажатые красным
 
 // Скобки вокруг таймера. Уголковые ⌈ ⌋ (U+2308/230B) «кибершоковее», но лежат в
 // Mathematical-блоке Unicode — вне гарантированного набора игрового шрифта, риск tofu на
@@ -636,19 +637,29 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 	//        ряд 2: A S D. Зазор между буквами — пара nbsp. ---
 	if (showKeys)
 	{
+		// overlap = одновременно нажаты ПРОТИВОПОЛОЖНЫЕ клавиши (W+S или A+D). Когда настройка
+		// hudKeysOverlap ВКЛ и есть overlap — ВСЕ нажатые клавиши красим в KZ_HUD_C_RED вместо
+		// обычного циана нажатия; ненажатые остаются dim. Настройка — тот же преф hudKeysOverlap,
+		// что у MHUD (читаем через IsMHUDKeysOverlapEnabled с this = настройки получателя), теперь
+		// он применяется и к стандартному HTML-худу.
+		bool wDown = dataSource->IsButtonPressed(IN_FORWARD);
+		bool sDown = dataSource->IsButtonPressed(IN_BACK);
+		bool aDown = dataSource->IsButtonPressed(IN_MOVELEFT);
+		bool dDown = dataSource->IsButtonPressed(IN_MOVERIGHT);
+		bool overlap = (wDown && sDown) || (aDown && dDown);
+		const char *pressedColor = (overlap && this->IsMHUDKeysOverlapEnabled()) ? KZ_HUD_C_RED : KZ_HUD_C_CYAN;
 		auto key = [&](const char *label, bool down)
 		{
 			char k[64];
-			V_snprintf(k, sizeof(k), "<font color='%s'>%s</font>", down ? KZ_HUD_C_CYAN : KZ_HUD_C_DIM, label);
+			V_snprintf(k, sizeof(k), "<font color='%s'>%s</font>", down ? pressedColor : KZ_HUD_C_DIM, label);
 			return std::string(k);
 		};
 		bool jump = dataSource->hudService->jumpedThisTick || dataSource->IsButtonPressed(IN_JUMP);
 		const char *sep = "&#160;&#160;"; // пара nbsp — читаемый зазор между буквами
 		// Ряд 1 (верх): C W J.
-		std::string row1 = key("C", dataSource->IsButtonPressed(IN_DUCK)) + sep + key("W", dataSource->IsButtonPressed(IN_FORWARD)) + sep + key("J", jump);
+		std::string row1 = key("C", dataSource->IsButtonPressed(IN_DUCK)) + sep + key("W", wDown) + sep + key("J", jump);
 		// Ряд 2 (низ): A S D — W окажется над S при центровке движком.
-		std::string row2 = key("A", dataSource->IsButtonPressed(IN_MOVELEFT)) + sep + key("S", dataSource->IsButtonPressed(IN_BACK)) + sep
-						   + key("D", dataSource->IsButtonPressed(IN_MOVERIGHT));
+		std::string row2 = key("A", aDown) + sep + key("S", sDown) + sep + key("D", dDown);
 		addLine(std::string("<font class='" KZ_HUD_FS_KEYS "'>") + row1 + "</font>");
 		addLine(std::string("<font class='" KZ_HUD_FS_KEYS "'>") + row2 + "</font>");
 	}
