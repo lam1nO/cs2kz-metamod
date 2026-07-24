@@ -85,6 +85,13 @@ static_function void OnRpMenuSelect(MenuHandle menu, int slot, int item)
 		}
 		commands::JumpToReplayTime(p, "0");
 	}
+	else if (KZ_STREQ(key, "end"))
+	{
+		// «Завершить»: остановить плейбек, убрать бота, закрыть меню.
+		commands::StopReplay(p);
+		g_pMenus->CancelMenu(slot);
+		return;
+	}
 	// Регулируемые строки перемотки (info "seek") реагируют на A/D в OnRpMenuAdjust;
 	// выбор E по ним ничего не делает — сюда попадём, но действий нет.
 
@@ -133,6 +140,10 @@ void KZ::replaysystem::menu::OpenReplayControlsMenu(KZPlayer *player)
 	std::string seek30 = SeekItemText(player, (int)RPMENU_SEEK_STEP_30);
 	g_pMenus->AddAdjustableItem(m, seek30.c_str(), "seek", RPMENU_SEEK_STEP_30, -RPMENU_SEEK_STEP_30, RPMENU_SEEK_STEP_30);
 	g_pMenus->SetAdjustCallback(m, &OnRpMenuAdjust);
+
+	// «Завершить» — останавливает реплей и закрывает меню (обрабатывается в OnRpMenuSelect).
+	std::string endLabel = KZLanguageService::PrepareMessageWithLang(lang, "Replay Menu - End");
+	g_pMenus->AddItem(m, endLabel.c_str(), "end", false);
 
 	// Не закрываем при выборе — меню держится, пока игрок сам не закроет (0/ESC).
 	g_pMenus->SetCloseOnSelect(m, false);

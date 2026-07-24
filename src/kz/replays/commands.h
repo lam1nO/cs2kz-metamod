@@ -32,6 +32,9 @@ namespace KZ::replaysystem::commands
 	void JumpToReplayTick(KZPlayer *player, const char *input);
 	void GetReplayInfo(KZPlayer *player);
 	void ToggleReplayPause(KZPlayer *player);
+	// Штатно завершает воспроизведение: убирает бота и снимает флаг плейбека
+	// (та же последовательность, что при естественном конце реплея).
+	void StopReplay(KZPlayer *player);
 	void ListReplays(KZPlayer *player, const char *input);
 	void ToggleLegsVisibility(KZPlayer *player);
 	void LoadReplayForRecord(KZPlayer *player, RecordType type, const char *courseArg, const char *modeArg);

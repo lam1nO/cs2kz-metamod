@@ -247,6 +247,11 @@
 		"ua"		"{grey}Повтор продовжено."
 		"de"		"{grey}Wiederholung fortgesetzt."
 	}
+	"Replay - Ended"
+	{
+		"en"		"{grey}Replay ended."
+		"ru"		"{grey}Реплей завершён."
+	}
 	"Replay - Loading"
 	{
 		"en"		"{grey}Loading replay, please wait..."
@@ -808,5 +813,10 @@
 		"#format"	"step:d"
 		"en"		"Rewind: {step} sec"
 		"ru"		"Перемотка: {step} сек"
+	}
+	"Replay Menu - End"
+	{
+		"en"		"End"
+		"ru"		"Завершить"
 	}
 }

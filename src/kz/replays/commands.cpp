@@ -456,6 +456,29 @@ namespace KZ::replaysystem::commands
 		}
 	}
 
+	void StopReplay(KZPlayer *player)
+	{
+		if (!data::IsReplayPlaying())
+		{
+			if (player)
+			{
+				player->languageService->PrintChat(true, false, "Replay - No Replay Playing");
+			}
+			return;
+		}
+
+		// Та же последовательность, что при естественном конце плейбека
+		// (playback.cpp: KickBot + снять флаг playingReplay). Данные реплея не
+		// выгружаем — его можно запустить снова.
+		bot::KickBot();
+		data::GetCurrentReplay()->playingReplay = false;
+
+		if (player)
+		{
+			player->languageService->PrintChat(true, false, "Replay - Ended");
+		}
+	}
+
 	void CheckReplayLoadProgress(KZPlayer *player)
 	{
 		if (!player)
