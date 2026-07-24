@@ -532,11 +532,11 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 	//        сайтом), при его промахе/недоступности — фолбэк на локальные кэши плагина
 	//        (globalPBCache/localPBCache для PB; wrCache→srCache для WR). Курс — pbwrCourse
 	//        (активный или главный вне старт-зоны).
-	//        Центрирование: значения PB/WR добиваются nbsp до ФИКСИРОВАННОЙ видимой ширины
-	//        (cellW символов, «00:00.00» = 8), «--» тоже. Левое поле «|| PB <val8>» и
-	//        правое « WR <val8> ||» одной ширины, центральный || не съезжает при «--»/разной длине.
-	//        Паддинг — nbsp ПОСЛЕ значения: цифры держатся у своей метки PB/WR, пустой хвост уходит
-	//        к разделителю. Шрифт пропорциональный → приблизительно, но сильно стабильнее прежнего. ---
+	//        Центрирование: значения PB/WR добиваются figure-space (U+2007, ширина цифры) до
+	//        ФИКСИРОВАННОЙ видимой ширины (cellW символов, «00:00.00» = 8), «--» тоже. Левое поле
+	//        «|| PB <val8>» и правое « WR <val8> ||» одной пиксельной ширины (figure-space ≈ цифра,
+	//        поэтому «--»+добивка = как полное время), центральный || не съезжает. Паддинг — ПОСЛЕ
+	//        значения: цифры держатся у метки PB/WR, пустой хвост уходит к разделителю. ---
 	if (pbwrCourse)
 	{
 		const int cellW = 8; // видимая ширина поля времени: «00:00.00» = 8 символов (правится тут)
@@ -545,7 +545,7 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		bool hasPB = dataSource->timerService->GetHudPBTime(pbTime, pbwrCourse);
 		bool hasWR = dataSource->timerService->GetHudWorldRecordTime(wrTime, pbwrCourse);
 
-		// Ячейка значения: <font color>text</font> + добивка nbsp до cellW видимых символов.
+		// Ячейка значения: <font color>text</font> + добивка figure-space (U+2007) до cellW видимых символов.
 		auto padCell = [&](const char *color, const char *text) -> std::string
 		{
 			char cell[96];
@@ -553,7 +553,7 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 			std::string s = cell;
 			for (int i = (int)V_strlen(text); i < cellW; i++)
 			{
-				s += "&#160;"; // невидимая добивка вправо (у длинных времён с часами хвоста нет)
+				s += "&#8199;"; // figure-space U+2007 (ширина цифры) — «--»+хвост ≈ пиксельная ширина полного времени
 			}
 			return s;
 		};
