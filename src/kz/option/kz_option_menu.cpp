@@ -46,6 +46,7 @@ enum class OptItemKind : u8
 	Action,     // действие без состояния (текст пункта не обновляется)
 	Volume,     // float-преф: цикл по пресетам громкости
 	PaintColor, // цикл по именованной палитре paint
+	PaintSize,  // float-преф: регулируемая строка A/D (размер краски)
 };
 
 struct OptionsMenuItem
@@ -120,11 +121,18 @@ static const OptionsMenuItem s_sndItems[] = {
 
 // Paint.
 static const OptionsMenuItem s_paintItems[] = {
-	{OptItemKind::Toggle,     "Options - Menu Label ShowAllPaint", "showAllPaint", false, 0.0f, &ApplyShowAllPaint},
-	{OptItemKind::PaintColor, "Options - Menu Label PaintColor",   "paintColor",   false, 0.0f, nullptr           },
+	{OptItemKind::Toggle,     "Options - Menu Label ShowAllPaint", "showAllPaint", false, 0.0f,                               &ApplyShowAllPaint},
+	{OptItemKind::PaintColor, "Options - Menu Label PaintColor",   "paintColor",   false, 0.0f,                               nullptr           },
+	{OptItemKind::PaintSize,  "Options - Menu Label PaintSize",    "paintSize",    false, KZPaintService::DEFAULT_PAINT_SIZE, nullptr           },
 };
 
 // clang-format on
+
+// Регулируемая строка размера краски (A/D). Диапазон под команду !paintsize
+// (SetSize требует value > 0; верхнего клэмпа у команды нет — в меню ограничиваем).
+static_global constexpr f32 s_paintSizeStep = 1.0f;
+static_global constexpr f32 s_paintSizeMin = 1.0f;
+static_global constexpr f32 s_paintSizeMax = 50.0f;
 
 // Пресеты громкости (как в меню джампстатов).
 static_global constexpr f32 s_volumePresets[] = {0.0f, 0.25f, 0.5f, 0.75f, 1.0f};
@@ -193,6 +201,11 @@ static_function std::string OptionsItemText(KZPlayer *p, const OptionsMenuItem &
 		case OptItemKind::PaintColor:
 		{
 			V_snprintf(text, sizeof(text), "%s: %s", label.c_str(), p->paintService->GetColorName());
+			return std::string(text);
+		}
+		case OptItemKind::PaintSize:
+		{
+			V_snprintf(text, sizeof(text), "%s: %.1f", label.c_str(), p->paintService->GetSize());
 			return std::string(text);
 		}
 	}
@@ -265,7 +278,42 @@ static_function void OnOptionsSubmenuSelect(MenuHandle menu, int slot, int item)
 			p->paintService->SetColor(s_paintColors[(idx + 1) % KZ_ARRAYSIZE(s_paintColors)]);
 			break;
 		}
+		case OptItemKind::PaintSize:
+			// Регулируется только A/D (см. OnOptionsSubmenuAdjust); E — no-op (лишь перерисовка ниже).
+			break;
 	}
+	g_pMenus->SetItemText(menu, item, OptionsItemText(p, *it, p->languageService->GetLanguage()).c_str());
+}
+
+// A/D по регулируемой строке размера краски: применить ±delta, клэмп по [min,max] строки,
+// сохранить (SetSize пишет преф paintSize), обновить текст. Механику рисования не трогаем.
+static_function void OnOptionsSubmenuAdjust(MenuHandle menu, int slot, int item, f32 delta, f32 minValue, f32 maxValue)
+{
+	KZPlayer *p = g_pKZPlayerManager->ToPlayer(CPlayerSlot(slot));
+	if (!p)
+	{
+		return;
+	}
+	const char *tag = g_pMenus->GetItemInfo(menu, item);
+	if (!tag || !tag[0])
+	{
+		return;
+	}
+	const OptionsMenuItem *it = FindOptionsItem(tag);
+	if (!it || it->kind != OptItemKind::PaintSize)
+	{
+		return;
+	}
+	f32 next = p->paintService->GetSize() + delta;
+	if (next < minValue)
+	{
+		next = minValue;
+	}
+	if (next > maxValue)
+	{
+		next = maxValue;
+	}
+	p->paintService->SetSize(next);
 	g_pMenus->SetItemText(menu, item, OptionsItemText(p, *it, p->languageService->GetLanguage()).c_str());
 }
 
@@ -282,8 +330,20 @@ static_function MenuHandle BuildOptionsSubmenu(KZPlayer *player, const char *tit
 	}
 	for (i32 i = 0; i < count; i++)
 	{
-		g_pMenus->AddItem(m, OptionsItemText(player, items[i], lang).c_str(), items[i].tag, false);
+		std::string itemText = OptionsItemText(player, items[i], lang);
+		if (items[i].kind == OptItemKind::PaintSize)
+		{
+			// Регулируемая строка A/D (движок значение не хранит — см. OnOptionsSubmenuAdjust).
+			g_pMenus->AddAdjustableItem(m, itemText.c_str(), items[i].tag, s_paintSizeStep, s_paintSizeMin, s_paintSizeMax);
+		}
+		else
+		{
+			g_pMenus->AddItem(m, itemText.c_str(), items[i].tag, false);
+		}
 	}
+	// Колбэк A/D нужен только подменю с регулируемыми строками (paint); на прочих A/D по
+	// нерегулируемым строкам движок игнорирует — регистрировать безвредно для всех.
+	g_pMenus->SetAdjustCallback(m, &OnOptionsSubmenuAdjust);
 	// Не закрываем при выборе — тумблеры обновляют текст вживую.
 	g_pMenus->SetCloseOnSelect(m, false);
 	return m;
