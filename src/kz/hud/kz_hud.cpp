@@ -504,43 +504,64 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		addLine(buf);
 	}
 
-	// --- Строка 4: || PB 00:55.25 | WR 00:53.50 || — рамки/разделители ||/| DIM, лейблы PB/WR
-	//        MUTED, время PB белое, время WR зелёное. Незаполненное время — "--" DIM (строка не
-	//        прыгает при догрузке). PB/WR — из платформенного api-кэша (совпадает с сайтом), при его
-	//        промахе/недоступности — фолбэк на локальные кэши плагина (globalPBCache/localPBCache для
-	//        PB; wrCache→srCache для WR). Курс — pbwrCourse (активный или главный вне старт-зоны). ---
+	// --- Строка 4: || PB 00:55.25 || WR 00:53.50 || — рамки/разделители везде ДВОЙНЫЕ ||  DIM,
+	//        лейблы PB/WR MUTED, время PB белое, время WR зелёное. Незаполненное время — "--" DIM
+	//        (строка не прыгает при догрузке). PB/WR — из платформенного api-кэша (совпадает с
+	//        сайтом), при его промахе/недоступности — фолбэк на локальные кэши плагина
+	//        (globalPBCache/localPBCache для PB; wrCache→srCache для WR). Курс — pbwrCourse
+	//        (активный или главный вне старт-зоны).
+	//        Центрирование: значения PB/WR добиваются nbsp до ФИКСИРОВАННОЙ видимой ширины
+	//        (cellW символов, «00:00.00» = 8), «--» тоже. Левое поле «|| PB <val8>» и
+	//        правое « WR <val8> ||» одной ширины, центральный || не съезжает при «--»/разной длине.
+	//        Паддинг — nbsp ПОСЛЕ значения: цифры держатся у своей метки PB/WR, пустой хвост уходит
+	//        к разделителю. Шрифт пропорциональный → приблизительно, но сильно стабильнее прежнего. ---
 	if (pbwrCourse)
 	{
+		const int cellW = 8; // видимая ширина поля времени: «00:00.00» = 8 символов (правится тут)
+
 		f64 pbTime = 0.0, wrTime = 0.0;
 		bool hasPB = dataSource->timerService->GetHudPBTime(pbTime, pbwrCourse);
 		bool hasWR = dataSource->timerService->GetHudWorldRecordTime(wrTime, pbwrCourse);
 
-		char pbVal[96], wrVal[96];
+		// Ячейка значения: <font color>text</font> + добивка nbsp до cellW видимых символов.
+		auto padCell = [&](const char *color, const char *text) -> std::string
+		{
+			char cell[96];
+			V_snprintf(cell, sizeof(cell), "<font color='%s'>%s</font>", color, text);
+			std::string s = cell;
+			for (int i = (int)V_strlen(text); i < cellW; i++)
+			{
+				s += "&#160;"; // невидимая добивка вправо (у длинных времён с часами хвоста нет)
+			}
+			return s;
+		};
+
+		std::string pbVal, wrVal;
 		if (hasPB)
 		{
 			char pbBuf[32];
 			FormatTimeHud(pbTime, pbBuf, sizeof(pbBuf));
-			V_snprintf(pbVal, sizeof(pbVal), "<font color='" KZ_HUD_C_WHITE "'>%s</font>", pbBuf);
+			pbVal = padCell(KZ_HUD_C_WHITE, pbBuf);
 		}
 		else
 		{
-			V_snprintf(pbVal, sizeof(pbVal), "<font color='" KZ_HUD_C_DIM "'>--</font>");
+			pbVal = padCell(KZ_HUD_C_DIM, "--");
 		}
 		if (hasWR)
 		{
 			char wrBuf[32];
 			FormatTimeHud(wrTime, wrBuf, sizeof(wrBuf));
-			V_snprintf(wrVal, sizeof(wrVal), "<font color='" KZ_HUD_C_TIMER "'>%s</font>", wrBuf);
+			wrVal = padCell(KZ_HUD_C_TIMER, wrBuf);
 		}
 		else
 		{
-			V_snprintf(wrVal, sizeof(wrVal), "<font color='" KZ_HUD_C_DIM "'>--</font>");
+			wrVal = padCell(KZ_HUD_C_DIM, "--");
 		}
 		V_snprintf(buf, sizeof(buf),
 				   "<font class='" KZ_HUD_FS_SECONDARY "'><font color='" KZ_HUD_C_DIM "'>||&#160;</font><font color='" KZ_HUD_C_MUTED "'>PB</font>&#160;%s"
-				   "<font color='" KZ_HUD_C_DIM "'>&#160;|&#160;</font><font color='" KZ_HUD_C_MUTED "'>WR</font>&#160;%s"
+				   "<font color='" KZ_HUD_C_DIM "'>&#160;||&#160;</font><font color='" KZ_HUD_C_MUTED "'>WR</font>&#160;%s"
 				   "<font color='" KZ_HUD_C_DIM "'>&#160;||</font></font>",
-				   pbVal, wrVal);
+				   pbVal.c_str(), wrVal.c_str());
 		addLine(buf);
 	}
 
