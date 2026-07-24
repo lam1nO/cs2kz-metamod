@@ -19,6 +19,11 @@ namespace
 	// Пауза — первый пункт меню: подпись живая, пересобирается в OnRpMenuSelect.
 	constexpr int RPMENU_ITEM_PAUSE = 0;
 
+	// Шаги перемотки (сек) для регулируемых строк; знак delta задаёт направление
+	// (A/AdjustDec = назад, D/AdjustInc = вперёд).
+	constexpr float RPMENU_SEEK_STEP_10 = 10.0f;
+	constexpr float RPMENU_SEEK_STEP_30 = 30.0f;
+
 	std::string PauseItemText(KZPlayer *player)
 	{
 		using namespace KZ::replaysystem;
@@ -26,7 +31,31 @@ namespace
 		const char *lang = player->languageService->GetLanguage();
 		return KZLanguageService::PrepareMessageWithLang(lang, paused ? "Replay Menu - Resume" : "Replay Menu - Pause");
 	}
+
+	// Текст регулируемой строки перемотки: «Перемотка: N сек». Стрелки ◄ ► рисует
+	// сам движок cs2menus для adjustable-строк; значение (шаг) фиксировано.
+	std::string SeekItemText(KZPlayer *player, int step)
+	{
+		const char *lang = player->languageService->GetLanguage();
+		return KZLanguageService::PrepareMessageWithLang(lang, "Replay Menu - Seek", step);
+	}
 } // namespace
+
+// A/D по регулируемой строке перемотки: знак delta задаёт направление (D = +шаг
+// вперёд, A = −шаг назад). Переиспользуем seek-логику JumpToReplayTime, собрав
+// относительный сдвиг вида "+10"/"-30". min/max движку нужны для клампа значения,
+// но здесь значение не хранится (шаг фиксирован) — они не используются.
+static_function void OnRpMenuAdjust(MenuHandle menu, int slot, int item, f32 delta, f32 minValue, f32 maxValue)
+{
+	KZPlayer *p = g_pKZPlayerManager->ToPlayer(CPlayerSlot(slot));
+	if (!p)
+	{
+		return;
+	}
+	char seek[16];
+	V_snprintf(seek, sizeof(seek), "%+d", (int)delta);
+	KZ::replaysystem::commands::JumpToReplayTime(p, seek);
+}
 
 static_function void OnRpMenuSelect(MenuHandle menu, int slot, int item)
 {
@@ -56,11 +85,8 @@ static_function void OnRpMenuSelect(MenuHandle menu, int slot, int item)
 		}
 		commands::JumpToReplayTime(p, "0");
 	}
-	else
-	{
-		// Ключ пункта — готовый относительный сдвиг ("+10"/"-30"); кламп внутри JumpToReplayTime.
-		commands::JumpToReplayTime(p, key);
-	}
+	// Регулируемые строки перемотки (info "seek") реагируют на A/D в OnRpMenuAdjust;
+	// выбор E по ним ничего не делает — сюда попадём, но действий нет.
 
 	// Подпись паузы — по фактическому состоянию (могла смениться и рестартом, и !rppause мимо меню).
 	g_pMenus->SetItemText(menu, RPMENU_ITEM_PAUSE, PauseItemText(p).c_str());
@@ -100,21 +126,13 @@ void KZ::replaysystem::menu::OpenReplayControlsMenu(KZPlayer *player)
 	std::string restart = KZLanguageService::PrepareMessageWithLang(lang, "Replay Menu - Restart");
 	g_pMenus->AddItem(m, restart.c_str(), "restart", false);
 
-	static const struct
-	{
-		const char *labelKey;
-		const char *seek;
-	} seekItems[] = {
-		{"Replay Menu - Back10", "-10"},
-		{"Replay Menu - Fwd10",  "+10"},
-		{"Replay Menu - Back30", "-30"},
-		{"Replay Menu - Fwd30",  "+30"},
-	};
-	for (const auto &s : seekItems)
-	{
-		std::string label = KZLanguageService::PrepareMessageWithLang(lang, s.labelKey);
-		g_pMenus->AddItem(m, label.c_str(), s.seek, false);
-	}
+	// Перемотка — одной регулируемой строкой на шаг: A (◄) — назад, D (►) — вперёд.
+	// Стрелки рисует движок; текст показывает фиксированный шаг. Вторая строка — шаг 30.
+	std::string seek10 = SeekItemText(player, (int)RPMENU_SEEK_STEP_10);
+	g_pMenus->AddAdjustableItem(m, seek10.c_str(), "seek", RPMENU_SEEK_STEP_10, -RPMENU_SEEK_STEP_10, RPMENU_SEEK_STEP_10);
+	std::string seek30 = SeekItemText(player, (int)RPMENU_SEEK_STEP_30);
+	g_pMenus->AddAdjustableItem(m, seek30.c_str(), "seek", RPMENU_SEEK_STEP_30, -RPMENU_SEEK_STEP_30, RPMENU_SEEK_STEP_30);
+	g_pMenus->SetAdjustCallback(m, &OnRpMenuAdjust);
 
 	// Не закрываем при выборе — меню держится, пока игрок сам не закроет (0/ESC).
 	g_pMenus->SetCloseOnSelect(m, false);

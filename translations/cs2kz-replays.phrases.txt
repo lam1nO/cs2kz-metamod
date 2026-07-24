@@ -803,24 +803,10 @@
 		"en"		"From start"
 		"ru"		"С начала"
 	}
-	"Replay Menu - Back10"
+	"Replay Menu - Seek"
 	{
-		"en"		"-10 sec"
-		"ru"		"-10 сек"
-	}
-	"Replay Menu - Fwd10"
-	{
-		"en"		"+10 sec"
-		"ru"		"+10 сек"
-	}
-	"Replay Menu - Back30"
-	{
-		"en"		"-30 sec"
-		"ru"		"-30 сек"
-	}
-	"Replay Menu - Fwd30"
-	{
-		"en"		"+30 sec"
-		"ru"		"+30 сек"
+		"#format"	"step:d"
+		"en"		"Rewind: {step} sec"
+		"ru"		"Перемотка: {step} сек"
 	}
 }
