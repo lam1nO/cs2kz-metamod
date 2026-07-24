@@ -43,9 +43,28 @@ void SwitchToMap(PublishedFileId_t id)
 	interfaces::pEngine->ServerCommand(command.c_str());
 }
 
+// Безопасное имя карты: только [A-Za-z0-9_], минимум 3 символа. Во время докачки в папке
+// может лежать частичный/битый .vpk со странным именем — такое имя в чат не выводим.
+bool IsSafeMapName(const std::string &name)
+{
+	if (name.size() < 3)
+	{
+		return false;
+	}
+	for (char c : name)
+	{
+		bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
+		if (!ok)
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
 // Название карты установленного айтема = имя .vpk в его папке (титул из Steam
 // доступен только асинхронным UGC-запросом — не тянем ради строки в чате).
-// Фолбэк — сам workshop-ID строкой.
+// Фолбэк — сам workshop-ID строкой (в т.ч. если имя из .vpk не прошло санитайз).
 std::string GetInstalledMapName(PublishedFileId_t id)
 {
 	u64 sizeOnDisk = 0;
@@ -69,16 +88,21 @@ std::string GetInstalledMapName(PublishedFileId_t id)
 			if (name.size() > 4 && name.compare(name.size() - 4, 4, "_dir") == 0)
 			{
 				name.resize(name.size() - 4);
-				return name;
+				// Битый/частичный .vpk при докачке даёт мусорное имя — валидируем перед выводом.
+				if (IsSafeMapName(name))
+				{
+					return name;
+				}
 			}
-			if (firstVpk.empty())
+			else if (firstVpk.empty())
 			{
 				firstVpk = name;
 			}
 		}
 		it.increment(ec);
 	}
-	return firstVpk.empty() ? std::to_string(id) : firstVpk;
+	// Не нашли валидного нормального имени → показываем workshop-ID вместо мусора.
+	return IsSafeMapName(firstVpk) ? firstVpk : std::to_string(id);
 }
 
 void StartDownload(PublishedFileId_t id)
