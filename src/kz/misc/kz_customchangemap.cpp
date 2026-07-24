@@ -43,8 +43,9 @@ void SwitchToMap(PublishedFileId_t id)
 	interfaces::pEngine->ServerCommand(command.c_str());
 }
 
-// Безопасное имя карты: только [A-Za-z0-9_], минимум 3 символа. Во время докачки в папке
+// Безопасное имя карты: только [A-Za-z0-9_-], минимум 3 символа. Во время докачки в папке
 // может лежать частичный/битый .vpk со странным именем — такое имя в чат не выводим.
+// Дефис допускаем: у части воркшоп-карт он в имени .vpk (иначе показали бы ID вместо названия).
 bool IsSafeMapName(const std::string &name)
 {
 	if (name.size() < 3)
@@ -53,7 +54,7 @@ bool IsSafeMapName(const std::string &name)
 	}
 	for (char c : name)
 	{
-		bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
+		bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-';
 		if (!ok)
 		{
 			return false;
