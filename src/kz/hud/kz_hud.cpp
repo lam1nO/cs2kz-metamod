@@ -317,12 +317,14 @@ bool KZHUDService::GetTimerParts(const char *language, std::string &outTime, std
 // #define KZ_HUD_BRACKET_CLOSE "&#8971;" // ⌋ U+230B
 
 // Размеры шрифта строк стандартного HTML-худа (класс движка внутри color-тега, см. ниже).
-// Крупнее прежнего «как на кибершоке». ВНИМАНИЕ: fontSize-l — гипотеза (кибершок вероятно
-// использует именно его); если движок не знает класс, размер молча откатится на дефолт —
-// проверить вживую. Все три в одном месте: правится одной строкой после живого теста.
-#define KZ_HUD_FS_SPEED "fontSize-l"  // скорость (крупная)
-#define KZ_HUD_FS_TIMER "fontSize-m"  // таймер
-#define KZ_HUD_FS_SMALL "fontSize-sm" // престрейф / Stage / PB-WR / клавиши / CP-TP / координаты
+// Явная иерархия по важности: скорость > таймер > вторичная инфа > клавиши/стиль. ВНИМАНИЕ:
+// имена классов — гипотезы (движок кибершока вероятно знает fontSize-l/m/sm/s); если класс
+// неизвестен, размер молча откатится на дефолт — проверить вживую. Все четыре в одном месте:
+// иерархия правится одной строкой после живого теста.
+#define KZ_HUD_FS_SPEED     "fontSize-l"  // скорость — главный акцент
+#define KZ_HUD_FS_TIMER     "fontSize-m"  // таймер — второй по важности
+#define KZ_HUD_FS_SECONDARY "fontSize-sm" // PB/WR, CP/TP, престрейф, Stage, координаты — вторичная инфа
+#define KZ_HUD_FS_MINOR     "fontSize-s"  // ряд клавиш W A S D J C и метка стиля — наименее заметное
 
 std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSpeed, bool suppressTimer, bool suppressKeys, bool masterMode,
 										   const char *language)
@@ -355,8 +357,9 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 	bool showCpTp = compact ? false : (masterMode ? this->IsMHUDCpTpEnabled() : true);
 	bool showExtra = !compact;
 
-	// Типографика: скорость — KZ_HUD_FS_SPEED, таймер — KZ_HUD_FS_TIMER, всё прочее — KZ_HUD_FS_SMALL
-	// (значения классов — в #define рядом с палитрой выше, правятся одной строкой).
+	// Типографика (иерархия): скорость — KZ_HUD_FS_SPEED, таймер — KZ_HUD_FS_TIMER, вторичная инфа
+	// (PB/WR, CP/TP, престрейф, Stage, координаты) — KZ_HUD_FS_SECONDARY, клавиши и метка стиля —
+	// KZ_HUD_FS_MINOR (значения классов — в #define рядом с палитрой выше, правятся одной строкой).
 	// Классы вкладываем В color-теги: <font class='...'><font color='...'>X</font></font>.
 	// Это прогрессивное улучшение — если движок не подхватит класс, размер молча дефолтный,
 	// но цвета и раскладка остаются корректными (класс лишь меняет кегль, не текст/цвет).
@@ -377,7 +380,7 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 			V_snprintf(buf, sizeof(buf),
 					   "<font class='" KZ_HUD_FS_TIMER "'><font color='" KZ_HUD_C_TIMER "'>" KZ_HUD_BRACKET_OPEN "&#160;%s&#160;" KZ_HUD_BRACKET_CLOSE
 					   "</font><font color='" KZ_HUD_C_DIM "'>%s</font></font>"
-					   "&#160;&#160;<font class='" KZ_HUD_FS_SMALL "'><font color='" KZ_HUD_C_MUTED "'>%s</font></font>",
+					   "&#160;&#160;<font class='" KZ_HUD_FS_MINOR "'><font color='" KZ_HUD_C_MUTED "'>%s</font></font>",
 					   tTime.c_str(), tSuffix.c_str(), styleLabel);
 			addLine(buf);
 		}
@@ -410,7 +413,7 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 				tintCol = dataSource->hudService->fromDuckbug ? jumpbugCol : perfCol;
 			}
 			char tk[128];
-			V_snprintf(tk, sizeof(tk), " <font class='" KZ_HUD_FS_SMALL "'><font color='#%02x%02x%02x'>(%d)</font></font>", tintCol.r(), tintCol.g(),
+			V_snprintf(tk, sizeof(tk), " <font class='" KZ_HUD_FS_SECONDARY "'><font color='#%02x%02x%02x'>(%d)</font></font>", tintCol.r(), tintCol.g(),
 					   tintCol.b(), RoundFloatToInt(dataSource->takeoffVelocity.Length2D()));
 			takeoff = tk;
 			if (dataSource->hudService->crouchJumping)
@@ -418,7 +421,7 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 				// Приписка C в cj-цвете (mhudSpeedCjColor, деф. #71EEB8) — как в GetSpeedText.
 				const Color cjCol = this->GetMHUDColorPref("mhudSpeedCjColor", Color(0x71, 0xEE, 0xB8, 0xFF));
 				char cj[96];
-				V_snprintf(cj, sizeof(cj), " <font class='" KZ_HUD_FS_SMALL "'><font color='#%02x%02x%02x'>C</font></font>", cjCol.r(), cjCol.g(), cjCol.b());
+				V_snprintf(cj, sizeof(cj), " <font class='" KZ_HUD_FS_SECONDARY "'><font color='#%02x%02x%02x'>C</font></font>", cjCol.r(), cjCol.g(), cjCol.b());
 				takeoff += cj;
 			}
 		}
@@ -437,7 +440,7 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 	if (course && course->stageCount > 1)
 	{
 		V_snprintf(buf, sizeof(buf),
-				   "<font class='" KZ_HUD_FS_SMALL "'><font color='" KZ_HUD_C_MUTED "'>Stage</font> <font color='" KZ_HUD_C_WHITE "'>%d/%d</font></font>",
+				   "<font class='" KZ_HUD_FS_SECONDARY "'><font color='" KZ_HUD_C_MUTED "'>Stage</font> <font color='" KZ_HUD_C_WHITE "'>%d/%d</font></font>",
 				   dataSource->timerService->GetCurrentStage(), course->stageCount);
 		addLine(buf);
 	}
@@ -474,7 +477,7 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 			V_snprintf(wrVal, sizeof(wrVal), "<font color='" KZ_HUD_C_DIM "'>--</font>");
 		}
 		V_snprintf(buf, sizeof(buf),
-				   "<font class='" KZ_HUD_FS_SMALL "'><font color='" KZ_HUD_C_DIM "'>||&#160;</font><font color='" KZ_HUD_C_MUTED "'>PB</font>&#160;%s"
+				   "<font class='" KZ_HUD_FS_SECONDARY "'><font color='" KZ_HUD_C_DIM "'>||&#160;</font><font color='" KZ_HUD_C_MUTED "'>PB</font>&#160;%s"
 				   "<font color='" KZ_HUD_C_DIM "'>&#160;|&#160;</font><font color='" KZ_HUD_C_MUTED "'>WR</font>&#160;%s"
 				   "<font color='" KZ_HUD_C_DIM "'>&#160;||</font></font>",
 				   pbVal, wrVal);
@@ -491,7 +494,7 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		i32 cpCount = isReplay ? KZ::replaysystem::GetCheckpointCount() : dataSource->checkpointService->GetCheckpointCount();
 		i32 tpCount = isReplay ? KZ::replaysystem::GetTeleportCount() : (i32)dataSource->checkpointService->GetTeleportCount();
 		V_snprintf(buf, sizeof(buf),
-				   "<font class='" KZ_HUD_FS_SMALL "'><font color='" KZ_HUD_C_MUTED "'>CP</font> <font color='" KZ_HUD_C_WHITE "'>%d/%d</font> "
+				   "<font class='" KZ_HUD_FS_SECONDARY "'><font color='" KZ_HUD_C_MUTED "'>CP</font> <font color='" KZ_HUD_C_WHITE "'>%d/%d</font> "
 				   "<font color='" KZ_HUD_C_DIM "'>|</font> <font color='" KZ_HUD_C_MUTED "'>TP</font> <font color='" KZ_HUD_C_WHITE "'>%d</font></font>",
 				   cpIndex, cpCount, tpCount);
 		addLine(buf);
@@ -511,7 +514,7 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		std::string row = key("W", dataSource->IsButtonPressed(IN_FORWARD)) + " " + key("A", dataSource->IsButtonPressed(IN_MOVELEFT)) + " "
 						  + key("S", dataSource->IsButtonPressed(IN_BACK)) + " " + key("D", dataSource->IsButtonPressed(IN_MOVERIGHT))
 						  + "&#160;&#160;" + key("J", jump) + " " + key("C", dataSource->IsButtonPressed(IN_DUCK));
-		addLine(std::string("<font class='" KZ_HUD_FS_SMALL "'>") + row + "</font>");
+		addLine(std::string("<font class='" KZ_HUD_FS_MINOR "'>") + row + "</font>");
 	}
 
 	// --- Координаты и углы (!showpos). Тумблер — настройка получателя (this), данные —
@@ -524,7 +527,7 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		dataSource->GetAngles(&angles);
 		std::string posText =
 			KZLanguageService::PrepareMessageWithLang(language, "HUD - Position Text", origin.x, origin.y, origin.z, angles.x, angles.y);
-		V_snprintf(buf, sizeof(buf), "<font class='" KZ_HUD_FS_SMALL "'><font color='" KZ_HUD_C_MUTED "'>%s</font></font>", posText.c_str());
+		V_snprintf(buf, sizeof(buf), "<font class='" KZ_HUD_FS_SECONDARY "'><font color='" KZ_HUD_C_MUTED "'>%s</font></font>", posText.c_str());
 		addLine(buf);
 	}
 
