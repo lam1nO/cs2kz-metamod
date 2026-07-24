@@ -345,7 +345,7 @@ bool KZHUDService::GetTimerParts(const char *language, std::string &outTime, std
 #define KZ_HUD_FS_SPEED     "fontSize-l"  // скорость — главный акцент
 #define KZ_HUD_FS_TIMER     "fontSize-l"  // таймер — крупный, одного кегля со скоростью (по фото кибершока)
 #define KZ_HUD_FS_SECONDARY "fontSize-sm" // PB/WR, CP/TP, престрейф, Stage, координаты — вторичная инфа
-#define KZ_HUD_FS_KEYS      "fontSize-l"  // 2 ряда клавиш (C W J / A S D). l — крупнее; высоту компенсируем малым зазором (Задача 4) и мелким суффиксом (Задача 5); при обрезке CP/TP откатить на m
+#define KZ_HUD_FS_KEYS      "fontSize-m"  // 2 ряда клавиш (C W J / A S D). Был l — по просьбе тестера уменьшен на ступень (m); заодно меньше риск обрезки низа панели
 #define KZ_HUD_FS_MINOR     "fontSize-s"  // метка стиля — наименее заметное
 
 std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSpeed, bool suppressTimer, bool suppressKeys, bool masterMode,
