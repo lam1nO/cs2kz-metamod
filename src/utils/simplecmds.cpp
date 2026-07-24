@@ -340,6 +340,37 @@ META_RES scmd::OnClientCommand(CPlayerSlot &slot, const CCommand &args)
 	return result;
 }
 
+// Проходит реестр и вызывает колбэки всех команд с чат-именем cmdName (имя без
+// kz_-префикса и без триггера). Возвращает true, если хоть одна сматчилась.
+// suppress ← true, если чат-строку надо проглотить (тихий триггер '/' либо колбэк
+// вернул MRES_SUPERCEDE); на первом же supercede обход прекращается — как в исходной
+// логике диспатча.
+static_function bool DispatchChatByName(CCSPlayerController *controller, const CCommand &cmdArgs, const char *cmdName, char trigger, bool &suppress)
+{
+	bool matched = false;
+	Scmd *cmds = g_cmdManager.cmds;
+	for (i32 i = 0; i < g_cmdManager.cmdCount; i++)
+	{
+		if (!cmds[i].callback)
+		{
+			Assert(cmds[i].callback);
+			continue;
+		}
+		const char *name = cmds[i].hasConsolePrefix ? cmds[i].name + strlen(SCMD_CONSOLE_PREFIX) : cmds[i].name;
+		if (!V_stricmp(cmdName, name))
+		{
+			matched = true;
+			META_RES res = cmds[i].callback(controller, &cmdArgs);
+			if (trigger == SCMD_CHAT_SILENT_TRIGGER || res == MRES_SUPERCEDE)
+			{
+				suppress = true;
+				break;
+			}
+		}
+	}
+	return matched;
+}
+
 META_RES scmd::OnDispatchConCommand(ConCommandRef cmd, const CCommandContext &ctx, const CCommand &args)
 {
 	META_RES result = MRES_IGNORED;
@@ -377,31 +408,29 @@ META_RES scmd::OnDispatchConCommand(ConCommandRef cmd, const CCommandContext &ct
 			// arg is too short!
 			return MRES_IGNORED;
 		}
-		Scmd *cmds = g_cmdManager.cmds;
 
 		CCommand cmdArgs;
 		cmdArgs.Tokenize(args[1]);
 
-		for (i32 i = 0; i < g_cmdManager.cmdCount; i++)
-		{
-			if (!cmds[i].callback)
-			{
-				// TODO: error?
-				Assert(cmds[i].callback);
-				continue;
-			}
+		const char trigger = args[1][0];
+		const char *cmdName = cmdArgs[0] + 1; // skip chat trigger
 
-			const char *arg = cmdArgs[0] + 1; // skip chat trigger
-			const char *cmdName = cmds[i].hasConsolePrefix ? cmds[i].name + strlen(SCMD_CONSOLE_PREFIX) : cmds[i].name;
-			if (!V_stricmp(arg, cmdName))
-			{
-				META_RES result = cmds[i].callback(controller, &cmdArgs);
-				if (args[1][0] == SCMD_CHAT_SILENT_TRIGGER || result == MRES_SUPERCEDE)
-				{
-					// don't send chat message
-					return MRES_SUPERCEDE;
-				}
-			}
+		bool suppress = false;
+		bool matched = DispatchChatByName(controller, cmdArgs, cmdName, trigger, suppress);
+
+		if (suppress)
+		{
+			// don't send chat message
+			return MRES_SUPERCEDE;
+		}
+
+		// Неизвестная команда одним словом (без аргументов) — покажем список команд
+		// этому игроку и проглотим строку, чтобы «!опечатка» не ушла в общий чат.
+		// Многословные «!фразы» пропускаем как обычный чат.
+		if (!matched && cmdArgs.ArgC() == 1 && cmdName[0] != '\0')
+		{
+			PrintChatCommandList(g_pKZPlayerManager->ToPlayer(controller));
+			return MRES_SUPERCEDE;
 		}
 	}
 	else // Are we overriding a console command?
