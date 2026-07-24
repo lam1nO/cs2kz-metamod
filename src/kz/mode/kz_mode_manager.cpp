@@ -176,7 +176,9 @@ bool KZModeManager::RegisterMode(PluginId id, const char *shortModeName, const c
 	char shortModeDescription[64];
 	V_snprintf(shortModeCmd, 64, "kz_%s", shortModeName);
 	V_snprintf(shortModeDescription, 64, "Command Description - kz_%s", shortModeName);
-	bool shortCmdRegistered = scmd::RegisterCmd(V_strlower(shortModeCmd), Command_KzModeShort, shortModeDescription, SCFL_MODESTYLE);
+	// SCFL_HELP — короткая команда режима (!vnl / !ckz / !kzt) видна в чат-версии !help.
+	bool shortCmdRegistered =
+		scmd::RegisterCmd(V_strlower(shortModeCmd), Command_KzModeShort, shortModeDescription, SCFL_MODESTYLE | SCFL_HELP);
 
 	// Add to the list otherwise, and update the database for ID.
 	if (!info)

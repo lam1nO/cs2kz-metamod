@@ -257,7 +257,7 @@ struct TopRecordRequest : public BaseRequest
 	}
 };
 
-SCMD(kz_wr, SCFL_RECORD | SCFL_GLOBAL)
+SCMD(kz_wr, SCFL_RECORD | SCFL_GLOBAL | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	TopRecordRequest::Create<TopRecordRequest>(player, TopRecordRequest::trFeatures, true, true, args);

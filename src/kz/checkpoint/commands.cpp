@@ -10,7 +10,7 @@ SCMD(kz_checkpoint, SCFL_CHECKPOINT)
 	return MRES_SUPERCEDE;
 }
 
-SCMD_LINK(kz_cp, kz_checkpoint);
+SCMD_LINK(kz_cp, kz_checkpoint, SCFL_HELP);
 
 SCMD(kz_teleport, SCFL_CHECKPOINT)
 {
@@ -19,9 +19,9 @@ SCMD(kz_teleport, SCFL_CHECKPOINT)
 	return MRES_SUPERCEDE;
 }
 
-SCMD_LINK(kz_tp, kz_teleport);
+SCMD_LINK(kz_tp, kz_teleport, SCFL_HELP);
 
-SCMD(kz_undo, SCFL_CHECKPOINT)
+SCMD(kz_undo, SCFL_CHECKPOINT | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	player->checkpointService->UndoTeleport();
@@ -35,7 +35,7 @@ SCMD(kz_prevcp, SCFL_CHECKPOINT)
 	return MRES_SUPERCEDE;
 }
 
-SCMD_LINK(kz_pcp, kz_prevcp);
+SCMD_LINK(kz_pcp, kz_prevcp, SCFL_HELP);
 
 SCMD(kz_nextcp, SCFL_CHECKPOINT)
 {
@@ -44,7 +44,7 @@ SCMD(kz_nextcp, SCFL_CHECKPOINT)
 	return MRES_SUPERCEDE;
 }
 
-SCMD_LINK(kz_ncp, kz_nextcp);
+SCMD_LINK(kz_ncp, kz_nextcp, SCFL_HELP);
 
 SCMD(kz_setstartpos, SCFL_CHECKPOINT | SCFL_MAP | SCFL_PREFERENCE)
 {
@@ -53,7 +53,7 @@ SCMD(kz_setstartpos, SCFL_CHECKPOINT | SCFL_MAP | SCFL_PREFERENCE)
 	return MRES_SUPERCEDE;
 }
 
-SCMD_LINK(kz_ssp, kz_setstartpos);
+SCMD_LINK(kz_ssp, kz_setstartpos, SCFL_HELP);
 
 SCMD(kz_clearstartpos, SCFL_CHECKPOINT)
 {
@@ -62,7 +62,7 @@ SCMD(kz_clearstartpos, SCFL_CHECKPOINT)
 	return MRES_SUPERCEDE;
 }
 
-SCMD_LINK(kz_csp, kz_clearstartpos);
+SCMD_LINK(kz_csp, kz_clearstartpos, SCFL_HELP);
 
 SCMD(kz_cpsound, SCFL_CHECKPOINT | SCFL_PREFERENCE)
 {

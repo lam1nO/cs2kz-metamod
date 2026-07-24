@@ -441,7 +441,7 @@ struct PBRequest : public BaseRequest
 	}
 };
 
-SCMD(kz_pb, SCFL_RECORD | SCFL_GLOBAL)
+SCMD(kz_pb, SCFL_RECORD | SCFL_GLOBAL | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	PBRequest::Create<PBRequest>(player, PBRequest::pbFeatures, true, true, args);

@@ -381,7 +381,10 @@ SCMD(kz_ctop, SCFL_RECORD | SCFL_GLOBAL)
 }
 
 SCMD_LINK(kz_coursetop, kz_ctop);
-SCMD_LINK(kz_maptop, kz_ctop);
+// !maptop — единственный из тройки ctop/coursetop/maptop в whitelist !help.
+// Показывает в консоль топ-10 PRO (0 телепортов) и топ-10 NUB (overall) текущего
+// курса/карты из локальной БД (+ глобал, если режим поддержан api).
+SCMD_LINK(kz_maptop, kz_ctop, SCFL_HELP);
 
 SCMD(kz_gctop, SCFL_RECORD | SCFL_GLOBAL)
 {

@@ -28,7 +28,7 @@ void KZBeamService::Init()
 	KZOptionService::RegisterEventListener(&optionEventListener);
 }
 
-SCMD(kz_beam, SCFL_MISC | SCFL_PREFERENCE)
+SCMD(kz_beam, SCFL_MISC | SCFL_PREFERENCE | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	u8 newDesiredBeamType = (player->beamService->desiredBeamType + 1) % KZBeamService::BEAM_COUNT;

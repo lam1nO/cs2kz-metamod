@@ -230,7 +230,7 @@ void KZTimerServiceEventListener_Spec::OnTimerStartPost(KZPlayer *player, u32 co
 	player->specService->Reset();
 }
 
-SCMD(kz_spec, SCFL_SPEC)
+SCMD(kz_spec, SCFL_SPEC | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player)

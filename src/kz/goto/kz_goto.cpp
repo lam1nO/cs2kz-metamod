@@ -218,7 +218,7 @@ bool KZGotoService::GotoPlayer(const char *playerNamePart)
 	return true;
 }
 
-SCMD(kz_goto, SCFL_PLAYER)
+SCMD(kz_goto, SCFL_PLAYER | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	player->gotoService->GotoPlayer(args->ArgS());

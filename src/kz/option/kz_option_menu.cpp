@@ -441,7 +441,7 @@ void KZ::option::InitOptionsMenu()
 	KZTimerService::RegisterEventListener(&s_optionsMenuTimerListener);
 }
 
-SCMD(kz_options, SCFL_PLAYER | SCFL_PREFERENCE)
+SCMD(kz_options, SCFL_PLAYER | SCFL_PREFERENCE | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	KZ::option::OpenOptionsMenu(player);

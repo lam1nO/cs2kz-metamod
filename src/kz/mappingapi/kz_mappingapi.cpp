@@ -1079,7 +1079,7 @@ static_function void OpenCoursesMenu(KZPlayer *player)
 	g_pMenus->DisplayMenu(m, slot, 0);
 }
 
-SCMD(kz_courses, SCFL_MAP)
+SCMD(kz_courses, SCFL_MAP | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	OpenCoursesMenu(player);
@@ -1403,7 +1403,7 @@ static_function void PrintCurrentMapCoursesInfo(KZPlayer *player)
 	KZ::course::PrintCourses(player);
 }
 
-SCMD(kz_mapinfo, SCFL_MAP | SCFL_GLOBAL)
+SCMD(kz_mapinfo, SCFL_MAP | SCFL_GLOBAL | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	PrintCurrentMapCoursesInfo(player);
@@ -1487,7 +1487,7 @@ static_function void PrintCourseTier(KZPlayer *player, const CCommand *args)
 	player->languageService->PrintChat(true, false, "Tier Info", course->name, nubTier, proTier, state.c_str(), description.c_str());
 }
 
-SCMD(kz_tier, SCFL_MAP | SCFL_GLOBAL)
+SCMD(kz_tier, SCFL_MAP | SCFL_GLOBAL | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	PrintCourseTier(player, args);

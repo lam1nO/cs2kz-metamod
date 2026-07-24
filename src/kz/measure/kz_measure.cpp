@@ -222,28 +222,28 @@ f32 KZMeasureService::GetEffectiveDistance(Vector pointA, Vector pointB)
 	return sqrt(pow(Ax - Bx, 2.0f) + pow(Ay - By, 2.0f)) + 32.0f;
 }
 
-SCMD(kz_measure, SCFL_MEASURE)
+SCMD(kz_measure, SCFL_MEASURE | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	player->measureService->TryMeasure();
 	return MRES_SUPERCEDE;
 }
 
-SCMD(kz_measurestart, SCFL_MEASURE)
+SCMD(kz_measurestart, SCFL_MEASURE | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	player->measureService->StartMeasure();
 	return MRES_SUPERCEDE;
 }
 
-SCMD(kz_measureend, SCFL_MEASURE)
+SCMD(kz_measureend, SCFL_MEASURE | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	player->measureService->EndMeasure();
 	return MRES_SUPERCEDE;
 }
 
-SCMD(kz_measureblock, SCFL_MEASURE)
+SCMD(kz_measureblock, SCFL_MEASURE | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	player->measureService->MeasureBlock();

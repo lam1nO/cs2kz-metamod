@@ -16,7 +16,7 @@ void KZFOVService::OnPhysicsSimulate()
 	}
 }
 
-SCMD(kz_fov, SCFL_PLAYER | SCFL_PREFERENCE)
+SCMD(kz_fov, SCFL_PLAYER | SCFL_PREFERENCE | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 

@@ -41,7 +41,7 @@ namespace
 	};
 }; // namespace
 
-SCMD(kz_globalcheck, SCFL_GLOBAL | SCFL_MAP | SCFL_PLAYER)
+SCMD(kz_globalcheck, SCFL_GLOBAL | SCFL_MAP | SCFL_PLAYER | SCFL_HELP)
 {
 	GlobalStatus status;
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);

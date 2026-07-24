@@ -152,7 +152,7 @@ void KZ::replaysystem::menu::OpenReplayControlsMenu(KZPlayer *player)
 	g_pMenus->DisplayMenu(m, slot, 0);
 }
 
-SCMD(kz_rpmenu, SCFL_REPLAY)
+SCMD(kz_rpmenu, SCFL_REPLAY | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player)

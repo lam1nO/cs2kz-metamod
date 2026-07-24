@@ -926,7 +926,7 @@ namespace KZ::replaysystem::commands
 	}
 } // namespace KZ::replaysystem::commands
 
-SCMD(kz_replay, SCFL_REPLAY)
+SCMD(kz_replay, SCFL_REPLAY | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!g_pFullFileSystem || !player)

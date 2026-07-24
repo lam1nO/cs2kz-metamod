@@ -936,9 +936,9 @@ SCMD(kz_safeguard, SCFL_TIMER | SCFL_PREFERENCE)
 }
 
 SCMD_LINK(kz_safe, kz_safeguard);
-SCMD_LINK(kz_sg, kz_safeguard);
+SCMD_LINK(kz_sg, kz_safeguard, SCFL_HELP);
 
-SCMD(kz_pro, SCFL_TIMER | SCFL_PREFERENCE)
+SCMD(kz_pro, SCFL_TIMER | SCFL_PREFERENCE | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	player->timerService->ToggleProSafeguard();
@@ -1106,7 +1106,7 @@ void KZTimerService::OnTeleport(const Vector *newPosition, const QAngle *newAngl
 	}
 }
 
-SCMD(kz_stop, SCFL_TIMER)
+SCMD(kz_stop, SCFL_TIMER | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (player->timerService->GetTimerRunning())
@@ -1121,7 +1121,7 @@ SCMD(kz_stop, SCFL_TIMER)
 	return MRES_SUPERCEDE;
 }
 
-SCMD(kz_pause, SCFL_TIMER)
+SCMD(kz_pause, SCFL_TIMER | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	player->timerService->TogglePause();

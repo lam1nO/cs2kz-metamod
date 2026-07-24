@@ -217,7 +217,7 @@ KZLanguageService::LanguageInfo::LanguageInfo()
 	V_strncpy(this->language, KZOptionService::GetOptionStr("defaultLanguage", KZ_DEFAULT_LANGUAGE), sizeof(this->language));
 }
 
-SCMD(kz_language, SCFL_PREFERENCE)
+SCMD(kz_language, SCFL_PREFERENCE | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	char language[32] {};

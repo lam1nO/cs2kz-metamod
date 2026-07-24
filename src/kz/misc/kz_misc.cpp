@@ -62,7 +62,7 @@ SCMD(kz_hide, SCFL_PLAYER | SCFL_PREFERENCE)
 	return MRES_SUPERCEDE;
 }
 
-SCMD(kz_end, SCFL_MAP)
+SCMD(kz_end, SCFL_MAP | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 
@@ -269,9 +269,9 @@ SCMD(kz_restart, SCFL_TIMER | SCFL_MAP)
 	return MRES_SUPERCEDE;
 }
 
-SCMD_LINK(kz_r, kz_restart);
+SCMD_LINK(kz_r, kz_restart, SCFL_HELP);
 
-SCMD(kz_lj, SCFL_JUMPSTATS | SCFL_MAP)
+SCMD(kz_lj, SCFL_JUMPSTATS | SCFL_MAP | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 
