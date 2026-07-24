@@ -162,6 +162,18 @@ private:
 
 	static std::unordered_map<PBDataKey, PBData> wrCache;
 
+	// Платформенные кэши PB/WR из cyber-api (те же данные, что лидерборд сайта). Ключуются по
+	// (api-mode-index, cyber-course-number), а НЕ по внутренним mode/course id — чтобы сойтись с
+	// ответом api (см. FetchPlatform*/IngestPlatformRecords). Времена в секундах (api отдаёт ms).
+	// WR — общий (static, по карте); PB — по игроку. Наполняются async; промах → худ падает на
+	// локальный фолбэк (wrCache/srCache, globalPBCache/localPBCache).
+	static std::unordered_map<u64, f64> platformWrCache;
+	std::unordered_map<u64, f64> platformPbCache;
+
+	// Разбор тела ответа GET /ingest/v1/kz/records в платформенные кэши. pbPlayer != nullptr →
+	// его pbTimeMs пишутся в platformPbCache; wrTimeMs всегда актуализирует общий platformWrCache.
+	static void IngestPlatformRecords(const char *body, KZPlayer *pbPlayer);
+
 public:
 	enum CompareType : u8
 	{
@@ -193,6 +205,11 @@ private:
 public:
 	static void ClearRecordCache();
 	static void UpdateLocalRecordCache();
+	// Платформенная догрузка PB/WR из cyber-api (тот же источник, что лидерборд сайта). WR — раз
+	// на карту (OnMapSetup); PB игрока — на его заходе (OnClientSetup). Async, fail-soft: сбой /
+	// timeout / выключенный cybEmitUrl оставляет платформенные кэши как есть, худ падает на локаль.
+	static void FetchPlatformWorldRecords();
+	static void FetchPlatformPB(KZPlayer *player);
 	static void InsertRecordToCache(f64 time, const KZCourseDescriptor *courseName, PluginId modeID, bool hasTeleports, bool global,
 									CUtlString metadata = "");
 
@@ -397,15 +414,17 @@ public:
 	}
 
 	// --- HUD (кибершоковский стандартный худ, строка PB/WR) ---
-	// Лучшее доступное персональное время (глоб. PB приоритетнее локального) для ТЕКУЩЕГО
-	// режима игрока и активного курса; overall = зачёт с телепортами. Только чтение PB-кэшей,
-	// без сети. Возвращает false, если курса нет или PB не наполнен.
-	bool GetHudPBTime(f64 &outTime);
-	// WR-время (overall) для текущего режима+курса. Приоритет — глобальный wrCache (наполняется
-	// лишь на глобальных картах, KZGlobalService::OnWorldRecordsForCache); если он пуст (локальные/
-	// нуб-карты) — фолбэк на srCache (рекорд наших серверов). false только когда нет ни того, ни
-	// другого (нет курса / рекорд не наполнен).
-	bool GetHudWorldRecordTime(f64 &outTime);
+	// Лучшее доступное персональное время для режима игрока и курса; overall = зачёт с телепортами.
+	// Приоритет — платформенный кэш (platformPbCache, совпадает с сайтом), при промахе — фолбэк на
+	// локальные PB-кэши (глоб. PB важнее локального). Только чтение кэшей, без сети. course == nullptr
+	// → активный курс игрока (this->GetCourse()); передан явно (напр. главный курс) — лукап по нему,
+	// чтобы PB показывался и вне старт-зоны. false, если курса нет или PB не наполнен нигде.
+	bool GetHudPBTime(f64 &outTime, const KZCourseDescriptor *course = nullptr);
+	// WR-время (overall) для режима+курса. Приоритет — платформенный кэш (platformWrCache, рекорд
+	// сети с сайта); при промахе — глобальный wrCache (глобальные карты), затем srCache (рекорд наших
+	// серверов). course == nullptr → активный курс; иначе лукап по переданному. false только когда
+	// нет ни одного источника.
+	bool GetHudWorldRecordTime(f64 &outTime, const KZCourseDescriptor *course = nullptr);
 
 	void SetCourse(u32 courseGUID)
 	{

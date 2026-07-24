@@ -11,11 +11,16 @@
 #include "kz/spec/kz_spec.h"
 #include "kz/recording/kz_recording.h"
 #include "kz/savedrun/kz_savedrun.h"
+#include "kz/replays/cyb_replay_common.h" // MapMode/IsValidMapName — общий с эмиттером маппинг режима/карты
 #include "submission.h"
 
 #include "utils/utils.h"
 #include "utils/simplecmds.h"
+#include "utils/http.h" // Steam async HTTP для догрузки платформенных PB/WR
 #include "vendor/sql_mm/src/public/sql_mm.h"
+
+#include <optional>
+#include <string>
 
 // clang-format off
 constexpr const char *diffTextKeys[KZTimerService::CompareType::COMPARETYPE_COUNT] = {
@@ -77,6 +82,62 @@ static_global class KZOptionServiceEventListener_Timer : public KZOptionServiceE
 
 std::unordered_map<PBDataKey, PBData> KZTimerService::srCache;
 std::unordered_map<PBDataKey, PBData> KZTimerService::wrCache;
+std::unordered_map<u64, f64> KZTimerService::platformWrCache;
+
+namespace
+{
+	// api-mode-строка ("ckz"/"vnl"/"kzt") → индекс 0/1/2; -1 — режим не поддержан платформой.
+	// Оба конца (запись ответа api и лукап из худа) идут через эту функцию → ключи сходятся.
+	i32 ApiModeToIndex(const char *apiMode)
+	{
+		if (!apiMode || !apiMode[0])
+		{
+			return -1;
+		}
+		if (KZ_STREQI(apiMode, "ckz"))
+		{
+			return 0;
+		}
+		if (KZ_STREQI(apiMode, "vnl"))
+		{
+			return 1;
+		}
+		if (KZ_STREQI(apiMode, "kzt"))
+		{
+			return 2;
+		}
+		return -1;
+	}
+
+	// Ключ платформенного кэша: (api-mode-index, cyber-course-number).
+	u64 ToPlatformKey(i32 modeIdx, i32 cyberCourse)
+	{
+		return (u32)modeIdx | ((u64)(u32)cyberCourse << 32);
+	}
+
+	// Число (ms) из члена KV3-объекта в f64. false — член отсутствует / null / не число.
+	// GetDouble коэрсит INT/UINT/DOUBLE; null и прочие типы (JSON null у отсутствующего WR/PB)
+	// отсекаются проверкой типа.
+	bool KV3ReadNumber(KeyValues3 *obj, const char *key, f64 &out)
+	{
+		if (!obj)
+		{
+			return false;
+		}
+		KeyValues3 *m = obj->FindMember(key);
+		if (!m)
+		{
+			return false;
+		}
+		KV3Type_t t = m->GetType();
+		if (t != KV3_TYPE_INT && t != KV3_TYPE_UINT && t != KV3_TYPE_DOUBLE)
+		{
+			return false;
+		}
+		out = m->GetDouble(0.0);
+		return true;
+	}
+} // namespace
 
 static_global CUtlVector<KZTimerServiceEventListener *> eventListeners;
 
@@ -1224,16 +1285,30 @@ const PBData *KZTimerService::GetCompareTarget(PBDataKey key)
 	return nullptr;
 }
 
-bool KZTimerService::GetHudPBTime(f64 &outTime)
+bool KZTimerService::GetHudPBTime(f64 &outTime, const KZCourseDescriptor *course)
 {
-	const KZCourseDescriptor *course = this->GetCourse();
+	if (!course)
+	{
+		course = this->GetCourse();
+	}
 	if (!course)
 	{
 		return false;
 	}
 	auto modeInfo = KZ::mode::GetModeInfo(this->player->modeService->GetModeName());
+	// 1) Платформенный PB (совпадает с лидербордом сайта) — первым.
+	i32 modeIdx = ApiModeToIndex(CybReplayCommon::MapMode(std::string(modeInfo.shortModeName.Get(), modeInfo.shortModeName.Length())));
+	if (modeIdx >= 0)
+	{
+		auto it = this->platformPbCache.find(ToPlatformKey(modeIdx, KZ::course::GetCyberCourseNumber(course)));
+		if (it != this->platformPbCache.end() && it->second > 0)
+		{
+			outTime = it->second;
+			return true;
+		}
+	}
+	// 2) Фолбэк: локальные PB-кэши (глобальный PB важнее локального; overall = зачёт с ТП).
 	PBDataKey key = ToPBDataKey(modeInfo.id, course->guid);
-	// Глобальный PB важнее локального; берём первый наполненный overall (зачёт с ТП).
 	const PBData *pb = this->GetCompareTargetForType(COMPARE_GPB, key);
 	if (!pb || pb->overall.pbTime <= 0)
 	{
@@ -1247,17 +1322,30 @@ bool KZTimerService::GetHudPBTime(f64 &outTime)
 	return true;
 }
 
-bool KZTimerService::GetHudWorldRecordTime(f64 &outTime)
+bool KZTimerService::GetHudWorldRecordTime(f64 &outTime, const KZCourseDescriptor *course)
 {
-	const KZCourseDescriptor *course = this->GetCourse();
+	if (!course)
+	{
+		course = this->GetCourse();
+	}
 	if (!course)
 	{
 		return false;
 	}
 	auto modeInfo = KZ::mode::GetModeInfo(this->player->modeService->GetModeName());
+	// 1) Платформенный WR (рекорд сети с сайта) — первым.
+	i32 modeIdx = ApiModeToIndex(CybReplayCommon::MapMode(std::string(modeInfo.shortModeName.Get(), modeInfo.shortModeName.Length())));
+	if (modeIdx >= 0)
+	{
+		auto it = KZTimerService::platformWrCache.find(ToPlatformKey(modeIdx, KZ::course::GetCyberCourseNumber(course)));
+		if (it != KZTimerService::platformWrCache.end() && it->second > 0)
+		{
+			outTime = it->second;
+			return true;
+		}
+	}
+	// 2) Фолбэк: глобальный wrCache (глобальные карты), затем srCache (рекорд нашей сети).
 	PBDataKey key = ToPBDataKey(modeInfo.id, course->guid);
-	// WR — глобальный рекорд (wrCache, наполняется лишь на глобальных картах). На нуб-сервере
-	// глобального WR нет → фолбэк на рекорд нашей сети (srCache — лучшее время в общей БД флота).
 	const PBData *wr = this->GetCompareTargetForType(COMPARE_WR, key);
 	if (!wr || wr->overall.pbTime <= 0)
 	{
@@ -1275,6 +1363,7 @@ void KZTimerService::ClearRecordCache()
 {
 	KZTimerService::srCache.clear();
 	KZTimerService::wrCache.clear();
+	KZTimerService::platformWrCache.clear();
 	for (i32 i = 0; i < MAXPLAYERS + 1; i++)
 	{
 		KZPlayer *player = g_pKZPlayerManager->ToPlayer(i);
@@ -1283,6 +1372,206 @@ void KZTimerService::ClearRecordCache()
 			player->timerService->ClearPBCache();
 		}
 	}
+}
+
+void KZTimerService::IngestPlatformRecords(const char *body, KZPlayer *pbPlayer)
+{
+	KeyValues3 kv(KV3_TYPEEX_TABLE, KV3_SUBTYPE_UNSPECIFIED);
+	CUtlString error = "";
+	LoadKV3FromJSON(&kv, &error, body, "");
+	if (!error.IsEmpty())
+	{
+		KZ_LOG_WARN(LogChannel::Timer, "[cyb_records] failed to parse api response: %s\n", error.Get());
+		return;
+	}
+
+	KeyValues3 *records = kv.FindMember("records");
+	if (!records || records->GetType() != KV3_TYPE_ARRAY)
+	{
+		return; // нет массива records — трактуем как "данных нет", худ на фолбэке
+	}
+
+	int count = records->GetArrayElementCount();
+	for (int i = 0; i < count; i++)
+	{
+		KeyValues3 *rec = records->GetArrayElement(i);
+		if (!rec)
+		{
+			continue;
+		}
+		// course (cyber-номер) — обязателен.
+		f64 courseF = 0;
+		if (!KV3ReadNumber(rec, "course", courseF))
+		{
+			continue;
+		}
+		// mode (api-строка) — обязателен и должен маппиться в поддерживаемый индекс.
+		KeyValues3 *modeMember = rec->FindMember("mode");
+		if (!modeMember || modeMember->GetType() != KV3_TYPE_STRING)
+		{
+			continue;
+		}
+		i32 modeIdx = ApiModeToIndex(modeMember->GetString(""));
+		if (modeIdx < 0)
+		{
+			continue;
+		}
+		u64 key = ToPlatformKey(modeIdx, (i32)courseF);
+
+		// WR — актуализируем всегда, когда присутствует (ms → секунды).
+		f64 wrMs = 0;
+		if (KV3ReadNumber(rec, "wrTimeMs", wrMs) && wrMs > 0)
+		{
+			KZTimerService::platformWrCache[key] = wrMs / 1000.0;
+		}
+		// PB — только для player-level ответа (пришёл steamId64).
+		if (pbPlayer)
+		{
+			f64 pbMs = 0;
+			if (KV3ReadNumber(rec, "pbTimeMs", pbMs) && pbMs > 0)
+			{
+				pbPlayer->timerService->platformPbCache[key] = pbMs / 1000.0;
+			}
+		}
+	}
+}
+
+void KZTimerService::FetchPlatformWorldRecords()
+{
+	const char *url = KZOptionService::GetOptionStr("cybEmitUrl", "");
+	if (!url || url[0] == '\0')
+	{
+		return; // платформенный источник выключен
+	}
+	const char *token = KZOptionService::GetOptionStr("cybEmitToken", "");
+
+	std::string mapName = g_pKZUtils->GetCurrentMapName().Get();
+	if (!CybReplayCommon::IsValidMapName(mapName))
+	{
+		return; // api валидирует map — заведомо мимо, сеть не дёргаем
+	}
+
+	// Свежая карта — прежний WR-кэш недействителен (наполнится из ответа).
+	KZTimerService::platformWrCache.clear();
+
+	std::string fullUrl = url;
+	if (!fullUrl.empty() && fullUrl.back() == '/')
+	{
+		fullUrl.pop_back();
+	}
+	fullUrl += "/ingest/v1/kz/records";
+
+	HTTP::Request req(HTTP::Method::GET, fullUrl);
+	req.SetQuery("map", mapName);
+	if (token && token[0] != '\0')
+	{
+		req.SetHeader("Authorization", std::string("Bearer ") + token);
+	}
+
+	// clang-format off
+	req.Send(
+		[mapName](HTTP::Response resp)
+		{
+			if (resp.status < 200 || resp.status >= 300)
+			{
+				KZ_LOG_INFO(LogChannel::Timer, "[cyb_records] WR fetch HTTP %u\n", (unsigned)resp.status);
+				return;
+			}
+			// Карта могла смениться, пока запрос летел — не засоряем кэш новой карты старыми данными.
+			if (!KZ_STREQ(mapName.c_str(), g_pKZUtils->GetCurrentMapName().Get()))
+			{
+				return;
+			}
+			std::optional<std::string> respBody = resp.Body();
+			if (!respBody.has_value())
+			{
+				return;
+			}
+			KZTimerService::IngestPlatformRecords(respBody->c_str(), nullptr);
+		},
+		[]()
+		{
+			KZ_LOG_INFO(LogChannel::Timer, "[cyb_records] WR fetch network error\n");
+		});
+	// clang-format on
+}
+
+void KZTimerService::FetchPlatformPB(KZPlayer *player)
+{
+	if (!player)
+	{
+		return;
+	}
+	// Свежий заход игрока (в т.ч. на переиспользованный слот) — платформенный PB начинаем с чистого
+	// листа, чтобы не показать чужой PB прежнего владельца слота; наполнится из ответа на его steamId.
+	player->timerService->platformPbCache.clear();
+
+	const char *url = KZOptionService::GetOptionStr("cybEmitUrl", "");
+	if (!url || url[0] == '\0')
+	{
+		return;
+	}
+	const char *token = KZOptionService::GetOptionStr("cybEmitToken", "");
+
+	std::string mapName = g_pKZUtils->GetCurrentMapName().Get();
+	if (!CybReplayCommon::IsValidMapName(mapName))
+	{
+		return;
+	}
+
+	u64 steamID64 = player->GetSteamId64();
+	if (steamID64 == 0 || !player->GetClient())
+	{
+		return; // не аутентифицирован / нет клиента — PB спросить не по кому
+	}
+	CPlayerUserId userID = player->GetClient()->GetUserID();
+
+	std::string fullUrl = url;
+	if (!fullUrl.empty() && fullUrl.back() == '/')
+	{
+		fullUrl.pop_back();
+	}
+	fullUrl += "/ingest/v1/kz/records";
+
+	HTTP::Request req(HTTP::Method::GET, fullUrl);
+	req.SetQuery("map", mapName);
+	req.SetQuery("steamId64", std::to_string(steamID64));
+	if (token && token[0] != '\0')
+	{
+		req.SetHeader("Authorization", std::string("Bearer ") + token);
+	}
+
+	// clang-format off
+	req.Send(
+		[mapName, userID, steamID64](HTTP::Response resp)
+		{
+			if (resp.status < 200 || resp.status >= 300)
+			{
+				KZ_LOG_INFO(LogChannel::Timer, "[cyb_records] PB fetch HTTP %u\n", (unsigned)resp.status);
+				return;
+			}
+			if (!KZ_STREQ(mapName.c_str(), g_pKZUtils->GetCurrentMapName().Get()))
+			{
+				return; // карта сменилась — PB относится к другой карте
+			}
+			KZPlayer *pl = g_pKZPlayerManager->ToPlayer(userID);
+			// Гард переиспользования userID: слот мог освободиться и занять другой игрок.
+			if (!pl || pl->GetSteamId64() != steamID64)
+			{
+				return;
+			}
+			std::optional<std::string> respBody = resp.Body();
+			if (!respBody.has_value())
+			{
+				return;
+			}
+			KZTimerService::IngestPlatformRecords(respBody->c_str(), pl);
+		},
+		[]()
+		{
+			KZ_LOG_INFO(LogChannel::Timer, "[cyb_records] PB fetch network error\n");
+		});
+	// clang-format on
 }
 
 void KZTimerService::UpdateLocalRecordCache()
@@ -1397,6 +1686,7 @@ void KZTimerService::ClearPBCache()
 {
 	this->localPBCache.clear();
 	this->globalPBCache.clear();
+	this->platformPbCache.clear();
 }
 
 const PBData *KZTimerService::GetGlobalCachedPB(const KZCourseDescriptor *course, PluginId modeID)
@@ -1801,6 +2091,9 @@ void KZDatabaseServiceEventListener_Timer::OnMapSetup()
 {
 	KZ::course::SetupLocalCourses();
 	KZTimerService::UpdateLocalRecordCache();
+	// Платформенные WR (тот же источник, что лидерборд сайта) — одна async-догрузка на карту,
+	// параллельно локальному кэшу; худ покажет их даже вне активного курса (главный курс).
+	KZTimerService::FetchPlatformWorldRecords();
 	// Раз на загрузку карты (OnMapSetup стреляет один раз после успешного SetupMap()) -
 	// TTL-чистка SavedRuns, fire-and-forget (Task 5).
 	KZSavedRunService::PurgeExpired();
@@ -1810,6 +2103,8 @@ void KZDatabaseServiceEventListener_Timer::OnClientSetup(Player *player, u64 ste
 {
 	KZPlayer *kzPlayer = g_pKZPlayerManager->ToKZPlayer(player);
 	kzPlayer->timerService->UpdateLocalPBCache();
+	// Платформенный PB игрока (тот же, что на сайте) — на его заходе, async.
+	KZTimerService::FetchPlatformPB(kzPlayer);
 }
 
 SCMD(kz_recordvolume, SCFL_TIMER | SCFL_GLOBAL | SCFL_PREFERENCE)
