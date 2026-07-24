@@ -332,7 +332,7 @@ bool KZHUDService::GetTimerParts(const char *language, std::string &outTime, std
 // неизвестен, размер молча откатится на дефолт — проверить вживую. Все четыре в одном месте:
 // иерархия правится одной строкой после живого теста.
 #define KZ_HUD_FS_SPEED     "fontSize-l"  // скорость — главный акцент
-#define KZ_HUD_FS_TIMER     "fontSize-m"  // таймер — второй по важности
+#define KZ_HUD_FS_TIMER     "fontSize-l"  // таймер — крупный, одного кегля со скоростью (по фото кибершока)
 #define KZ_HUD_FS_SECONDARY "fontSize-sm" // PB/WR, CP/TP, престрейф, Stage, координаты — вторичная инфа
 #define KZ_HUD_FS_KEYS      "fontSize-m"  // ряд клавиш W A S D J C — крупный, как на кибершоке
 #define KZ_HUD_FS_MINOR     "fontSize-s"  // метка стиля — наименее заметное
