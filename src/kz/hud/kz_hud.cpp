@@ -11,6 +11,8 @@
 #include "kz/checkpoint/kz_checkpoint.h"
 #include "kz/replays/kz_replaysystem.h"
 #include "kz/style/kz_style.h" // GetStyleName для лейбла стиля (деф. Normal) в строке 1
+#include "kz/mode/kz_mode.h" // KZModeService::GetModeShortName для метки режима в строке 1
+#include "kz/replays/cyb_replay_common.h" // MapMode — тот же маппинг режима, что у PB/WR-фетча
 
 #include <vendor/MultiAddonManager/public/imultiaddonmanager.h>
 extern IMultiAddonManager *g_pMultiAddonManager;
@@ -394,6 +396,27 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 				FormatTimeHud(0.0, zeroText, sizeof(zeroText));
 				tTime = zeroText;
 			}
+			// Метка режима — рядом с временем, ЗАГЛАВНЫМИ (CKZ/KZT/VNL), как на кибершоке «[..] CKZ».
+			// Короткое имя режима наблюдаемого прогоняем через CybReplayCommon::MapMode (тот же
+			// маппинг/вайтлист, что у PB/WR-фетча в kz_timer.cpp) → ckz/vnl/kzt, апаем в верхний
+			// регистр. Пустая строка = кастомный режим сверх этих трёх → метку не показываем.
+			// Реплей-бот пропускаем (своего режима как у игрока нет).
+			std::string modeTag;
+			if (!isReplay && dataSource->modeService)
+			{
+				const char *modeApi = CybReplayCommon::MapMode(dataSource->modeService->GetModeShortName());
+				if (modeApi[0])
+				{
+					char up[8] = {0};
+					for (int i = 0; modeApi[i] && i < 7; i++)
+					{
+						up[i] = (modeApi[i] >= 'a' && modeApi[i] <= 'z') ? (char)(modeApi[i] - 32) : modeApi[i];
+					}
+					char mt[128];
+					V_snprintf(mt, sizeof(mt), "&#160;&#160;<font class='" KZ_HUD_FS_SECONDARY "'><font color='" KZ_HUD_C_MUTED "'>%s</font></font>", up);
+					modeTag = mt;
+				}
+			}
 			// Метка стиля — только для активного не-дефолтного стиля. "Normal" как шум убран:
 			// без активных стилей метки нет вовсе (пустой styleTag → без висячего разделителя).
 			std::string styleTag;
@@ -404,10 +427,11 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 						   dataSource->styleServices[0]->GetStyleName());
 				styleTag = st;
 			}
+			// Порядок как на кибершоке: время → режим → стиль-если-есть.
 			V_snprintf(buf, sizeof(buf),
 					   "<font class='" KZ_HUD_FS_TIMER "'><font color='%s'>" KZ_HUD_BRACKET_OPEN "&#160;%s&#160;" KZ_HUD_BRACKET_CLOSE
-					   "</font><font color='" KZ_HUD_C_DIM "'>%s</font></font>%s",
-					   timerColor, tTime.c_str(), tSuffix.c_str(), styleTag.c_str());
+					   "</font><font color='" KZ_HUD_C_DIM "'>%s</font></font>%s%s",
+					   timerColor, tTime.c_str(), tSuffix.c_str(), modeTag.c_str(), styleTag.c_str());
 			addLine(buf);
 		}
 	}
