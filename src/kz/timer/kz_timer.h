@@ -25,6 +25,10 @@
 #define KZ_SAFEGUARD_RESTART_MIN_DELAY 0.6f
 #define KZ_SAFEGUARD_RESTART_MAX_DELAY 5.0f
 
+// Legacy: старый единый int-преф "safeguard". Оставлен ТОЛЬКО для миграции —
+// расцеплённые флаги теперь живут в отдельных префах "sgTeleport"/"sgReset"
+// (см. KZTimerService::GetSafeguardTeleport/GetSafeguardReset). Старое значение
+// читается лишь как фолбэк: PRO → блок ТП + блок сброса, NUB → только блок сброса.
 enum SafeguardOption : u8
 {
 	SAFEGUARD_DISABLED = 0,
@@ -536,12 +540,22 @@ public:
 
 	void ToggleTimerStopSound();
 
-	// Safeguard
+	// Safeguard — два НЕЗАВИСИМЫХ предохранителя (расцеплены из старого единого префа):
+	//  - «блок телепортов» (PRO)  — преф "sgTeleport", команда !pro; гейтит ТОЛЬКО чекпоинт-ТП,
+	//    чтобы ран остался PRO. Рестарт и noclip при этом РАЗРЕШЕНЫ.
+	//  - «блок сброса таймера»     — преф "sgReset",   команда !sg;  гейтит noclip/рестарт/стоп/
+	//    !end/!lj/уход в спектатор — всё, что останавливает/инвалидирует таймер. ТП сюда НЕ входит.
+	// Каждая команда ставит СВОЙ флаг независимо. CheckSafeguardPro смотрит только на "sgTeleport";
+	// CheckSafeguard/CheckSafeguardRestart — только на "sgReset".
 	void ToggleSafeguard();
 	void ToggleProSafeguard();
 	bool CheckSafeguard(bool showError = true);
 	bool CheckSafeguardPro(bool showError = true);
 	bool CheckSafeguardRestart(bool showError = true);
+	// Эффективные значения флагов: новый преф в приоритете, при его отсутствии — вывод из
+	// старого "safeguard" по прежней семантике (миграция без потери настроек игрока).
+	bool GetSafeguardTeleport();
+	bool GetSafeguardReset();
 
 public:
 	virtual void Reset() override;

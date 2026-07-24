@@ -818,39 +818,57 @@ void KZTimerService::ToggleTimerStopSound()
 	this->player->languageService->PrintChat(true, false, this->shouldPlayTimerStopSound ? "Timer Stop Sound Enabled" : "Timer Stop Sound Disabled");
 }
 
-// Safeguard
+// Safeguard — два независимых предохранителя.
+// «Блок телепортов» (PRO, преф "sgTeleport", команда !pro) — гейтит только чекпоинт-ТП, ран
+// остаётся PRO; рестарт/noclip при этом разрешены. «Блок сброса таймера» (преф "sgReset",
+// команда !sg) — гейтит noclip/рестарт/стоп/!end/!lj/уход в спектатор. Раньше это был один
+// int-преф "safeguard" (DISABLED/NUB/PRO), где PRO блокировал И ТП, И сброс, а NUB — только
+// сброс. Теперь расцеплено. Старый преф читается как фолбэк (см. GetSafeguard*): пока игрок не
+// трогал новую команду, поведение выводится из старого значения — настройки не теряются.
+
+bool KZTimerService::GetSafeguardTeleport()
+{
+	i64 v = this->player->optionService->GetPreferenceInt("sgTeleport", -1);
+	if (v >= 0)
+	{
+		return v != 0;
+	}
+	// Фолбэк на старый единый преф: телепорты блокировал только PRO.
+	return this->player->optionService->GetPreferenceInt("safeguard", SAFEGUARD_DISABLED) == SAFEGUARD_PRO;
+}
+
+bool KZTimerService::GetSafeguardReset()
+{
+	i64 v = this->player->optionService->GetPreferenceInt("sgReset", -1);
+	if (v >= 0)
+	{
+		return v != 0;
+	}
+	// Фолбэк: сброс таймера блокировали И NUB, И PRO.
+	i64 legacy = this->player->optionService->GetPreferenceInt("safeguard", SAFEGUARD_DISABLED);
+	return legacy == SAFEGUARD_NUB || legacy == SAFEGUARD_PRO;
+}
 
 void KZTimerService::ToggleSafeguard()
 {
-	if (this->player->optionService->GetPreferenceInt("safeguard") == SAFEGUARD_NUB)
-	{
-		this->player->optionService->SetPreferenceInt("safeguard", SAFEGUARD_DISABLED);
-		this->player->languageService->PrintChat(true, false, "Safeguard - Disable");
-	}
-	else
-	{
-		this->player->optionService->SetPreferenceInt("safeguard", SAFEGUARD_NUB);
-		this->player->languageService->PrintChat(true, false, "Safeguard - Enable");
-	}
+	// !sg — независимый флаг «блок сброса таймера» (noclip/рестарт/стоп/инвалидаторы).
+	bool enabled = !this->GetSafeguardReset();
+	this->player->optionService->SetPreferenceInt("sgReset", enabled ? 1 : 0);
+	this->player->languageService->PrintChat(true, false, enabled ? "Safeguard - Enable" : "Safeguard - Disable");
 }
 
 void KZTimerService::ToggleProSafeguard()
 {
-	if (this->player->optionService->GetPreferenceInt("safeguard") == SAFEGUARD_PRO)
-	{
-		this->player->optionService->SetPreferenceInt("safeguard", SAFEGUARD_DISABLED);
-		this->player->languageService->PrintChat(true, false, "Safeguard - Disable");
-	}
-	else
-	{
-		this->player->optionService->SetPreferenceInt("safeguard", SAFEGUARD_PRO);
-		this->player->languageService->PrintChat(true, false, "Safeguard - Enable (PRO)");
-	}
+	// !pro — независимый флаг «блок телепортов» (ран остаётся PRO); рестарт/noclip не трогает.
+	bool enabled = !this->GetSafeguardTeleport();
+	this->player->optionService->SetPreferenceInt("sgTeleport", enabled ? 1 : 0);
+	this->player->languageService->PrintChat(true, false, enabled ? "Safeguard - Enable (PRO)" : "Safeguard PRO - Disable");
 }
 
 bool KZTimerService::CheckSafeguard(bool showError)
 {
-	if (this->player->optionService->GetPreferenceInt("safeguard") <= SAFEGUARD_DISABLED || !this->GetTimerRunning() || !this->GetValidTimer())
+	// Гейт «сброса таймера»: только флаг sgReset (!sg). Телепорты сюда НЕ относятся.
+	if (!this->GetSafeguardReset() || !this->GetTimerRunning() || !this->GetValidTimer())
 	{
 		return true;
 	}
@@ -864,14 +882,15 @@ bool KZTimerService::CheckSafeguard(bool showError)
 
 bool KZTimerService::CheckSafeguardPro(bool showError)
 {
-	if (this->player->optionService->GetPreferenceInt("safeguard") != SAFEGUARD_PRO || !this->GetTimerRunning() || !this->GetValidTimer()
+	// Гейт телепорта: только флаг sgTeleport (!pro). После первого ТП ран уже не PRO — не гейтим.
+	if (!this->GetSafeguardTeleport() || !this->GetTimerRunning() || !this->GetValidTimer()
 		|| this->player->checkpointService->GetTeleportCount() > 0)
 	{
 		return true;
 	}
 	if (showError)
 	{
-		this->player->languageService->PrintChat(true, false, "Safeguard - Blocked");
+		this->player->languageService->PrintChat(true, false, "Safeguard - Blocked (PRO)");
 		this->player->PlayErrorSound();
 	}
 	return false;
@@ -879,7 +898,8 @@ bool KZTimerService::CheckSafeguardPro(bool showError)
 
 bool KZTimerService::CheckSafeguardRestart(bool showError)
 {
-	if (this->player->optionService->GetPreferenceInt("safeguard") <= SAFEGUARD_DISABLED || !this->GetTimerRunning() || !this->GetValidTimer())
+	// Рестарт — тоже «сброс таймера»: гейт по флагу sgReset (!sg), с кулдауном/двойным тапом.
+	if (!this->GetSafeguardReset() || !this->GetTimerRunning() || !this->GetValidTimer())
 	{
 		return true;
 	}
