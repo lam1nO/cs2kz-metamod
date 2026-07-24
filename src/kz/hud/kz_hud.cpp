@@ -634,11 +634,12 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		addLine(std::string("<font class='" KZ_HUD_FS_KEYS "'>") + row2 + "</font>");
 	}
 
-	// --- CP/TP (per-element тумблер hudCpTp, деф. вкл) — ПОД клавишами (в самом низу перед
-	//        координатами). Не входит в кибершоковские строки 1-4, но тумблер существует; сохраняем
-	//        строку, чтобы не делать тумблер инертным. Стиль под общую палитру (лейблы MUTED, числа
-	//        WHITE, разделитель DIM). Риск: строка внизу — center-HTML может обрезать (см. отчёт). ---
-	if (showCpTp)
+	// --- CP/TP (per-element тумблер hudCpTp, деф. вкл) — ПОД клавишами. ВЗАИМОИСКЛЮЧАЕТСЯ с showpos:
+	//        когда включён showpos, строка координат ЗАМЕНЯЕТ CP/TP (а не добавляется сверху), иначе
+	//        при всех включённых тумблерах низ панели center-HTML обрезал координаты. showpos игроки
+	//        используют редко, так что временно скрыть CP/TP при нём не страшно (решение пользователя).
+	//        Стиль под палитру (лейблы WHITE, числа WHITE, разделитель DIM). ---
+	if (showCpTp && !showPos)
 	{
 		i32 cpIndex = isReplay ? KZ::replaysystem::GetCurrentCpIndex() : dataSource->checkpointService->GetCurrentCpIndex();
 		i32 cpCount = isReplay ? KZ::replaysystem::GetCheckpointCount() : dataSource->checkpointService->GetCheckpointCount();
