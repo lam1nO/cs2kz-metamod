@@ -334,7 +334,8 @@ bool KZHUDService::GetTimerParts(const char *language, std::string &outTime, std
 #define KZ_HUD_FS_SPEED     "fontSize-l"  // скорость — главный акцент
 #define KZ_HUD_FS_TIMER     "fontSize-m"  // таймер — второй по важности
 #define KZ_HUD_FS_SECONDARY "fontSize-sm" // PB/WR, CP/TP, престрейф, Stage, координаты — вторичная инфа
-#define KZ_HUD_FS_MINOR     "fontSize-s"  // ряд клавиш W A S D J C и метка стиля — наименее заметное
+#define KZ_HUD_FS_KEYS      "fontSize-m"  // ряд клавиш W A S D J C — крупный, как на кибершоке
+#define KZ_HUD_FS_MINOR     "fontSize-s"  // метка стиля — наименее заметное
 
 std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSpeed, bool suppressTimer, bool suppressKeys, bool masterMode,
 										   const char *language)
@@ -539,7 +540,7 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		std::string row = key("W", dataSource->IsButtonPressed(IN_FORWARD)) + " " + key("A", dataSource->IsButtonPressed(IN_MOVELEFT)) + " "
 						  + key("S", dataSource->IsButtonPressed(IN_BACK)) + " " + key("D", dataSource->IsButtonPressed(IN_MOVERIGHT))
 						  + "&#160;&#160;" + key("J", jump) + " " + key("C", dataSource->IsButtonPressed(IN_DUCK));
-		addLine(std::string("<font class='" KZ_HUD_FS_MINOR "'>") + row + "</font>");
+		addLine(std::string("<font class='" KZ_HUD_FS_KEYS "'>") + row + "</font>");
 	}
 
 	// --- Координаты и углы (!showpos). Тумблер — настройка получателя (this), данные —
