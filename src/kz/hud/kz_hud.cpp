@@ -436,19 +436,38 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 				styleTag = st;
 				rightVisChars += 2 + (int)V_strlen(styleName); // 2 разделителя + имя стиля
 			}
+			// PRO/NUB слева от времени — только пока таймер ИДЁТ (tRunning; в простое/стопе не рисуем).
+			// PRO — в текущем ране НЕ использован ни один телепорт, NUB — использован ≥1 (тот же критерий
+			// Pro/Standard, что у типа времени таймера: checkpointService->GetTeleportCount()). PRO зелёный
+			// (KZ_HUD_C_TIMER), NUB приглушённый (KZ_HUD_C_MUTED); мелкий кегль SECONDARY, как метка режима.
+			// Буквы + пара nbsp-зазора к времени; ширину блока учитываем в балансе паддинга (leftVisChars).
+			std::string proNubTag;
+			int leftVisChars = 0;
+			if (tRunning && !isReplay && dataSource->checkpointService)
+			{
+				bool pro = dataSource->checkpointService->GetTeleportCount() == 0;
+				const char *pnColor = pro ? KZ_HUD_C_TIMER : KZ_HUD_C_MUTED;
+				const char *pnText = pro ? "PRO" : "NUB";
+				char pn[128];
+				V_snprintf(pn, sizeof(pn), "<font class='" KZ_HUD_FS_SECONDARY "'><font color='%s'>%s</font></font>&#160;&#160;", pnColor, pnText);
+				proNubTag = pn;
+				leftVisChars = 2 + (int)V_strlen(pnText); // симметрично modeTag: 2 nbsp-зазор + буквы
+			}
 			// Левый паддинг nbsp'ами (&#160;, рендерится с шириной) ≈ ширины правой части, чтобы центр
 			// ВРЕМЕНИ (область «:» в «00:00.00») встал под центр экрана (движок центрирует строку целиком):
 			// тогда одиночная скорость снизу окажется ровно под серединой времени. nbsp У́ЖЕ буквы
 			// (≈0.5–0.6), поэтому его нужно БОЛЬШЕ, чем «символов» правой части — множитель
 			// kLeftPadNbspPerChar под живую подстройку (цель «визуально по центру», не пиксель).
 			// Паддинг в том же кегле, что правая часть (SECONDARY), чтобы ширины сопоставлялись.
-			// Пусто, если ни режима, ни стиля нет (реплей-бот / кастомный режим) → время и так по центру.
+			// PRO/NUB — реальный контент слева, поэтому из бюджета паддинга вычитаем его ширину
+			// (leftVisChars): [pad][PRO][ время ][режим][стиль] — PRO зеркалит режим вокруг центра времени.
 			const int kLeftPadNbspPerChar = 2; // nbsp на 1 «символ» правой части; крутить после теста
 			std::string leftPad;
-			if (rightVisChars > 0)
+			int padBudget = rightVisChars - leftVisChars;
+			if (padBudget > 0)
 			{
 				std::string fs;
-				int padCount = rightVisChars * kLeftPadNbspPerChar;
+				int padCount = padBudget * kLeftPadNbspPerChar;
 				for (int i = 0; i < padCount; i++)
 				{
 					fs += "&#160;"; // nbsp — добивка с шириной (≈0.5–0.6 буквы) под центровку времени
@@ -466,11 +485,11 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 				V_snprintf(sf, sizeof(sf), "<font class='" KZ_HUD_FS_SECONDARY "'><font color='" KZ_HUD_C_DIM "'>%s</font></font>", tSuffix.c_str());
 				suffixTag = sf;
 			}
-			// Порядок как на кибершоке: (паддинг) → время → суффикс → режим → стиль-если-есть.
+			// Порядок как на кибершоке: (паддинг) → PRO/NUB → время → суффикс → режим → стиль-если-есть.
 			V_snprintf(buf, sizeof(buf),
-					   "%s<font class='" KZ_HUD_FS_TIMER "'><font color='%s'>" KZ_HUD_BRACKET_OPEN "&#160;%s&#160;" KZ_HUD_BRACKET_CLOSE
+					   "%s%s<font class='" KZ_HUD_FS_TIMER "'><font color='%s'>" KZ_HUD_BRACKET_OPEN "&#160;%s&#160;" KZ_HUD_BRACKET_CLOSE
 					   "</font></font>%s%s%s",
-					   leftPad.c_str(), timerColor, tTime.c_str(), suffixTag.c_str(), modeTag.c_str(), styleTag.c_str());
+					   leftPad.c_str(), proNubTag.c_str(), timerColor, tTime.c_str(), suffixTag.c_str(), modeTag.c_str(), styleTag.c_str());
 			addLine(buf);
 		}
 	}
