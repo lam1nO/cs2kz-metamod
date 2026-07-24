@@ -370,6 +370,9 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 	bool showKeys = compact ? false : (masterMode ? (this->IsMHUDKeysEnabled() && !suppressKeys) : !suppressKeys);
 	bool showCpTp = compact ? false : (masterMode ? this->IsMHUDCpTpEnabled() : true);
 	bool showExtra = !compact;
+	// showpos — тумблер получателя (this->player), данные наблюдаемого. Считаем заранее: нужен
+	// и для координат, и для решения о зазоре нижней группы (клавиши/CP-TP/showpos).
+	bool showPos = !compact && this->player->optionService->GetPreferenceBool("showPos", false);
 
 	// Типографика (иерархия): скорость — KZ_HUD_FS_SPEED, таймер — KZ_HUD_FS_TIMER, вторичная инфа
 	// (PB/WR, CP/TP, престрейф, Stage, координаты) — KZ_HUD_FS_SECONDARY, клавиши и метка стиля —
@@ -587,20 +590,13 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		addLine(buf);
 	}
 
-	// --- CP/TP (per-element тумблер hudCpTp, деф. вкл) — не входит в кибершоковские строки 1-4,
-	//        но тумблер существует и был включён; сохраняем строку опционально, чтобы не
-	//        регрессировать существующую функциональность и не делать тумблер инертным.
-	//        Стиль под общую палитру (лейблы MUTED, числа WHITE, разделитель DIM). ---
-	if (showCpTp)
+	// --- Зазор между верхней группой (таймер/скорость/Stage/PB-WR) и нижней (клавиши/CP-TP/
+	//        showpos): одна пустая строка (доп. <br>), только если обе группы непусты — иначе
+	//        висячий <br>. Высота center-HTML ограничена (обрезка низа) → ровно ОДНА пустая строка. ---
+	bool lowerGroup = showKeys || showCpTp || showPos;
+	if (lowerGroup && !html.empty())
 	{
-		i32 cpIndex = isReplay ? KZ::replaysystem::GetCurrentCpIndex() : dataSource->checkpointService->GetCurrentCpIndex();
-		i32 cpCount = isReplay ? KZ::replaysystem::GetCheckpointCount() : dataSource->checkpointService->GetCheckpointCount();
-		i32 tpCount = isReplay ? KZ::replaysystem::GetTeleportCount() : (i32)dataSource->checkpointService->GetTeleportCount();
-		V_snprintf(buf, sizeof(buf),
-				   "<font class='" KZ_HUD_FS_SECONDARY "'><font color='" KZ_HUD_C_MUTED "'>CP</font> <font color='" KZ_HUD_C_WHITE "'>%d/%d</font> "
-				   "<font color='" KZ_HUD_C_DIM "'>|</font> <font color='" KZ_HUD_C_MUTED "'>TP</font> <font color='" KZ_HUD_C_WHITE "'>%d</font></font>",
-				   cpIndex, cpCount, tpCount);
-		addLine(buf);
+		html += "<br>"; // пустая строка-зазор: addLine ниже сам добавит <br> перед первой строкой
 	}
 
 	// --- Клавиши в стиле MHUD: 2 строки раскладкой клавиатуры, каждая — отдельный addLine
@@ -627,9 +623,25 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		addLine(std::string("<font class='" KZ_HUD_FS_KEYS "'>") + row2 + "</font>");
 	}
 
+	// --- CP/TP (per-element тумблер hudCpTp, деф. вкл) — ПОД клавишами (в самом низу перед
+	//        координатами). Не входит в кибершоковские строки 1-4, но тумблер существует; сохраняем
+	//        строку, чтобы не делать тумблер инертным. Стиль под общую палитру (лейблы MUTED, числа
+	//        WHITE, разделитель DIM). Риск: строка внизу — center-HTML может обрезать (см. отчёт). ---
+	if (showCpTp)
+	{
+		i32 cpIndex = isReplay ? KZ::replaysystem::GetCurrentCpIndex() : dataSource->checkpointService->GetCurrentCpIndex();
+		i32 cpCount = isReplay ? KZ::replaysystem::GetCheckpointCount() : dataSource->checkpointService->GetCheckpointCount();
+		i32 tpCount = isReplay ? KZ::replaysystem::GetTeleportCount() : (i32)dataSource->checkpointService->GetTeleportCount();
+		V_snprintf(buf, sizeof(buf),
+				   "<font class='" KZ_HUD_FS_SECONDARY "'><font color='" KZ_HUD_C_MUTED "'>CP</font> <font color='" KZ_HUD_C_WHITE "'>%d/%d</font> "
+				   "<font color='" KZ_HUD_C_DIM "'>|</font> <font color='" KZ_HUD_C_MUTED "'>TP</font> <font color='" KZ_HUD_C_WHITE "'>%d</font></font>",
+				   cpIndex, cpCount, tpCount);
+		addLine(buf);
+	}
+
 	// --- Координаты и углы (!showpos). Тумблер — настройка получателя (this), данные —
 	//        наблюдаемого (dataSource). В компакте скрыто (как раньше). Стиль как раньше. ---
-	if (!compact && this->player->optionService->GetPreferenceBool("showPos", false))
+	if (showPos)
 	{
 		Vector origin;
 		QAngle angles;
