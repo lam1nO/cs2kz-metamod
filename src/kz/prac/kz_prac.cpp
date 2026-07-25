@@ -13,8 +13,7 @@ void KZPracService::Reset()
 {
 	this->inPrac = false;
 	this->frozen = {};
-	this->points.RemoveAll();
-	this->currentIndex = 0;
+	this->ClearPoints();
 }
 
 void KZPracService::ClearPoints()
@@ -165,4 +164,143 @@ void KZPracService::DropFrozenRun(const char *reason)
 		this->player->languageService->PrintChat(true, false, "Prac - Run Lost");
 		KZ_LOG_DEBUG(LogChannel::Timer, "[prac] frozen run dropped for %s: %s\n", this->player->GetName(), reason);
 	}
+}
+
+bool KZPracService::RequirePrac()
+{
+	if (!this->inPrac)
+	{
+		this->player->languageService->PrintChat(true, false, "Prac - Only In Prac");
+		this->player->PlayErrorSound();
+		return false;
+	}
+	return true;
+}
+
+void KZPracService::SetPoint()
+{
+	if (!this->RequirePrac())
+	{
+		return;
+	}
+	CCSPlayerPawn *pawn = this->player->GetPlayerPawn();
+	if (!pawn)
+	{
+		return;
+	}
+
+	PracPoint pt = {};
+	this->player->GetOrigin(&pt.origin);
+	this->player->GetVelocity(&pt.velocity);
+	this->player->GetAngles(&pt.angles);
+	pt.onGround = (pawn->m_fFlags() & FL_ONGROUND) != 0;
+	CCSPlayer_MovementServices *ms = this->player->GetMoveServices();
+	if (ms)
+	{
+		pt.duckAmount = ms->m_flDuckAmount;
+		pt.stamina = ms->m_flStamina;
+		pt.ladderNormal = ms->m_vecLadderNormal();
+		pt.onLadder = pawn->m_MoveType() == MOVETYPE_LADDER;
+	}
+
+	this->points.AddToTail(pt);
+	this->currentIndex = this->points.Count() - 1;
+	this->player->languageService->PrintChat(true, false, "Prac - Point Set", this->points.Count());
+	this->player->checkpointService->PlayCheckpointSound();
+}
+
+void KZPracService::DoTpToPoint(const PracPoint &pt)
+{
+	CCSPlayerPawn *pawn = this->player->GetPlayerPawn();
+	if (!pawn || !pawn->IsAlive())
+	{
+		return;
+	}
+
+	// Ноуклип снимаем всегда: смысл practp — продолжить движение по-настоящему.
+	this->player->noclipService->DisableNoclip();
+	this->player->noclipService->HandleNoclip();
+
+	// В отличие от обычного чекпоинта передаём НЕнулевую скорость — это вся суть prac-точки.
+	this->player->Teleport(&pt.origin, &pt.angles, &pt.velocity);
+
+	CCSPlayer_MovementServices *ms = this->player->GetMoveServices();
+	if (ms)
+	{
+		ms->m_flDuckAmount(pt.duckAmount);
+		ms->m_flStamina(pt.stamina);
+		if (pt.onLadder)
+		{
+			ms->m_vecLadderNormal(pt.ladderNormal);
+			this->player->SetMoveType(MOVETYPE_LADDER);
+		}
+		else
+		{
+			ms->m_vecLadderNormal(vec3_origin);
+			this->player->SetMoveType(MOVETYPE_WALK);
+		}
+	}
+	if (pt.onGround)
+	{
+		pawn->m_fFlags(pawn->m_fFlags() | FL_ONGROUND);
+	}
+	this->player->checkpointService->PlayTeleportSound();
+}
+
+void KZPracService::TpToPoint()
+{
+	if (!this->RequirePrac())
+	{
+		return;
+	}
+	if (this->points.Count() == 0)
+	{
+		this->player->languageService->PrintChat(true, false, "Prac - No Points");
+		this->player->PlayErrorSound();
+		return;
+	}
+	this->DoTpToPoint(this->points[this->currentIndex]);
+}
+
+void KZPracService::TpToPrevPoint()
+{
+	if (!this->RequirePrac())
+	{
+		return;
+	}
+	if (this->points.Count() == 0)
+	{
+		this->player->languageService->PrintChat(true, false, "Prac - No Points");
+		this->player->PlayErrorSound();
+		return;
+	}
+	this->currentIndex = MAX(0, this->currentIndex - 1);
+	this->DoTpToPoint(this->points[this->currentIndex]);
+}
+
+void KZPracService::TpToNextPoint()
+{
+	if (!this->RequirePrac())
+	{
+		return;
+	}
+	if (this->points.Count() == 0)
+	{
+		this->player->languageService->PrintChat(true, false, "Prac - No Points");
+		this->player->PlayErrorSound();
+		return;
+	}
+	this->currentIndex = MIN(this->points.Count() - 1, this->currentIndex + 1);
+	this->DoTpToPoint(this->points[this->currentIndex]);
+}
+
+void KZPracService::ResetPoints()
+{
+	if (!this->RequirePrac())
+	{
+		return;
+	}
+	this->ClearPoints();
+	this->player->languageService->PrintChat(true, false, "Prac - Points Cleared");
+	this->player->checkpointService->PlayCheckpointResetSound();
 }

@@ -70,8 +70,17 @@ public:
 	// и лога; nullptr = молча (смена карты).
 	void DropFrozenRun(const char *reason);
 
+	void SetPoint();
+	void TpToPoint();
+	void TpToPrevPoint();
+	void TpToNextPoint();
+	void ResetPoints();
+
 private:
 	void EnterPrac();
 	void ExitPrac();
 	void ClearPoints();
+	void DoTpToPoint(const PracPoint &pt);
+	// Общий гард для всех prac-команд: печатает отказ и возвращает false вне prac.
+	bool RequirePrac();
 };
