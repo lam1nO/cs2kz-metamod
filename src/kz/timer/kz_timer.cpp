@@ -365,7 +365,7 @@ bool KZTimerService::TimerStart(const KZCourseDescriptor *courseDesc, bool playS
 	this->shouldAnnounceMissedProTime = true;
 
 	// Начало рана: без него run_stop/run_finish не с чем сопоставить по времени.
-	KZ_LOG_INFO(LogChannel::Timer, "[cyb] run_start steam_id=%llu map=%s course=%s mode=%s\n", this->player->GetSteamId64(),
+	KZ_LOG_INFO(LogChannel::Timer, "[cyb] run_start steam_id=%llu map=%s course=%s mode=%s\n", this->player->GetSteamId64(false),
 				g_pKZUtils->GetCurrentMapName().Get(), courseDesc->name, this->player->modeService->GetModeName());
 
 	this->UpdateCurrentCompareType(ToPBDataKey(KZ::mode::GetModeInfo(this->player->modeService).id, courseDesc->guid));
@@ -413,7 +413,7 @@ bool KZTimerService::TimerEnd(const KZCourseDescriptor *courseDesc)
 	// именно поэтому жалобу «мой ран не засчитался» нечем было разбирать.
 	if (!this->player->IsAlive())
 	{
-		KZ_LOG_INFO(LogChannel::Timer, "[cyb] run_reject steam_id=%llu course=%s reason=not_alive\n", this->player->GetSteamId64(),
+		KZ_LOG_INFO(LogChannel::Timer, "[cyb] run_reject steam_id=%llu course=%s reason=not_alive\n", this->player->GetSteamId64(false),
 					courseDesc->name);
 		return false;
 	}
@@ -426,8 +426,13 @@ bool KZTimerService::TimerEnd(const KZCourseDescriptor *courseDesc)
 		}
 		this->PlayTimerFalseEndSound();
 		this->lastFalseEndTime = g_pKZUtils->GetServerGlobals()->curtime;
-		KZ_LOG_INFO(LogChannel::Timer, "[cyb] run_reject steam_id=%llu course=%s reason=%s\n", this->player->GetSteamId64(), courseDesc->name,
-					this->timerRunning ? "wrong_course" : "timer_not_running");
+		// Только wrong_course: подслучай «таймер не бежал» сыплется на каждый вход в
+		// финишную зону (на bhop-картах игроки на ней стоят) и ничего не диагностирует.
+		if (this->timerRunning)
+		{
+			KZ_LOG_INFO(LogChannel::Timer, "[cyb] run_reject steam_id=%llu course=%s reason=wrong_course\n",
+						this->player->GetSteamId64(false), courseDesc->name);
+		}
 		return false;
 	}
 
@@ -435,7 +440,7 @@ bool KZTimerService::TimerEnd(const KZCourseDescriptor *courseDesc)
 	{
 		this->PlayMissedZoneSound();
 		KZ_LOG_INFO(LogChannel::Timer, "[cyb] run_reject steam_id=%llu course=%s reason=missed_stage stage=%d/%d\n",
-					this->player->GetSteamId64(), courseDesc->name, this->currentStage + 1, courseDesc->stageCount);
+					this->player->GetSteamId64(false), courseDesc->name, this->currentStage + 1, courseDesc->stageCount);
 		this->player->languageService->PrintChat(true, false, "Can't Finish Run (Missed Stage)", this->currentStage + 1);
 		return false;
 	}
@@ -445,7 +450,7 @@ bool KZTimerService::TimerEnd(const KZCourseDescriptor *courseDesc)
 		this->PlayMissedZoneSound();
 		i32 missCount = courseDesc->checkpointCount - this->reachedCheckpoints;
 		KZ_LOG_INFO(LogChannel::Timer, "[cyb] run_reject steam_id=%llu course=%s reason=missed_checkpoints missed=%d of=%d\n",
-					this->player->GetSteamId64(), courseDesc->name, missCount, courseDesc->checkpointCount);
+					this->player->GetSteamId64(false), courseDesc->name, missCount, courseDesc->checkpointCount);
 		if (missCount == 1)
 		{
 			this->player->languageService->PrintChat(true, false, "Can't Finish Run (Missed a Checkpoint Zone)");
@@ -467,7 +472,7 @@ bool KZTimerService::TimerEnd(const KZCourseDescriptor *courseDesc)
 	}
 	if (!allowEnd)
 	{
-		KZ_LOG_INFO(LogChannel::Timer, "[cyb] run_reject steam_id=%llu course=%s reason=listener_denied\n", this->player->GetSteamId64(),
+		KZ_LOG_INFO(LogChannel::Timer, "[cyb] run_reject steam_id=%llu course=%s reason=listener_denied\n", this->player->GetSteamId64(false),
 					courseDesc->name);
 		return false;
 	}
@@ -479,7 +484,7 @@ bool KZTimerService::TimerEnd(const KZCourseDescriptor *courseDesc)
 
 	// Финиш рана: ровно то, чего не хватало при жалобе «мой ран не засчитался».
 	KZ_LOG_INFO(LogChannel::Timer, "[cyb] run_finish steam_id=%llu map=%s course=%s mode=%s style=%s time=%.3f tps=%u\n",
-				this->player->GetSteamId64(), g_pKZUtils->GetCurrentMapName().Get(), courseDesc->name,
+				this->player->GetSteamId64(false), g_pKZUtils->GetCurrentMapName().Get(), courseDesc->name,
 				this->player->modeService->GetModeName(),
 				this->player->styleServices.Count() > 0 ? this->player->styleServices[0]->GetStyleShortName() : "normal", time,
 				teleportsUsed);
@@ -519,7 +524,7 @@ bool KZTimerService::TimerStop(bool playSound, const char *reason)
 	this->timerRunning = false;
 	// Главный класс багрепортов — «таймер сбросился сам». Одна строка с причиной
 	// закрывает разбор без воспроизведения. Событие редкое (раз на ран), не на тик.
-	KZ_LOG_INFO(LogChannel::Timer, "[cyb] run_stop steam_id=%llu map=%s mode=%s time=%.3f reason=%s\n", this->player->GetSteamId64(),
+	KZ_LOG_INFO(LogChannel::Timer, "[cyb] run_stop steam_id=%llu map=%s mode=%s time=%.3f reason=%s\n", this->player->GetSteamId64(false),
 				g_pKZUtils->GetCurrentMapName().Get(), this->player->modeService->GetModeName(), this->GetTime(), reason);
 	if (playSound)
 	{
@@ -1122,7 +1127,7 @@ void KZTimerService::OnPlayerDeath()
 
 void KZTimerService::OnRoundStart()
 {
-	KZTimerService::TimerStopAll();
+	KZTimerService::TimerStopAll(true, "round_start");
 }
 
 void KZTimerService::OnTeleport(const Vector *newPosition, const QAngle *newAngles, const Vector *newVelocity)
@@ -1143,7 +1148,7 @@ SCMD(kz_stop, SCFL_TIMER | SCFL_HELP)
 			return MRES_SUPERCEDE;
 		}
 		player->savedRunService->InvalidateCurrent("stop");
-		player->timerService->TimerStop(true, "round_start");
+		player->timerService->TimerStop(true, "stop");
 	}
 	return MRES_SUPERCEDE;
 }

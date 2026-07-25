@@ -61,7 +61,7 @@ void KZRacingService::OnStartRace(const KZ::racing::events::StartRace &message)
 		KZPlayer *player = g_pKZPlayerManager->SteamIdToPlayer(participant.id);
 		if (player)
 		{
-			player->timerService->TimerStop();
+			player->timerService->TimerStop(true, "race_event");
 		}
 	}
 }
