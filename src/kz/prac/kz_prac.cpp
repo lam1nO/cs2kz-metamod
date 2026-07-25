@@ -217,13 +217,13 @@ void KZPracService::EnterPrac()
 			this->frozen.tpCount = this->player->checkpointService->GetTeleportCount() + 1;
 			this->player->GetOrigin(&this->frozen.origin);
 			this->player->GetAngles(&this->frozen.angles);
-			// Скорость и «с земли ли» — для возврата (ревизия 2): вошёл в полёте → вернём в полёт
-			// без паузы. Лестницу считаем землёй (см. FrozenRun::enteredGrounded). wasPaused —
-			// тоже «с земли»: паузу можно было поставить только стоя, а FL_ONGROUND за время
-			// MOVETYPE_NONE могло слететь, и без этого игрок вернулся бы в ран без паузы.
+			// Скорость входа — для возврата (ревизия 2). Пауза на возврате уместна ТОЛЬКО если
+			// игрок реально стоял: она обнуляет скорость, поэтому вошедшему на бегу или в полёте
+			// вернула бы не то состояние (решение пользователя 25.07 — сохранять скорость бега).
+			// wasPaused — тоже «стоял»: паузу можно поставить только стоя, а скорость под
+			// MOVETYPE_NONE уже нулевая.
 			this->player->GetVelocity(&this->frozen.velocity);
-			CCSPlayerPawn *pawn = this->player->GetPlayerPawn();
-			this->frozen.enteredGrounded = wasPaused || (pawn->m_fFlags() & FL_ONGROUND) != 0 || pawn->m_MoveType() == MOVETYPE_LADDER;
+			this->frozen.enteredStill = wasPaused || this->frozen.velocity.Length() < KZ_PRAC_STILL_SPEED;
 			SnapshotModeStyles(this->player, this->frozen.modeName, sizeof(this->frozen.modeName), this->frozen.styles,
 							   sizeof(this->frozen.styles));
 
@@ -327,17 +327,17 @@ void KZPracService::ExitPrac()
 	// а мы телепортируем напрямую через KZPlayer::Teleport, который его не трогает.
 	this->player->checkpointService->RestoreFromSnapshot(this->frozen.checkpoints, this->frozen.cpIndex, this->frozen.tpCount);
 	// Возврат со скоростью входа (ревизия 2): вошёл стоя — она нулевая и её всё равно съест
-	// пауза; вошёл в полёте — это единственный способ вернуть игрока в тот же полёт.
-	const bool grounded = this->frozen.enteredGrounded;
+	// пауза; вошёл на бегу или в полёте — это единственный способ вернуть то же состояние.
+	const bool still = this->frozen.enteredStill;
 	this->player->Teleport(&this->frozen.origin, &this->frozen.angles, &this->frozen.velocity);
 	this->player->recordingService->OnResume();
-	// Пауза только для входа с земли: ForcePause обнуляет скорость и ставит MOVETYPE_NONE, то
-	// есть съела бы ровно то, что мы вернули выше. Вошёл в воздухе — таймер сразу идёт, игрок
-	// продолжает полёт (об этом отдельная фраза ниже).
+	// Пауза только если игрок стоял: ForcePause обнуляет скорость и ставит MOVETYPE_NONE, то
+	// есть съела бы ровно то, что мы вернули выше. Вошёл на бегу или в полёте — таймер сразу
+	// идёт, игрок продолжает движение (об этом отдельная фраза ниже).
 	// ForcePause() возвращает void и молча не поставит паузу, если какой-то листенер
 	// провалит OnPause() (сейчас таких нет) — а чат ниже безусловно говорит "на паузе".
 	// Если появится реальное вето, эту пару придётся согласовать явно.
-	if (grounded)
+	if (still)
 	{
 		this->player->timerService->ForcePause();
 	}
@@ -345,7 +345,7 @@ void KZPracService::ExitPrac()
 	this->frozen = {};
 	this->ClearPoints();
 	this->ResetPracTime();
-	this->player->languageService->PrintChat(true, false, grounded ? "Prac - Exit To Run" : "Prac - Exit To Run Airborne");
+	this->player->languageService->PrintChat(true, false, still ? "Prac - Exit To Run" : "Prac - Exit To Run Moving");
 }
 
 void KZPracService::DropFrozenRun(const char *reason, const char *phrase)

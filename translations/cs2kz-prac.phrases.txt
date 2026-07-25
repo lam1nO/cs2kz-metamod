@@ -22,9 +22,9 @@
 		"en"		"{grey}Back to your run. Timer is {default}paused{grey}, the run is now {default}NUB{grey}."
 		"ru"		"{grey}Возврат в ран. Таймер на {default}паузе{grey}, ран теперь {default}NUB{grey}."
 	}
-	"Prac - Exit To Run Airborne"
+	"Prac - Exit To Run Moving"
 	{
-		// Вход в prac был в воздухе: паузу не ставим (она обнуляет скорость), таймер идёт сразу.
+		// Вход был на бегу или в полёте: паузу не ставим (она обнуляет скорость), таймер идёт сразу.
 		"en"		"{grey}Back to your run at your entry speed. Timer is {default}running{grey}, the run is now {default}NUB{grey}."
 		"ru"		"{grey}Возврат в ран со скоростью входа. Таймер {default}идёт{grey}, ран теперь {default}NUB{grey}."
 	}
