@@ -28,6 +28,7 @@ enum OptSubmenu : u8
 	OPTSUB_CHECKPOINT = 0,
 	OPTSUB_VISIBILITY,
 	OPTSUB_SOUND,
+	OPTSUB_TIMER,
 	OPTSUB_PAINT,
 	OPTSUB_COUNT
 };
@@ -117,6 +118,12 @@ static const OptionsMenuItem s_sndItems[] = {
 	{OptItemKind::Toggle, "Options - Menu Label TeleportSound",   "teleportSound",   true, 0.0f, nullptr              },
 	{OptItemKind::Toggle, "Options - Menu Label TimerStopSound",  "timerStopSound",  true, 0.0f, &ApplyTimerStopSound },
 	{OptItemKind::Volume, "Options - Menu Label RecordVolume",    "recordVolume",    false, 1.0f, nullptr             },
+};
+
+// Таймер: сообщения о ходе рана. missedTimeAnnounce гасит и чат-строку «You missed your
+// best time…», и её звук (см. KZTimerService::CheckMissedTime).
+static const OptionsMenuItem s_timerItems[] = {
+	{OptItemKind::Toggle, "Options - Menu Label MissedTime", "missedTimeAnnounce", true, 0.0f, nullptr},
 };
 
 // Paint.
@@ -392,6 +399,7 @@ void KZ::option::OpenOptionsMenu(KZPlayer *player)
 	handles.sub[OPTSUB_CHECKPOINT] = BuildOptionsSubmenu(player, "Options - Menu Cat Checkpoint", s_cpItems, (i32)KZ_ARRAYSIZE(s_cpItems));
 	handles.sub[OPTSUB_VISIBILITY] = BuildOptionsSubmenu(player, "Options - Menu Cat Visibility", s_visItems, (i32)KZ_ARRAYSIZE(s_visItems));
 	handles.sub[OPTSUB_SOUND] = BuildOptionsSubmenu(player, "Options - Menu Cat Sound", s_sndItems, (i32)KZ_ARRAYSIZE(s_sndItems));
+	handles.sub[OPTSUB_TIMER] = BuildOptionsSubmenu(player, "Options - Menu Cat Timer", s_timerItems, (i32)KZ_ARRAYSIZE(s_timerItems));
 	handles.sub[OPTSUB_PAINT] = BuildOptionsSubmenu(player, "Options - Menu Cat Paint", s_paintItems, (i32)KZ_ARRAYSIZE(s_paintItems));
 	// HUD/JS-подменю строят их модули (свои per-slot хэндлы, пункт «Назад» внутри).
 	MenuHandle hudMenu = (MenuHandle)player->hudService->CreateHUDMenu();
@@ -411,6 +419,7 @@ void KZ::option::OpenOptionsMenu(KZPlayer *player)
 	addCat("Options - Menu Cat HUD", hudMenu);
 	addCat("Options - Menu Cat Visibility", handles.sub[OPTSUB_VISIBILITY]);
 	addCat("Options - Menu Cat Sound", handles.sub[OPTSUB_SOUND]);
+	addCat("Options - Menu Cat Timer", handles.sub[OPTSUB_TIMER]);
 	addCat("Options - Menu Cat Jumpstats", jsMenu);
 	addCat("Options - Menu Cat Paint", handles.sub[OPTSUB_PAINT]);
 

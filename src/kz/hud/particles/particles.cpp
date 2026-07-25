@@ -285,6 +285,18 @@ bool KZHUDService::IsMHUDOutlineEnabled()
 	return this->MHUDSettingsSource()->optionService->GetPreferenceBool("hudOutline", true);
 }
 
+// Ниже — настройки ТОЛЬКО стандартного HTML-худа (particle-MHUD их не читает), но живут
+// рядом с остальными тумблерами: тот же источник настроек и то же меню «Элементы».
+bool KZHUDService::IsMHUDKeysTwoRowsEnabled()
+{
+	return this->MHUDSettingsSource()->optionService->GetPreferenceBool("hudKeysTwoRows", true);
+}
+
+bool KZHUDService::IsMHUDPbWrEnabled()
+{
+	return this->MHUDSettingsSource()->optionService->GetPreferenceBool("hudPbWr", true);
+}
+
 // === Helpers для particle ============================================================
 
 static_function void SetParticleTint(CParticleSystem *particle, const Color &color)
@@ -878,6 +890,7 @@ static_function void ResetElementPrefs(KZPlayer *p, MHUDElement element)
 		case MHUDElement::Keys:
 			p->optionService->SetPreferenceBool("hudKeys", true);
 			p->optionService->SetPreferenceBool("hudKeysOverlap", true);
+			p->optionService->SetPreferenceBool("hudKeysTwoRows", true);
 			p->optionService->SetPreferenceFloat("mhudKeysOffsetX", MHUD_DEF_KEYS_OFFSET_X);
 			p->optionService->SetPreferenceFloat("mhudKeysOffsetY", MHUD_DEF_KEYS_OFFSET_Y);
 			p->optionService->SetPreferenceFloat("mhudKeysScale", MHUD_DEF_KEYS_SCALE);
@@ -933,6 +946,9 @@ static const HUDMenuToggle s_hudToggles[] = {
 	{"HUD - Menu Label Keys",         "hudKeys",        true,  "MHUD - Keys Enabled",          "MHUD - Keys Disabled"         },
 	{"HUD - Menu Label KeysOverlap",  "hudKeysOverlap", true,  "MHUD - Keys Overlap Enabled",  "MHUD - Keys Overlap Disabled" },
 	{"HUD - Menu Label CpTp",         "hudCpTp",        true,  "MHUD - CP/TP Enabled",         "MHUD - CP/TP Disabled"        },
+	// Только стандартный HTML-худ: раскладка клавиш (2 ряда / одна строка) и строка PB/WR.
+	{"HUD - Menu Label KeysTwoRows",  "hudKeysTwoRows", true,  "MHUD - Keys Two Rows Enabled", "MHUD - Keys Two Rows Disabled"},
+	{"HUD - Menu Label PbWr",         "hudPbWr",        true,  "MHUD - PB/WR Enabled",         "MHUD - PB/WR Disabled"        },
 	{"HUD - Menu Label Outline",      "hudOutline",     true,  "MHUD - Outline Enabled",       "MHUD - Outline Disabled"      },
 	// showPos — строка координат HTML-панели (!showpos), не particle-элемент.
 	{"HUD - Menu Label ShowPos",      "showPos",        false, "HUD Option - Show Pos - Enable", "HUD Option - Show Pos - Disable"},
@@ -1519,7 +1535,9 @@ u32 KZHUDService::CreateHUDMenu()
 			addToggleKey(sub, "hudTimer");
 			addToggleKey(sub, "hudKeys");
 			addToggleKey(sub, "hudKeysOverlap"); // overlap применяется и к стандартному, и к MHUD-худу
+			addToggleKey(sub, "hudKeysTwoRows"); // только стандартный худ: 2 ряда vs одна строка
 			addToggleKey(sub, "hudCpTp");
+			addToggleKey(sub, "hudPbWr"); // только стандартный худ: строка PB/WR
 		}
 		attachSub(sub, "HUD - Menu Label Elements");
 	}

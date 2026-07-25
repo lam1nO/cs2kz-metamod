@@ -27,6 +27,11 @@
 		"en"	"Sounds"
 		"ru"	"Звуки"
 	}
+	"Options - Menu Cat Timer"
+	{
+		"en"	"Timer"
+		"ru"	"Таймер"
+	}
 	"Options - Menu Cat Jumpstats"
 	{
 		"en"	"Jumpstats"
@@ -101,5 +106,10 @@
 	{
 		"en"	"Paint size"
 		"ru"	"Размер краски"
+	}
+	"Options - Menu Label MissedTime"
+	{
+		"en"	"Missed best time message"
+		"ru"	"Сообщение о потере PB"
 	}
 }

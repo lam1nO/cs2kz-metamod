@@ -1827,6 +1827,12 @@ void KZTimerService::CheckMissedTime()
 	{
 		return;
 	}
+	// Игрок мог выключить оповещение «You missed your best time» (!options → Таймер).
+	// Гасим и чат-строку, и звук — ниже других выходов нет, поэтому проверяем здесь.
+	if (!this->player->optionService->GetPreferenceBool("missedTimeAnnounce", true))
+	{
+		return;
+	}
 	// No comparison available for styled runs.
 	if (this->player->styleServices.Count() > 0)
 	{

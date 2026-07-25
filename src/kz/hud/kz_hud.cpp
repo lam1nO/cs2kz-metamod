@@ -327,15 +327,8 @@ bool KZHUDService::GetTimerParts(const char *language, std::string &outTime, std
 #define KZ_HUD_C_JUMPBUG "#FFFF20" // престрейф после jumpbug/duckbug
 #define KZ_HUD_C_CJ      "#71EEB8" // приписка C (crouch-jump)
 
-// Скобки вокруг таймера. Уголковые ⌈ ⌋ (U+2308/230B) «кибершоковее», но лежат в
-// Mathematical-блоке Unicode — вне гарантированного набора игрового шрифта, риск tofu на
-// живом сервере (см. дизайн-спеку). Поэтому по умолчанию ASCII; чтобы проверить уголковые —
-// закомментировать ASCII-пару и раскомментировать HTML-entity-пару ниже, прогнать
-// glyph-тест на dev-боксе.
-#define KZ_HUD_BRACKET_OPEN  "["
-#define KZ_HUD_BRACKET_CLOSE "]"
-// #define KZ_HUD_BRACKET_OPEN  "&#8968;" // ⌈ U+2308
-// #define KZ_HUD_BRACKET_CLOSE "&#8971;" // ⌋ U+230B
+// Скобок вокруг времени больше нет (убраны 25.07 по решению пользователя) — прежние
+// #define KZ_HUD_BRACKET_* и вариант с уголковыми ⌈ ⌋ удалены вместе с ними.
 
 // Размеры шрифта строк стандартного HTML-худа (класс движка внутри color-тега, см. ниже).
 // Явная иерархия по важности: скорость > таймер > вторичная инфа > клавиши/стиль. ВНИМАНИЕ:
@@ -389,9 +382,9 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 	// Это прогрессивное улучшение — если движок не подхватит класс, размер молча дефолтный,
 	// но цвета и раскладка остаются корректными (класс лишь меняет кегль, не текст/цвет).
 
-	// --- Строка 1: [ 00:07.96 ] Стиль — таймер в скобках (m): зелёный когда идёт/пауза, белый
+	// --- Строка 1: 00:07.96 CKZ Стиль — время: зелёное когда идёт/пауза, белое
 	//        00:00.00 когда стоп/idle; суффикс паузы/стопа DIM, рядом метка стиля MUTED (s, только
-	//        активный не-деф. стиль). Символ скобки — через KZ_HUD_BRACKET_*. ---
+	//        активный не-деф. стиль). Скобок вокруг времени нет (убраны 25.07). ---
 	if (showTimer)
 	{
 		std::string tTime, tSuffix;
@@ -488,10 +481,11 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 			// не идёт → белое 00:00.00 (см. timerColor/notRunning выше). tSuffix из GetTimerParts
 			// больше не используется (сам метод его по-прежнему может отдавать — здесь игнорируем).
 			// Порядок как на кибершоке: (паддинг) → PRO/NUB → время → режим → стиль-если-есть.
-			V_snprintf(buf, sizeof(buf),
-					   "%s%s<font class='" KZ_HUD_FS_TIMER "'><font color='%s'>" KZ_HUD_BRACKET_OPEN "&#160;%s&#160;" KZ_HUD_BRACKET_CLOSE
-					   "</font></font>%s%s",
-					   leftPad.c_str(), proNubTag.c_str(), timerColor, tTime.c_str(), modeTag.c_str(), styleTag.c_str());
+			// Квадратные скобки вокруг времени убраны (решение пользователя 25.07) — время
+			// само по себе читается, скобки только шумели. Симметричные nbsp внутри них ушли
+			// вместе с ними: центровку они не держали (её держит leftPad, посчитанный выше).
+			V_snprintf(buf, sizeof(buf), "%s%s<font class='" KZ_HUD_FS_TIMER "'><font color='%s'>%s</font></font>%s%s", leftPad.c_str(),
+					   proNubTag.c_str(), timerColor, tTime.c_str(), modeTag.c_str(), styleTag.c_str());
 			addLine(buf);
 		}
 	}
@@ -568,7 +562,8 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 	//        Центрирование: оба поля ВСЕГДА одной знаковой ширины — реальное «MM:SS.CC» (8 симв.,
 	//        FormatTimeHud при hours=0) ИЛИ равноширинный плейсхолдер «--:--.--» (8, DIM) при
 	//        отсутствии значения. Равная ширина ⇒ центральный || стоит по построению, без паддинга. ---
-	if (pbwrCourse)
+	//        Секция целиком отключается тумблером hudPbWr (Элементы → «PB/WR»).
+	if (pbwrCourse && this->IsMHUDPbWrEnabled())
 	{
 		// Плейсхолдер отсутствующего значения — той же знаковой ширины, что формат времени
 		// «MM:SS.CC» (8 символов). Держит поля PB/WR равными ⇒ || по центру без добивки.
@@ -653,12 +648,23 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		};
 		bool jump = dataSource->hudService->jumpedThisTick || dataSource->IsButtonPressed(IN_JUMP);
 		const char *sep = "&#160;&#160;"; // пара nbsp — читаемый зазор между буквами
-		// Ряд 1 (верх): C W J.
-		std::string row1 = key("C", dataSource->IsButtonPressed(IN_DUCK)) + sep + key("W", wDown) + sep + key("J", jump);
-		// Ряд 2 (низ): A S D — W окажется над S при центровке движком.
-		std::string row2 = key("A", aDown) + sep + key("S", sDown) + sep + key("D", dDown);
-		addLine(std::string("<font class='" KZ_HUD_FS_KEYS "'>") + row1 + "</font>");
-		addLine(std::string("<font class='" KZ_HUD_FS_KEYS "'>") + row2 + "</font>");
+		if (this->IsMHUDKeysTwoRowsEnabled())
+		{
+			// Ряд 1 (верх): C W J.
+			std::string row1 = key("C", dataSource->IsButtonPressed(IN_DUCK)) + sep + key("W", wDown) + sep + key("J", jump);
+			// Ряд 2 (низ): A S D — W окажется над S при центровке движком.
+			std::string row2 = key("A", aDown) + sep + key("S", sDown) + sep + key("D", dDown);
+			addLine(std::string("<font class='" KZ_HUD_FS_KEYS "'>") + row1 + "</font>");
+			addLine(std::string("<font class='" KZ_HUD_FS_KEYS "'>") + row2 + "</font>");
+		}
+		else
+		{
+			// Одна строка в порядке апстрима cs2kz (A W S D C J) — вариант для тех, кому
+			// клавиатурная раскладка в 2 ряда занимает слишком много высоты панели.
+			std::string row = key("A", aDown) + sep + key("W", wDown) + sep + key("S", sDown) + sep + key("D", dDown) + sep
+							  + key("C", dataSource->IsButtonPressed(IN_DUCK)) + sep + key("J", jump);
+			addLine(std::string("<font class='" KZ_HUD_FS_KEYS "'>") + row + "</font>");
+		}
 	}
 
 	// --- CP/TP (per-element тумблер hudCpTp, деф. вкл) — ПОД клавишами. ВЗАИМОИСКЛЮЧАЕТСЯ с showpos:
