@@ -18,6 +18,11 @@ static_global class KZTimerServiceEventListener_Racing : public KZTimerServiceEv
 		return player->racingService->OnTimerStart(courseGUID);
 	}
 
+	virtual void OnTimerStartPost(KZPlayer *player, u32 courseGUID) override
+	{
+		player->racingService->OnTimerStartPost(courseGUID);
+	}
+
 	virtual void OnTimerEndPost(KZPlayer *player, u32 courseGUID, f32 time, u32 teleportsUsed) override
 	{
 		player->racingService->OnTimerEndPost(courseGUID, time, teleportsUsed);

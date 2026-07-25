@@ -401,13 +401,26 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		{
 			// Идёт забег или пауза (tRunning) → зелёный + фактическое время. Стоп/idle обычного
 			// игрока → белый + 00:00.00. Реплей-бот не трогаем (свой финальный тайм остаётся).
+			const bool inPrac = dataSource->pracService && dataSource->pracService->IsInPrac();
+			const bool pracFrozen = inPrac && dataSource->pracService->HasFrozenRun();
 			bool notRunning = !tRunning && !isReplay;
 			const char *timerColor = notRunning ? KZ_HUD_C_WHITE : KZ_HUD_C_TIMER;
 			if (notRunning)
 			{
-				char zeroText[64];
-				FormatTimeHud(0.0, zeroText, sizeof(zeroText));
-				tTime = zeroText;
+				char stoppedText[64];
+				if (pracFrozen)
+				{
+					// В prac таймер честно стоит, но время рана не потеряно — показываем
+					// ЗАМОРОЖЕННОЕ приглушённым. Белое 00:00.00 рядом с меткой PRAC читалось
+					// бы как «время пропало» (чат при этом говорит «ран заморожен»).
+					FormatTimeHud(dataSource->pracService->GetFrozenRun().timer.time, stoppedText, sizeof(stoppedText));
+					timerColor = KZ_HUD_C_MUTED;
+				}
+				else
+				{
+					FormatTimeHud(0.0, stoppedText, sizeof(stoppedText));
+				}
+				tTime = stoppedText;
 			}
 			// Метка режима — рядом с временем, ЗАГЛАВНЫМИ (CKZ/KZT/VNL), как на кибершоке «[..] CKZ».
 			// Короткое имя режима наблюдаемого прогоняем через CybReplayCommon::MapMode (тот же
@@ -452,7 +465,6 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 			// (см. KZTimerService::GetCurrentTimeType: GetTeleportCount() == 0 -> PRO).
 			std::string proNubTag;
 			int leftVisChars = 0;
-			const bool inPrac = dataSource->pracService && dataSource->pracService->IsInPrac();
 			if ((tRunning || inPrac) && !isReplay && dataSource->checkpointService)
 			{
 				const char *pnColor;

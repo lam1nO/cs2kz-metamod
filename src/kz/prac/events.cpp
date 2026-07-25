@@ -3,7 +3,7 @@
 
 // В prac активного рана нет, но игрок летает по карте и может влететь в стартовую
 // зону курса. Запуск таймера в этом состоянии — единственное, что нужно отбить в ядре.
-class PracTimerListener : public KZTimerServiceEventListener
+static_global class PracTimerListener : public KZTimerServiceEventListener
 {
 public:
 	virtual bool OnTimerStart(KZPlayer *player, u32 courseGUID) override

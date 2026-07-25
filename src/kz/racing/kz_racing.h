@@ -319,9 +319,16 @@ public:
 	static void RemoveLocalRaceParticipant(u64 steamID);
 
 	bool CanTeleport();
+	// Заезд идёт, игрок в нём участвует и ещё не финишировал. Нужен потребителям, которые
+	// обязаны отказать участнику заезда целиком, а не только по лимиту телепортов (!prac).
+	bool IsInActiveRace();
 	// Return false if a race is active, the player is one of the participants and the start time hasn't arrived yet.
 	// Also returns false if the mode or the course is invalid, or if the player has any active style.
 	bool OnTimerStart(u32 courseGUID);
+	// Тик фактического старта. Отдельным пост-колбэком, а не побочным эффектом OnTimerStart:
+	// вето — это опрос ВСЕХ листенеров через allowStart &= (kz_timer.cpp), поэтому наше "да"
+	// ещё не значит, что таймер запустился (запуск может отбить другой листенер, например prac).
+	void OnTimerStartPost(u32 courseGUID);
 
 	i32 timerStartTickServer {};
 	// Notify the coordinator about the end of the run.

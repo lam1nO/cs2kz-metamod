@@ -22,6 +22,12 @@ public:
 		u32 tpCount {};
 		Vector origin {};
 		QAngle angles {};
+		// Режим и стили на момент заморозки. RunSubmission читает ТЕКУЩИЕ modeService/
+		// styleServices, поэтому ран, переживший !mode/!style внутри prac, уехал бы в чужой
+		// лидерборд со временем, набранным на другой физике — сверяем на выходе (ExitPrac).
+		char modeName[KZ_MAX_MODE_NAME_LENGTH + 1] {};
+		// Канонический список стилей — тот же вид, что ключ SavedRuns (BuildStylesString, 64 симв.).
+		char styles[65] {};
 	};
 
 	// Точка отработки внутри prac. В отличие от обычного чекпоинта хранит ВЕКТОР
@@ -46,6 +52,9 @@ private:
 
 public:
 	static void Init();
+	// Сброс замороженных ранов у всех игроков — по образцу KZTimerService::TimerStopAll.
+	// Нужен там, где ран умирает у всех сразу (старт/рестарт раунда).
+	static void DropFrozenRunAll(const char *reason);
 	virtual void Reset() override;
 
 	bool IsInPrac()
@@ -73,9 +82,10 @@ public:
 
 	// Тоггл: вход в prac (заморозка рана, если он есть) или возврат в замороженный ран.
 	void TogglePrac();
-	// Потеря prac без возврата в ран (смерть, !r, смена карты). reason — для чат-сообщения
-	// и лога; nullptr = молча (смена карты).
-	void DropFrozenRun(const char *reason);
+	// Потеря prac без возврата в ран (смерть, !r, смена карты, смена режима/стиля).
+	// reason — для лога (nullptr = не логировать, смена карты); phrase — ключ чат-фразы
+	// (nullptr = молча, когда вызывающий уже напечатал свою причину).
+	void DropFrozenRun(const char *reason, const char *phrase = "Prac - Run Lost");
 
 	void SetPoint();
 	void TpToPoint();
@@ -98,4 +108,10 @@ private:
 	bool RequirePrac();
 	// Гард всех prac-телепортов: вне prac или при пустом стеке печатает отказ и возвращает false.
 	bool RequirePracPoint();
+	// ЕДИНЫЙ гард всех четырёх prac-путей, которые трогают пешку (EnterPrac, ExitPrac,
+	// DoTpToPoint, OnPlayerSpawn): HandleNoclip, ForcePause и Teleport разыменовывают пешку и
+	// move services без проверок (kz_noclip.cpp, KZTimerService::ForcePause), а у спектатора
+	// пешки нет вовсе. Звать ДО любых мутаций состояния. showError=false — тихий путь
+	// (колбэк спауна), true — игрок позвал команду сам.
+	bool RequireLivePawn(bool showError);
 };

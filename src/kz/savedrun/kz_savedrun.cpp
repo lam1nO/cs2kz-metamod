@@ -12,6 +12,8 @@
 #include "utils/json.h"
 #include "utils/utils.h"
 
+#include <cmath>
+
 #include "vendor/sql_mm/src/public/sql_mm.h"
 
 namespace
@@ -195,8 +197,23 @@ bool KZSavedRunService::ApplySnapshot(i32 course, u32 tpCount, const std::string
 	}
 
 	// pos отсутствует у обычных (не prac) снапшотов — это норма, не ошибка парсинга.
+	// Значения проверяем на конечность: pos идёт прямо в Teleport, а NaN/inf из битой строки
+	// телепортировал бы в невалидный origin (остальные поля снапшота проходят «базовую
+	// санность» ниже). Битый pos = игнорируем поле целиком, дальше обычная ветка по чекпоинтам.
 	std::vector<f64> pos;
-	const bool hasPos = json.Get("pos", pos) && pos.size() == 6;
+	bool hasPos = json.Get("pos", pos) && pos.size() == 6;
+	if (hasPos)
+	{
+		for (const f64 v : pos)
+		{
+			if (!std::isfinite(v))
+			{
+				KZ_LOG_WARN(LogChannel::Timer, "[SavedRuns] Snapshot for %s has non-finite pos, ignoring the field.\n", this->player->GetName());
+				hasPos = false;
+				break;
+			}
+		}
+	}
 
 	if (version != 1)
 	{
@@ -283,9 +300,10 @@ bool KZSavedRunService::ApplySnapshot(i32 course, u32 tpCount, const std::string
 	timerService->RestoreFromSnapshot(courseDescriptor->guid, restoreSnap);
 
 	// Телепорт ДО паузы: DoTeleport гардит "в паузе телепорт запрещён" (cyb.19-инвариант), а
-	// игрок сейчас ещё не paused. restoredCheckpoints пуст ровно тогда, когда hasPos (prac-заморозка
-	// pro-рана, см. Task 7) — гард на пустой список без pos отбивает это выше без ТП/паузы, поэтому
-	// индексация restoredCheckpoints[...] ниже остаётся только в ветке else.
+	// игрок сейчас ещё не paused. Пустой restoredCheckpoints возможен ТОЛЬКО при hasPos (гард
+	// выше отбивает пустой список без pos без ТП/паузы); обратное неверно — prac-заморозка
+	// NUB-рана даёт и pos, и чекпоинты. Поэтому индексация restoredCheckpoints[...] живёт
+	// только в ветке else: туда попадают лишь снапшоты без pos, а у них список непуст.
 	//
 	// Намеренно НЕ используем checkpointService->TpToCheckpoint(): она идёт через
 	// DoTeleport(i32 index), который гардит racingService->CanTeleport() и

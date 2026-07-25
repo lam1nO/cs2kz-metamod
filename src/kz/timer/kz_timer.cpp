@@ -1115,6 +1115,11 @@ void KZTimerService::OnPlayerDeath()
 
 void KZTimerService::OnRoundStart()
 {
+	// Рестарт раунда сбрасывает мир, поэтому по конвенции проекта убивает все активные раны
+	// (TimerStopAll ниже). Замороженный prac-ран — тот же ран, только его состояние держит
+	// KZPracService, и живой таймер у него уже остановлен — значит TimerStopAll до него не
+	// достанет. Убираем симметрично, иначе игрок вернулся бы в ран, чей мир уже сброшен.
+	KZPracService::DropFrozenRunAll("round start");
 	KZTimerService::TimerStopAll();
 }
 

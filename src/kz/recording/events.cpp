@@ -5,6 +5,7 @@
 #include "kz/replays/kz_replaysystem.h"
 #include "kz/global/kz_global.h"
 #include "kz/option/kz_option.h"
+#include "kz/prac/kz_prac.h"
 
 extern CConVar<i32> kz_replay_recording_min_jump_tier;
 
@@ -145,6 +146,20 @@ void KZRecordingService::OnTimerStop()
 	{
 		return;
 	}
+	// Вход в !prac останавливает таймер, но ран НЕ кончился: он лежит снапшотом в KZPracService
+	// и вернётся по второму !prac (kz_prac.cpp). Здесь нельзя ни того, ни другого:
+	//  - убить рекордер рана: UUID рана рождается в OnTimerEnd из живого рекордера, без него
+	//    currentRunUUID остаётся UUID_t(false) (16 нулей) и локальный INSERT в Times валит
+	//    PRIMARY KEY со второго prac-рана на сервере — ран игрока исчезает молча;
+	//  - писать TIMER_STOP: на воспроизведении он гасит таймер и курс до конца записи
+	//    (replays/events.cpp) и рвёт паузный отрезок prac (replays/playback.cpp).
+	// Обратный случай (ран в prac потерян и рекордер надо всё-таки закрыть) закрывает
+	// KZPracService::DropFrozenRun явным вызовом уже со снятым inPrac.
+	if (this->player->pracService && this->player->pracService->IsInPrac())
+	{
+		KZ_LOG_DEBUG(LogChannel::Recording, "Timer stop suppressed: player is in prac\n");
+		return;
+	}
 	KZ_LOG_DEBUG(LogChannel::Recording, "Timer stop\n");
 	this->InsertTimerEvent(RpEvent::RpEventData::TimerEvent::TIMER_STOP, this->player->timerService->GetTime());
 
@@ -241,6 +256,13 @@ void KZRecordingService::OnStage(i32 stage)
 void KZRecordingService::OnTeleport(const Vector *origin, const QAngle *angles, const Vector *velocity)
 {
 	if (KZ::replaysystem::IsReplayBot(this->player))
+	{
+		return;
+	}
+	// Рекордер рана переживает prac, поэтому !practp иначе протекал бы в реплей рана событиями
+	// телепорта на тиках, которых в записи нет (тики prac не пишутся, см. RecordTickData_*).
+	// Возвратный телепорт самого ExitPrac под гард не попадает: там inPrac уже снят.
+	if (this->player->pracService && this->player->pracService->IsInPrac())
 	{
 		return;
 	}

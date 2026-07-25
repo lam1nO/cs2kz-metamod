@@ -585,6 +585,14 @@ static_function void Hook_ClientDisconnect(CPlayerSlot slot, ENetworkDisconnecti
 										   const char *pszNetworkID)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(slot);
+	// Персист незавершённого рана (SavedRuns) — ПЕРВЫМ делом, до тирдауна ниже.
+	// SwitchTeam(0) уничтожает пешку и может поднять player_death (движковый вопрос, чтением
+	// не закрывается); этот путь идёт не через KZ::misc::JoinTeam, поэтому changingTeam == false
+	// и OnPlayerDeath принял бы его за реальную смерть: TimerStop убил бы живой ран, а
+	// DropFrozenRun — замороженный prac-ран, и SaveOnDisconnect не сохранил бы ничего.
+	// Сериализация читает только сервисные поля, пешку не трогает (kz_savedrun.cpp) — здесь
+	// состояние заведомо целее, чем после тирдауна.
+	player->timerService->OnClientDisconnect();
 	// Immediately remove the player off the list. We don't need to keep them around.
 	if (player->GetController())
 	{
@@ -599,7 +607,6 @@ static_function void Hook_ClientDisconnect(CPlayerSlot slot, ENetworkDisconnecti
 	{
 		Warning("WARNING: Player pawn for slot %i not found!\n", slot.Get());
 	}
-	player->timerService->OnClientDisconnect();
 	player->recordingService->OnClientDisconnect();
 	player->optionService->OnClientDisconnect();
 	player->racingService->OnClientDisconnect();

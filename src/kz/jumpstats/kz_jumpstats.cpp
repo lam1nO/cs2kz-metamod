@@ -9,6 +9,7 @@
 #include "kz/option/kz_option.h"
 #include "kz/language/kz_language.h"
 #include "kz/trigger/kz_trigger.h"
+#include "kz/prac/kz_prac.h"
 #include "kz/recording/kz_recording.h"
 #include "kz/replays/kz_replaysystem.h"
 #include "tier0/memdbgon.h"
@@ -1014,8 +1015,15 @@ void KZJumpstatsService::EndJump()
 	{
 		return;
 	}
-	KZJumpstatsService::AnnounceJump(jump);
-	this->player->recordingService->OnJumpFinish(jump);
+	// В prac прыжок не идёт ни в статистику, ни в реплеи: тики prac не записываются
+	// (KZRecordingService::RecordTickData_PhysicsSimulatePost), поэтому jump-реплей вышел бы
+	// пустым файлом под живой строкой jumpstats, а отработка элемента — не результат.
+	// Античит прыжок всё равно смотрит.
+	if (!this->player->pracService->IsInPrac())
+	{
+		KZJumpstatsService::AnnounceJump(jump);
+		this->player->recordingService->OnJumpFinish(jump);
+	}
 	this->player->anticheatService->OnJumpFinish(jump);
 }
 

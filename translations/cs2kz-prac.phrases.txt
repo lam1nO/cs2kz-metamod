@@ -10,6 +10,12 @@
 		"en"		"{grey}Practice mode. No active run to freeze."
 		"ru"		"{grey}Режим отработки. Активного рана нет — просто тренировка."
 	}
+	"Prac - Enter Run Discarded"
+	{
+		// kz_prac_run_policy 1: вход в prac не замораживает ран, а сбрасывает его.
+		"en"		"{grey}Practice mode. Your run is {default}not counted{grey} — this server does not keep runs that went through practice."
+		"ru"		"{grey}Режим отработки. Ран {default}не засчитан{grey} — на этом сервере ран через отработку не сохраняется."
+	}
 	"Prac - Exit To Run"
 	{
 		"en"		"{grey}Back to your run. Timer is {default}paused{grey}, the run is now {default}NUB{grey}."
@@ -24,6 +30,16 @@
 	{
 		"en"		"{grey}Frozen run lost."
 		"ru"		"{grey}Замороженный ран потерян."
+	}
+	"Prac - Run Lost Mode Changed"
+	{
+		"en"		"{grey}Frozen run lost: {default}mode or style changed{grey} while in practice mode."
+		"ru"		"{grey}Замороженный ран потерян: в режиме отработки {default}сменился режим или стиль{grey}."
+	}
+	"Prac - In Race"
+	{
+		"en"		"{grey}Practice mode is not available during a race."
+		"ru"		"{grey}Режим отработки недоступен во время заезда."
 	}
 	"Prac - Disabled"
 	{

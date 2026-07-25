@@ -1,7 +1,9 @@
 #include "kz_prac.h"
 
 #include "kz/language/kz_language.h"
+#include "kz/mode/kz_mode.h"
 #include "kz/noclip/kz_noclip.h"
+#include "kz/racing/kz_racing.h"
 #include "kz/recording/kz_recording.h"
 #include "kz/savedrun/kz_savedrun.h"
 #include "utils/utils.h"
@@ -9,6 +11,14 @@
 CConVar<bool> kz_prac_enable("kz_prac_enable", FCVAR_NONE, "Whether the !prac practice mode is available to players.", true);
 CConVar<i32> kz_prac_run_policy("kz_prac_run_policy", FCVAR_NONE,
 								"What happens to a run that went through !prac: 0 = becomes NUB (counted), 1 = not counted at all.", 0);
+
+// Канонический вид «режим + стили» для сверки на выходе из prac. Строим через тот же
+// BuildStylesString, что и ключ SavedRuns, чтобы «те же стили» значило одно и то же во всём форке.
+static_function void SnapshotModeStyles(KZPlayer *player, char *modeOut, int modeSize, char *stylesOut, int stylesSize)
+{
+	V_strncpy(modeOut, player->modeService->GetModeShortName(), modeSize);
+	V_strncpy(stylesOut, KZSavedRunService::BuildStylesString(player).Get(), stylesSize);
+}
 
 void KZPracService::Reset()
 {
@@ -43,24 +53,37 @@ void KZPracService::EnterPrac()
 		this->player->PlayErrorSound();
 		return;
 	}
-	if (!this->player->IsAlive())
+	if (!this->RequireLivePawn(true))
 	{
-		this->player->languageService->PrintChat(true, false, "Prac - Must Be Alive");
+		return;
+	}
+	// Гонка: prac заморозил бы хронометр участника, пока остальные бегут, и вернул его со
+	// штрафом +1 TP, которого лимит телепортов заезда не видел.
+	if (this->player->racingService->IsInActiveRace())
+	{
+		this->player->languageService->PrintChat(true, false, "Prac - In Race");
 		this->player->PlayErrorSound();
 		return;
 	}
 
 	const bool timerRunning = this->player->timerService->GetTimerRunning();
+	// kz_prac_run_policy 1 - «ран не засчитывается»: не замораживаем его вовсе (засчитывать
+	// нечего, если рана нет), см. ниже.
+	const bool discardRun = timerRunning && kz_prac_run_policy.Get() == 1;
 	if (timerRunning)
 	{
-		// !pro существует ровно для «не дай мне сломать PRO», а prac ломает его как телепорт.
+		// !pro существует ровно для «не дай мне сломать PRO», а prac ломает его как телепорт
+		// (при policy 1 — ещё и целиком, поэтому гард нужен тем более).
 		if (!this->player->timerService->CheckSafeguardPro())
 		{
 			return;
 		}
-		// Гарды входа = гарды паузы (не в воздухе, не сразу после приземления,
-		// не в antipause-зоне, не под кулдауном). Сообщения печатает сам CanPause.
-		if (!this->player->timerService->CanPause(true))
+		// Гарды входа = гарды паузы (не в воздухе, не сразу после приземления, не в
+		// antipause-зоне, не под кулдауном). Сообщения печатает сам CanPause.
+		// Исключение — уже стоящая пауза: CanPause отдаёт на ней false МОЛЧА, а по смыслу
+		// пауза и есть нужное нам «игрок стоит», поэтому вилка явная.
+		const bool wasPaused = this->player->timerService->GetPaused();
+		if (!wasPaused && !this->player->timerService->CanPause(true))
 		{
 			return;
 		}
@@ -74,44 +97,72 @@ void KZPracService::EnterPrac()
 			return;
 		}
 
-		// С этой строки и до this->inPrac = true ниже инвариант «frozen.active только при
-		// inPrac» кратковременно не держится (frozen.active уже true, inPrac ещё false).
-		// Безвредно: код синхронный, между ними нет колбэков/тиков, никто снаружи в это
-		// окно prac-состояние не читает (см. HasActiveFrozenRun() и её потребителей).
-		this->frozen = {};
-		this->frozen.active = true;
-		this->frozen.courseGUID = courseDesc->guid;
-		this->frozen.timer = this->player->timerService->SnapshotForSave();
-		const CUtlVector<KZCheckpointService::Checkpoint> &cps = this->player->checkpointService->GetCheckpointsForSave();
-		FOR_EACH_VEC(cps, i)
+		// Пауза несовместима с полётом: ForcePause ставит MOVETYPE_NONE и gravity 0. Снимаем
+		// её ДО любых мутаций prac-состояния — если листенер вето́рует OnResume, отказ остаётся
+		// бесплатным (частично применённого состояния нет). force=true: кулдаун CanResume тут
+		// не при чём, игрок уходит не в ран. Порядок важен и для реплея: TIMER_RESUME закрывает
+		// СВОЮ паузу игрока до того, как ниже откроется prac-отрезок.
+		if (wasPaused)
 		{
-			this->frozen.checkpoints.AddToTail(cps[i]);
+			this->player->timerService->Resume(true);
+			if (this->player->timerService->GetPaused())
+			{
+				// Причину напечатал сам Resume.
+				return;
+			}
 		}
-		this->frozen.cpIndex = this->player->checkpointService->GetRawCpIndex();
-		// Штраф печём в снапшот СРАЗУ, а не при возврате: тогда и возврат через !prac, и
-		// восстановление после дисконнекта (Task 7) дают одинаковый результат без дублей логики.
-		// +1 телепорт = ран становится NUB.
-		this->frozen.tpCount = this->player->checkpointService->GetTeleportCount() + 1;
-		if (kz_prac_run_policy.Get() == 1)
-		{
-			// Политика «не засчитывать»: ран восстановится уже невалидным.
-			this->frozen.timer.valid = false;
-		}
-		this->player->GetOrigin(&this->frozen.origin);
-		this->player->GetAngles(&this->frozen.angles);
 
-		this->player->timerService->TimerStop(false);
-		// Граница prac в реплее: сам TimerStop события паузы не даёт, а плеер
-		// пропускает именно отрезок PAUSE..RESUME.
-		this->player->recordingService->OnPause();
+		if (discardRun)
+		{
+			// Ран не замораживаем и не восстановим: политика запрещает его засчитывать.
+			// Сейв SavedRuns тоже сносим — иначе реконнект вернул бы ран, которого по этой
+			// политике быть не должно. inPrac ещё false, поэтому TimerStop здесь честно
+			// доводит ран до конца (рекордер реплея закрывается, TIMER_STOP пишется).
+			this->frozen = {};
+			this->player->savedRunService->InvalidateCurrent("prac_run_policy");
+			this->player->timerService->TimerStop();
+		}
+		else
+		{
+			// С этой строки и до this->inPrac = true ниже инвариант «frozen.active только при
+			// inPrac» кратковременно не держится (frozen.active уже true, inPrac ещё false).
+			// Безвредно: код синхронный, между ними нет колбэков/тиков, никто снаружи в это
+			// окно prac-состояние не читает (см. HasActiveFrozenRun() и её потребителей).
+			this->frozen = {};
+			this->frozen.active = true;
+			this->frozen.courseGUID = courseDesc->guid;
+			this->frozen.timer = this->player->timerService->SnapshotForSave();
+			const CUtlVector<KZCheckpointService::Checkpoint> &cps = this->player->checkpointService->GetCheckpointsForSave();
+			FOR_EACH_VEC(cps, i)
+			{
+				this->frozen.checkpoints.AddToTail(cps[i]);
+			}
+			this->frozen.cpIndex = this->player->checkpointService->GetRawCpIndex();
+			// Штраф печём в снапшот СРАЗУ, а не при возврате: тогда и возврат через !prac, и
+			// восстановление после дисконнекта (Task 7) дают одинаковый результат без дублей логики.
+			// +1 телепорт = ран становится NUB.
+			this->frozen.tpCount = this->player->checkpointService->GetTeleportCount() + 1;
+			this->player->GetOrigin(&this->frozen.origin);
+			this->player->GetAngles(&this->frozen.angles);
+			SnapshotModeStyles(this->player, this->frozen.modeName, sizeof(this->frozen.modeName), this->frozen.styles,
+							   sizeof(this->frozen.styles));
+
+			// inPrac поднимаем ДО TimerStop: KZRecordingService::OnTimerStop по этому флагу
+			// узнаёт, что ран не кончился, и НЕ убивает рекордер рана — иначе финиш получил бы
+			// нулевой UUID (коллизия PRIMARY KEY в Times, ран игрока исчезал бы молча).
+			// Ноуклип включается ниже, так что «карательная» ветка HandleNoclip тоже подавлена.
+			this->inPrac = true;
+			this->player->timerService->TimerStop(false);
+			// Граница prac в реплее: TimerStop в prac события паузы не даёт, а плеер
+			// пропускает именно отрезок PAUSE..RESUME.
+			this->player->recordingService->OnPause();
+		}
 	}
 	else
 	{
 		this->frozen = {};
 	}
 
-	// Порядок важен: inPrac до включения ноуклипа, иначе HandleNoclip успеет
-	// сработать по «карательной» ветке.
 	this->inPrac = true;
 	this->ClearPoints();
 	this->player->noclipService->EnableNoclip();
@@ -121,6 +172,10 @@ void KZPracService::EnterPrac()
 	{
 		this->player->languageService->PrintChat(true, false, "Prac - Enter With Run");
 	}
+	else if (discardRun)
+	{
+		this->player->languageService->PrintChat(true, false, "Prac - Enter Run Discarded");
+	}
 	else
 	{
 		this->player->languageService->PrintChat(true, false, "Prac - Enter Free");
@@ -129,6 +184,15 @@ void KZPracService::EnterPrac()
 
 void KZPracService::ExitPrac()
 {
+	// Все три шага возврата (HandleNoclip / Teleport / ForcePause) разыменовывают пешку и move
+	// services без проверок, а из prac можно уйти в спек (CanSpectate сводится к CanPause, а
+	// та в prac не проверяет midair — таймер стоит). Отказ ДО любых мутаций: замороженный ран
+	// при этом жив, игрок вернётся в команду и повторит !prac.
+	if (!this->RequireLivePawn(true))
+	{
+		return;
+	}
+
 	this->player->noclipService->DisableNoclip();
 	this->player->noclipService->HandleNoclip();
 
@@ -137,6 +201,21 @@ void KZPracService::ExitPrac()
 		this->inPrac = false;
 		this->ClearPoints();
 		this->player->languageService->PrintChat(true, false, "Prac - Exit Free");
+		return;
+	}
+
+	// Замороженный ран валиден только при неизменных режиме и стилях: RunSubmission читает
+	// ТЕКУЩИЕ modeService/styleServices (submission.cpp), а SwitchToMode/AddStyle защищают ран
+	// единственным TimerStop, который в prac — no-op. Без этой сверки «!prac / !mode vnl /
+	// !prac / финиш» отправляло бы время с классической физики в таблицу Vanilla.
+	char modeNow[sizeof(this->frozen.modeName)];
+	char stylesNow[sizeof(this->frozen.styles)];
+	SnapshotModeStyles(this->player, modeNow, sizeof(modeNow), stylesNow, sizeof(stylesNow));
+	if (!KZ_STREQI(modeNow, this->frozen.modeName) || !KZ_STREQI(stylesNow, this->frozen.styles))
+	{
+		this->player->languageService->PrintChat(true, false, "Prac - Run Lost Mode Changed");
+		this->player->PlayErrorSound();
+		this->DropFrozenRun("mode or styles changed in prac", nullptr);
 		return;
 	}
 
@@ -164,7 +243,7 @@ void KZPracService::ExitPrac()
 	this->player->languageService->PrintChat(true, false, "Prac - Exit To Run");
 }
 
-void KZPracService::DropFrozenRun(const char *reason)
+void KZPracService::DropFrozenRun(const char *reason, const char *phrase)
 {
 	if (!this->inPrac && !this->frozen.active)
 	{
@@ -174,11 +253,51 @@ void KZPracService::DropFrozenRun(const char *reason)
 	this->inPrac = false;
 	this->frozen = {};
 	this->ClearPoints();
-	if (hadRun && reason)
+	if (hadRun)
 	{
-		this->player->languageService->PrintChat(true, false, "Prac - Run Lost");
-		KZ_LOG_DEBUG(LogChannel::Timer, "[prac] frozen run dropped for %s: %s\n", this->player->GetName(), reason);
+		// Рекордер реплея переживает prac (см. KZRecordingService::OnTimerStop) — если ран
+		// потерян, закрыть его надо здесь и вручную: живой таймер уже остановлен, поэтому
+		// TimerStop листенеров не позовёт, а брошенный рекордер копил бы тики следующего рана
+		// (и второй рекордер на его старте). inPrac уже false, так что гард prac пропускает.
+		this->player->recordingService->OnTimerStop();
+		if (phrase)
+		{
+			this->player->languageService->PrintChat(true, false, phrase);
+		}
+		if (reason)
+		{
+			KZ_LOG_DEBUG(LogChannel::Timer, "[prac] frozen run dropped for %s: %s\n", this->player->GetName(), reason);
+		}
 	}
+}
+
+void KZPracService::DropFrozenRunAll(const char *reason)
+{
+	for (int i = 0; i < MAXPLAYERS + 1; i++)
+	{
+		KZPlayer *player = g_pKZPlayerManager->ToPlayer(i);
+		if (!player || !player->pracService)
+		{
+			continue;
+		}
+		// Сам DropFrozenRun no-op вне prac, так что проходить всех дёшево и безопасно.
+		player->pracService->DropFrozenRun(reason);
+	}
+}
+
+bool KZPracService::RequireLivePawn(bool showError)
+{
+	CCSPlayerPawn *pawn = this->player->GetPlayerPawn();
+	if (pawn && pawn->IsAlive() && this->player->GetMoveServices())
+	{
+		return true;
+	}
+	if (showError)
+	{
+		this->player->languageService->PrintChat(true, false, "Prac - Must Be Alive");
+		this->player->PlayErrorSound();
+	}
+	return false;
 }
 
 bool KZPracService::RequirePrac()
@@ -209,15 +328,11 @@ bool KZPracService::RequirePracPoint()
 
 void KZPracService::SetPoint()
 {
-	if (!this->RequirePrac())
+	if (!this->RequirePrac() || !this->RequireLivePawn(true))
 	{
 		return;
 	}
 	CCSPlayerPawn *pawn = this->player->GetPlayerPawn();
-	if (!pawn)
-	{
-		return;
-	}
 
 	PracPoint pt = {};
 	this->player->GetOrigin(&pt.origin);
@@ -241,11 +356,11 @@ void KZPracService::SetPoint()
 
 void KZPracService::DoTpToPoint(const PracPoint &pt)
 {
-	CCSPlayerPawn *pawn = this->player->GetPlayerPawn();
-	if (!pawn || !pawn->IsAlive())
+	if (!this->RequireLivePawn(true))
 	{
 		return;
 	}
+	CCSPlayerPawn *pawn = this->player->GetPlayerPawn();
 
 	// Ноуклип снимаем всегда: смысл practp — продолжить движение по-настоящему.
 	this->player->noclipService->DisableNoclip();
@@ -335,6 +450,13 @@ void KZPracService::OnPlayerSpawn()
 	{
 		return;
 	}
+	// Флаг ноуклипа возвращаем безусловно, а применяем только по живой пешке: KZTimerService::
+	// OnPlayerSpawn зовёт нас вне своей проверки пешки, а HandleNoclip разыменовывает её без
+	// чеков. Если пешка на этом тике ещё не готова, флаг доиграет HandleMoveCollision на
+	// следующем физическом тике (kz_player.cpp), поэтому отказ здесь ничего не теряет.
 	this->player->noclipService->EnableNoclip();
-	this->player->noclipService->HandleNoclip();
+	if (this->RequireLivePawn(false))
+	{
+		this->player->noclipService->HandleNoclip();
+	}
 }

@@ -988,6 +988,12 @@ void KZPlayer::UpdateTriggerTouchList()
 void KZPlayer::OnChangeTeamPost(i32 team)
 {
 	this->timerService->OnPlayerJoinTeam(team);
+	if (team == CS_TEAM_SPECTATOR)
+	{
+		// Здесь, а не в обёртке KZ::misc::JoinTeam: это движковый хук ChangeTeam, он ловит и
+		// админ-форсы/движковые свитчи, у которых стек prac-точек иначе переживал бы уход в спек.
+		this->pracService->OnJoinSpectator();
+	}
 }
 
 const CVValue_t *KZPlayer::GetCvarValueFromModeStyles(KzModeCvars cvar)

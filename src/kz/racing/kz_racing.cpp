@@ -249,6 +249,26 @@ void KZRacingService::RemoveLocalRaceParticipant(u64 steamID)
 					   participants.end());
 }
 
+bool KZRacingService::IsInActiveRace()
+{
+	if (KZRacingService::currentRace.state == RaceInfo::State::None)
+	{
+		return false;
+	}
+	if (!this->IsRaceParticipant())
+	{
+		return false;
+	}
+	for (const auto &finisher : KZRacingService::currentRace.localFinishers)
+	{
+		if (finisher.id == this->player->GetSteamId64())
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
 bool KZRacingService::CanTeleport()
 {
 	if (KZRacingService::currentRace.state == RaceInfo::State::None)
@@ -309,8 +329,23 @@ bool KZRacingService::OnTimerStart(u32 courseGUID)
 	{
 		return false;
 	}
-	this->timerStartTickServer = g_pKZUtils->GetServerGlobals()->tickcount;
 	return true;
+}
+
+void KZRacingService::OnTimerStartPost(u32 courseGUID)
+{
+	if (KZRacingService::currentRace.state == RaceInfo::State::None)
+	{
+		return;
+	}
+	if (!this->IsRaceParticipant())
+	{
+		return;
+	}
+	// Тик фактического старта — база смещения времени финиша (см. OnTimerEndPost). Раньше
+	// писался прямо в OnTimerStart, то есть и когда таймер вето́ровал другой листенер: результат
+	// заезда считался бы от тика, на котором ран не начался.
+	this->timerStartTickServer = g_pKZUtils->GetServerGlobals()->tickcount;
 }
 
 void KZRacingService::OnTimerEndPost(u32 courseGUID, f32 time, u32 teleportsUsed)
