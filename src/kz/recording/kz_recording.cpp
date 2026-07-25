@@ -6,6 +6,7 @@
 #include "kz/replays/kz_replaysystem.h"
 #include "kz/language/kz_language.h"
 #include "kz/spec/kz_spec.h"
+#include "kz/prac/kz_prac.h"
 #include "utils/simplecmds.h"
 
 #include "sdk/cskeletoninstance.h"
@@ -195,6 +196,14 @@ void KZRecordingService::RecordTickData_SetupMove(PlayerCommand *pc)
 
 void KZRecordingService::RecordTickData_PhysicsSimulatePost()
 {
+	// В prac игрок летает в ноуклипе минутами: писать эти тики бессмысленно — при
+	// воспроизведении отрезок между TIMER_PAUSE и TIMER_RESUME всё равно пропускается,
+	// а файл распухает (10 минут на 128 тик ≈ 77k тиков).
+	if (this->player->pracService && this->player->pracService->IsInPrac())
+	{
+		return;
+	}
+
 	this->EnsureCircularRecorderInitialized();
 
 	this->player->GetOrigin(&this->currentTickData.post.origin);
@@ -225,6 +234,12 @@ void KZRecordingService::RecordTickData_PhysicsSimulatePost()
 
 void KZRecordingService::RecordCommand(PlayerCommand *cmds, i32 numCmds)
 {
+	// См. RecordTickData_PhysicsSimulatePost — тот же гард против записи prac-тиков.
+	if (this->player->pracService && this->player->pracService->IsInPrac())
+	{
+		return;
+	}
+
 	this->EnsureCircularRecorderInitialized();
 
 	i32 currentTick = g_pKZUtils->GetServerGlobals()->tickcount;

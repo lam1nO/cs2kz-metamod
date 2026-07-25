@@ -2,6 +2,7 @@
 
 #include "kz/language/kz_language.h"
 #include "kz/noclip/kz_noclip.h"
+#include "kz/recording/kz_recording.h"
 #include "kz/savedrun/kz_savedrun.h"
 #include "utils/utils.h"
 
@@ -96,6 +97,9 @@ void KZPracService::EnterPrac()
 		this->player->GetAngles(&this->frozen.angles);
 
 		this->player->timerService->TimerStop(false);
+		// Граница prac в реплее: сам TimerStop события паузы не даёт, а плеер
+		// пропускает именно отрезок PAUSE..RESUME.
+		this->player->recordingService->OnPause();
 	}
 	else
 	{
@@ -142,6 +146,7 @@ void KZPracService::ExitPrac()
 	// а мы телепортируем напрямую через KZPlayer::Teleport, который его не трогает.
 	this->player->checkpointService->RestoreFromSnapshot(this->frozen.checkpoints, this->frozen.cpIndex, this->frozen.tpCount);
 	this->player->Teleport(&this->frozen.origin, &this->frozen.angles, &vec3_origin);
+	this->player->recordingService->OnResume();
 	this->player->timerService->ForcePause();
 
 	this->frozen = {};
