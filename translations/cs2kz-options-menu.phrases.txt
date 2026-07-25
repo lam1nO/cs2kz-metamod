@@ -109,7 +109,10 @@
 	}
 	"Options - Menu Label MissedTime"
 	{
-		"en"	"Missed best time message"
-		"ru"	"Сообщение о потере PB"
+		// Гасит всю группу missedTime* — по currentCompareType это может быть PB, SR или WR,
+		// поэтому подпись про «рекорд», а не про PB (иначе игрок со сравнением по WR
+		// потеряет уведомление, которое по подписи выключать не собирался).
+		"en"	"Missed record message"
+		"ru"	"Сообщение о потере рекорда"
 	}
 }

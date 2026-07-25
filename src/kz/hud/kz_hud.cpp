@@ -339,7 +339,7 @@ bool KZHUDService::GetTimerParts(const char *language, std::string &outTime, std
 #define KZ_HUD_FS_SPEED     "fontSize-l"  // скорость — главный акцент
 #define KZ_HUD_FS_TIMER     "fontSize-l"  // таймер — крупный, одного кегля со скоростью (по фото кибершока)
 #define KZ_HUD_FS_SECONDARY "fontSize-sm" // PB/WR, CP/TP, престрейф, Stage, координаты — вторичная инфа
-#define KZ_HUD_FS_KEYS      "fontSize-m"  // 2 ряда клавиш (C W J / A S D). Был l — по просьбе тестера уменьшен на ступень (m); заодно меньше риск обрезки низа панели
+#define KZ_HUD_FS_KEYS      "fontSize-m"  // клавиши (оба варианта раскладки: 2 ряда / одна строка). Был l — уменьшен на ступень по просьбе тестера; заодно меньше риск обрезки низа панели
 #define KZ_HUD_FS_MINOR     "fontSize-s"  // метка стиля — наименее заметное
 
 std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSpeed, bool suppressTimer, bool suppressKeys, bool masterMode,
@@ -517,7 +517,7 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 			// Порядок как на кибершоке: (паддинг) → PRO/NUB/PRAC → время → режим → стиль-если-есть.
 			// Квадратные скобки вокруг времени убраны (решение пользователя 25.07) — время
 			// само по себе читается, скобки только шумели. Симметричные nbsp внутри них ушли
-			// вместе с ними: центровку они не держали (её держит leftPad ниже).
+			// вместе с ними: центровку они не держали (её держит leftPad, посчитанный выше).
 			V_snprintf(buf, sizeof(buf), "%s%s<font class='" KZ_HUD_FS_TIMER "'><font color='%s'>%s</font></font>%s%s", leftPad.c_str(),
 					   proNubTag.c_str(), timerColor, tTime.c_str(), modeTag.c_str(), styleTag.c_str());
 			addLine(buf);
@@ -572,8 +572,11 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 	// Курс для строки PB/WR: активный курс, а если игрок ещё НЕ в старт-зоне (только зашёл / стоит
 	// вне зоны) — главный курс карты (cyber 0). Так PB/WR (из платформенного api-кэша) показываются
 	// сразу при заходе, не дожидаясь входа в старт-зону. Только для живого игрока (не реплей).
+	// Тумблер проверяем ДО фолбэка: GetCourseByCyberNumber — линейный поиск по всем курсам,
+	// а строится худ каждый тик — при выключенной строке PB/WR платить за него незачем.
+	const bool showPbWr = this->IsMHUDPbWrEnabled();
 	const KZCourseDescriptor *pbwrCourse = course;
-	if (!pbwrCourse && showExtra && !isReplay)
+	if (!pbwrCourse && showPbWr && showExtra && !isReplay)
 	{
 		pbwrCourse = KZ::course::GetCourseByCyberNumber(0);
 	}
@@ -596,8 +599,8 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 	//        Центрирование: оба поля ВСЕГДА одной знаковой ширины — реальное «MM:SS.CC» (8 симв.,
 	//        FormatTimeHud при hours=0) ИЛИ равноширинный плейсхолдер «--:--.--» (8, DIM) при
 	//        отсутствии значения. Равная ширина ⇒ центральный || стоит по построению, без паддинга. ---
-	//        Секция целиком отключается тумблером hudPbWr (Элементы → «PB/WR»).
-	if (pbwrCourse && this->IsMHUDPbWrEnabled())
+	//        Секция целиком отключается тумблером hudPbWr (Элементы → «Строка PB/WR»).
+	if (pbwrCourse && showPbWr)
 	{
 		// Плейсхолдер отсутствующего значения — той же знаковой ширины, что формат времени
 		// «MM:SS.CC» (8 символов). Держит поля PB/WR равными ⇒ || по центру без добивки.
@@ -656,11 +659,12 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		html += "<br><font class='" KZ_HUD_FS_MINOR "'>&#160;</font>";
 	}
 
-	// --- Клавиши в стиле MHUD: 2 строки раскладкой клавиатуры, каждая — отдельный addLine
-	//        (движок центрирует ряды сам, W встаёт над S). Буквы ВСЕГДА видны: нажата → циан,
-	//        отпущена → dim, чтобы читалась раскладка. Подпись «Keys:» убрана — раскладка
-	//        самодостаточна. Ряд 1: C W J (C=duck слева, W=forward центр, J=jump справа),
-	//        ряд 2: A S D. Зазор между буквами — пара nbsp. ---
+	// --- Клавиши. Раскладка — по тумблеру hudKeysTwoRows (Элементы → «Клавиши в 2 строки»):
+	//        ВКЛ (деф.) — 2 ряда клавиатурой, каждый ряд отдельным addLine (движок центрирует
+	//        сам, W встаёт над S): ряд 1 = C W J (C=duck слева, W=forward центр, J=jump справа),
+	//        ряд 2 = A S D. ВЫКЛ — одна строка A W S D C J, как в апстримном cs2kz.
+	//        Буквы ВСЕГДА видны: нажата → циан, отпущена → dim, чтобы читалась раскладка.
+	//        Подпись «Keys:» убрана — раскладка самодостаточна. Зазор между буквами — пара nbsp. ---
 	if (showKeys)
 	{
 		// overlap = одновременно нажаты ПРОТИВОПОЛОЖНЫЕ клавиши (W+S или A+D). Когда настройка
