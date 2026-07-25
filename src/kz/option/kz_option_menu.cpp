@@ -28,7 +28,7 @@ enum OptSubmenu : u8
 	OPTSUB_CHECKPOINT = 0,
 	OPTSUB_VISIBILITY,
 	OPTSUB_SOUND,
-	OPTSUB_TIMER,
+	OPTSUB_MESSAGES,
 	OPTSUB_PAINT,
 	OPTSUB_COUNT
 };
@@ -120,9 +120,10 @@ static const OptionsMenuItem s_sndItems[] = {
 	{OptItemKind::Volume, "Options - Menu Label RecordVolume",    "recordVolume",    false, 1.0f, nullptr             },
 };
 
-// Таймер: сообщения о ходе рана. missedTimeAnnounce гасит и чат-строку «You missed your
-// best time…», и её звук (см. KZTimerService::CheckMissedTime).
-static const OptionsMenuItem s_timerItems[] = {
+// Сообщения в чат. Сюда складываем тумблеры отдельных сообщений (пока одно —
+// потеря рекорда: missedTimeAnnounce гасит и чат-строку «You missed your best time…»,
+// и её звук, см. KZTimerService::CheckMissedTime).
+static const OptionsMenuItem s_msgItems[] = {
 	{OptItemKind::Toggle, "Options - Menu Label MissedTime", "missedTimeAnnounce", true, 0.0f, nullptr},
 };
 
@@ -147,34 +148,34 @@ static_global constexpr f32 s_volumePresets[] = {0.0f, 0.25f, 0.5f, 0.75f, 1.0f}
 // Палитра paint — тот же список, что понимает utils::ParseColorName.
 static_global constexpr const char *s_paintColors[] = {"red", "white", "black", "blue", "brown", "green", "yellow", "purple"};
 
+// ВСЕ таблицы пунктов одним списком: и постройка подменю, и select-диспатч ходят через
+// него. Раньше FindOptionsItem перебирал таблицы вручную, и забытая в нём новая категория
+// давала мёртвую кнопку — пункт рисуется, но E ничего не делает (поймано на разделе
+// «Таймер»). Добавляя категорию, дописывать ТОЛЬКО сюда.
+struct OptionsTable
+{
+	const OptionsMenuItem *items;
+	i32 count;
+};
+
+static_global const OptionsTable s_optTables[] = {
+	{s_cpItems,    (i32)KZ_ARRAYSIZE(s_cpItems)   },
+	{s_visItems,   (i32)KZ_ARRAYSIZE(s_visItems)  },
+	{s_sndItems,   (i32)KZ_ARRAYSIZE(s_sndItems)  },
+	{s_msgItems,   (i32)KZ_ARRAYSIZE(s_msgItems)  },
+	{s_paintItems, (i32)KZ_ARRAYSIZE(s_paintItems)},
+};
+
 static_function const OptionsMenuItem *FindOptionsItem(const char *tag)
 {
-	for (const auto &it : s_cpItems)
+	for (const auto &table : s_optTables)
 	{
-		if (KZ_STREQ(tag, it.tag))
+		for (i32 i = 0; i < table.count; i++)
 		{
-			return &it;
-		}
-	}
-	for (const auto &it : s_visItems)
-	{
-		if (KZ_STREQ(tag, it.tag))
-		{
-			return &it;
-		}
-	}
-	for (const auto &it : s_sndItems)
-	{
-		if (KZ_STREQ(tag, it.tag))
-		{
-			return &it;
-		}
-	}
-	for (const auto &it : s_paintItems)
-	{
-		if (KZ_STREQ(tag, it.tag))
-		{
-			return &it;
+			if (KZ_STREQ(tag, table.items[i].tag))
+			{
+				return &table.items[i];
+			}
 		}
 	}
 	return nullptr;
@@ -399,7 +400,7 @@ void KZ::option::OpenOptionsMenu(KZPlayer *player)
 	handles.sub[OPTSUB_CHECKPOINT] = BuildOptionsSubmenu(player, "Options - Menu Cat Checkpoint", s_cpItems, (i32)KZ_ARRAYSIZE(s_cpItems));
 	handles.sub[OPTSUB_VISIBILITY] = BuildOptionsSubmenu(player, "Options - Menu Cat Visibility", s_visItems, (i32)KZ_ARRAYSIZE(s_visItems));
 	handles.sub[OPTSUB_SOUND] = BuildOptionsSubmenu(player, "Options - Menu Cat Sound", s_sndItems, (i32)KZ_ARRAYSIZE(s_sndItems));
-	handles.sub[OPTSUB_TIMER] = BuildOptionsSubmenu(player, "Options - Menu Cat Timer", s_timerItems, (i32)KZ_ARRAYSIZE(s_timerItems));
+	handles.sub[OPTSUB_MESSAGES] = BuildOptionsSubmenu(player, "Options - Menu Cat Messages", s_msgItems, (i32)KZ_ARRAYSIZE(s_msgItems));
 	handles.sub[OPTSUB_PAINT] = BuildOptionsSubmenu(player, "Options - Menu Cat Paint", s_paintItems, (i32)KZ_ARRAYSIZE(s_paintItems));
 	// HUD/JS-подменю строят их модули (свои per-slot хэндлы, пункт «Назад» внутри).
 	MenuHandle hudMenu = (MenuHandle)player->hudService->CreateHUDMenu();
@@ -419,7 +420,7 @@ void KZ::option::OpenOptionsMenu(KZPlayer *player)
 	addCat("Options - Menu Cat HUD", hudMenu);
 	addCat("Options - Menu Cat Visibility", handles.sub[OPTSUB_VISIBILITY]);
 	addCat("Options - Menu Cat Sound", handles.sub[OPTSUB_SOUND]);
-	addCat("Options - Menu Cat Timer", handles.sub[OPTSUB_TIMER]);
+	addCat("Options - Menu Cat Messages", handles.sub[OPTSUB_MESSAGES]);
 	addCat("Options - Menu Cat Jumpstats", jsMenu);
 	addCat("Options - Menu Cat Paint", handles.sub[OPTSUB_PAINT]);
 

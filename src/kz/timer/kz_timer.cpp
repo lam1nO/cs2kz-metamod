@@ -1857,10 +1857,14 @@ void KZTimerService::CheckMissedTime()
 	{
 		return;
 	}
-	// Игрок мог выключить оповещение «You missed your best time» (!options → Таймер).
-	// Гасим и чат-строку, и звук — ниже других выходов нет, поэтому проверяем здесь.
+	// Игрок мог выключить оповещение о потере рекорда (!options → Сообщения): гасим и чат-строку,
+	// и звук. Флаги при этом ГАСИМ, а не просто выходим: иначе они залипали в true и при
+	// включении настройки посреди рана выстреливало отложенное сообщение (в т.ч. pro-вариант
+	// у игрока с чекпоинтами — его апстрим намеренно глушит ниже).
 	if (!this->player->optionService->GetPreferenceBool("missedTimeAnnounce", true))
 	{
+		this->shouldAnnounceMissedTime = false;
+		this->shouldAnnounceMissedProTime = false;
 		return;
 	}
 	// No comparison available for styled runs.
