@@ -2,24 +2,31 @@
 {
 	"Prac - Enter With Run"
 	{
-		"en"		"{grey}Practice mode. Your run is {default}frozen{grey} — type {default}!prac{grey} to return to it."
-		"ru"		"{grey}Режим отработки. Ран {default}заморожен{grey} — напиши {default}!prac{grey}, чтобы вернуться."
+		// Точку №1 ставит сам вход (ревизия 2), поэтому про неё говорит эта же строка.
+		"en"		"{grey}Practice mode. Run {default}frozen{grey}, point {default}#1{grey} set here. {default}!prac{grey} — back to the run."
+		"ru"		"{grey}Режим отработки. Ран {default}заморожен{grey}, точка {default}#1{grey} поставлена здесь. {default}!prac{grey} — обратно в ран."
 	}
 	"Prac - Enter Free"
 	{
-		"en"		"{grey}Practice mode. No active run to freeze."
-		"ru"		"{grey}Режим отработки. Активного рана нет — просто тренировка."
+		"en"		"{grey}Practice mode. No active run to freeze, point {default}#1{grey} set here."
+		"ru"		"{grey}Режим отработки. Активного рана нет, точка {default}#1{grey} поставлена здесь."
 	}
 	"Prac - Enter Run Discarded"
 	{
 		// kz_prac_run_policy 1: вход в prac не замораживает ран, а сбрасывает его.
-		"en"		"{grey}Practice mode. Your run is {default}not counted{grey} — this server does not keep runs that went through practice."
-		"ru"		"{grey}Режим отработки. Ран {default}не засчитан{grey} — на этом сервере ран через отработку не сохраняется."
+		"en"		"{grey}Practice mode. Your run is {default}not counted{grey} — this server does not keep runs that went through practice. Point {default}#1{grey} set here."
+		"ru"		"{grey}Режим отработки. Ран {default}не засчитан{grey} — на этом сервере ран через отработку не сохраняется. Точка {default}#1{grey} поставлена здесь."
 	}
 	"Prac - Exit To Run"
 	{
 		"en"		"{grey}Back to your run. Timer is {default}paused{grey}, the run is now {default}NUB{grey}."
 		"ru"		"{grey}Возврат в ран. Таймер на {default}паузе{grey}, ран теперь {default}NUB{grey}."
+	}
+	"Prac - Exit To Run Airborne"
+	{
+		// Вход в prac был в воздухе: паузу не ставим (она обнуляет скорость), таймер идёт сразу.
+		"en"		"{grey}Back to your run at your entry speed. Timer is {default}running{grey}, the run is now {default}NUB{grey}."
+		"ru"		"{grey}Возврат в ран со скоростью входа. Таймер {default}идёт{grey}, ран теперь {default}NUB{grey}."
 	}
 	"Prac - Exit Free"
 	{
@@ -77,5 +84,18 @@
 	{
 		"en"		"{grey}Undo is not available in practice mode."
 		"ru"		"{grey}Отмена телепорта в режиме отработки недоступна."
+	}
+	"Prac - Finish"
+	{
+		// Финиш в prac (12:34.567): только эта строка и только самому игроку — ран не завершается.
+		"#format"	"prac_time:s"
+		"en"		"{grey}Practice finish: {default}{prac_time}{grey}. Nothing is submitted — this is practice, keep going."
+		"ru"		"{grey}Финиш в отработке: {default}{prac_time}{grey}. Ничего не засчитано — это репетиция, продолжай."
+	}
+	"Prac - Time Void Noclip"
+	{
+		// Ноуклип обнуляет prac-часы: за пролетевший насквозь участок времени не даём.
+		"en"		"{grey}Noclip — practice time is {default}void{grey}. Use {default}!practp{grey} or the start zone to start a new attempt."
+		"ru"		"{grey}Ноуклип — prac-время {default}обнулено{grey}. Новая попытка: {default}!practp{grey} или стартовая зона."
 	}
 }

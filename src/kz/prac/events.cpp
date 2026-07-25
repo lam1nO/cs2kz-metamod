@@ -8,7 +8,15 @@ static_global class PracTimerListener : public KZTimerServiceEventListener
 public:
 	virtual bool OnTimerStart(KZPlayer *player, u32 courseGUID) override
 	{
-		return !player->pracService->IsInPrac();
+		if (!player->pracService->IsInPrac())
+		{
+			return true;
+		}
+		// Настоящий таймер не пускаем, но для prac это «свежая попытка»: prac-часы стартуют
+		// ровно здесь — все гарды TimerStart уже пройдены, то есть это тот самый тик, на
+		// котором пошёл бы ран.
+		player->pracService->OnTimerStartBlocked();
+		return false;
 	}
 } pracTimerListener;
 

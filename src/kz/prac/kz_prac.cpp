@@ -7,6 +7,7 @@
 #include "kz/racing/kz_racing.h"
 #include "kz/recording/kz_recording.h"
 #include "kz/savedrun/kz_savedrun.h"
+#include "kz/trigger/kz_trigger.h"
 #include "utils/utils.h"
 
 CConVar<bool> kz_prac_enable("kz_prac_enable", FCVAR_NONE, "Whether the !prac practice mode is available to players.", true);
@@ -27,12 +28,80 @@ void KZPracService::Reset()
 	this->noclipBeforeSpec = false;
 	this->frozen = {};
 	this->ClearPoints();
+	this->ResetPracTime();
 }
 
 void KZPracService::ClearPoints()
 {
 	this->points.RemoveAll();
 	this->currentIndex = 0;
+}
+
+void KZPracService::ResetPracTime()
+{
+	this->pracTime = 0.0;
+	this->pracTimeRunning = false;
+}
+
+void KZPracService::OnPhysicsSimulatePost()
+{
+	// Условие симметрично KZTimerService::OnPhysicsSimulatePost (живой игрок, часы идут, пауза
+	// время не копит) и стоит тем же шагом. Пауза сюда попадает и как уход в спектатор
+	// (OnPlayerJoinTeam ставит paused), поэтому отдельного правила для спека не нужно.
+	if (this->inPrac && this->pracTimeRunning && this->player->IsAlive() && !this->player->timerService->GetPaused())
+	{
+		this->pracTime += ENGINE_FIXED_TICK_INTERVAL;
+	}
+}
+
+void KZPracService::OnTimerStartBlocked()
+{
+	if (!this->inPrac)
+	{
+		return;
+	}
+	// Свежая попытка. Точка вызова — вето OnTimerStart, то есть ровно тот тик, на котором
+	// пошёл бы настоящий таймер (все гарды TimerStart уже пройдены), поэтому prac-время
+	// сопоставимо с настоящим и не включает время, проведённое внутри стартовой зоны.
+	// Молча: обратная связь — сами часы в худе (0 и зелёные), чат на каждом рестарте
+	// бхоп-попытки был бы спамом.
+	this->pracTime = 0.0;
+	this->pracTimeRunning = true;
+}
+
+void KZPracService::OnNoclipEnabled()
+{
+	if (!this->inPrac)
+	{
+		return;
+	}
+	// Пролетев участок насквозь, игрок не имеет права на время за него — попытка
+	// недействительна целиком. Осмысленные часы возвращает только !practp или новый заход
+	// через стартовую зону.
+	const bool hadAttempt = this->pracTimeRunning || this->pracTime > 0.0;
+	this->ResetPracTime();
+	if (hadAttempt)
+	{
+		// Иначе пропажа времени в худе выглядит багом.
+		this->player->languageService->PrintChat(true, false, "Prac - Time Void Noclip");
+	}
+}
+
+bool KZPracService::OnEndZoneTouch()
+{
+	// Часы стоят (или prac нет вовсе) — печатать нечего, отдаём касание обычному тракту:
+	// там оно упрётся в !timerRunning и даст привычный false-end.
+	if (!this->inPrac || !this->pracTimeRunning)
+	{
+		return false;
+	}
+	char timeText[32];
+	utils::FormatTime(this->pracTime, timeText, sizeof(timeText));
+	this->player->languageService->PrintChat(true, false, "Prac - Finish", timeText);
+	// И это всё: настоящий TimerEnd не зовём вовсе, поэтому ни Times, ни реплей, ни PB/WR,
+	// ни kz.run_finished, ни инвалидация SavedRuns не задействованы (весь этот тракт висит
+	// внутри KZTimerService::TimerEnd). Часы продолжают идти, prac и точки остаются.
+	return true;
 }
 
 void KZPracService::TogglePrac()
@@ -80,15 +149,17 @@ void KZPracService::EnterPrac()
 		{
 			return;
 		}
-		// Гарды входа = гарды паузы (не в воздухе, не сразу после приземления, не в
-		// antipause-зоне, не под кулдауном). Сообщения печатает сам CanPause.
-		// Исключение — уже стоящая пауза: CanPause отдаёт на ней false МОЛЧА, а по смыслу
-		// пауза и есть нужное нам «игрок стоит», поэтому вилка явная.
-		const bool wasPaused = this->player->timerService->GetPaused();
-		if (!wasPaused && !this->player->timerService->CanPause(true))
+		// Гард CanPause убран (ревизия 2): в prac можно входить в воздухе — он стал репетицией,
+		// а не паузой, и возврат умеет вернуть скорость входа. Уходят вместе с ним midair,
+		// just-landed и кулдаун паузы; antipause-зона приходила оттуда же, поэтому проверяем её
+		// сами, той же фразой отказа — карты ставят такие зоны намеренно.
+		if (this->player->triggerService->InAntiPauseArea())
 		{
+			this->player->languageService->PrintChat(true, false, "Can't Pause (Anti Pause Area)");
+			this->player->PlayErrorSound();
 			return;
 		}
+		const bool wasPaused = this->player->timerService->GetPaused();
 
 		// Публичного геттера GUID у таймера нет, но есть GetCourse() -> дескриптор (kz_timer.h:409).
 		const KZCourseDescriptor *courseDesc = this->player->timerService->GetCourse();
@@ -146,6 +217,13 @@ void KZPracService::EnterPrac()
 			this->frozen.tpCount = this->player->checkpointService->GetTeleportCount() + 1;
 			this->player->GetOrigin(&this->frozen.origin);
 			this->player->GetAngles(&this->frozen.angles);
+			// Скорость и «с земли ли» — для возврата (ревизия 2): вошёл в полёте → вернём в полёт
+			// без паузы. Лестницу считаем землёй (см. FrozenRun::enteredGrounded). wasPaused —
+			// тоже «с земли»: паузу можно было поставить только стоя, а FL_ONGROUND за время
+			// MOVETYPE_NONE могло слететь, и без этого игрок вернулся бы в ран без паузы.
+			this->player->GetVelocity(&this->frozen.velocity);
+			CCSPlayerPawn *pawn = this->player->GetPlayerPawn();
+			this->frozen.enteredGrounded = wasPaused || (pawn->m_fFlags() & FL_ONGROUND) != 0 || pawn->m_MoveType() == MOVETYPE_LADDER;
 			SnapshotModeStyles(this->player, this->frozen.modeName, sizeof(this->frozen.modeName), this->frozen.styles,
 							   sizeof(this->frozen.styles));
 
@@ -170,6 +248,16 @@ void KZPracService::EnterPrac()
 	// Ноуклип НЕ включаем (решение пользователя 25.07): вход в prac только замораживает ран,
 	// а летать игрок начинает сам через !nc. Внутри prac ноуклип безопасен — «карательная»
 	// ветка HandleNoclip подавлена по inPrac, таймер уже остановлен.
+
+	// prac-часы: с раном — продолжают время рана (репетиция идёт дальше), без рана — стоят в 0
+	// до касания стартовой зоны. MAX: снапшот, снятый на самом тике старта рана, содержит
+	// отрицательный субтиковый офсет (см. TimerStart) — в prac-часах он не нужен.
+	this->pracTime = this->frozen.active ? MAX(0.0, this->frozen.timer.time) : 0.0;
+	this->pracTimeRunning = this->frozen.active;
+	// Точка №1 — текущее состояние (со скоростью и показанием часов): !practp сразу после входа
+	// возвращает ровно туда, откуда игрок вошёл, включая полёт. Общий путь захвата, без гардов
+	// (пешка проверена в начале) и без своего сообщения — про точку говорит фраза входа ниже.
+	this->CapturePoint();
 
 	if (this->frozen.active)
 	{
@@ -203,6 +291,7 @@ void KZPracService::ExitPrac()
 	{
 		this->inPrac = false;
 		this->ClearPoints();
+		this->ResetPracTime();
 		this->player->languageService->PrintChat(true, false, "Prac - Exit Free");
 		return;
 	}
@@ -237,16 +326,26 @@ void KZPracService::ExitPrac()
 	// SetTeleportCountForRestore не нужен: счётчик бампает KZCheckpointService::DoTeleport,
 	// а мы телепортируем напрямую через KZPlayer::Teleport, который его не трогает.
 	this->player->checkpointService->RestoreFromSnapshot(this->frozen.checkpoints, this->frozen.cpIndex, this->frozen.tpCount);
-	this->player->Teleport(&this->frozen.origin, &this->frozen.angles, &vec3_origin);
+	// Возврат со скоростью входа (ревизия 2): вошёл стоя — она нулевая и её всё равно съест
+	// пауза; вошёл в полёте — это единственный способ вернуть игрока в тот же полёт.
+	const bool grounded = this->frozen.enteredGrounded;
+	this->player->Teleport(&this->frozen.origin, &this->frozen.angles, &this->frozen.velocity);
 	this->player->recordingService->OnResume();
+	// Пауза только для входа с земли: ForcePause обнуляет скорость и ставит MOVETYPE_NONE, то
+	// есть съела бы ровно то, что мы вернули выше. Вошёл в воздухе — таймер сразу идёт, игрок
+	// продолжает полёт (об этом отдельная фраза ниже).
 	// ForcePause() возвращает void и молча не поставит паузу, если какой-то листенер
 	// провалит OnPause() (сейчас таких нет) — а чат ниже безусловно говорит "на паузе".
 	// Если появится реальное вето, эту пару придётся согласовать явно.
-	this->player->timerService->ForcePause();
+	if (grounded)
+	{
+		this->player->timerService->ForcePause();
+	}
 
 	this->frozen = {};
 	this->ClearPoints();
-	this->player->languageService->PrintChat(true, false, "Prac - Exit To Run");
+	this->ResetPracTime();
+	this->player->languageService->PrintChat(true, false, grounded ? "Prac - Exit To Run" : "Prac - Exit To Run Airborne");
 }
 
 void KZPracService::DropFrozenRun(const char *reason, const char *phrase)
@@ -261,6 +360,7 @@ void KZPracService::DropFrozenRun(const char *reason, const char *phrase)
 	this->inPrac = false;
 	this->frozen = {};
 	this->ClearPoints();
+	this->ResetPracTime();
 	if (hadRun)
 	{
 		// Рекордер реплея переживает prac (см. KZRecordingService::OnTimerStop) — если ран
@@ -345,6 +445,13 @@ void KZPracService::SetPoint()
 	{
 		return;
 	}
+	this->CapturePoint();
+	this->player->languageService->PrintChat(true, false, "Prac - Point Set", this->points.Count());
+	this->player->checkpointService->PlayCheckpointSound();
+}
+
+void KZPracService::CapturePoint()
+{
 	CCSPlayerPawn *pawn = this->player->GetPlayerPawn();
 
 	PracPoint pt = {};
@@ -360,11 +467,12 @@ void KZPracService::SetPoint()
 		pt.ladderNormal = ms->m_vecLadderNormal();
 		pt.onLadder = pawn->m_MoveType() == MOVETYPE_LADDER;
 	}
+	// Показание prac-часов — часть точки: !practp откручивает их назад вместе с позицией.
+	pt.pracTime = this->pracTime;
+	pt.pracTimeRunning = this->pracTimeRunning;
 
 	this->points.AddToTail(pt);
 	this->currentIndex = this->points.Count() - 1;
-	this->player->languageService->PrintChat(true, false, "Prac - Point Set", this->points.Count());
-	this->player->checkpointService->PlayCheckpointSound();
 }
 
 void KZPracService::DoTpToPoint(const PracPoint &pt)
@@ -402,6 +510,12 @@ void KZPracService::DoTpToPoint(const PracPoint &pt)
 	{
 		pawn->m_fFlags(pawn->m_fFlags() | FL_ONGROUND);
 	}
+	// Часы откручиваем к показанию точки и продолжаем — в этом смысл репетиции по кускам.
+	// Ставим ПОСЛЕ снятия ноуклипа выше, иначе OnNoclipEnabled успел бы их обнулить.
+	// Признак «шли» тоже из точки: точка, снятая без действующей попытки, не должна
+	// рождать время из ничего (см. PracPoint).
+	this->pracTime = pt.pracTime;
+	this->pracTimeRunning = pt.pracTimeRunning;
 	this->player->checkpointService->PlayTeleportSound();
 }
 

@@ -215,6 +215,9 @@ void KZPlayer::OnPhysicsSimulatePost()
 		this->styleServices[i]->OnPhysicsSimulatePost();
 	}
 	this->timerService->OnPhysicsSimulatePost();
+	// prac-часы тикают сразу за таймерным хуком: тот же тик, тот же шаг, и оба уже посчитаны
+	// к DrawPanels ниже (иначе худ показывал бы время на тик позади).
+	this->pracService->OnPhysicsSimulatePost();
 	KZ::replaysystem::OnPhysicsSimulatePost(this);
 	if (this->specService->GetSpectatedPlayer())
 	{

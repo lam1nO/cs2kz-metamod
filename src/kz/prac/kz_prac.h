@@ -22,6 +22,14 @@ public:
 		u32 tpCount {};
 		Vector origin {};
 		QAngle angles {};
+		// Скорость на момент входа: с ревизии 2 в prac можно войти в воздухе, и возврат должен
+		// вернуть игрока в тот же полёт, а не уронить с нулевой скоростью.
+		Vector velocity {};
+		// Вошёл «с земли» (или с лестницы) — только тогда возврат ставит ForcePause: она
+		// обнуляет скорость и ставит MOVETYPE_NONE, то есть для возврата в полёт не годится.
+		// Лестницу считаем землёй: её состояние всё равно не восстанавливается (см. спеку),
+		// а до ревизии 2 возврат с неё был через паузу — регресс не нужен.
+		bool enteredGrounded {};
 		// Режим и стили на момент заморозки. RunSubmission читает ТЕКУЩИЕ modeService/
 		// styleServices, поэтому ран, переживший !mode/!style внутри prac, уехал бы в чужой
 		// лидерборд со временем, набранным на другой физике — сверяем на выходе (ExitPrac).
@@ -42,6 +50,12 @@ public:
 		bool onGround {};
 		bool onLadder {};
 		Vector ladderNormal {};
+		// Показание prac-часов в момент снятия точки: !practp откручивает часы к нему.
+		// Признак «часы шли» тоже часть точки — точка, снятая без действующей попытки
+		// (свободный prac до старта, после обнуления ноуклипом), не должна на возврате
+		// рождать время из ничего.
+		f64 pracTime {};
+		bool pracTimeRunning {};
 	};
 
 private:
@@ -52,6 +66,12 @@ private:
 	FrozenRun frozen;
 	CUtlVector<PracPoint> points;
 	i32 currentIndex {};
+	// prac-часы («репетиция»): СВОЙ счётчик, а не таймер рана. Настоящий таймер в prac обязан
+	// оставаться остановленным — на timerRunning висит вся машинерия финиша/сабмита/реплеев/
+	// SavedRuns (см. четыре Critical в спеке). Эти часы никуда не уезжают: только худ и строка
+	// в чат на финише.
+	f64 pracTime {};
+	bool pracTimeRunning {};
 
 public:
 	static void Init();
@@ -65,13 +85,19 @@ public:
 		return this->inPrac;
 	}
 
-	bool HasFrozenRun()
+	// prac-часы для худа: значение и «идут ли». Часы стоят = действующей попытки нет.
+	f64 GetPracTime()
 	{
-		return this->frozen.active;
+		return this->pracTime;
+	}
+
+	bool IsPracTimeRunning()
+	{
+		return this->pracTimeRunning;
 	}
 
 	// Общее условие "есть замороженный ран, в который можно вернуться" — используется в
-	// SavedRuns (kz_savedrun.cpp, save_savedrun.cpp) вместо дублирования IsInPrac() && HasFrozenRun().
+	// SavedRuns (kz_savedrun.cpp, save_savedrun.cpp) вместо дублирования inPrac && frozen.active.
 	bool HasActiveFrozenRun()
 	{
 		return this->inPrac && this->frozen.active;
@@ -97,6 +123,20 @@ public:
 	void TpToNextPoint();
 	void ResetPoints();
 
+	// Тик prac-часов. Зовётся из KZPlayer::OnPhysicsSimulatePost рядом с таймерным хуком и
+	// тем же шагом ENGINE_FIXED_TICK_INTERVAL — иначе prac-время нельзя было бы сравнивать
+	// с настоящим.
+	void OnPhysicsSimulatePost();
+	// Вето настоящего таймера на выходе из стартовой зоны (см. events.cpp): для prac это
+	// «свежая попытка» — часы в 0 и пуск.
+	void OnTimerStartBlocked();
+	// Включение ноуклипа в prac: попытка недействительна, часы в 0 и стоп. Висит на переходе
+	// в MOVETYPE_NOCLIP внутри KZNoclipService::HandleNoclip, а не на команде !nc — иначе
+	// ноуклип из меню/бинда правило бы обошёл.
+	void OnNoclipEnabled();
+	// Касание финишной зоны курса. true = обработали сами (настоящий TimerEnd звать НЕЛЬЗЯ:
+	// в prac рана не существует, а весь сабмит висит на нём).
+	bool OnEndZoneTouch();
 	// Уход в спектатор: prac и замороженный ран НЕ теряются, гасим только ноуклип
 	// и стек prac-точек (pawn у обсервера всё равно исчезает).
 	void OnJoinSpectator();
@@ -107,6 +147,10 @@ private:
 	void EnterPrac();
 	void ExitPrac();
 	void ClearPoints();
+	// Часы в 0 и стоп: попытки нет.
+	void ResetPracTime();
+	// Захват точки без гардов и сообщений — общий путь для !praccp и для точки №1 на входе.
+	void CapturePoint();
 	void DoTpToPoint(const PracPoint &pt);
 	// Общий гард для всех prac-команд: печатает отказ и возвращает false вне prac.
 	bool RequirePrac();

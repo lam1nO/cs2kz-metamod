@@ -33,6 +33,10 @@ void KZNoclipService::HandleNoclip()
 		if (pawn->m_MoveType() != MOVETYPE_NOCLIP)
 		{
 			this->player->SetMoveType(MOVETYPE_NOCLIP);
+			// Момент фактического включения ноуклипа. В prac он не убивает ран, но делает
+			// недействительной попытку: prac-часы в 0 и стоп (сам метод no-op вне prac).
+			// Висим здесь, а не на команде !nc, чтобы ноуклип из меню/бинда правило не обошёл.
+			this->player->pracService->OnNoclipEnabled();
 			// Инвалидация ДО TimerStop, только если таймер реально бежал - иначе InvalidateCurrent
 			// не может резолвить курс (см. guard внутри) и это просто лишний no-op вызов.
 			if (!suppressTimerKill)

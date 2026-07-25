@@ -402,25 +402,35 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 			// Идёт забег или пауза (tRunning) → зелёный + фактическое время. Стоп/idle обычного
 			// игрока → белый + 00:00.00. Реплей-бот не трогаем (свой финальный тайм остаётся).
 			const bool inPrac = dataSource->pracService && dataSource->pracService->IsInPrac();
-			const bool pracFrozen = inPrac && dataSource->pracService->HasFrozenRun();
+			const bool pracTimeRunning = inPrac && dataSource->pracService->IsPracTimeRunning();
 			bool notRunning = !tRunning && !isReplay;
 			const char *timerColor = notRunning ? KZ_HUD_C_WHITE : KZ_HUD_C_TIMER;
 			if (notRunning)
 			{
 				char stoppedText[64];
-				if (pracFrozen)
+				if (pracTimeRunning)
 				{
-					// В prac таймер честно стоит, но время рана не потеряно — показываем
-					// ЗАМОРОЖЕННОЕ приглушённым. Белое 00:00.00 рядом с меткой PRAC читалось
-					// бы как «время пропало» (чат при этом говорит «ран заморожен»).
-					FormatTimeHud(dataSource->pracService->GetFrozenRun().timer.time, stoppedText, sizeof(stoppedText));
-					timerColor = KZ_HUD_C_MUTED;
+					// В prac настоящий таймер стоит by design, а время идёт по prac-часам —
+					// показываем ИХ и зелёным, как любое живое время. Чьё это время, объясняет
+					// метка PRAC слева.
+					FormatTimeHud(dataSource->pracService->GetPracTime(), stoppedText, sizeof(stoppedText));
+					tTime = stoppedText;
+					timerColor = KZ_HUD_C_TIMER;
+				}
+				else if (inPrac)
+				{
+					// Часы стоят: действующей попытки нет (ноуклип обнулил её / свободный prac до
+					// первого касания старта). Плейсхолдер той же ширины, что «MM:SS.CC», DIM —
+					// тот же идиом, что у пустых PB/WR ниже. Белое 00:00.00 читалось бы как
+					// «время ноль, часы вот-вот пойдут», а они не пойдут без старта или !practp.
+					tTime = "--:--.--";
+					timerColor = KZ_HUD_C_DIM;
 				}
 				else
 				{
 					FormatTimeHud(0.0, stoppedText, sizeof(stoppedText));
+					tTime = stoppedText;
 				}
-				tTime = stoppedText;
 			}
 			// Метка режима — рядом с временем, ЗАГЛАВНЫМИ (CKZ/KZT/VNL), как на кибершоке «[..] CKZ».
 			// Короткое имя режима наблюдаемого прогоняем через CybReplayCommon::MapMode (тот же

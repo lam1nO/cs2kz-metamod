@@ -4,6 +4,7 @@
 #include "kz/jumpstats/kz_jumpstats.h"
 #include "kz/checkpoint/kz_checkpoint.h"
 #include "kz/noclip/kz_noclip.h"
+#include "kz/prac/kz_prac.h"
 #include "kz/timer/kz_timer.h"
 #include "kz/language/kz_language.h"
 #include "kz/replays/kz_replaysystem.h"
@@ -270,6 +271,14 @@ void KZTriggerService::OnMappingApiTriggerStartTouchPost(TriggerTouchTracker tra
 
 		case KZTRIGGER_ZONE_END:
 		{
+			// В prac настоящего рана нет: финиш — только строка с prac-временем самому игроку.
+			// TimerEnd на этом пути не зовём вовсе, иначе к нему подтянулся бы весь тракт
+			// сабмита (Times/реплей/PB-WR/kz.run_finished). Часы стоят → обычный тракт
+			// (там касание упрётся в !timerRunning и даст привычный false-end).
+			if (this->player->pracService->OnEndZoneTouch())
+			{
+				break;
+			}
 			this->player->timerService->TimerEnd(course);
 		}
 		break;
