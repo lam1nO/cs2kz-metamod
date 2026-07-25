@@ -355,6 +355,26 @@
 		"ru"		"{grey}Отображение кнопок {darkred}выключено."
 		"ua"		"{grey}Відображення клавіш {darkred}вимкнено."
 	}
+	"MHUD - Keys Two Rows Enabled"
+	{
+		"en"		"{grey}Keys are shown in {green}two rows{grey} (keyboard layout)."
+		"ru"		"{grey}Клавиши показываются {green}в 2 строки{grey} (раскладкой клавиатуры)."
+	}
+	"MHUD - Keys Two Rows Disabled"
+	{
+		"en"		"{grey}Keys are shown in {darkred}one row{grey} (A W S D C J)."
+		"ru"		"{grey}Клавиши показываются {darkred}одной строкой{grey} (A W S D C J)."
+	}
+	"MHUD - PB/WR Enabled"
+	{
+		"en"		"{grey}PB/WR line is currently {green}enabled."
+		"ru"		"{grey}Строка PB/WR {green}включена."
+	}
+	"MHUD - PB/WR Disabled"
+	{
+		"en"		"{grey}PB/WR line is currently {darkred}disabled."
+		"ru"		"{grey}Строка PB/WR {darkred}выключена."
+	}
 	"MHUD - Keys Overlap Enabled"
 	{
 		"en"		"{grey}Keys overlap is currently {green}enabled."
@@ -958,6 +978,16 @@
 		"ru"		"Overlap"
 		"chi"		"按键冲突"
 		"ua"		"Накладання клавіш"
+	}
+	"HUD - Menu Label KeysTwoRows"
+	{
+		"en"		"Keys in two rows"
+		"ru"		"Клавиши в 2 строки"
+	}
+	"HUD - Menu Label PbWr"
+	{
+		"en"		"PB/WR line"
+		"ru"		"Строка PB/WR"
 	}
 	"HUD - Menu Label CpTp"
 	{

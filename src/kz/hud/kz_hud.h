@@ -139,6 +139,10 @@ public:
 	bool IsMHUDTimerDetailed();
 	bool IsMHUDKeysOverlapEnabled();
 	bool IsMHUDOutlineEnabled();
+	// Только для стандартного HTML-худа (particle-MHUD их не смотрит):
+	// раскладка клавиш в 2 ряда (иначе одна строка A W S D C J) и показ строки PB/WR.
+	bool IsMHUDKeysTwoRowsEnabled();
+	bool IsMHUDPbWrEnabled();
 
 	// kz_hud / kz_mhud — печатает сводку текущего конфига.
 	void PrintHUDSummary();
