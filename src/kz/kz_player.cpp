@@ -30,6 +30,7 @@
 #include "pistol/kz_pistol.h"
 #include "fov/kz_fov.h"
 #include "ztopwatch/kz_ztopwatch.h"
+#include "prac/kz_prac.h"
 
 #include "cs2kz.h"
 #include "sdk/datatypes.h"
@@ -56,6 +57,7 @@ void KZPlayer::Init()
 	delete this->timerService;
 	delete this->optionService;
 	delete this->paintService;
+	delete this->pracService;
 	delete this->noclipService;
 	delete this->tipService;
 	delete this->telemetryService;
@@ -84,6 +86,7 @@ void KZPlayer::Init()
 	this->timerService = new KZTimerService(this);
 	this->optionService = new KZOptionService(this);
 	this->paintService = new KZPaintService(this);
+	this->pracService = new KZPracService(this);
 	this->tipService = new KZTipService(this);
 	this->telemetryService = new KZTelemetryService(this);
 	this->triggerService = new KZTriggerService(this);
@@ -111,6 +114,7 @@ void KZPlayer::Reset()
 	this->modeService->Reset();
 	this->optionService->Reset();
 	this->checkpointService->Reset();
+	this->pracService->Reset();
 	this->noclipService->Reset();
 	this->quietService->Reset();
 	this->jumpstatsService->Reset();
