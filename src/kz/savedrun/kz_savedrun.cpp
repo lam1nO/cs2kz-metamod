@@ -489,6 +489,21 @@ void KZSavedRunService::TryRestoreOnSpawn()
 			savedRunService->fetchStarted = false;
 			return;
 		}
+		if (pl->pracService->IsInPrac())
+		{
+			// Игрок успел войти в !prac за время round-trip к БД. Синхронные гарды на входе
+			// (KZTimerService::OnPlayerSpawn) окно между стартом fetch'а и этим колбэком не
+			// закрывают, а проверка GetTimerRunning() ниже его пропустит: в prac таймер как раз
+			// НЕ бежит. Применить снапшот здесь значит поднять timerRunning через
+			// RestoreFromSnapshot и телепортировать игрока, который летает в ноуклипе (наш
+			// suppressTimerKill в HandleNoclip этот таймер уже не остановит) - то есть выдать
+			// путь сфабриковать финиш; плюс затереть состояние рана, единственный владелец
+			// которого - KZPracService.
+			// Отказ по образцу !IsAlive() выше: тихо, БЕЗ удаления сейва (доживёт до TTL) и без
+			// сжигания restoreAttempted - на следующем спауне вне prac fetch повторится.
+			savedRunService->fetchStarted = false;
+			return;
+		}
 		if (pl->timerService->GetTimerRunning())
 		{
 			savedRunService->restoreAttempted = true;
