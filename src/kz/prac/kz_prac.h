@@ -83,4 +83,6 @@ private:
 	void DoTpToPoint(const PracPoint &pt);
 	// Общий гард для всех prac-команд: печатает отказ и возвращает false вне prac.
 	bool RequirePrac();
+	// Гард всех prac-телепортов: вне prac или при пустом стеке печатает отказ и возвращает false.
+	bool RequirePracPoint();
 };

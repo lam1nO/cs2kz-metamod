@@ -177,6 +177,21 @@ bool KZPracService::RequirePrac()
 	return true;
 }
 
+bool KZPracService::RequirePracPoint()
+{
+	if (!this->RequirePrac())
+	{
+		return false;
+	}
+	if (this->points.Count() == 0)
+	{
+		this->player->languageService->PrintChat(true, false, "Prac - No Points");
+		this->player->PlayErrorSound();
+		return false;
+	}
+	return true;
+}
+
 void KZPracService::SetPoint()
 {
 	if (!this->RequirePrac())
@@ -249,14 +264,8 @@ void KZPracService::DoTpToPoint(const PracPoint &pt)
 
 void KZPracService::TpToPoint()
 {
-	if (!this->RequirePrac())
+	if (!this->RequirePracPoint())
 	{
-		return;
-	}
-	if (this->points.Count() == 0)
-	{
-		this->player->languageService->PrintChat(true, false, "Prac - No Points");
-		this->player->PlayErrorSound();
 		return;
 	}
 	this->DoTpToPoint(this->points[this->currentIndex]);
@@ -264,14 +273,8 @@ void KZPracService::TpToPoint()
 
 void KZPracService::TpToPrevPoint()
 {
-	if (!this->RequirePrac())
+	if (!this->RequirePracPoint())
 	{
-		return;
-	}
-	if (this->points.Count() == 0)
-	{
-		this->player->languageService->PrintChat(true, false, "Prac - No Points");
-		this->player->PlayErrorSound();
 		return;
 	}
 	this->currentIndex = MAX(0, this->currentIndex - 1);
@@ -280,14 +283,8 @@ void KZPracService::TpToPrevPoint()
 
 void KZPracService::TpToNextPoint()
 {
-	if (!this->RequirePrac())
+	if (!this->RequirePracPoint())
 	{
-		return;
-	}
-	if (this->points.Count() == 0)
-	{
-		this->player->languageService->PrintChat(true, false, "Prac - No Points");
-		this->player->PlayErrorSound();
 		return;
 	}
 	this->currentIndex = MIN(this->points.Count() - 1, this->currentIndex + 1);
