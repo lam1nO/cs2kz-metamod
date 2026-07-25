@@ -63,4 +63,15 @@ public:
 	{
 		return this->frozen;
 	}
+
+	// Тоггл: вход в prac (заморозка рана, если он есть) или возврат в замороженный ран.
+	void TogglePrac();
+	// Потеря prac без возврата в ран (смерть, !r, смена карты). reason — для чат-сообщения
+	// и лога; nullptr = молча (смена карты).
+	void DropFrozenRun(const char *reason);
+
+private:
+	void EnterPrac();
+	void ExitPrac();
+	void ClearPoints();
 };

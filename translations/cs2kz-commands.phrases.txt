@@ -1833,4 +1833,34 @@
 		"en"		"Open the replay control menu."
 		"ru"		"Меню управления реплеем."
 	}
+	"Command Description - kz_prac"
+	{
+		"en"		"Toggle practice mode: freeze your run, fly around, then return to it."
+		"ru"		"Режим отработки: заморозить ран, полетать, затем вернуться в него."
+	}
+	"Command Description - kz_praccp"
+	{
+		"en"		"Set a practice checkpoint (keeps your speed). Practice mode only."
+		"ru"		"Поставить prac-чекпоинт (сохраняет скорость). Только в режиме отработки."
+	}
+	"Command Description - kz_practp"
+	{
+		"en"		"Teleport to the current practice checkpoint. Practice mode only."
+		"ru"		"Телепорт на текущий prac-чекпоинт. Только в режиме отработки."
+	}
+	"Command Description - kz_pracprev"
+	{
+		"en"		"Teleport to the previous practice checkpoint. Practice mode only."
+		"ru"		"Телепорт на предыдущий prac-чекпоинт. Только в режиме отработки."
+	}
+	"Command Description - kz_pracnext"
+	{
+		"en"		"Teleport to the next practice checkpoint. Practice mode only."
+		"ru"		"Телепорт на следующий prac-чекпоинт. Только в режиме отработки."
+	}
+	"Command Description - kz_pracreset"
+	{
+		"en"		"Clear all practice checkpoints. Practice mode only."
+		"ru"		"Очистить все prac-чекпоинты. Только в режиме отработки."
+	}
 }

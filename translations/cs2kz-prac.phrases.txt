@@ -1,0 +1,60 @@
+"Phrases"
+{
+	"Prac - Enter With Run"
+	{
+		"en"		"{grey}Practice mode. Your run is {default}frozen{grey} — type {default}!prac{grey} to return to it."
+		"ru"		"{grey}Режим отработки. Ран {default}заморожен{grey} — напиши {default}!prac{grey}, чтобы вернуться."
+	}
+	"Prac - Enter Free"
+	{
+		"en"		"{grey}Practice mode. No active run to freeze."
+		"ru"		"{grey}Режим отработки. Активного рана нет — просто тренировка."
+	}
+	"Prac - Exit To Run"
+	{
+		"en"		"{grey}Back to your run. Timer is {default}paused{grey}, the run is now {default}NUB{grey}."
+		"ru"		"{grey}Возврат в ран. Таймер на {default}паузе{grey}, ран теперь {default}NUB{grey}."
+	}
+	"Prac - Exit Free"
+	{
+		"en"		"{grey}Practice mode off."
+		"ru"		"{grey}Режим отработки выключен."
+	}
+	"Prac - Run Lost"
+	{
+		"en"		"{grey}Frozen run lost."
+		"ru"		"{grey}Замороженный ран потерян."
+	}
+	"Prac - Disabled"
+	{
+		"en"		"{grey}Practice mode is disabled on this server."
+		"ru"		"{grey}Режим отработки на этом сервере отключён."
+	}
+	"Prac - Must Be Alive"
+	{
+		"en"		"{grey}You must be alive to use practice mode."
+		"ru"		"{grey}Режим отработки доступен только живому игроку."
+	}
+	"Prac - Only In Prac"
+	{
+		"en"		"{grey}This command only works in practice mode ({default}!prac{grey})."
+		"ru"		"{grey}Команда работает только в режиме отработки ({default}!prac{grey})."
+	}
+	"Prac - No Points"
+	{
+		"en"		"{grey}No practice checkpoints set."
+		"ru"		"{grey}Prac-чекпоинтов нет."
+	}
+	"Prac - Point Set"
+	{
+		// You have set a practice checkpoint (#3).
+		"#format"	"prac_count:d"
+		"en"		"{grey}Practice checkpoint set (#{default}{prac_count}{grey})."
+		"ru"		"{grey}Prac-чекпоинт поставлен (#{default}{prac_count}{grey})."
+	}
+	"Prac - Points Cleared"
+	{
+		"en"		"{grey}Practice checkpoints cleared."
+		"ru"		"{grey}Prac-чекпоинты очищены."
+	}
+}
