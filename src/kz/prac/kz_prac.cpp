@@ -1,6 +1,7 @@
 #include "kz_prac.h"
 
 #include "kz/language/kz_language.h"
+#include "kz/mappingapi/kz_mappingapi.h"
 #include "kz/mode/kz_mode.h"
 #include "kz/noclip/kz_noclip.h"
 #include "kz/racing/kz_racing.h"
@@ -211,11 +212,14 @@ void KZPracService::ExitPrac()
 	char modeNow[sizeof(this->frozen.modeName)];
 	char stylesNow[sizeof(this->frozen.styles)];
 	SnapshotModeStyles(this->player, modeNow, sizeof(modeNow), stylesNow, sizeof(stylesNow));
-	if (!KZ_STREQI(modeNow, this->frozen.modeName) || !KZ_STREQI(stylesNow, this->frozen.styles))
+	const bool modeChanged = !KZ_STREQI(modeNow, this->frozen.modeName);
+	if (modeChanged || !KZ_STREQI(stylesNow, this->frozen.styles))
 	{
 		this->player->languageService->PrintChat(true, false, "Prac - Run Lost Mode Changed");
 		this->player->PlayErrorSound();
-		this->DropFrozenRun("mode or styles changed in prac", nullptr);
+		// Причины из словаря TimerStop (kz_timer.h): различаем режим и стили, иначе разбор
+		// «почему ран не уехал в лидерборд» упирается в одно общее значение.
+		this->DropFrozenRun(modeChanged ? "mode_change" : "style_change", nullptr);
 		return;
 	}
 
@@ -250,6 +254,8 @@ void KZPracService::DropFrozenRun(const char *reason, const char *phrase)
 		return;
 	}
 	const bool hadRun = this->frozen.active;
+	// Курс запоминаем ДО сброса frozen ниже — иначе в лог уйдёт уже обнулённый GUID.
+	const u32 lostCourseGUID = this->frozen.courseGUID;
 	this->inPrac = false;
 	this->frozen = {};
 	this->ClearPoints();
@@ -266,7 +272,12 @@ void KZPracService::DropFrozenRun(const char *reason, const char *phrase)
 		}
 		if (reason)
 		{
-			KZ_LOG_DEBUG(LogChannel::Timer, "[prac] frozen run dropped for %s: %s\n", this->player->GetName(), reason);
+			// INFO, а не DEBUG: без -debug каналы регистрируются с LV_DEFAULT (utils/logging.cpp),
+			// то есть на проде строки бы не было. Уничтожение рана — отказ, а последнее событие
+			// игрока перед ним (run_stop reason=prac) читается как «сам приостановил», не «потерял».
+			const KZCourseDescriptor *lostCourse = KZ::course::GetCourse(lostCourseGUID);
+			KZ_LOG_INFO(LogChannel::Timer, "[cyb] run_lost steam_id=%llu course=%s reason=%s\n", this->player->GetSteamId64(false),
+						lostCourse ? lostCourse->name : "unknown", reason);
 		}
 	}
 }

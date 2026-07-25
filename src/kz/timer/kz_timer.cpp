@@ -1001,6 +1001,8 @@ void KZTimerService::Reset()
 	this->touchedGroundSinceTouchingStartZone = {};
 	this->shouldPlayTimerStopSound = true;
 	this->lastRestartAttemptTime = {};
+	// Гигиена: залипший в true флаг тихо отключил бы DropFrozenRun("death") в OnPlayerDeath.
+	this->changingTeam = {};
 }
 
 void KZTimerService::OnPhysicsSimulatePost()
@@ -1154,7 +1156,7 @@ void KZTimerService::OnRoundStart()
 	// (TimerStopAll ниже). Замороженный prac-ран — тот же ран, только его состояние держит
 	// KZPracService, и живой таймер у него уже остановлен — значит TimerStopAll до него не
 	// достанет. Убираем симметрично, иначе игрок вернулся бы в ран, чей мир уже сброшен.
-	KZPracService::DropFrozenRunAll("round start");
+	KZPracService::DropFrozenRunAll("round_start");
 	KZTimerService::TimerStopAll(true, "round_start");
 }
 

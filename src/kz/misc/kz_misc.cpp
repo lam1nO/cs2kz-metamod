@@ -156,7 +156,9 @@ void KZ::misc::TeleportToCourse(KZPlayer *player, const KZCourseDescriptor *cour
 	{
 		return;
 	}
-	player->pracService->DropFrozenRun("restart");
+	// Та же причина, что уйдёт в run_stop из OnTeleportToStart ниже — одно действие игрока,
+	// одно значение, две строки коррелируют.
+	player->pracService->DropFrozenRun("teleport_to_start");
 
 	// Рестарт снимает паузу — но только у живого игрока: у спектатора paused
 	// выставлен всегда (OnPlayerJoinTeam), а Resume лезет в pawn/move services

@@ -458,7 +458,8 @@ public:
 	// Значения: start_zone, teleport_to_start, teleport_to_end, disconnect, death,
 	// round_start, noclip, cheat_cvar, mode_change, style_change, jumpstat_area,
 	// pause_denied, team_change, stop, race, race_event, prac, prac_discard,
-	// stop_all, unknown.
+	// stop_all, unknown. Тот же словарь у run_lost (KZPracService::DropFrozenRun) —
+	// одно действие игрока должно давать одно значение в обеих строках.
 	bool TimerStop(bool playSound = true, const char *reason = "unknown");
 	static void TimerStopAll(bool playSound = true, const char *reason = "stop_all");
 

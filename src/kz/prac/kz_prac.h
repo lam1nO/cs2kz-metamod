@@ -83,7 +83,8 @@ public:
 	// Тоггл: вход в prac (заморозка рана, если он есть) или возврат в замороженный ран.
 	void TogglePrac();
 	// Потеря prac без возврата в ран (смерть, !r, смена карты, смена режима/стиля).
-	// reason — для лога (nullptr = не логировать, смена карты); phrase — ключ чат-фразы
+	// reason — в лог как run_lost, значения берём из словаря TimerStop (kz_timer.h), а не
+	// изобретаем (nullptr = не логировать, смена карты); phrase — ключ чат-фразы
 	// (nullptr = молча, когда вызывающий уже напечатал свою причину).
 	void DropFrozenRun(const char *reason, const char *phrase = "Prac - Run Lost");
 
