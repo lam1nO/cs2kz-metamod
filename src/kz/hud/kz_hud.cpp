@@ -9,6 +9,7 @@
 #include "kz/timer/kz_timer.h"
 #include "kz/language/kz_language.h"
 #include "kz/checkpoint/kz_checkpoint.h"
+#include "kz/prac/kz_prac.h"
 #include "kz/replays/kz_replaysystem.h"
 #include "kz/style/kz_style.h" // GetStyleName для лейбла стиля (деф. Normal) в строке 1
 #include "kz/mode/kz_mode.h" // KZModeService::GetModeShortName для метки режима в строке 1
@@ -444,22 +445,31 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 				styleTag = st;
 				rightVisChars += 2 + (int)V_strlen(styleName); // 2 разделителя + имя стиля
 			}
-			// PRO/NUB слева от времени — только пока таймер ИДЁТ (tRunning; в простое/стопе не рисуем).
-			// PRO — в текущем ране НЕ использован ни один телепорт, NUB — использован ≥1 (тот же критерий
-			// Pro/Standard, что у типа времени таймера: checkpointService->GetTeleportCount()). PRO зелёный
-			// (KZ_HUD_C_TIMER), NUB приглушённый (KZ_HUD_C_MUTED); мелкий кегль SECONDARY, как метка режима.
-			// Буквы + пара nbsp-зазора к времени; ширину блока учитываем в балансе паддинга (leftVisChars).
+			// PRO/NUB/PRAC слева от времени. PRAC имеет приоритет: игрок в режиме отработки,
+			// таймера у него нет вообще. Флаг берём из dataSource, а не из this->player —
+			// блок рисует состояние НАБЛЮДАЕМОГО игрока, поэтому зритель видит PRAC сам.
 			std::string proNubTag;
 			int leftVisChars = 0;
-			if (tRunning && !isReplay && dataSource->checkpointService)
+			const bool inPrac = !isReplay && dataSource->pracService && dataSource->pracService->IsInPrac();
+			if ((tRunning || inPrac) && !isReplay && dataSource->checkpointService)
 			{
-				bool pro = dataSource->checkpointService->GetTeleportCount() == 0;
-				const char *pnColor = pro ? KZ_HUD_C_TIMER : KZ_HUD_C_MUTED;
-				const char *pnText = pro ? "PRO" : "NUB";
+				const char *pnColor;
+				const char *pnText;
+				if (inPrac)
+				{
+					pnColor = KZ_HUD_C_MUTED;
+					pnText = "PRAC";
+				}
+				else
+				{
+					bool pro = dataSource->checkpointService->GetTeleportCount() == 0;
+					pnColor = pro ? KZ_HUD_C_TIMER : KZ_HUD_C_MUTED;
+					pnText = pro ? "PRO" : "NUB";
+				}
 				char pn[128];
 				V_snprintf(pn, sizeof(pn), "<font class='" KZ_HUD_FS_SECONDARY "'><font color='%s'>%s</font></font>&#160;&#160;", pnColor, pnText);
 				proNubTag = pn;
-				leftVisChars = 2 + (int)V_strlen(pnText); // симметрично modeTag: 2 nbsp-зазор + буквы
+				leftVisChars = 2 + (int)V_strlen(pnText);
 			}
 			// Левый паддинг nbsp'ами (&#160;, рендерится с шириной) ≈ ширины правой части, чтобы центр
 			// ВРЕМЕНИ (область «:» в «00:00.00») встал под центр экрана (движок центрирует строку целиком):
