@@ -58,6 +58,13 @@ public:
 		return this->frozen.active;
 	}
 
+	// Общее условие "есть замороженный ран, в который можно вернуться" — используется в
+	// SavedRuns (kz_savedrun.cpp, save_savedrun.cpp) вместо дублирования IsInPrac() && HasFrozenRun().
+	bool HasActiveFrozenRun()
+	{
+		return this->inPrac && this->frozen.active;
+	}
+
 	// Снапшот для SavedRuns при дисконнекте в prac (Task 7). Не мутирует состояние.
 	const FrozenRun &GetFrozenRun()
 	{

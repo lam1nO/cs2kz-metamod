@@ -448,9 +448,11 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 			// PRO/NUB/PRAC слева от времени. PRAC имеет приоритет: игрок в режиме отработки,
 			// таймера у него нет вообще. Флаг берём из dataSource, а не из this->player —
 			// блок рисует состояние НАБЛЮДАЕМОГО игрока, поэтому зритель видит PRAC сам.
+			// PRO/NUB — тот же критерий, что у Pro/Standard-типа времени таймера
+			// (см. KZTimerService::GetCurrentTimeType: GetTeleportCount() == 0 -> PRO).
 			std::string proNubTag;
 			int leftVisChars = 0;
-			const bool inPrac = !isReplay && dataSource->pracService && dataSource->pracService->IsInPrac();
+			const bool inPrac = dataSource->pracService && dataSource->pracService->IsInPrac();
 			if ((tRunning || inPrac) && !isReplay && dataSource->checkpointService)
 			{
 				const char *pnColor;
@@ -477,8 +479,8 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 			// (≈0.5–0.6), поэтому его нужно БОЛЬШЕ, чем «символов» правой части — множитель
 			// kLeftPadNbspPerChar под живую подстройку (цель «визуально по центру», не пиксель).
 			// Паддинг в том же кегле, что правая часть (SECONDARY), чтобы ширины сопоставлялись.
-			// PRO/NUB — реальный контент слева, поэтому из бюджета паддинга вычитаем его ширину
-			// (leftVisChars): [pad][PRO][ время ][режим][стиль] — PRO зеркалит режим вокруг центра времени.
+			// PRO/NUB/PRAC — реальный контент слева, поэтому из бюджета паддинга вычитаем его ширину
+			// (leftVisChars): [pad][PRO/NUB/PRAC][ время ][режим][стиль] — метка зеркалит режим вокруг центра времени.
 			const int kLeftPadNbspPerChar = 2; // nbsp на 1 «символ» правой части; крутить после теста
 			std::string leftPad;
 			int padBudget = rightVisChars - leftVisChars;
@@ -497,7 +499,7 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 			// Состояние читается по цвету времени: идёт → зелёное фактическое время,
 			// не идёт → белое 00:00.00 (см. timerColor/notRunning выше). tSuffix из GetTimerParts
 			// больше не используется (сам метод его по-прежнему может отдавать — здесь игнорируем).
-			// Порядок как на кибершоке: (паддинг) → PRO/NUB → время → режим → стиль-если-есть.
+			// Порядок как на кибершоке: (паддинг) → PRO/NUB/PRAC → время → режим → стиль-если-есть.
 			V_snprintf(buf, sizeof(buf),
 					   "%s%s<font class='" KZ_HUD_FS_TIMER "'><font color='%s'>" KZ_HUD_BRACKET_OPEN "&#160;%s&#160;" KZ_HUD_BRACKET_CLOSE
 					   "</font></font>%s%s",

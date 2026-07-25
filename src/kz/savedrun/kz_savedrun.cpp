@@ -100,7 +100,7 @@ std::string KZSavedRunService::SerializeSnapshot()
 	// состояние рана лежит в KZPracService. Штраф (+1 телепорт, при policy=1 ещё и valid=false)
 	// уже вшит в снапшот на входе в prac — здесь просто переносим его как есть, поэтому
 	// восстановление после реконнекта даёт ровно тот же ран, что и возврат через !prac.
-	const bool fromPrac = this->player->pracService->IsInPrac() && this->player->pracService->HasFrozenRun();
+	const bool fromPrac = this->player->pracService->HasActiveFrozenRun();
 	const KZPracService::FrozenRun &frozen = this->player->pracService->GetFrozenRun();
 
 	KZTimerService::TimerSaveSnapshot timerSnapshot = fromPrac ? frozen.timer : timerService->SnapshotForSave();
@@ -240,9 +240,13 @@ bool KZSavedRunService::ApplySnapshot(i32 course, u32 tpCount, const std::string
 		return false;
 	}
 
-	// Карта запрещает ТП на чекпоинты: DoTeleport ниже молча откажет, и состояние применилось
-	// бы «наполовину» (таймер/пауза без позиции). Отказ целиком ДО любых мутаций.
-	if (!this->player->triggerService->CanTeleportToCheckpoints())
+	// Карта запрещает ТП на чекпоинты — актуально только для пути "чекпоинт-восстановление"
+	// (else ниже, checkpointService->DoTeleport): он молча откажет, и состояние применилось бы
+	// «наполовину» (таймер/пауза без позиции). Prac-путь (hasPos) делает "сырой" Teleport в точку
+	// заморозки и этот гард не проверяет вовсе — симметрично KZPracService::ExitPrac, который
+	// возвращает игрока в !prac той же дорогой и тоже не гейтится CanTeleportToCheckpoints().
+	// Отказ целиком ДО любых мутаций.
+	if (!hasPos && !this->player->triggerService->CanTeleportToCheckpoints())
 	{
 		KZ_LOG_WARN(LogChannel::Timer, "[SavedRuns] Snapshot for %s has checkpoints but map forbids checkpoint teleports, discarding.\n",
 					this->player->GetName());
@@ -328,7 +332,7 @@ void KZSavedRunService::SaveOnDisconnect()
 	// GetTimerRunning() здесь false даже для замороженного рана со свежим штрафом NUB.
 	// Без fromPrac дисконнект в prac молча не сохранял бы вообще ничего.
 	KZTimerService *timerService = this->player->timerService;
-	const bool fromPrac = this->player->pracService->IsInPrac() && this->player->pracService->HasFrozenRun();
+	const bool fromPrac = this->player->pracService->HasActiveFrozenRun();
 	if (!timerService->GetTimerRunning() && !fromPrac)
 	{
 		return;

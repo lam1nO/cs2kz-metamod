@@ -26,7 +26,7 @@ void KZDatabaseService::SaveRun(KZPlayer *player, f64 runTime, u32 tpCount, cons
 	// Дисконнект в prac (Task 7): курс живого таймера (currentCourseGUID) в общем случае этот же,
 	// но это совпадение мы не гарантируем (см. StartZoneEndTouch) - берём курс явно из
 	// замороженного рана, той же вилкой, что SerializeSnapshot/SaveOnDisconnect.
-	const bool fromPrac = player->pracService->IsInPrac() && player->pracService->HasFrozenRun();
+	const bool fromPrac = player->pracService->HasActiveFrozenRun();
 	const KZCourseDescriptor *course =
 		fromPrac ? KZ::course::GetCourse(player->pracService->GetFrozenRun().courseGUID) : player->timerService->GetCourse();
 	if (!course)

@@ -74,6 +74,10 @@ void KZPracService::EnterPrac()
 			return;
 		}
 
+		// С этой строки и до this->inPrac = true ниже инвариант «frozen.active только при
+		// inPrac» кратковременно не держится (frozen.active уже true, inPrac ещё false).
+		// Безвредно: код синхронный, между ними нет колбэков/тиков, никто снаружи в это
+		// окно prac-состояние не читает (см. HasActiveFrozenRun() и её потребителей).
 		this->frozen = {};
 		this->frozen.active = true;
 		this->frozen.courseGUID = courseDesc->guid;
@@ -138,6 +142,9 @@ void KZPracService::ExitPrac()
 
 	// inPrac снимаем ДО восстановления: RestoreFromSnapshot поднимает timerRunning,
 	// и дальше листенер OnTimerStart уже не должен ничего вето́ровать.
+	// С этой строки и до this->frozen = {} ниже инвариант «frozen.active только при inPrac»
+	// снова кратковременно не держится (inPrac уже false, frozen.active ещё true) — тот же
+	// безвредный синхронный случай, что и в EnterPrac.
 	this->inPrac = false;
 
 	this->player->timerService->RestoreFromSnapshot(this->frozen.courseGUID, this->frozen.timer);
@@ -147,6 +154,9 @@ void KZPracService::ExitPrac()
 	this->player->checkpointService->RestoreFromSnapshot(this->frozen.checkpoints, this->frozen.cpIndex, this->frozen.tpCount);
 	this->player->Teleport(&this->frozen.origin, &this->frozen.angles, &vec3_origin);
 	this->player->recordingService->OnResume();
+	// ForcePause() возвращает void и молча не поставит паузу, если какой-то листенер
+	// провалит OnPause() (сейчас таких нет) — а чат ниже безусловно говорит "на паузе".
+	// Если появится реальное вето, эту пару придётся согласовать явно.
 	this->player->timerService->ForcePause();
 
 	this->frozen = {};
