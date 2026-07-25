@@ -50,6 +50,26 @@ cs2kz-linux-builder .`, иначе компилируются старые ис�
   карты). Конвенция course — cyber-номер (`KZ::course::GetCyberCourseNumber`/
   `GetCourseByCyberNumber`), не hammerId/guid — переживает ребилд карты, пока
   номер курса не меняется.
+- **prac — режим отработки элементов** (`src/kz/prac/*`, cyb.93): `!prac` замораживает ран
+  (снапшот таймера+чекпоинтов в `KZPracService`, затем честный `TimerStop`) и даёт ноуклип;
+  `!praccp`/`!practp`/`!pracprev`/`!pracnext`/`!pracreset` — свой стек точек, хранящих **вектор
+  скорости** (+присед, stamina, лестница), `practp` сам снимает ноуклип. Второй `!prac`
+  восстанавливает ран через тот же путь, что SavedRuns, телепортирует в точку заморозки и
+  ставит `ForcePause`. Ключевое: **во время prac активного рана не существует** — таймер стоит,
+  поэтому ноуклип/чекпоинты/триггеры ведут себя как в простое; ядро знает о prac только через
+  вето `OnTimerStart`. Штраф вшивается в снапшот на ВХОДЕ (`tpCount + 1` → ран становится NUB),
+  поэтому возврат через `!prac` и через реконнект дают одинаковый ран. Гарды входа = гарды
+  паузы + `!pro`-предохранитель + отказ участнику активной гонки. Стек точек стирается на
+  выходе и на уходе в спек; сам prac переживает спектатор, но не смерть/`!r`/рестарт
+  раунда/смену карты. cvar'ы `kz_prac_enable`, `kz_prac_run_policy` (0 = ран NUB,
+  1 = ран не начинать вовсе). Спека — в монорепо
+  `docs/superpowers/specs/2026-07-25-kz-prac-mode-design.md`.
+  Неочевидные связки, которые ломались при разработке: вход в prac обязан гейтить
+  `KZRecordingService::OnTimerStop` (иначе `OnTimerStopped` стирает активный `RunRecorder` и
+  финиш получает нулевой UUID → коллизия PK в `Times`); `TimerStopAll` prac не достаёт
+  (`TimerStop` выходит по `!timerRunning` до листенеров) — поэтому свой `DropFrozenRunAll` в
+  `OnRoundStart`; `TryRestoreOnSpawn` гейтится в АСИНХРОННОМ колбэке, а не на входе (у неё два
+  вызывающих, второй — `db/setup_client.cpp`).
 - **Центральные реплеи PB/WR** (`src/kz/replays/cyb_replay_{common,upload,download}.*`,
   cyb.26): авто-upload при новом локальном PB и серверном рекорде (WR = overall/nub;
   pro отдельно НЕ выгружается) через api `POST /replays/v1/upload` (Bearer
