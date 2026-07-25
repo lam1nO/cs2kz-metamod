@@ -917,6 +917,10 @@ void KZHUDService::PrintHUDSummary()
 	lang->PrintChat(true, false, opts->GetPreferenceBool("hudKeysOverlap", true) ? "MHUD - Keys Overlap Enabled" : "MHUD - Keys Overlap Disabled");
 	lang->PrintChat(true, false, opts->GetPreferenceBool("hudCpTp",        true) ? "MHUD - CP/TP Enabled"        : "MHUD - CP/TP Disabled");
 	lang->PrintChat(true, false, opts->GetPreferenceBool("hudOutline",     true) ? "MHUD - Outline Enabled"      : "MHUD - Outline Disabled");
+	// Настройки стандартного HTML-худа — тоже в сводке: без cs2menus меню недоступно,
+	// и сводка остаётся единственным способом увидеть их состояние.
+	lang->PrintChat(true, false, opts->GetPreferenceBool("hudKeysTwoRows", true) ? "MHUD - Keys Two Rows Enabled" : "MHUD - Keys Two Rows Disabled");
+	lang->PrintChat(true, false, opts->GetPreferenceBool("hudPbWr",        true) ? "MHUD - PB/WR Enabled"        : "MHUD - PB/WR Disabled");
 	// clang-format on
 }
 

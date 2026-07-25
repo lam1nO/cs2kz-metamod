@@ -147,34 +147,34 @@ static_global constexpr f32 s_volumePresets[] = {0.0f, 0.25f, 0.5f, 0.75f, 1.0f}
 // Палитра paint — тот же список, что понимает utils::ParseColorName.
 static_global constexpr const char *s_paintColors[] = {"red", "white", "black", "blue", "brown", "green", "yellow", "purple"};
 
+// ВСЕ таблицы пунктов одним списком: и постройка подменю, и select-диспатч ходят через
+// него. Раньше FindOptionsItem перебирал таблицы вручную, и забытая в нём новая категория
+// давала мёртвую кнопку — пункт рисуется, но E ничего не делает (поймано на разделе
+// «Таймер»). Добавляя категорию, дописывать ТОЛЬКО сюда.
+struct OptionsTable
+{
+	const OptionsMenuItem *items;
+	i32 count;
+};
+
+static_global const OptionsTable s_optTables[] = {
+	{s_cpItems,    (i32)KZ_ARRAYSIZE(s_cpItems)   },
+	{s_visItems,   (i32)KZ_ARRAYSIZE(s_visItems)  },
+	{s_sndItems,   (i32)KZ_ARRAYSIZE(s_sndItems)  },
+	{s_timerItems, (i32)KZ_ARRAYSIZE(s_timerItems)},
+	{s_paintItems, (i32)KZ_ARRAYSIZE(s_paintItems)},
+};
+
 static_function const OptionsMenuItem *FindOptionsItem(const char *tag)
 {
-	for (const auto &it : s_cpItems)
+	for (const auto &table : s_optTables)
 	{
-		if (KZ_STREQ(tag, it.tag))
+		for (i32 i = 0; i < table.count; i++)
 		{
-			return &it;
-		}
-	}
-	for (const auto &it : s_visItems)
-	{
-		if (KZ_STREQ(tag, it.tag))
-		{
-			return &it;
-		}
-	}
-	for (const auto &it : s_sndItems)
-	{
-		if (KZ_STREQ(tag, it.tag))
-		{
-			return &it;
-		}
-	}
-	for (const auto &it : s_paintItems)
-	{
-		if (KZ_STREQ(tag, it.tag))
-		{
-			return &it;
+			if (KZ_STREQ(tag, table.items[i].tag))
+			{
+				return &table.items[i];
+			}
 		}
 	}
 	return nullptr;
