@@ -73,4 +73,9 @@
 		"en"		"{grey}Practice checkpoints cleared."
 		"ru"		"{grey}Prac-чекпоинты очищены."
 	}
+	"Prac - No Undo"
+	{
+		"en"		"{grey}Undo is not available in practice mode."
+		"ru"		"{grey}Отмена телепорта в режиме отработки недоступна."
+	}
 }
