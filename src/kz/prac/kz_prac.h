@@ -76,6 +76,12 @@ public:
 	void TpToNextPoint();
 	void ResetPoints();
 
+	// Уход в спектатор: prac и замороженный ран НЕ теряются, гасим только ноуклип
+	// и стек prac-точек (pawn у обсервера всё равно исчезает).
+	void OnJoinSpectator();
+	// Возврат из спектатора: если игрок был в prac — снова включить ноуклип.
+	void OnPlayerSpawn();
+
 private:
 	void EnterPrac();
 	void ExitPrac();

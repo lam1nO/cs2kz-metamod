@@ -15,6 +15,7 @@
 #include "kz/noclip/kz_noclip.h"
 #include "kz/hud/kz_hud.h"
 #include "kz/option/kz_option.h"
+#include "kz/prac/kz_prac.h"
 #include "kz/spec/kz_spec.h"
 #include "kz/goto/kz_goto.h"
 #include "kz/telemetry/kz_telemetry.h"
@@ -155,6 +156,7 @@ void KZ::misc::TeleportToCourse(KZPlayer *player, const KZCourseDescriptor *cour
 	{
 		return;
 	}
+	player->pracService->DropFrozenRun("restart");
 
 	// Рестарт снимает паузу — но только у живого игрока: у спектатора paused
 	// выставлен всегда (OnPlayerJoinTeam), а Resume лезет в pawn/move services
@@ -429,6 +431,7 @@ void KZ::misc::JoinTeam(KZPlayer *player, int newTeam, bool restorePos)
 		// Партикли мхуда гасим сразу: у обсервера движение не тикает и штатное
 		// выключение в OnProcessMovement не сработает (жалоба: висят в спеках).
 		player->hudService->OnJoinSpectator();
+		player->pracService->OnJoinSpectator();
 		player->quietService->SendFullUpdate();
 		// TODO: put spectators of this player to freecam, and send them full updates
 	}

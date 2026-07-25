@@ -6,6 +6,7 @@
 #include "kz/style/kz_style.h"
 #include "kz/noclip/kz_noclip.h"
 #include "kz/option/kz_option.h"
+#include "kz/prac/kz_prac.h"
 #include "kz/language/kz_language.h"
 #include "kz/trigger/kz_trigger.h"
 #include "kz/spec/kz_spec.h"
@@ -1064,10 +1065,18 @@ void KZTimerService::OnPlayerSpawn()
 		}
 	}
 
+	// Возврат из спектатора: если игрок был в prac — вернуть ноуклип.
+	this->player->pracService->OnPlayerSpawn();
+
 	// Восстановление персист-рана (транш 3): один раз за сессию на карте. Вызываем ПОСЛЕ
 	// авто-снятия паузы выше — не конфликтует, т.к. restoreAttempted защищает от повторного
 	// восстановления на следующих спаунах, а само применение снапшота ставит паузу заново.
-	this->player->savedRunService->TryRestoreOnSpawn();
+	// Пока игрок в prac, замороженный ран держит KZPracService — восстановление из БД
+	// его затрёт.
+	if (!this->player->pracService->IsInPrac())
+	{
+		this->player->savedRunService->TryRestoreOnSpawn();
+	}
 }
 
 void KZTimerService::OnPlayerJoinTeam(i32 team)
@@ -1090,6 +1099,13 @@ void KZTimerService::OnPlayerJoinTeam(i32 team)
 
 void KZTimerService::OnPlayerDeath()
 {
+	// Только реальная смерть. Смена команды на живом игроке может стрелять player_death —
+	// уход в спектатор prac терять НЕ должен, поэтому проверяем, что игрок в игровой команде.
+	i32 team = this->player->GetController() ? this->player->GetController()->GetTeam() : CS_TEAM_NONE;
+	if (team == CS_TEAM_CT || team == CS_TEAM_T)
+	{
+		this->player->pracService->DropFrozenRun("death");
+	}
 	this->TimerStop();
 }
 

@@ -306,3 +306,23 @@ void KZPracService::ResetPoints()
 	this->player->languageService->PrintChat(true, false, "Prac - Points Cleared");
 	this->player->checkpointService->PlayCheckpointResetSound();
 }
+
+void KZPracService::OnJoinSpectator()
+{
+	if (!this->inPrac)
+	{
+		return;
+	}
+	this->player->noclipService->DisableNoclip();
+	this->ClearPoints();
+}
+
+void KZPracService::OnPlayerSpawn()
+{
+	if (!this->inPrac)
+	{
+		return;
+	}
+	this->player->noclipService->EnableNoclip();
+	this->player->noclipService->HandleNoclip();
+}
