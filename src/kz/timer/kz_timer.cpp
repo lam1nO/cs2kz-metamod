@@ -1099,12 +1099,16 @@ void KZTimerService::OnPlayerJoinTeam(i32 team)
 
 void KZTimerService::OnPlayerDeath()
 {
-	// Только реальная смерть. Смена команды на живом игроке может стрелять player_death —
-	// уход в спектатор prac терять НЕ должен, поэтому проверяем, что игрок в игровой команде.
-	i32 team = this->player->GetController() ? this->player->GetController()->GetTeam() : CS_TEAM_NONE;
-	if (team == CS_TEAM_CT || team == CS_TEAM_T)
+	// Только реальная смерть. changingTeam гейтит весь интервал JoinTeam (ChangeTeam/
+	// CommitSuicide/SwitchTeam) - ревью нашло, что CommitSuicide в ветке CT<->T стреляет ровно
+	// этот player_death ДО смены команды, так что одна лишь проверка живой команды не спасает.
+	if (!this->changingTeam)
 	{
-		this->player->pracService->DropFrozenRun("death");
+		i32 team = this->player->GetController() ? this->player->GetController()->GetTeam() : CS_TEAM_NONE;
+		if (team == CS_TEAM_CT || team == CS_TEAM_T)
+		{
+			this->player->pracService->DropFrozenRun("death");
+		}
 	}
 	this->TimerStop();
 }

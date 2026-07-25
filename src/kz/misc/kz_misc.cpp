@@ -410,6 +410,12 @@ void KZ::misc::JoinTeam(KZPlayer *player, int newTeam, bool restorePos)
 {
 	int currentTeam = player->GetController()->GetTeam();
 
+	// Ниже команда меняется движковыми вызовами (ChangeTeam/CommitSuicide/SwitchTeam), которые
+	// могут поднять player_death как побочный эффект смены команды - OnPlayerDeath не должен
+	// путать это с реальной смертью. Снимаем в конце функции - в ней нет ранних return; если
+	// такой появится, снять флаг нужно и в нём.
+	player->timerService->SetChangingTeam(true);
+
 	// Don't use CS_TEAM_NONE
 	if (newTeam == CS_TEAM_NONE)
 	{
@@ -473,6 +479,7 @@ void KZ::misc::JoinTeam(KZPlayer *player, int newTeam, bool restorePos)
 		player->pistolService->OnPlayerJoinTeam();
 	}
 	player->tipService->OnPlayerJoinTeam(newTeam);
+	player->timerService->SetChangingTeam(false);
 }
 
 static_function void SanitizeMsg(const char *input, char *output, u32 size)

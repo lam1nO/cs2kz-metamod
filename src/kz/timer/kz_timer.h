@@ -557,7 +557,19 @@ public:
 	bool GetSafeguardTeleport();
 	bool GetSafeguardReset();
 
+private:
+	// JoinTeam (kz_misc.cpp) держит этот флаг поднятым вокруг ChangeTeam/CommitSuicide/
+	// SwitchTeam: эти вызовы могут поднять player_death как побочный эффект смены команды,
+	// а не как реальную смерть игрока (см. OnPlayerDeath).
+	bool changingTeam {};
+
 public:
+	// Ставится/снимается ТОЛЬКО KZ::misc::JoinTeam на каждом выходе из неё.
+	void SetChangingTeam(bool value)
+	{
+		this->changingTeam = value;
+	}
+
 	virtual void Reset() override;
 	void OnPhysicsSimulatePost();
 	void OnStartTouchGround();

@@ -313,6 +313,8 @@ void KZPracService::OnJoinSpectator()
 	{
 		return;
 	}
+	// Только флаг: HandleNoclip() здесь звать НЕЛЬЗЯ - он безусловно разыменовывает
+	// GetPlayerPawn() (kz_noclip.cpp), а у обсервера собственной пешки нет (null-deref).
 	this->player->noclipService->DisableNoclip();
 	this->ClearPoints();
 }
