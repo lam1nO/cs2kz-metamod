@@ -5,6 +5,7 @@
 #include "kz/language/kz_language.h"
 #include "kz/mappingapi/kz_mappingapi.h"
 #include "kz/mode/kz_mode.h"
+#include "kz/prac/kz_prac.h"
 #include "kz/style/kz_style.h"
 #include "kz/timer/kz_timer.h"
 #include "kz/trigger/kz_trigger.h"
@@ -95,7 +96,14 @@ std::string KZSavedRunService::SerializeSnapshot()
 	KZTimerService *timerService = this->player->timerService;
 	KZCheckpointService *checkpointService = this->player->checkpointService;
 
-	KZTimerService::TimerSaveSnapshot timerSnapshot = timerService->SnapshotForSave();
+	// Дисконнект в prac: живой таймер уже остановлен (TimerStop в EnterPrac), актуальное
+	// состояние рана лежит в KZPracService. Штраф (+1 телепорт, при policy=1 ещё и valid=false)
+	// уже вшит в снапшот на входе в prac — здесь просто переносим его как есть, поэтому
+	// восстановление после реконнекта даёт ровно тот же ран, что и возврат через !prac.
+	const bool fromPrac = this->player->pracService->IsInPrac() && this->player->pracService->HasFrozenRun();
+	const KZPracService::FrozenRun &frozen = this->player->pracService->GetFrozenRun();
+
+	KZTimerService::TimerSaveSnapshot timerSnapshot = fromPrac ? frozen.timer : timerService->SnapshotForSave();
 
 	Json json;
 	// v: версия формата снапшота (see t3-task-2-brief.md). Меняется при несовместимой правке формата.
@@ -103,9 +111,10 @@ std::string KZSavedRunService::SerializeSnapshot()
 	// запрос на дисконнекте). Окно якорится на ТЕКУЩЕМ чекпоинте: если игрок
 	// стоит на чекпоинте старше хвостового окна — сдвигаем окно к нему
 	// (теряется часть новейших, но текущий cp никогда не выпадает).
-	const CUtlVector<KZCheckpointService::Checkpoint> &savedCheckpoints = checkpointService->GetCheckpointsForSave();
+	const CUtlVector<KZCheckpointService::Checkpoint> &savedCheckpoints =
+		fromPrac ? frozen.checkpoints : checkpointService->GetCheckpointsForSave();
 	const i32 cpCap = 200;
-	const i32 rawCpIndex = MAX(0, checkpointService->GetRawCpIndex());
+	const i32 rawCpIndex = MAX(0, fromPrac ? frozen.cpIndex : checkpointService->GetRawCpIndex());
 	const i32 cpOffset = MIN(MAX(0, savedCheckpoints.Count() - cpCap), rawCpIndex);
 	const i32 cpEnd = MIN(savedCheckpoints.Count(), cpOffset + cpCap);
 
@@ -133,6 +142,15 @@ std::string KZSavedRunService::SerializeSnapshot()
 		checkpoints.push_back(entry);
 	}
 	json.Set("checkpoints", checkpoints);
+
+	// Опциональное поле: точка, куда вернуть игрока при восстановлении. Пишет только
+	// prac-путь. Версию не поднимаем — парсер читает по именам ключей и лишние
+	// игнорирует, так что старый сервер такой снапшот прочитает без pos.
+	if (fromPrac)
+	{
+		std::vector<f64> pos = {frozen.origin.x, frozen.origin.y, frozen.origin.z, frozen.angles.x, frozen.angles.y, frozen.angles.z};
+		json.Set("pos", pos);
+	}
 
 	return json.ToString();
 }
@@ -176,6 +194,10 @@ bool KZSavedRunService::ApplySnapshot(i32 course, u32 tpCount, const std::string
 		return false;
 	}
 
+	// pos отсутствует у обычных (не prac) снапшотов — это норма, не ошибка парсинга.
+	std::vector<f64> pos;
+	const bool hasPos = json.Get("pos", pos) && pos.size() == 6;
+
 	if (version != 1)
 	{
 		KZ_LOG_WARN(LogChannel::Timer, "[SavedRuns] Snapshot for %s has unsupported version %u, discarding.\n", this->player->GetName(), version);
@@ -209,8 +231,9 @@ bool KZSavedRunService::ApplySnapshot(i32 course, u32 tpCount, const std::string
 	// StartZoneEndTouch -> TimerStart, который безусловно сбрасывает currentTime/currentStage
 	// (см. TimerStart) — восстановленное время исчезало на первом же движении, при этом чат уже
 	// сказал "Run Restored". Сейв НЕ удаляем (это не порча данных, а пустой pro-ран) — он живёт до
-	// TTL (см. PurgeExpired, Task 5).
-	if (parsed.checkpoints.empty())
+	// TTL (см. PurgeExpired, Task 5). При наличии pos восстанавливать МОЖНО — точка возврата
+	// берётся из снапшота, а не из чекпоинта (см. hasPos ниже, Task 7: prac-заморозка pro-рана).
+	if (parsed.checkpoints.empty() && !hasPos)
 	{
 		KZ_LOG_INFO(LogChannel::Timer, "[SavedRuns] skip restore: no checkpoints (pro-run) for %s on course %s.\n", this->player->GetName(),
 					courseDescriptor->name);
@@ -256,8 +279,9 @@ bool KZSavedRunService::ApplySnapshot(i32 course, u32 tpCount, const std::string
 	timerService->RestoreFromSnapshot(courseDescriptor->guid, restoreSnap);
 
 	// Телепорт ДО паузы: DoTeleport гардит "в паузе телепорт запрещён" (cyb.19-инвариант), а
-	// игрок сейчас ещё не paused. restoredCheckpoints гарантированно непуст здесь — пустой
-	// снапшот чекпоинтов отбивается выше (pro-ран, честный skip без ТП/паузы).
+	// игрок сейчас ещё не paused. restoredCheckpoints пуст ровно тогда, когда hasPos (prac-заморозка
+	// pro-рана, см. Task 7) — гард на пустой список без pos отбивает это выше без ТП/паузы, поэтому
+	// индексация restoredCheckpoints[...] ниже остаётся только в ветке else.
 	//
 	// Намеренно НЕ используем checkpointService->TpToCheckpoint(): она идёт через
 	// DoTeleport(i32 index), который гардит racingService->CanTeleport() и
@@ -267,8 +291,20 @@ bool KZSavedRunService::ApplySnapshot(i32 course, u32 tpCount, const std::string
 	// (но всё ещё уважает паузный гард). Он, как и любой физический телепорт, инкрементит
 	// tpCount как побочный эффект — пин-бэчим только счётчик, не трогая teleportTime
 	// (окно TpHoldPlayerStill свежего телепорта должно жить).
-	checkpointService->DoTeleport(restoredCheckpoints[checkpointService->GetRawCpIndex()]);
-	checkpointService->SetTeleportCountForRestore(tpCount);
+	if (hasPos)
+	{
+		// prac-снапшот: возврат в точку заморозки, а не на последний чекпоинт (иначе игрок
+		// отъехал бы назад по трассе). Прямой Teleport, а не DoTeleport — tpCount уже
+		// выставлен RestoreFromSnapshot выше и бампать его не нужно.
+		Vector origin((f32)pos[0], (f32)pos[1], (f32)pos[2]);
+		QAngle angles((f32)pos[3], (f32)pos[4], (f32)pos[5]);
+		this->player->Teleport(&origin, &angles, &vec3_origin);
+	}
+	else
+	{
+		checkpointService->DoTeleport(restoredCheckpoints[checkpointService->GetRawCpIndex()]);
+		checkpointService->SetTeleportCountForRestore(tpCount);
+	}
 
 	// Форс-пауза, а не Pause(): CanPause почти всегда откажет по JustLanded — landingTime
 	// выставляется на первом тике после спауна, а колбэк локальной БД приходит через 1-2 тика
@@ -287,8 +323,13 @@ void KZSavedRunService::SaveOnDisconnect()
 {
 	// Guard здесь — только "таймер активен" (paused неважно, спека п.4). БД-готовность
 	// и наличие активного курса проверяет сам KZDatabaseService::SaveRun — не дублируем.
+	//
+	// Исключение — prac (Task 7): EnterPrac уже остановил живой таймер (TimerStop), поэтому
+	// GetTimerRunning() здесь false даже для замороженного рана со свежим штрафом NUB.
+	// Без fromPrac дисконнект в prac молча не сохранял бы вообще ничего.
 	KZTimerService *timerService = this->player->timerService;
-	if (!timerService->GetTimerRunning())
+	const bool fromPrac = this->player->pracService->IsInPrac() && this->player->pracService->HasFrozenRun();
+	if (!timerService->GetTimerRunning() && !fromPrac)
 	{
 		return;
 	}
@@ -309,8 +350,13 @@ void KZSavedRunService::SaveOnDisconnect()
 	// Сериализация читает только сервисные поля (timerService/checkpointService), pawn не трогает —
 	// у вышедшего игрока pawn уже может быть невалиден/уничтожен.
 	std::string snapshot = this->SerializeSnapshot();
-	f64 runTime = timerService->GetTime();
-	u32 tpCount = this->player->checkpointService->GetTeleportCount();
+	// Живые timerService/checkpointService не отражают prac-заморозку (currentTime не тикает после
+	// TimerStop, tpCount не бампается prac-телепортами — см. KZPracService::EnterPrac/DoTpToPoint) —
+	// берём runTime/tpCount из frozen той же вилкой, что и SerializeSnapshot, иначе штраф NUB
+	// потеряется при апсерте (см. save_savedrun.cpp).
+	const KZPracService::FrozenRun &frozen = this->player->pracService->GetFrozenRun();
+	f64 runTime = fromPrac ? frozen.timer.time : timerService->GetTime();
+	u32 tpCount = fromPrac ? frozen.tpCount : this->player->checkpointService->GetTeleportCount();
 
 	KZDatabaseService::SaveRun(this->player, runTime, tpCount, snapshot);
 }

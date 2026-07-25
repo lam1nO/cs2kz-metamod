@@ -4,6 +4,7 @@
 #include "kz_db.h"
 #include "kz/mappingapi/kz_mappingapi.h"
 #include "kz/mode/kz_mode.h"
+#include "kz/prac/kz_prac.h"
 #include "kz/savedrun/kz_savedrun.h"
 #include "kz/timer/kz_timer.h"
 #include "queries/savedruns.h"
@@ -22,7 +23,12 @@ void KZDatabaseService::SaveRun(KZPlayer *player, f64 runTime, u32 tpCount, cons
 		return;
 	}
 
-	const KZCourseDescriptor *course = player->timerService->GetCourse();
+	// Дисконнект в prac (Task 7): курс живого таймера (currentCourseGUID) в общем случае этот же,
+	// но это совпадение мы не гарантируем (см. StartZoneEndTouch) - берём курс явно из
+	// замороженного рана, той же вилкой, что SerializeSnapshot/SaveOnDisconnect.
+	const bool fromPrac = player->pracService->IsInPrac() && player->pracService->HasFrozenRun();
+	const KZCourseDescriptor *course =
+		fromPrac ? KZ::course::GetCourse(player->pracService->GetFrozenRun().courseGUID) : player->timerService->GetCourse();
 	if (!course)
 	{
 		// Нет активного курса - сохранять нечего.
