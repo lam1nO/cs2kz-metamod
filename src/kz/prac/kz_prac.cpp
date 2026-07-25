@@ -6,7 +6,9 @@
 #include "kz/noclip/kz_noclip.h"
 #include "kz/racing/kz_racing.h"
 #include "kz/recording/kz_recording.h"
+#include "kz/replays/kz_replaysystem.h"
 #include "kz/savedrun/kz_savedrun.h"
+#include "kz/spec/kz_spec.h"
 #include "kz/trigger/kz_trigger.h"
 #include "utils/utils.h"
 
@@ -20,6 +22,19 @@ static_function void SnapshotModeStyles(KZPlayer *player, char *modeOut, int mod
 {
 	V_strncpy(modeOut, player->modeService->GetModeShortName(), modeSize);
 	V_strncpy(stylesOut, KZSavedRunService::BuildStylesString(player).Get(), stylesSize);
+}
+
+// «ckz» или «ckz (abh)» — только для сообщения игроку о несовпадении, не для сверки.
+static_function void FormatModeStyles(const char *mode, const char *styles, char *out, int size)
+{
+	if (styles && styles[0])
+	{
+		V_snprintf(out, size, "%s (%s)", mode, styles);
+	}
+	else
+	{
+		V_snprintf(out, size, "%s", mode);
+	}
 }
 
 void KZPracService::Reset()
@@ -322,6 +337,11 @@ void KZPracService::ExitPrac()
 	this->inPrac = false;
 
 	this->player->timerService->RestoreFromSnapshot(this->frozen.courseGUID, this->frozen.timer);
+	// Тот же случай, что в SavedRuns: RestoreFromSnapshot листенеров не стреляет, поэтому UUID
+	// рану никто не выдаёт. В обычном prac-ране это no-op — рекордер реплея пережил prac (гейт в
+	// KZRecordingService::OnTimerStop) и UUID выдаст OnTimerEnd из него. Строка нужна для рана,
+	// который сам пришёл из SavedRuns (рекордера нет) и потом ещё раз прошёл через prac.
+	this->player->recordingService->EnsureRunUUIDAfterRestore("prac_exit");
 	// tpCount в снапшоте уже со штрафом (+1, см. EnterPrac) — здесь только применяем.
 	// SetTeleportCountForRestore не нужен: счётчик бампает KZCheckpointService::DoTeleport,
 	// а мы телепортируем напрямую через KZPlayer::Teleport, который его не трогает.
@@ -441,7 +461,21 @@ bool KZPracService::RequirePracPoint()
 
 void KZPracService::SetPoint()
 {
-	if (!this->RequirePrac() || !this->RequireLivePawn(true))
+	if (!this->RequirePrac())
+	{
+		return;
+	}
+	// Развод гарда пешки. Спектатор в prac забирает состояние НАБЛЮДАЕМОГО — своей пешки у него
+	// нет, и RequireLivePawn тут не «сломан», а неприменим: этот путь свою пешку не трогает
+	// вовсе (ни Teleport, ни HandleNoclip, ни ForcePause), а живость проверяет у чужой.
+	// Для своей пешки гард обязателен и остаётся ниже: CapturePointFrom разыменовывает pawn.
+	// Условие ровно то же, что у GetSpectatedPlayer (он отдаёт цель только мёртвому/спектатору).
+	if (!this->player->IsAlive())
+	{
+		this->StealPointFromSpectated();
+		return;
+	}
+	if (!this->RequireLivePawn(true))
 	{
 		return;
 	}
@@ -452,14 +486,19 @@ void KZPracService::SetPoint()
 
 void KZPracService::CapturePoint()
 {
-	CCSPlayerPawn *pawn = this->player->GetPlayerPawn();
+	this->CapturePointFrom(this->player, this->pracTime, this->pracTimeRunning);
+}
+
+void KZPracService::CapturePointFrom(KZPlayer *source, f64 time, bool timeRunning)
+{
+	CCSPlayerPawn *pawn = source->GetPlayerPawn();
 
 	PracPoint pt = {};
-	this->player->GetOrigin(&pt.origin);
-	this->player->GetVelocity(&pt.velocity);
-	this->player->GetAngles(&pt.angles);
+	source->GetOrigin(&pt.origin);
+	source->GetVelocity(&pt.velocity);
+	source->GetAngles(&pt.angles);
 	pt.onGround = (pawn->m_fFlags() & FL_ONGROUND) != 0;
-	CCSPlayer_MovementServices *ms = this->player->GetMoveServices();
+	CCSPlayer_MovementServices *ms = source->GetMoveServices();
 	if (ms)
 	{
 		pt.duckAmount = ms->m_flDuckAmount;
@@ -468,11 +507,128 @@ void KZPracService::CapturePoint()
 		pt.onLadder = pawn->m_MoveType() == MOVETYPE_LADDER;
 	}
 	// Показание prac-часов — часть точки: !practp откручивает их назад вместе с позицией.
-	pt.pracTime = this->pracTime;
-	pt.pracTimeRunning = this->pracTimeRunning;
+	// Для своей точки это свои часы, для забранной — часы наблюдаемого (см. StealPointFromSpectated).
+	pt.pracTime = time;
+	pt.pracTimeRunning = timeRunning;
 
 	this->points.AddToTail(pt);
 	this->currentIndex = this->points.Count() - 1;
+}
+
+bool KZPracService::StealPointFromSpectated()
+{
+	// Свободная камера или свой труп: GetSpectatedPlayer отдаёт nullptr — забирать нечего.
+	KZPlayer *target = this->player->specService->GetSpectatedPlayer();
+	if (!target || target == this->player)
+	{
+		this->player->languageService->PrintChat(true, false, "Prac - Steal No Target");
+		this->player->PlayErrorSound();
+		return false;
+	}
+	// Реплей-бот (и любой фейк-клиент): его «состояние» — воспроизведение чужой записи, режим и
+	// стили у него не игрока, а плеера, и никакой действующей попытки за ним нет.
+	if (KZ::replaysystem::IsReplayBot(target) || target->IsFakeClient())
+	{
+		this->player->languageService->PrintChat(true, false, "Prac - Steal Bot");
+		this->player->PlayErrorSound();
+		return false;
+	}
+	// Мёртвый/респавнящийся наблюдаемый: CapturePointFrom разыменовывает пешку, а move services
+	// нужны для приседа/stamina/лестницы. modeService — для сверки ниже (SnapshotModeStyles его
+	// разыменовывает). Момент между смертью цели и переключением наблюдателя реально достижим.
+	CCSPlayerPawn *targetPawn = target->GetPlayerPawn();
+	if (!targetPawn || !targetPawn->IsAlive() || !target->GetMoveServices() || !target->modeService)
+	{
+		this->player->languageService->PrintChat(true, false, "Prac - Steal Target Dead");
+		this->player->PlayErrorSound();
+		return false;
+	}
+	// Ноуклип наблюдаемого: по правилам prac пролёт насквозь обнуляет попытку, значит и точка от
+	// такого игрока бессмысленна — ни позиция (может быть внутри геометрии), ни скорость (полётная),
+	// ни время (у него уже обнулено) не воспроизводимы вживую. Проверяем И флаг сервиса, И реальный
+	// movetype: ноуклип от админа/другого плагина наш флаг не ставит.
+	if ((target->noclipService && target->noclipService->IsNoclipping()) || targetPawn->m_MoveType() == MOVETYPE_NOCLIP)
+	{
+		this->player->languageService->PrintChat(true, false, "Prac - Steal Target Noclip");
+		this->player->PlayErrorSound();
+		return false;
+	}
+	// Режим И стили должны совпадать: автобхоп и legacy-jump меняют достижимое из позиции не
+	// меньше режима, поэтому «сколько выбью из этого положения» иначе несравнимо. Сверка — тем же
+	// каноническим видом, что у ключа SavedRuns и у выхода из prac (SnapshotModeStyles).
+	// Сравниваем ТЕКУЩИЕ режим/стили обоих, а не frozen: физика, с которой забравший будет бежать
+	// от точки, — это его текущая физика (а ран, переживший смену режима в prac, всё равно
+	// потеряется на выходе, см. ExitPrac).
+	char modeMine[sizeof(this->frozen.modeName)];
+	char stylesMine[sizeof(this->frozen.styles)];
+	char modeTheirs[sizeof(this->frozen.modeName)];
+	char stylesTheirs[sizeof(this->frozen.styles)];
+	SnapshotModeStyles(this->player, modeMine, sizeof(modeMine), stylesMine, sizeof(stylesMine));
+	SnapshotModeStyles(target, modeTheirs, sizeof(modeTheirs), stylesTheirs, sizeof(stylesTheirs));
+	if (!KZ_STREQI(modeMine, modeTheirs) || !KZ_STREQI(stylesMine, stylesTheirs))
+	{
+		char theirsText[96];
+		char mineText[96];
+		FormatModeStyles(modeTheirs, stylesTheirs, theirsText, sizeof(theirsText));
+		FormatModeStyles(modeMine, stylesMine, mineText, sizeof(mineText));
+		this->player->languageService->PrintChat(true, false, "Prac - Steal Mode Mismatch", target->GetName(), theirsText, mineText);
+		this->player->PlayErrorSound();
+		return false;
+	}
+
+	// Время наблюдаемого. Порядок важен: у игрока В PRAC настоящий таймер остановлен по
+	// инварианту, поэтому сначала живой ран, потом prac-часы. Ни того, ни другого — точка ложится
+	// без действующей попытки (pracTimeRunning=false), и !practp время из ничего не родит.
+	// MAX: на самом тике старта рана currentTime содержит отрицательный субтиковый офсет.
+	f64 stolenTime = 0.0;
+	bool stolenRunning = false;
+	if (target->timerService && target->timerService->GetTimerRunning())
+	{
+		stolenTime = MAX(0.0, target->timerService->GetTime());
+		stolenRunning = true;
+	}
+	else if (target->pracService && target->pracService->IsInPrac() && target->pracService->IsPracTimeRunning())
+	{
+		stolenTime = MAX(0.0, target->pracService->GetPracTime());
+		stolenRunning = true;
+	}
+
+	// Курс наблюдаемого — чтобы игрок видел, ОТКУДА точка: забор с чужого курса разрешён
+	// (решение пользователя 25.07), поэтому курс надо показывать, а не подразумевать.
+	// Резолв в том же порядке, что и время, но чуть шире: у игрока в prac курс известен из
+	// замороженного рана даже когда его prac-часы стоят (попытка недействительна, курс — нет).
+	const KZCourseDescriptor *targetCourse = nullptr;
+	if (target->timerService && target->timerService->GetTimerRunning())
+	{
+		targetCourse = target->timerService->GetCourse();
+	}
+	else if (target->pracService && target->pracService->HasActiveFrozenRun())
+	{
+		targetCourse = KZ::course::GetCourse(target->pracService->GetFrozenRun().courseGUID);
+	}
+	// Имя курса, а не cyber-номер: номер читается только для main (0) и «Bonus N», а не-главный
+	// не-бонусный курс уезжает в 100+ (GetCyberCourseNumber) и в чате выглядел бы мусором.
+	// Курса может не быть вовсе — наблюдаемый просто ходит по карте; тогда фраза-фрагмент под
+	// локаль игрока (тот же приём, что у Map Info в kz_mappingapi.cpp). Держим в std::string:
+	// PrepareMessage возвращает по значению, .c_str() от временного объекта повис бы.
+	std::string courseText =
+		targetCourse ? std::string(targetCourse->name) : this->player->languageService->PrepareMessage("Prac - Course Unknown");
+
+	this->CapturePointFrom(target, stolenTime, stolenRunning);
+	if (stolenRunning)
+	{
+		char timeText[32];
+		utils::FormatTime(stolenTime, timeText, sizeof(timeText));
+		this->player->languageService->PrintChat(true, false, "Prac - Point Stolen", target->GetName(), this->points.Count(), courseText.c_str(),
+												 timeText);
+	}
+	else
+	{
+		this->player->languageService->PrintChat(true, false, "Prac - Point Stolen No Time", target->GetName(), this->points.Count(),
+												 courseText.c_str());
+	}
+	this->player->checkpointService->PlayCheckpointSound();
+	return true;
 }
 
 void KZPracService::DoTpToPoint(const PracPoint &pt)
@@ -571,7 +727,8 @@ void KZPracService::OnJoinSpectator()
 	// Только флаг: HandleNoclip() здесь звать НЕЛЬЗЯ - он безусловно разыменовывает
 	// GetPlayerPawn() (kz_noclip.cpp), а у обсервера собственной пешки нет (null-deref).
 	this->player->noclipService->DisableNoclip();
-	this->ClearPoints();
+	// Точки НЕ чистим (решение пользователя 25.07): вернувшись из спектаторов, игрок хочет
+	// продолжить prac'ать свой ран с теми же точками, включая авто-точку №1 со входа.
 }
 
 void KZPracService::OnPlayerSpawn()

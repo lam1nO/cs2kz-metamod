@@ -128,7 +128,7 @@ void KZRecordingService::OnTimerStart()
 		this->InsertTimerEvent(RpEvent::RpEventData::TimerEvent::TIMER_START, this->player->timerService->GetTime(),
 							   this->player->timerService->GetCourse()->id);
 		// Assign a random UUID for local database saving.
-		this->currentRunUUID = UUID_t();
+		this->AssignLocalRunUUID("nonglobal_map");
 		return;
 	}
 
@@ -138,6 +138,33 @@ void KZRecordingService::OnTimerStart()
 						   this->player->timerService->GetCourse()->id);
 	// Reset currentRunUUID to invalid state at timer start
 	this->currentRunUUID = UUID_t(false);
+}
+
+void KZRecordingService::AssignLocalRunUUID(const char *reason)
+{
+	// UUID_t() = init по умолчанию, то есть настоящий UUIDv7 (utils/uuid.h). Единственное место,
+	// где UUID рана рождается вне рекордера, — см. контракт в kz_recording.h.
+	this->currentRunUUID = UUID_t();
+	KZ_LOG_DEBUG(LogChannel::Recording, "Assigned local run UUID %s (reason: %s)\n", this->currentRunUUID.ToString().c_str(), reason);
+}
+
+bool KZRecordingService::EnsureRunUUIDAfterRestore(const char *reason)
+{
+	// Живой рекордер = без desiredStopTime (то же условие, по которому OnTimerEnd выдаёт UUID).
+	// Рекордер в «брезере» (уже закрытый, ждёт записи на диск) принадлежит ПРЕДЫДУЩЕМУ рану и
+	// восстановленному ничего не даёт, поэтому он выдачу не блокирует.
+	for (const auto &recorder : this->runRecorders)
+	{
+		if (recorder.desiredStopTime < 0.0f)
+		{
+			return false;
+		}
+	}
+	// Безусловно, а не «только если UUID нулевой»: у восстановленного рана своя локальная
+	// идентичность, а старое значение currentRunUUID может быть уже ЗАПИСАННЫМ в Times ID
+	// предыдущего рана — переиспользовать его значило бы ту же коллизию PRIMARY KEY.
+	this->AssignLocalRunUUID(reason);
+	return true;
 }
 
 void KZRecordingService::OnTimerStop()

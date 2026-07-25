@@ -154,15 +154,24 @@ private:
 	void ResetPracTime();
 	// Захват точки без гардов и сообщений — общий путь для !praccp и для точки №1 на входе.
 	void CapturePoint();
+	// То же, но из состояния ЧУЖОГО игрока (наблюдаемого в спеке) и с чужими часами: живость
+	// и наличие пешки у source проверяет вызывающий, здесь гардов нет.
+	void CapturePointFrom(KZPlayer *source, f64 time, bool timeRunning);
+	// «Забрать чужой прак»: спектатор в prac кладёт в свой стек состояние наблюдаемого.
+	// Живой пешки у самого спектатора нет, поэтому это отдельный путь от CapturePoint —
+	// см. развод гарда в SetPoint(). Печатает свои отказы, возвращает false, если не вышло.
+	bool StealPointFromSpectated();
 	void DoTpToPoint(const PracPoint &pt);
 	// Общий гард для всех prac-команд: печатает отказ и возвращает false вне prac.
 	bool RequirePrac();
 	// Гард всех prac-телепортов: вне prac или при пустом стеке печатает отказ и возвращает false.
 	bool RequirePracPoint();
-	// ЕДИНЫЙ гард всех четырёх prac-путей, которые трогают пешку (EnterPrac, ExitPrac,
-	// DoTpToPoint, OnPlayerSpawn): HandleNoclip, ForcePause и Teleport разыменовывают пешку и
-	// move services без проверок (kz_noclip.cpp, KZTimerService::ForcePause), а у спектатора
+	// ЕДИНЫЙ гард всех prac-путей, которые трогают СВОЮ пешку (EnterPrac, ExitPrac, DoTpToPoint,
+	// OnPlayerSpawn, захват своей точки): HandleNoclip, ForcePause и Teleport разыменовывают пешку
+	// и move services без проверок (kz_noclip.cpp, KZTimerService::ForcePause), а у спектатора
 	// пешки нет вовсе. Звать ДО любых мутаций состояния. showError=false — тихий путь
 	// (колбэк спауна), true — игрок позвал команду сам.
+	// Путь «забрать у наблюдаемого» (StealPointFromSpectated) сюда НЕ попадает: он вообще не
+	// трогает свою пешку, а живость проверяет у чужой.
 	bool RequireLivePawn(bool showError);
 };

@@ -27,14 +27,38 @@ static void BuildReplayPath(char *buf, int bufLen, const UUID_t &uuid)
 	V_snprintf(buf, bufLen, "%s/%s.replay", KZ_REPLAY_PATH, uuid.ToString().c_str());
 }
 
+// UUID локальной записи рана. Обычно его уже выдал рекордер реплея (OnTimerEnd), но ран может
+// финишировать вовсе без рекордера — тогда currentRunUUID остаётся нулевым (UUID_t(false)), а
+// ID в Times — PRIMARY KEY: ВТОРОЙ такой ран за жизнь файла БД молча теряется на констрейнте.
+// Известный путь (ран, поднятый через RestoreFromSnapshot) закрыт в самих точках восстановления
+// (KZRecordingService::EnsureRunUUIDAfterRestore); это общий гард на случай нового такого пути и
+// единственный способ узнать о нём по логу, а не по потерянным ранам игроков.
+static UUID_t ResolveLocalRunUUID(KZPlayer *player)
+{
+	const UUID_t &current = player->recordingService->GetCurrentRunUUID();
+	if (!(current == UUID_t(false)))
+	{
+		return current;
+	}
+	UUID_t assigned; // конструктор по умолчанию = UUIDv7
+	const KZCourseDescriptor *course = player->timerService->GetCourse();
+	KZ_LOG_WARN(LogChannel::Timer, "[cyb] run_uuid_missing steam_id=%llu map=%s course=%s time=%.3f reason=no_recorder assigned=%s\n",
+				player->GetSteamId64(false), g_pKZUtils->GetCurrentMapName().Get(), course ? course->name : "unknown",
+				player->timerService->GetTime(), assigned.ToString().c_str());
+	return assigned;
+}
+
 // ---------------------------------------------------------------------------
 // Constructor
 // ---------------------------------------------------------------------------
 
+// localUUID инициализируется через ResolveLocalRunUUID (гард нулевого UUID, см. выше), а finalUUID —
+// из уже проинициализированного localUUID: он объявлен раньше в submission.h, а порядок
+// инициализации членов идёт по объявлению, поэтому значение здесь валидно и равно localUUID.
 RunSubmission::RunSubmission(KZPlayer *player)
 	: uid(RunSubmission::idCount++), timestamp(g_pKZUtils->GetServerGlobals()->realtime), userID(player->GetClient()->GetUserID()),
-	  localUUID(player->recordingService->GetCurrentRunUUID()), finalUUID(player->recordingService->GetCurrentRunUUID()),
-	  time(player->timerService->GetTime()), teleports(player->checkpointService->GetTeleportCount())
+	  localUUID(ResolveLocalRunUUID(player)), finalUUID(localUUID), time(player->timerService->GetTime()),
+	  teleports(player->checkpointService->GetTeleportCount())
 {
 	this->local = KZDatabaseService::IsReady() && KZDatabaseService::IsMapSetUp();
 	this->global = player->hasPrime && KZGlobalService::MayBecomeAvailable();

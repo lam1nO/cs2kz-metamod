@@ -298,6 +298,17 @@ public:
 	void OnTimerStart();
 	void OnTimerStop();
 	void OnTimerEnd();
+	// Выдать рану валидный UUIDv7 БЕЗУСЛОВНО. Нужно там, где рекордер реплея не создаётся, а
+	// локальная запись в Times всё равно будет: ID там PRIMARY KEY, а UUID_t(false) — 16 нулей,
+	// поэтому второй безрекордерный ран за жизнь файла БД валит констрейнт и теряется молча.
+	// reason — только в лог. Единая точка: ветка «карта не global, реплей не пишем» (OnTimerStart)
+	// и восстановление рана (EnsureRunUUIDAfterRestore).
+	void AssignLocalRunUUID(const char *reason);
+	// То же для путей, поднимающих ран через KZTimerService::RestoreFromSnapshot (SavedRuns после
+	// реконнекта, возврат из prac): они не проходят через листенеры таймера, поэтому UUID им никто
+	// не выдаёт. NO-OP, если жив рекордер рана: его UUID выдаст OnTimerEnd, и подменять его нельзя —
+	// файл реплея пишется под recorder.uuid. Возвращает true, если UUID был выдан.
+	bool EnsureRunUUIDAfterRestore(const char *reason);
 	void OnPause();
 	void OnResume();
 	void OnSplit(i32 split);

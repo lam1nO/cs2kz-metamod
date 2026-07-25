@@ -6,6 +6,7 @@
 #include "kz/mappingapi/kz_mappingapi.h"
 #include "kz/mode/kz_mode.h"
 #include "kz/prac/kz_prac.h"
+#include "kz/recording/kz_recording.h"
 #include "kz/style/kz_style.h"
 #include "kz/timer/kz_timer.h"
 #include "kz/trigger/kz_trigger.h"
@@ -298,6 +299,12 @@ bool KZSavedRunService::ApplySnapshot(i32 course, u32 tpCount, const std::string
 	restoreSnap.cpTimes = parsed.cpTimes;
 	restoreSnap.stageTimes = parsed.stageTimes;
 	timerService->RestoreFromSnapshot(courseDescriptor->guid, restoreSnap);
+	// RestoreFromSnapshot поднимает timerRunning напрямую и НЕ стреляет OnTimerStartPost, поэтому
+	// рекордер реплея не создаётся и UUID рану никто не выдаёт: на финише он остался бы нулевым
+	// (UUID_t(false)), а ID в Times — PRIMARY KEY, то есть второй такой ран за жизнь файла БД
+	// пропадал бы молча на констрейнте. Выдаём валидный UUID здесь. Реплея у восстановленного
+	// рана по-прежнему нет — рекордер не создаём сознательно (запись пошла бы с середины трассы).
+	this->player->recordingService->EnsureRunUUIDAfterRestore("savedrun_restore");
 
 	// Телепорт ДО паузы: DoTeleport гардит "в паузе телепорт запрещён" (cyb.19-инвариант), а
 	// игрок сейчас ещё не paused. Пустой restoredCheckpoints возможен ТОЛЬКО при hasPos (гард

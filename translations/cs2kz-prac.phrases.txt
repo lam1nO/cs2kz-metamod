@@ -98,4 +98,53 @@
 		"en"		"{grey}Noclip — practice time is {default}void{grey}. Use {default}!practp{grey} or the start zone to start a new attempt."
 		"ru"		"{grey}Ноуклип — prac-время {default}обнулено{grey}. Новая попытка: {default}!practp{grey} или стартовая зона."
 	}
+	"Prac - Point Stolen"
+	{
+		// Забрали состояние наблюдаемого вместе с его курсом и временем (его ран или его prac-часы).
+		"#format"	"prac_name:s,prac_count:d,prac_course:s,prac_time:s"
+		"en"		"{grey}Point {default}#{prac_count}{grey} taken from {lime}{prac_name}{grey} on {default}{prac_course}{grey} at {default}{prac_time}{grey}. {default}!tp{grey} — go there with their speed."
+		"ru"		"{grey}Точка {default}#{prac_count}{grey} забрана у {lime}{prac_name}{grey}, курс {default}{prac_course}{grey}, время {default}{prac_time}{grey}. {default}!tp{grey} — встать туда с его скоростью."
+	}
+	"Prac - Point Stolen No Time"
+	{
+		// У наблюдаемого нет действующей попытки: точка без времени, часы после !tp не пойдут.
+		"#format"	"prac_name:s,prac_count:d,prac_course:s"
+		"en"		"{grey}Point {default}#{prac_count}{grey} taken from {lime}{prac_name}{grey} on {default}{prac_course}{grey}. They have {default}no active attempt{grey}, so the point carries no time."
+		"ru"		"{grey}Точка {default}#{prac_count}{grey} забрана у {lime}{prac_name}{grey}, курс {default}{prac_course}{grey}. Действующей попытки у него {default}нет{grey}, время в точке не сохранено."
+	}
+	"Prac - Course Unknown"
+	{
+		// Фрагмент, подставляемый вместо названия курса в сообщения выше: наблюдаемый не идёт ран
+		// и не в prac, то есть курса как состояния у него нет. Без цветовых тегов — вставляется
+		// внутрь уже раскрашенного куска фразы.
+		"en"		"an unknown course"
+		"ru"		"неизвестен"
+	}
+	"Prac - Steal No Target"
+	{
+		"en"		"{grey}Spectate a player first — a point can only be taken from the player you are watching."
+		"ru"		"{grey}Сначала встань за игроком — забрать точку можно только у наблюдаемого."
+	}
+	"Prac - Steal Bot"
+	{
+		"en"		"{grey}Nothing to take from a bot: replay playback is not a live run."
+		"ru"		"{grey}У бота забирать нечего: это воспроизведение записи, а не живой ран."
+	}
+	"Prac - Steal Target Dead"
+	{
+		"en"		"{grey}The player you are watching is not alive — nothing to take."
+		"ru"		"{grey}Наблюдаемый игрок не жив — забирать нечего."
+	}
+	"Prac - Steal Target Noclip"
+	{
+		"en"		"{grey}The player you are watching is in {default}noclip{grey} — that state is not reachable by playing, so it cannot be taken."
+		"ru"		"{grey}Наблюдаемый в {default}ноуклипе{grey} — такое состояние вживую недостижимо, забрать его нельзя."
+	}
+	"Prac - Steal Mode Mismatch"
+	{
+		// Режим и стили должны совпадать: иначе «сколько выбью из этого положения» несравнимо.
+		"#format"	"prac_name:s,prac_theirs:s,prac_mine:s"
+		"en"		"{grey}Cannot take {lime}{prac_name}{grey}'s state: they are on {default}{prac_theirs}{grey}, you are on {default}{prac_mine}{grey} — mode and styles must match."
+		"ru"		"{grey}Нельзя забрать состояние {lime}{prac_name}{grey}: у него {default}{prac_theirs}{grey}, у тебя {default}{prac_mine}{grey} — режим и стили должны совпадать."
+	}
 }
