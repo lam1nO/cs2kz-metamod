@@ -46,6 +46,9 @@ public:
 
 private:
 	bool inPrac {};
+	// Летел ли игрок в момент ухода в спектатор — возврат восстанавливает ровно это состояние
+	// (вход в prac ноуклип не включает, поэтому включать его на возврате безусловно нельзя).
+	bool noclipBeforeSpec {};
 	FrozenRun frozen;
 	CUtlVector<PracPoint> points;
 	i32 currentIndex {};

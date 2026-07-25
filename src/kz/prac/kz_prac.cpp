@@ -24,6 +24,7 @@ static_function void SnapshotModeStyles(KZPlayer *player, char *modeOut, int mod
 void KZPracService::Reset()
 {
 	this->inPrac = false;
+	this->noclipBeforeSpec = false;
 	this->frozen = {};
 	this->ClearPoints();
 }
@@ -166,8 +167,9 @@ void KZPracService::EnterPrac()
 
 	this->inPrac = true;
 	this->ClearPoints();
-	this->player->noclipService->EnableNoclip();
-	this->player->noclipService->HandleNoclip();
+	// Ноуклип НЕ включаем (решение пользователя 25.07): вход в prac только замораживает ран,
+	// а летать игрок начинает сам через !nc. Внутри prac ноуклип безопасен — «карательная»
+	// ветка HandleNoclip подавлена по inPrac, таймер уже остановлен.
 
 	if (this->frozen.active)
 	{
@@ -449,6 +451,9 @@ void KZPracService::OnJoinSpectator()
 	{
 		return;
 	}
+	// Запоминаем, летел ли игрок: с 25.07 вход в prac ноуклип НЕ включает, поэтому на
+	// возврате из спека его нельзя включать безусловно — включили бы тому, кто не летал.
+	this->noclipBeforeSpec = this->player->noclipService->IsNoclipping();
 	// Только флаг: HandleNoclip() здесь звать НЕЛЬЗЯ - он безусловно разыменовывает
 	// GetPlayerPawn() (kz_noclip.cpp), а у обсервера собственной пешки нет (null-deref).
 	this->player->noclipService->DisableNoclip();
@@ -461,10 +466,15 @@ void KZPracService::OnPlayerSpawn()
 	{
 		return;
 	}
-	// Флаг ноуклипа возвращаем безусловно, а применяем только по живой пешке: KZTimerService::
+	// Возвращаем РОВНО то состояние ноуклипа, что было при уходе в спек (вход в prac его больше
+	// не включает). Флаг ставим безусловно, а применяем только по живой пешке: KZTimerService::
 	// OnPlayerSpawn зовёт нас вне своей проверки пешки, а HandleNoclip разыменовывает её без
 	// чеков. Если пешка на этом тике ещё не готова, флаг доиграет HandleMoveCollision на
 	// следующем физическом тике (kz_player.cpp), поэтому отказ здесь ничего не теряет.
+	if (!this->noclipBeforeSpec)
+	{
+		return;
+	}
 	this->player->noclipService->EnableNoclip();
 	if (this->RequireLivePawn(false))
 	{
