@@ -453,8 +453,14 @@ public:
 	void StageZoneStartTouch(const KZCourseDescriptor *course, i32 stageNumber);
 	bool TimerStart(const KZCourseDescriptor *course, bool playSound = true);
 	bool TimerEnd(const KZCourseDescriptor *course);
-	bool TimerStop(bool playSound = true);
-	static void TimerStopAll(bool playSound = true);
+	// reason — машинно-читаемая причина остановки, уходит в лог (инвариант
+	// «у отказа всегда причина»): по ней разбирается жалоба «таймер сбросился сам».
+	// Значения: start_zone, teleport_to_start, teleport_to_end, disconnect, death,
+	// round_start, noclip, cheat_cvar, mode_change, style_change, jumpstat_area,
+	// pause_denied, team_change, stop, race, race_event, prac, prac_discard,
+	// stop_all, unknown.
+	bool TimerStop(bool playSound = true, const char *reason = "unknown");
+	static void TimerStopAll(bool playSound = true, const char *reason = "stop_all");
 
 	bool GetValidJump()
 	{

@@ -120,7 +120,7 @@ void KZPracService::EnterPrac()
 			// доводит ран до конца (рекордер реплея закрывается, TIMER_STOP пишется).
 			this->frozen = {};
 			this->player->savedRunService->InvalidateCurrent("prac_run_policy");
-			this->player->timerService->TimerStop();
+			this->player->timerService->TimerStop(true, "prac_discard");
 		}
 		else
 		{
@@ -152,7 +152,7 @@ void KZPracService::EnterPrac()
 			// нулевой UUID (коллизия PRIMARY KEY в Times, ран игрока исчезал бы молча).
 			// Ноуклип включается ниже, так что «карательная» ветка HandleNoclip тоже подавлена.
 			this->inPrac = true;
-			this->player->timerService->TimerStop(false);
+			this->player->timerService->TimerStop(false, "prac");
 			// Граница prac в реплее: TimerStop в prac события паузы не даёт, а плеер
 			// пропускает именно отрезок PAUSE..RESUME.
 			this->player->recordingService->OnPause();

@@ -202,7 +202,7 @@ void KZRacingService::AcceptRace()
 	if (KZRacingService::currentRace.state == RaceInfo::State::Init && !this->IsRaceParticipant()
 		&& g_pKZUtils->GetCurrentMapWorkshopID() == KZRacingService::currentRace.spec.workshopID)
 	{
-		this->player->timerService->TimerStop();
+		this->player->timerService->TimerStop(true, "race");
 		this->SendJoinRace();
 		KZRacingService::currentRace.localParticipants.push_back({this->player->GetSteamId64(), this->player->GetName()});
 	}
@@ -212,7 +212,7 @@ void KZRacingService::SurrenderRace()
 {
 	if (KZRacingService::currentRace.state == RaceInfo::State::Ongoing && this->IsRaceParticipant())
 	{
-		this->player->timerService->TimerStop();
+		this->player->timerService->TimerStop(true, "race");
 		this->SendSurrenderRace();
 
 		auto &localParticipants = KZRacingService::currentRace.localParticipants;

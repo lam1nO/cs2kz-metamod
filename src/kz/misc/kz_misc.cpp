@@ -126,7 +126,7 @@ SCMD(kz_end, SCFL_MAP | SCFL_HELP)
 		{
 			return MRES_SUPERCEDE;
 		}
-		player->timerService->TimerStop();
+		player->timerService->TimerStop(true, "teleport_to_end");
 		// Как и !r: телепорт к концу снимает паузу у живого игрока, иначе он
 		// приезжает замороженным (MOVETYPE_NONE, gravity 0).
 		if (player->timerService->GetPaused() && player->IsAlive())
@@ -285,7 +285,7 @@ SCMD(kz_lj, SCFL_JUMPSTATS | SCFL_MAP | SCFL_HELP)
 		{
 			return MRES_SUPERCEDE;
 		}
-		player->timerService->TimerStop();
+		player->timerService->TimerStop(true, "jumpstat_area");
 		player->Teleport(&destPos, &destAngles, &vec3_origin);
 	}
 	else
@@ -431,7 +431,7 @@ void KZ::misc::JoinTeam(KZPlayer *player, int newTeam, bool restorePos)
 
 		if (!player->timerService->GetPaused() && !player->timerService->CanPause())
 		{
-			player->timerService->TimerStop();
+			player->timerService->TimerStop(true, "pause_denied");
 		}
 		player->GetController()->ChangeTeam(CS_TEAM_SPECTATOR);
 		// Партикли мхуда гасим сразу: у обсервера движение не тикает и штатное
@@ -456,7 +456,7 @@ void KZ::misc::JoinTeam(KZPlayer *player, int newTeam, bool restorePos)
 		}
 		else
 		{
-			player->timerService->TimerStop();
+			player->timerService->TimerStop(true, "team_change");
 			// Just joining a team alone can put you into weird invalid spawns.
 			// Need to teleport the player to a valid one.
 			Vector spawnOrigin {};

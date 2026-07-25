@@ -563,6 +563,9 @@ static_function void Hook_ClientFullyConnect(CPlayerSlot slot)
 static_function void Hook_ClientPutInServer(CPlayerSlot slot, char const *pszName, int type, uint64 xuid)
 {
 	g_pKZPlayerManager->OnClientPutInServer(slot, pszName, type, xuid);
+	// Привязка жалобы к сессии: без join/leave непонятно, был ли игрок на сервере
+	// в названное им время.
+	KZ_LOG_INFO(LogChannel::Player, "[cyb] player_join steam_id=%llu name=%s slot=%d\n", xuid, pszName, slot.Get());
 	RETURN_META(MRES_IGNORED);
 }
 
@@ -607,6 +610,7 @@ static_function void Hook_ClientDisconnect(CPlayerSlot slot, ENetworkDisconnecti
 	{
 		Warning("WARNING: Player pawn for slot %i not found!\n", slot.Get());
 	}
+	KZ_LOG_INFO(LogChannel::Player, "[cyb] player_leave steam_id=%llu name=%s reason=%d\n", xuid, pszName, (int)reason);
 	player->recordingService->OnClientDisconnect();
 	player->optionService->OnClientDisconnect();
 	player->racingService->OnClientDisconnect();
@@ -642,6 +646,9 @@ static_function void Hook_StartupServer(const GameSessionConfiguration_t &config
 	KZ::course::ClearCourses();
 	KZ::mapapi::Init();
 	KZ::replaysystem::Init();
+	// Смена карты доехала. Закрывает две вещи: «сервер завис на смене карты»
+	// (строки нет — значит загрузка не завершилась) и «на какой версии это было».
+	KZ_LOG_INFO(LogChannel::General, "[cyb] map_loaded map=%s cs2kz=%s\n", g_pKZUtils->GetCurrentMapName().Get(), PLUGIN_FULL_VERSION);
 	RETURN_META(MRES_IGNORED);
 }
 

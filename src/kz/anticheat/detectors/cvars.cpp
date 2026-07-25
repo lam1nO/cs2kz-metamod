@@ -141,7 +141,7 @@ static_function void ValidateQueriedCvar(CPlayerSlot nSlot, ECvarValueStatus eSt
 			player->languageService->PrintChat(true, false, "Kick Player m_yaw");
 			player->languageService->PrintConsole(false, false, "Kick Player m_yaw (Console)");
 			player->anticheatService->MarkHasInvalidCvars();
-			player->timerService->TimerStop();
+			player->timerService->TimerStop(true, "cheat_cvar");
 			StartTimer<CPlayerUserId>(KZAnticheatService::KickPlayerInvalidSettings, player->GetClient()->GetUserID(), KICK_DELAY, true, true);
 		}
 	}
@@ -158,7 +158,7 @@ static_function void ValidateQueriedCvar(CPlayerSlot nSlot, ECvarValueStatus eSt
 			player->languageService->PrintChat(true, false, "Kick Player fps_max");
 			player->languageService->PrintConsole(false, false, "Kick Player fps_max (Console)");
 			player->anticheatService->MarkHasInvalidCvars();
-			player->timerService->TimerStop();
+			player->timerService->TimerStop(true, "cheat_cvar");
 			StartTimer<CPlayerUserId>(KZAnticheatService::KickPlayerInvalidSettings, player->GetClient()->GetUserID(), KICK_DELAY, true, true);
 		}
 		else if (fabs(fps - player->anticheatService->currentMaxFps) > 0.01f)
@@ -292,7 +292,7 @@ static_function f64 CheckUserInfoCvars(KZPlayer *player)
 				player->languageService->PrintChat(true, false, "Kick Player m_yaw");
 				player->languageService->PrintConsole(false, false, "Kick Player m_yaw (Console)");
 				player->anticheatService->MarkHasInvalidCvars();
-				player->timerService->TimerStop();
+				player->timerService->TimerStop(true, "cheat_cvar");
 				StartTimer<CPlayerUserId>(KZAnticheatService::KickPlayerInvalidSettings, player->GetClient()->GetUserID(), KICK_DELAY, true, true);
 				return 0.0f;
 			}
