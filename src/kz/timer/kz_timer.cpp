@@ -159,7 +159,7 @@ bool KZTimerService::UnregisterEventListener(KZTimerServiceEventListener *eventL
 void KZTimerService::StartZoneStartTouch(const KZCourseDescriptor *course)
 {
 	this->touchedGroundSinceTouchingStartZone = !!(this->player->GetPlayerPawn()->m_fFlags & FL_ONGROUND);
-	this->TimerStop(false);
+	this->TimerStop(false, "start_zone");
 }
 
 void KZTimerService::StartZoneEndTouch(const KZCourseDescriptor *course)
@@ -364,6 +364,10 @@ bool KZTimerService::TimerStart(const KZCourseDescriptor *courseDesc, bool playS
 	this->shouldAnnounceMissedTime = true;
 	this->shouldAnnounceMissedProTime = true;
 
+	// Начало рана: без него run_stop/run_finish не с чем сопоставить по времени.
+	KZ_LOG_INFO(LogChannel::Timer, "[cyb] run_start steam_id=%llu map=%s course=%s mode=%s\n", this->player->GetSteamId64(),
+				g_pKZUtils->GetCurrentMapName().Get(), courseDesc->name, this->player->modeService->GetModeName());
+
 	this->UpdateCurrentCompareType(ToPBDataKey(KZ::mode::GetModeInfo(this->player->modeService).id, courseDesc->guid));
 
 	if (playSound)
@@ -405,8 +409,12 @@ bool KZTimerService::TimerStart(const KZCourseDescriptor *courseDesc, bool playS
 
 bool KZTimerService::TimerEnd(const KZCourseDescriptor *courseDesc)
 {
+	// Все четыре пути отказа ниже сейчас сообщают игроку в чат и молчат в логах —
+	// именно поэтому жалобу «мой ран не засчитался» нечем было разбирать.
 	if (!this->player->IsAlive())
 	{
+		KZ_LOG_INFO(LogChannel::Timer, "[cyb] run_reject steam_id=%llu course=%s reason=not_alive\n", this->player->GetSteamId64(),
+					courseDesc->name);
 		return false;
 	}
 
@@ -418,12 +426,16 @@ bool KZTimerService::TimerEnd(const KZCourseDescriptor *courseDesc)
 		}
 		this->PlayTimerFalseEndSound();
 		this->lastFalseEndTime = g_pKZUtils->GetServerGlobals()->curtime;
+		KZ_LOG_INFO(LogChannel::Timer, "[cyb] run_reject steam_id=%llu course=%s reason=%s\n", this->player->GetSteamId64(), courseDesc->name,
+					this->timerRunning ? "wrong_course" : "timer_not_running");
 		return false;
 	}
 
 	if (this->currentStage != courseDesc->stageCount)
 	{
 		this->PlayMissedZoneSound();
+		KZ_LOG_INFO(LogChannel::Timer, "[cyb] run_reject steam_id=%llu course=%s reason=missed_stage stage=%d/%d\n",
+					this->player->GetSteamId64(), courseDesc->name, this->currentStage + 1, courseDesc->stageCount);
 		this->player->languageService->PrintChat(true, false, "Can't Finish Run (Missed Stage)", this->currentStage + 1);
 		return false;
 	}
@@ -432,6 +444,8 @@ bool KZTimerService::TimerEnd(const KZCourseDescriptor *courseDesc)
 	{
 		this->PlayMissedZoneSound();
 		i32 missCount = courseDesc->checkpointCount - this->reachedCheckpoints;
+		KZ_LOG_INFO(LogChannel::Timer, "[cyb] run_reject steam_id=%llu course=%s reason=missed_checkpoints missed=%d of=%d\n",
+					this->player->GetSteamId64(), courseDesc->name, missCount, courseDesc->checkpointCount);
 		if (missCount == 1)
 		{
 			this->player->languageService->PrintChat(true, false, "Can't Finish Run (Missed a Checkpoint Zone)");
@@ -453,6 +467,8 @@ bool KZTimerService::TimerEnd(const KZCourseDescriptor *courseDesc)
 	}
 	if (!allowEnd)
 	{
+		KZ_LOG_INFO(LogChannel::Timer, "[cyb] run_reject steam_id=%llu course=%s reason=listener_denied\n", this->player->GetSteamId64(),
+					courseDesc->name);
 		return false;
 	}
 	// Update current time for one last time.
@@ -460,6 +476,13 @@ bool KZTimerService::TimerEnd(const KZCourseDescriptor *courseDesc)
 
 	this->timerRunning = false;
 	this->lastEndTime = g_pKZUtils->GetServerGlobals()->curtime;
+
+	// Финиш рана: ровно то, чего не хватало при жалобе «мой ран не засчитался».
+	KZ_LOG_INFO(LogChannel::Timer, "[cyb] run_finish steam_id=%llu map=%s course=%s mode=%s style=%s time=%.3f tps=%u\n",
+				this->player->GetSteamId64(), g_pKZUtils->GetCurrentMapName().Get(), courseDesc->name,
+				this->player->modeService->GetModeName(),
+				this->player->styleServices.Count() > 0 ? this->player->styleServices[0]->GetStyleShortName() : "normal", time,
+				teleportsUsed);
 
 	for (KZPlayer *spec = player->specService->GetNextSpectator(NULL); spec != NULL; spec = player->specService->GetNextSpectator(spec))
 	{
@@ -487,13 +510,17 @@ bool KZTimerService::TimerEnd(const KZCourseDescriptor *courseDesc)
 	return true;
 }
 
-bool KZTimerService::TimerStop(bool playSound)
+bool KZTimerService::TimerStop(bool playSound, const char *reason)
 {
 	if (!this->timerRunning)
 	{
 		return false;
 	}
 	this->timerRunning = false;
+	// Главный класс багрепортов — «таймер сбросился сам». Одна строка с причиной
+	// закрывает разбор без воспроизведения. Событие редкое (раз на ран), не на тик.
+	KZ_LOG_INFO(LogChannel::Timer, "[cyb] run_stop steam_id=%llu map=%s mode=%s time=%.3f reason=%s\n", this->player->GetSteamId64(),
+				g_pKZUtils->GetCurrentMapName().Get(), this->player->modeService->GetModeName(), this->GetTime(), reason);
 	if (playSound)
 	{
 		for (KZPlayer *spec = player->specService->GetNextSpectator(NULL); spec != NULL; spec = player->specService->GetNextSpectator(spec))
@@ -514,7 +541,7 @@ bool KZTimerService::TimerStop(bool playSound)
 	return true;
 }
 
-void KZTimerService::TimerStopAll(bool playSound)
+void KZTimerService::TimerStopAll(bool playSound, const char *reason)
 {
 	for (int i = 0; i < MAXPLAYERS + 1; i++)
 	{
@@ -523,7 +550,7 @@ void KZTimerService::TimerStopAll(bool playSound)
 		{
 			continue;
 		}
-		player->timerService->TimerStop(playSound);
+		player->timerService->TimerStop(playSound, reason);
 	}
 }
 
@@ -1034,14 +1061,14 @@ void KZTimerService::OnTeleportToStart()
 	{
 		this->player->savedRunService->InvalidateCurrent("teleport_to_start");
 	}
-	this->TimerStop();
+	this->TimerStop(true, "teleport_to_start");
 }
 
 void KZTimerService::OnClientDisconnect()
 {
 	// Персист незавершённого рана (транш 3) — до TimerStop, пока состояние живо.
 	this->player->savedRunService->SaveOnDisconnect();
-	this->TimerStop();
+	this->TimerStop(true, "disconnect");
 }
 
 void KZTimerService::OnPlayerSpawn()
@@ -1090,7 +1117,7 @@ void KZTimerService::OnPlayerJoinTeam(i32 team)
 
 void KZTimerService::OnPlayerDeath()
 {
-	this->TimerStop();
+	this->TimerStop(true, "death");
 }
 
 void KZTimerService::OnRoundStart()
@@ -1116,7 +1143,7 @@ SCMD(kz_stop, SCFL_TIMER | SCFL_HELP)
 			return MRES_SUPERCEDE;
 		}
 		player->savedRunService->InvalidateCurrent("stop");
-		player->timerService->TimerStop();
+		player->timerService->TimerStop(true, "round_start");
 	}
 	return MRES_SUPERCEDE;
 }

@@ -34,7 +34,7 @@ void KZNoclipService::HandleNoclip()
 			{
 				this->player->savedRunService->InvalidateCurrent("noclip");
 			}
-			this->player->timerService->TimerStop();
+			this->player->timerService->TimerStop(true, "noclip");
 		}
 		// if (pawn->m_Collision().m_CollisionGroup() != KZ_COLLISION_GROUP_NOTRIGGER)
 		// {
@@ -46,7 +46,7 @@ void KZNoclipService::HandleNoclip()
 		{
 			this->player->savedRunService->InvalidateCurrent("noclip");
 		}
-		this->player->timerService->TimerStop();
+		this->player->timerService->TimerStop(true, "noclip");
 	}
 	else
 	{
@@ -61,7 +61,7 @@ void KZNoclipService::HandleNoclip()
 			{
 				this->player->savedRunService->InvalidateCurrent("noclip");
 			}
-			this->player->timerService->TimerStop();
+			this->player->timerService->TimerStop(true, "noclip");
 		}
 		if (pawn->m_Collision().m_CollisionGroup() != KZ_COLLISION_GROUP_STANDARD)
 		{
@@ -74,7 +74,7 @@ void KZNoclipService::HandleNoclip()
 		if (this->player->IsAlive() && this->player->timerService->GetTimerRunning())
 		{
 			this->player->savedRunService->InvalidateCurrent("noclip");
-			this->player->timerService->TimerStop();
+			this->player->timerService->TimerStop(true, "noclip");
 		}
 	}
 }

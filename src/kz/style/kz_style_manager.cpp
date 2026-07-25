@@ -265,7 +265,7 @@ void KZStyleManager::AddStyle(KZPlayer *player, const char *styleName, bool sile
 		}
 	}
 	player->styleServices.AddToTail(info.factory(player));
-	player->timerService->TimerStop();
+	player->timerService->TimerStop(true, "style_change");
 	player->styleServices.Tail()->Init();
 	if (updatePreference)
 	{
@@ -377,7 +377,7 @@ void KZStyleManager::ToggleStyle(KZPlayer *player, const char *styleName, bool s
 		}
 	}
 	player->styleServices.AddToTail(info.factory(player));
-	player->timerService->TimerStop();
+	player->timerService->TimerStop(true, "style_change");
 	player->styleServices.Tail()->Init();
 	if (updatePreference)
 	{

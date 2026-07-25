@@ -290,7 +290,7 @@ bool KZModeManager::SwitchToMode(KZPlayer *player, const char *modeName, bool si
 	player->modeService->Cleanup();
 	delete player->modeService;
 	player->modeService = factory(player);
-	player->timerService->TimerStop();
+	player->timerService->TimerStop(true, "mode_change");
 	player->modeService->Init();
 
 	if (!silent)
