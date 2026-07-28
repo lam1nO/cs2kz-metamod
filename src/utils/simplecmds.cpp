@@ -548,14 +548,12 @@ META_RES scmd::OnDispatchConCommand(ConCommandRef cmd, const CCommandContext &ct
 			return MRES_SUPERCEDE;
 		}
 
-		// Неизвестная команда одним словом (без аргументов) — покажем список команд
-		// этому игроку и проглотим строку, чтобы «!опечатка» не ушла в общий чат.
-		// Многословные «!фразы» пропускаем как обычный чат.
-		if (!matched && cmdArgs.ArgC() == 1 && cmdName[0] != '\0')
-		{
-			PrintChatCommandList(g_pKZPlayerManager->ToPlayer(controller));
-			return MRES_SUPERCEDE;
-		}
+		// Неизвестную команду НЕ проглатываем: `!`-команды есть и у соседних плагинов
+		// (GG1MapChooser — !rtv/!maps/!nominate, скины — !ws/!knife, !mcustom), а они
+		// разбирают чат из игрового события player_chat, которое возникает только если
+		// say реально исполнится. MRES_SUPERCEDE здесь глушил их все разом (cyb.86..100:
+		// голосование за карту на флоте было мертво). Своих команд это не касается —
+		// они уже обработаны выше. Список !-команд игрок получает по !help.
 	}
 	else // Are we overriding a console command?
 	{
