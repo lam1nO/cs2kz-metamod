@@ -533,12 +533,14 @@ META_RES scmd::OnDispatchConCommand(ConCommandRef cmd, const CCommandContext &ct
 		// команды матчатся на первом проходе, поэтому не ломаются (RemapCyrillicToLatin
 		// без кириллицы вернёт false). Аргументы команды остаются как есть — в callback
 		// уходит исходный cmdArgs.
+		// Результат второго прохода дальше не нужен: решение принимает только suppress
+		// (его выставляет сама команда), поэтому возврат намеренно не сохраняем.
 		if (!matched)
 		{
 			char remapped[SCMD_MAX_NAME_LEN];
 			if (RemapCyrillicToLatin(cmdName, remapped, sizeof(remapped)))
 			{
-				matched = DispatchChatByName(controller, cmdArgs, remapped, trigger, suppress);
+				(void)DispatchChatByName(controller, cmdArgs, remapped, trigger, suppress);
 			}
 		}
 
