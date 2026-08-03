@@ -86,15 +86,25 @@
 		"ko"		" 일시정지됨"
 		"lv"		" NOPAUZĒTS"
 	}
-	// Строка CP/TP нижней панели (канал plain-text, без разметки).
+	// Строка CP/TP нижней панели (канал plain-text, без разметки). Латиница для всех
+	// языков, кроме chi — как в апстримном «HUD - Checkpoint Text».
 	"HUD - Bottom CP/TP Text"
 	{
 		// CP 4/4 | TP 12
 		"#format"	"checkpoint_index:d,checkpoint_count:d,teleport_count:d"
 		"en"		"CP {checkpoint_index}/{checkpoint_count} | TP {teleport_count}"
 		"chi"		"存点 {checkpoint_index}/{checkpoint_count} | 传送 {teleport_count}"
+		"pl"		"CP {checkpoint_index}/{checkpoint_count} | TP {teleport_count}"
 		"ru"		"CP {checkpoint_index}/{checkpoint_count} | TP {teleport_count}"
+		"fi"		"CP {checkpoint_index}/{checkpoint_count} | TP {teleport_count}"
+		"sv"		"CP {checkpoint_index}/{checkpoint_count} | TP {teleport_count}"
 		"ua"		"CP {checkpoint_index}/{checkpoint_count} | TP {teleport_count}"
+		"tr"		"CP {checkpoint_index}/{checkpoint_count} | TP {teleport_count}"
+		"it"		"CP {checkpoint_index}/{checkpoint_count} | TP {teleport_count}"
+		"es"		"CP {checkpoint_index}/{checkpoint_count} | TP {teleport_count}"
+		"de"		"CP {checkpoint_index}/{checkpoint_count} | TP {teleport_count}"
+		"ko"		"CP {checkpoint_index}/{checkpoint_count} | TP {teleport_count}"
+		"lv"		"CP {checkpoint_index}/{checkpoint_count} | TP {teleport_count}"
 	}
 	"HUD - Speed Text"
 	{

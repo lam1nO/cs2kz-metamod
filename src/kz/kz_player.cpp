@@ -231,7 +231,10 @@ void KZPlayer::OnPhysicsSimulatePost()
 	{
 		// Dead and not spectating anyone (death cam on own corpse / freeroam):
 		// destroy particles here, otherwise a frozen MHUD stays up until the next DrawPanels.
+		// Нижнюю панель тоже гасим одноразово: DrawPanels для этого состояния не вызывается,
+		// и остаток CP/TP висел бы до самозатухания канала.
 		this->hudService->DestroyAllParticles();
+		this->hudService->ClearBottomPanel();
 	}
 	this->measureService->OnPhysicsSimulatePost();
 	this->quietService->OnPhysicsSimulatePost();

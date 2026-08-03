@@ -29,9 +29,15 @@ cs2kz-linux-builder .`, иначе компилируются старые ис�
   BH/MBH/JB/WJ; **LJ wrecker = 284.0 — решение пользователя, не менять**.
 - **Эмиттер** (`src/kz/timer/cyb_emitter.*`): `kz.run_finished` в ingest
   платформы по окончании таймера. Конвенция course: 0 = main, N = bonus N.
-- **HUD**: единый `!hud` (Стандартный/MHUD), per-element тумблеры с prefKey,
-  particle-mhud (скорость/клавиши/CP-TP/время), спектатор видит по данным
-  наблюдаемого, досылка контент-ассета в OnPlayerActive.
+- **HUD**: единый `!hud` (Стандартный/MHUD/Выкл), per-element тумблеры с prefKey,
+  particle-mhud (скорость/клавиши/время; particle-элемента CP/TP НЕ существует —
+  CP/TP только в HTML-пути), спектатор видит по данным наблюдаемого, досылка
+  контент-ассета в OnPlayerActive. HTML-панель сопровождает **нижняя панель** в plain
+  centre-канале (HUD_PRINTCENTER, не HTML): CP/TP (гейт hudCpTp) + время при
+  минимал-стиле; шлётся только вместе с HTML-панелью (needHtml), по изменению слепка
+  состояния + heartbeat 1с (канал надёжный, каждый тик не слать). Преф `hudTimerStyle`
+  (0=Обновлённый деф., 1=Минималистичный) — пункт «Таймер: …» в `!options` → HUD →
+  «Обычный HUD».
 - **Меню**: submodule mm-cs2menus указывает на форк lam1nO (минималистичный
   стиль без ▶).
 - **Чат**: `!`-команды и серверный шум (beta join, website tip, turnbinds,
