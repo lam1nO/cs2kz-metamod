@@ -36,16 +36,28 @@ private:
 		bool timePlaceholder {}; // «--:--.--» — prac-часы стоят (нет действующей попытки)
 		i32 timeCs {};           // отображаемое время в сотых (как в FormatTimeHud)
 		bool stopped {}, paused {};
+		// Язык получателя — ЧАСТЬ слепка: kz_language меняет язык НА МЕСТЕ, без реконнекта
+		// (reconnect — только при смене языкового аддона, и есть явная ветка отказа от него
+		// при чекпоинтах/таймере) — без языка в слепке heartbeat бессрочно гнал бы
+		// сохранённый текст на старом языке.
+		char lang[16] {};
 
 		bool HasContent() const
 		{
 			return showCpTp || showTime;
 		}
 
+		// Входы кэша готовой CP/TP-строки (bottomCpTpLine): только её слагаемые.
+		bool SameCpTpInputs(const BottomPanelState &o) const
+		{
+			return cp == o.cp && cpCount == o.cpCount && tp == o.tp && V_strcmp(lang, o.lang) == 0;
+		}
+
 		bool operator==(const BottomPanelState &o) const
 		{
 			return showCpTp == o.showCpTp && cp == o.cp && cpCount == o.cpCount && tp == o.tp && showTime == o.showTime
-				   && timePlaceholder == o.timePlaceholder && timeCs == o.timeCs && stopped == o.stopped && paused == o.paused;
+				   && timePlaceholder == o.timePlaceholder && timeCs == o.timeCs && stopped == o.stopped && paused == o.paused
+				   && V_strcmp(lang, o.lang) == 0;
 		}
 	};
 
@@ -56,6 +68,13 @@ private:
 	bool bottomStateValid {};
 	char lastBottomText[256] {};
 	f64 lastBottomSendTime {};
+
+	// Кэш готовой CP/TP-строки (по входам SameCpTpInputs): при идущем minimal-таймере слепок
+	// меняется каждый тик из-за timeCs, и без этого кэша единственная аллоцирующая часть
+	// текста (PrepareMessageWithLang → tfm) собиралась бы ~100/с на получателя.
+	char bottomCpTpLine[96] {};
+	BottomPanelState bottomCpTpKey {};
+	bool bottomCpTpValid {};
 
 	// Источник ДАННЫХ для MHUD (скорость/клавиши/таймер/CP-TP); nullptr → сам игрок.
 	// ПОСЛЕ cyb.36 particle-путь идёт ТОЛЬКО живому владельцу (player == target в
@@ -85,6 +104,11 @@ private:
 public:
 	virtual void Reset() override;
 	static void Init();
+	// Раунд-старт (в т.ч. первый на новой карте): сброс кэша нижней панели всем игрокам.
+	// Критично для смены карты: curtime отсчитывается от её загрузки, переживший смену
+	// lastBottomSendTime оказывается «в будущем» и глушил бы heartbeat (Reset() на
+	// выделенном сервере при смене карты НЕ зовётся — только на дисконнекте).
+	static void OnRoundStart();
 
 	// Returns true when the particle-based MHUD should be used.
 	// Requires MultiAddonManager to be available, unless kz_force_mhud is set.
@@ -244,14 +268,19 @@ private:
 	// возвращает true с нулевым таймером; false — только для реплей-бота без времени.
 	bool GetTimerParts(const char *language, std::string &outTime, std::string &outSuffix, bool &outRunning);
 
-	// Слепок нижней панели: player — данные (наблюдаемый), target — настройки (получатель).
-	// Дёшево (интовые чтения), зовётся каждый тик из UpdateBottomPanel.
+	// Слепок нижней панели: player — данные (наблюдаемый), target — настройки+язык
+	// (получатель). Дёшево (интовые чтения), зовётся каждый тик из UpdateBottomPanel.
 	static void ComputeBottomState(KZPlayer *player, KZPlayer *target, BottomPanelState &out);
 
-	// Текст нижней панели — ЧИСТАЯ функция слепка и языка (никаких живых данных: текст и
-	// слепок обязаны совпадать по построению). Аллоцирует (фразы/tfm) — зовётся только на
-	// изменении слепка. Канал plain-text: разметки нет, перенос строки — '\n'.
-	static void FormatBottomText(const BottomPanelState &state, const char *language, char *buf, i32 size);
+	// Текст нижней панели — функция слепка (включая язык: текст и слепок обязаны совпадать
+	// по построению). Зовётся только на изменении слепка; при идущем minimal-таймере это
+	// каждый тик, поэтому горячий путь без аллокаций (CP/TP-строка из кэша bottomCpTpLine,
+	// время — стек). Канал plain-text: разметки нет, перенос строки — '\n'.
+	void FormatBottomText(const BottomPanelState &state, char *buf, i32 size);
+
+	// Полный сброс кэша нижней панели БЕЗ клир-кадра (для OnRoundStart: канал новой карты
+	// и так чист, а посылать usermessage посреди смены карты незачем).
+	void ResetBottomPanelCache();
 
 	// Единый HTML-center HUD в стиле кибершока: строка 1 — таймер (зелёный) + режим + стиль
 	// (в минимал-стиле — мелкая метка «CKZ · PRO», время рисует нижняя панель), строка 2 —

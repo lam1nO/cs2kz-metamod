@@ -133,13 +133,38 @@ void KZHUDService::Reset()
 	this->fromDuckbug = false;
 	this->crouchJumping = false;
 	this->particlesActive = false;
+	// Кэш нижней панели (слепок/текст/heartbeat/CP-TP-строка) — целиком.
+	this->ResetBottomPanelCache();
+	this->DestroyAllParticles();
+}
+
+// Полный сброс кэша нижней панели без клир-кадра: дисконнект (Reset) и раунд-старт
+// (OnRoundStart) — в обоих случаях канал получателя и так чист/неактуален.
+void KZHUDService::ResetBottomPanelCache()
+{
 	this->bottomPanelActive = false;
-	// Кэш нижней панели: слепок/текст/heartbeat. Сброс покрывает и смену языка —
-	// она в этом форке проходит через reconnect, а reconnect ведёт сюда.
 	this->bottomStateValid = false;
 	this->lastBottomText[0] = '\0';
 	this->lastBottomSendTime = 0.0;
-	this->DestroyAllParticles();
+	this->bottomCpTpValid = false;
+}
+
+// Раунд-старт (в т.ч. первый на новой карте — mp_restartgame из OnActivateServer). Главное —
+// смена карты: curtime отсчитывается от её загрузки, а Reset() игрока на выделенном сервере
+// при смене карты не зовётся — переживший смену lastBottomSendTime оказался бы «в будущем»
+// и заглушил heartbeat, а совпавший со старым слепок (типовой idle: CP 0/0 | TP 0) — и
+// отправку по изменению: низ пропал бы на всю карту. Свежий кэш шлёт всё первым же тиком.
+void KZHUDService::OnRoundStart()
+{
+	for (int i = 0; i < MAXPLAYERS + 1; i++)
+	{
+		KZPlayer *player = g_pKZPlayerManager->ToPlayer(i);
+		if (!player || !player->hudService)
+		{
+			continue;
+		}
+		player->hudService->ResetBottomPanelCache();
+	}
 }
 
 void KZHUDService::OnJoinSpectator()
@@ -837,6 +862,8 @@ void KZHUDService::ComputeBottomState(KZPlayer *player, KZPlayer *target, Bottom
 	out = BottomPanelState {};
 	KZHUDService *cfg = target->hudService;
 	const bool isReplay = KZ::replaysystem::IsReplayBot(player);
+	// Язык получателя — часть слепка (kz_language меняет его на месте, без реконнекта).
+	V_strncpy(out.lang, target->languageService->GetLanguage(), sizeof(out.lang));
 
 	if (cfg->IsMHUDCpTpEnabled())
 	{
@@ -887,52 +914,65 @@ void KZHUDService::ComputeBottomState(KZPlayer *player, KZPlayer *target, Bottom
 	}
 }
 
-// Текст нижней панели — ЧИСТАЯ функция слепка и языка: рендерит ровно то, что сравнивает
-// ComputeBottomState (никаких живых данных — текст и слепок не могут разъехаться).
-// Аллоцирует (фразы/tfm) — зовётся ТОЛЬКО на изменении слепка. Разметки нет — канал
-// plain-text, перенос строки — '\n'.
-void KZHUDService::FormatBottomText(const BottomPanelState &state, const char *language, char *buf, i32 size)
+// Текст нижней панели — функция слепка (включая язык): рендерит ровно то, что сравнивает
+// ComputeBottomState — текст и слепок не могут разъехаться. Зовётся только на изменении
+// слепка, но при идущем minimal-таймере слепок меняется КАЖДЫЙ тик (сотые), поэтому горячий
+// путь — без аллокаций: CP/TP-строка (единственная тянущая PrepareMessageWithLang → tfm)
+// берётся из кэша по своим входам, время — стековый FormatTimeHudCs, склейка — V_strcat.
+// Суффиксы стопа/паузы аллоцируют, но достижимы только на смене состояния: у идущего
+// времени их нет, у стоящего/паузы слепок стабилен и пересборка не выполняется.
+// Разметки нет — канал plain-text, перенос строки — '\n'.
+void KZHUDService::FormatBottomText(const BottomPanelState &state, char *buf, i32 size)
 {
 	buf[0] = '\0';
-	std::string text;
 	if (state.showCpTp)
 	{
-		text = KZLanguageService::PrepareMessageWithLang(language, "HUD - Bottom CP/TP Text", state.cp, state.cpCount, state.tp);
+		if (!this->bottomCpTpValid || !state.SameCpTpInputs(this->bottomCpTpKey))
+		{
+			std::string line =
+				KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Bottom CP/TP Text", state.cp, state.cpCount, state.tp);
+			V_strncpy(this->bottomCpTpLine, line.c_str(), sizeof(this->bottomCpTpLine));
+			this->bottomCpTpKey = state;
+			this->bottomCpTpValid = true;
+		}
+		V_strncpy(buf, this->bottomCpTpLine, size);
 	}
 	if (state.showTime)
 	{
-		std::string line;
+		char timeLine[160];
 		if (state.timePlaceholder)
 		{
-			line = "--:--.--";
+			V_strncpy(timeLine, "--:--.--", sizeof(timeLine));
 		}
 		else
 		{
-			char timeText[64];
-			FormatTimeHudCs(state.timeCs, timeText, sizeof(timeText));
-			line = timeText;
+			FormatTimeHudCs(state.timeCs, timeLine, sizeof(timeLine));
 		}
 		if (state.stopped)
 		{
-			line += KZLanguageService::PrepareMessageWithLang(language, "HUD - Bottom Stopped Text");
+			std::string suffix = KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Bottom Stopped Text");
+			V_strcat(timeLine, suffix.c_str(), sizeof(timeLine));
 		}
 		if (state.paused)
 		{
-			line += KZLanguageService::PrepareMessageWithLang(language, "HUD - Bottom Paused Text");
+			std::string suffix = KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Bottom Paused Text");
+			V_strcat(timeLine, suffix.c_str(), sizeof(timeLine));
 		}
-		if (!text.empty())
+		if (buf[0])
 		{
-			text += "\n";
+			V_strcat(buf, "\n", size);
 		}
-		text += line;
+		V_strcat(buf, timeLine, size);
 	}
-	V_strncpy(buf, text.c_str(), size);
 }
 
 // Тик нижней панели получателя (this): пересчитать слепок; отправлять только на его
 // изменении (пересборка текста — тоже только тут) либо heartbeat'ом раз в
 // KZ_HUD_BOTTOM_HEARTBEAT — centre-канал надёжный (BUF_RELIABLE), слать 128/с каждому
 // получателю расточительно, а неизменившийся текст переотправляется как есть без пересборки.
+// Честно про minimal: при ИДУЩЕМ minimal-таймере слепок меняется каждый тик (сотые) —
+// текст пересобирается и шлётся каждый тик; пересборка при этом без аллокаций
+// (см. FormatBottomText), а отправка — неизбежная цена стиля у самих minimal-игроков.
 void KZHUDService::UpdateBottomPanel(KZPlayer *dataSource)
 {
 	BottomPanelState state;
@@ -947,7 +987,10 @@ void KZHUDService::UpdateBottomPanel(KZPlayer *dataSource)
 	f64 now = g_pKZUtils->GetServerGlobals()->curtime;
 	if (this->bottomStateValid && state == this->lastBottomState)
 	{
-		if (now - this->lastBottomSendTime < KZ_HUD_BOTTOM_HEARTBEAT)
+		// now < lastBottomSendTime = curtime пошёл заново (кэш пережил смену карты —
+		// подстраховка к сбросу в OnRoundStart): считаем heartbeat истёкшим.
+		const bool heartbeatDue = now < this->lastBottomSendTime || now - this->lastBottomSendTime >= KZ_HUD_BOTTOM_HEARTBEAT;
+		if (!heartbeatDue)
 		{
 			return;
 		}
@@ -956,7 +999,7 @@ void KZHUDService::UpdateBottomPanel(KZPlayer *dataSource)
 		return;
 	}
 	char buf[256];
-	FormatBottomText(state, this->player->languageService->GetLanguage(), buf, sizeof(buf));
+	this->FormatBottomText(state, buf, sizeof(buf));
 	this->lastBottomState = state;
 	this->bottomStateValid = true;
 	V_strncpy(this->lastBottomText, buf, sizeof(this->lastBottomText));

@@ -676,6 +676,7 @@ static_function bool Hook_FireEvent(IGameEvent *event, bool bDontBroadcast)
 		{
 			interfaces::pEngine->ServerCommand("sv_full_alltalk 1");
 			KZTimerService::OnRoundStart();
+			KZHUDService::OnRoundStart();
 			KZ::misc::OnRoundStart();
 			KZ::mapapi::OnRoundStart();
 			KZ::replaysystem::OnRoundStart();
