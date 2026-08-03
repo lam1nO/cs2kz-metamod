@@ -242,6 +242,22 @@ void KZHUDService::SetHudType(int type)
 	this->DestroyAllParticles();
 }
 
+// === Стиль таймера (hudTimerStyle) =================================================
+// Настройка только стандартного HTML-худа: 0 = Updated (крупное время в строке 1),
+// 1 = Minimal (время в нижней панели centre-канала, строка 1 — мелкая метка режима).
+
+int KZHUDService::GetTimerStyle()
+{
+	int stored = this->MHUDSettingsSource()->optionService->GetPreferenceInt("hudTimerStyle", HUD_TIMER_STYLE_UPDATED);
+	// Нормализация мусора в префе: всё, что не Minimal, читаем как дефолтный Updated.
+	return stored == HUD_TIMER_STYLE_MINIMAL ? HUD_TIMER_STYLE_MINIMAL : HUD_TIMER_STYLE_UPDATED;
+}
+
+void KZHUDService::SetTimerStyle(int style)
+{
+	this->MHUDSettingsSource()->optionService->SetPreferenceInt("hudTimerStyle", style);
+}
+
 // Все тумблеры/раскладка — НАСТРОЙКИ: читаем из источника настроек (сам игрок/спектатор),
 // а не из данных наблюдаемого. Иначе у спектатора «прыгал» бы HUD при смене цели.
 // Per-element тумблеры.
@@ -903,6 +919,12 @@ static_function void ResetElementPrefs(KZPlayer *p, MHUDElement element)
 	}
 }
 
+// Фраза-ключ отображаемого имени стиля таймера (пункт меню и сводка).
+static_function const char *HudTimerStylePhrase(int style)
+{
+	return style == KZHUDService::HUD_TIMER_STYLE_MINIMAL ? "HUD - Timer Style Minimal" : "HUD - Timer Style Updated";
+}
+
 void KZHUDService::PrintHUDSummary()
 {
 	auto *p    = this->player;
@@ -922,6 +944,9 @@ void KZHUDService::PrintHUDSummary()
 	lang->PrintChat(true, false, opts->GetPreferenceBool("hudKeysTwoRows", true) ? "MHUD - Keys Two Rows Enabled" : "MHUD - Keys Two Rows Disabled");
 	lang->PrintChat(true, false, opts->GetPreferenceBool("hudPbWr",        true) ? "MHUD - PB/WR Enabled"        : "MHUD - PB/WR Disabled");
 	// clang-format on
+	// Стиль таймера стандартного худа — той же фразой, что пункт меню («Таймер: <стиль>»).
+	std::string styleName = KZLanguageService::PrepareMessageWithLang(lang->GetLanguage(), HudTimerStylePhrase(this->GetTimerStyle()));
+	lang->PrintChat(true, false, "HUD - Menu Label TimerStyle", styleName.c_str());
 }
 
 // Алиас для обратной совместимости kz_mhud без аргументов.
@@ -972,10 +997,11 @@ static_function const HUDMenuToggle *FindHudToggle(const char *prefKey)
 	return nullptr;
 }
 
-// info-теги специальных пунктов (тип худа, компактный режим, шрифт).
+// info-теги специальных пунктов (тип худа, компактный режим, шрифт, стиль таймера).
 static constexpr const char *HUD_MENU_TYPE_TAG = "__hudType__";
 static constexpr const char *HUD_MENU_COMPACT_TAG = "__compactPanel__";
 static constexpr const char *HUD_MENU_FONT_TAG = "__mhudFont__";
+static constexpr const char *HUD_MENU_TIMERSTYLE_TAG = "__hudTimerStyle__";
 
 // Следующий тип в цикле меню: MHUD → Standard → Off → MHUD.
 static_function int HudTypeNext(int current)
@@ -1062,6 +1088,18 @@ static_function void OnHUDMenuSelect(MenuHandle menu, int slot, int item)
 		char newText[128];
 		V_snprintf(newText, sizeof(newText), "%s: %s", label.c_str(), next);
 		g_pMenus->SetItemText(menu, item, newText);
+		return;
+	}
+
+	// Стиль таймера — двухпозиционный цикл Обновлённый ↔ Минималистичный.
+	if (KZ_STREQ(key, HUD_MENU_TIMERSTYLE_TAG))
+	{
+		int next = p->hudService->GetTimerStyle() == KZHUDService::HUD_TIMER_STYLE_MINIMAL ? KZHUDService::HUD_TIMER_STYLE_UPDATED
+																						   : KZHUDService::HUD_TIMER_STYLE_MINIMAL;
+		p->hudService->SetTimerStyle(next);
+		std::string styleName = KZLanguageService::PrepareMessageWithLang(lang, HudTimerStylePhrase(next));
+		std::string styleLabel = KZLanguageService::PrepareMessageWithLang(lang, "HUD - Menu Label TimerStyle", styleName.c_str());
+		g_pMenus->SetItemText(menu, item, styleLabel.c_str());
 		return;
 	}
 
@@ -1551,6 +1589,12 @@ u32 KZHUDService::CreateHUDMenu()
 		MenuHandle sub = makeSub(HUD_SUB_NORMAL, "HUD - Menu Label NormalHud");
 		if (sub != kInvalidMenuHandle)
 		{
+			// Стиль таймера: Обновлённый (крупное время сверху) / Минималистичный (время внизу).
+			{
+				std::string styleName = KZLanguageService::PrepareMessageWithLang(lang, HudTimerStylePhrase(this->GetTimerStyle()));
+				std::string styleText = KZLanguageService::PrepareMessageWithLang(lang, "HUD - Menu Label TimerStyle", styleName.c_str());
+				g_pMenus->AddItem(sub, styleText.c_str(), HUD_MENU_TIMERSTYLE_TAG, false);
+			}
 			addToggle(sub, "HUD - Menu Label CompactPanel", HUD_MENU_COMPACT_TAG, this->IsCompactPanel());
 			addToggleKey(sub, "showPos");
 		}

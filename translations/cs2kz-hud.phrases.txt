@@ -50,6 +50,52 @@
 		"ko"		" (일시정지됨)"
 		"lv"		" (NOPAUZĒTS)"
 	}
+	// Суффиксы состояния для нижней панели (centre-канал) — те же, что выше, но БЕЗ скобок:
+	// минимал-таймер показывает «MM:SS.CC СТОП» текстом.
+	"HUD - Bottom Stopped Text"
+	{
+		// STOPPED
+		"en"		" STOPPED"
+		"chi"		" 停止"
+		"pl"		" ZATRZYMANY"
+		"ru"		" СТОП"
+		"fi"		" PYSÄYTETTY"
+		"sv"		" STOPPAD"
+		"ua"		" ЗУПИНЕНО"
+		"tr"		" DURDURULDU"
+		"it"		" FERMO"
+		"es"		" DETENIDO"
+		"de"		" GESTOPPT"
+		"ko"		" 중지됨"
+		"lv"		" APTURĒTS"
+	}
+	"HUD - Bottom Paused Text"
+	{
+		// PAUSED
+		"en"		" PAUSED"
+		"chi"		" 暂停"
+		"pl"		" WSTRZYMANY"
+		"ru"		" НА ПАУЗЕ"
+		"fi"		" KESKEYTETTY"
+		"sv"		" PAUSAD"
+		"ua"		" НА ПАУЗІ"
+		"tr"		" DURAKLATILDI"
+		"it"		" PAUSA"
+		"es"		" PAUSADO"
+		"de"		" PAUSIERT"
+		"ko"		" 일시정지됨"
+		"lv"		" NOPAUZĒTS"
+	}
+	// Строка CP/TP нижней панели (канал plain-text, без разметки).
+	"HUD - Bottom CP/TP Text"
+	{
+		// CP 4/4 | TP 12
+		"#format"	"checkpoint_index:d,checkpoint_count:d,teleport_count:d"
+		"en"		"CP {checkpoint_index}/{checkpoint_count} | TP {teleport_count}"
+		"chi"		"存点 {checkpoint_index}/{checkpoint_count} | 传送 {teleport_count}"
+		"ru"		"CP {checkpoint_index}/{checkpoint_count} | TP {teleport_count}"
+		"ua"		"CP {checkpoint_index}/{checkpoint_count} | TP {teleport_count}"
+	}
 	"HUD - Speed Text"
 	{
 		// Speed: 234
@@ -872,6 +918,29 @@
 	{
 		"en"		"Compact panel"
 		"ru"		"Компактная панель"
+	}
+	// Пункт «Таймер: Обновлённый/Минималистичный» (подменю «Обычный HUD») и имена стилей.
+	"HUD - Menu Label TimerStyle"
+	{
+		"#format"	"style:s"
+		"en"		"Timer: {style}"
+		"ru"		"Таймер: {style}"
+		"chi"		"计时器: {style}"
+		"ua"		"Таймер: {style}"
+	}
+	"HUD - Timer Style Updated"
+	{
+		"en"		"Updated"
+		"ru"		"Обновлённый"
+		"chi"		"更新版"
+		"ua"		"Оновлений"
+	}
+	"HUD - Timer Style Minimal"
+	{
+		"en"		"Minimal"
+		"ru"		"Минималистичный"
+		"chi"		"极简"
+		"ua"		"Мінімалістичний"
 	}
 	// Заголовки подменю HUD-меню (пункты-разделы).
 	"HUD - Menu Label Elements"

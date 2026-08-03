@@ -18,6 +18,9 @@ private:
 	bool crouchJumping {};
 	bool showPanel {};
 	bool particlesActive {};
+	// На прошлом тике в centre-канал уходил текст нижней панели (нужен одноразовый клир,
+	// когда слать стало нечего — см. ClearBottomPanel).
+	bool bottomPanelActive {};
 	f64 timerStoppedTime {};
 	f64 currentTimeWhenTimerStopped {};
 
@@ -65,9 +68,26 @@ public:
 	int GetHudType();
 	void SetHudType(int type);
 
+	// Стиль таймера стандартного HTML-худа (персистентный int-pref "hudTimerStyle").
+	// Updated (деф.) — крупное время в строке 1 панели; Minimal — время уезжает в нижнюю
+	// панель (обычный centre-канал), а строка 1 становится мелкой меткой «CKZ · PRO».
+	enum
+	{
+		HUD_TIMER_STYLE_UPDATED = 0,
+		HUD_TIMER_STYLE_MINIMAL = 1,
+	};
+	int GetTimerStyle();
+	void SetTimerStyle(int style);
+
 	static void PrecacheParticles(IEntityResourceManifest *pResourceManifest);
 	// Draw the panel from a player to a specific target.
 	static void DrawPanels(KZPlayer *player, KZPlayer *target);
+
+	// Нижняя панель (обычный centre-канал HUD_PRINTCENTER, не HTML): строка CP/TP (гейт
+	// hudCpTp) и при минимал-стиле строка таймера. Контракт как у DrawPanels: player —
+	// источник ДАННЫХ (наблюдаемый), target — получатель (его настройки/язык). Пустой
+	// buf = слать нечего.
+	static void BuildBottomText(KZPlayer *player, KZPlayer *target, char *buf, i32 size);
 
 	void ResetShowPanel();
 	void TogglePanel();
@@ -171,12 +191,18 @@ private:
 	std::string GetTimerText(const char *language = KZ_DEFAULT_LANGUAGE);
 
 	// Разбор состояния таймера для кибершоковского худа: время (формат до сотых) и суффикс
-	// паузы/стопа раздельно, чтобы красить их разными цветами. outRunning — идёт ли активный
-	// забег (пауза = идёт → true); по нему BuildVersionCHud красит время (зелёное) или обнуляет
-	// в белый 00:00.00 (стоп/idle). Данные — this->player; суффикс-фразы — в языке получателя.
-	// У обычного игрока в простое (idle) возвращает true с нулевым таймером; false — только для
-	// реплей-бота, которому показывать нечего.
+	// паузы/стопа раздельно. outRunning — идёт ли активный забег (пауза = идёт → true); по
+	// нему BuildVersionCHud красит время (зелёное) или обнуляет в белый 00:00.00 (стоп/idle).
+	// Данные — this->player; суффикс-фразы — в языке получателя, БЕЗ скобок («HUD - Bottom
+	// * Text»): единственный потребитель суффикса — нижняя панель (BuildBottomText),
+	// BuildVersionCHud его игнорирует. У обычного игрока в простое (idle) возвращает true с
+	// нулевым таймером; false — только для реплей-бота, которому показывать нечего.
 	bool GetTimerParts(const char *language, std::string &outTime, std::string &outSuffix, bool &outRunning);
+
+	// Одноразово стереть нижнюю панель (пустой токен в centre-канал): сам по себе канал
+	// гасит последний текст лишь через несколько секунд, а остаток CP/TP после смены
+	// типа худа/открытия меню выглядит как зависший худ.
+	void ClearBottomPanel();
 
 	// Единый HTML-center HUD в стиле кибершока: строка 1 — таймер в скобках (зелёный) + стиль,
 	// строка 2 — крупная скорость + престрейф, строка 3 — Stage (только многостейдж), строка 4 —
