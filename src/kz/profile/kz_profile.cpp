@@ -83,6 +83,10 @@ static_function i32 GetRankIndexForPoints(const i32 *thresholds, i32 points)
 #define RATING_REFRESH_PERIOD 120.0f // seconds
 // Грейс после финиша рана: платформа должна успеть принять и посчитать ран.
 #define RATING_RUN_FINISH_DELAY 5.0f // seconds
+// Ретрай после раннего выхода «не сейчас» (нет аутентификации/режима/стили):
+// без сдвига таймера OnPhysicsSimulatePost долбил бы RequestRating каждый тик
+// (реплей-боты не аутентифицированы никогда).
+#define RATING_RETRY_PERIOD 5.0f // seconds
 
 CConVar<bool> kz_profile_rating_badge_enabled("kz_profile_rating_badge_enabled", FCVAR_NONE, "Whether to show competitive rank in scoreboard.", true);
 // Мост режима для GG1 (map chooser): до его релиза команды-приёмника нет,
@@ -122,27 +126,32 @@ void KZProfileService::OnCheckTransmit()
 // ранов), а не cs2kz.org: гейт KZGlobalService::IsAvailable из апстрима снят.
 void KZProfileService::RequestRating()
 {
+	// Бэкофф ставится ДО ранних выходов: любой выход «не сейчас» = ретрай через
+	// RATING_RETRY_PERIOD, успешный путь ниже перепишет на полный период.
+	// GetName() в этих ветках не использовать — он аллоцирует (CUtlString+Trim).
+	this->timeToNextRatingRefresh = g_pKZUtils->GetServerGlobals()->realtime + RATING_RETRY_PERIOD;
 	if (!this->player->IsAuthenticated() || !this->player->IsConnected())
 	{
-		KZ_LOG_DEBUG(LogChannel::Profile, "Player %s not authenticated or not connected, cannot request rating.\n", this->player->GetName());
+		KZ_LOG_DEBUG(LogChannel::Profile, "Slot %d not authenticated or not connected, cannot request rating.\n",
+					 this->player->GetPlayerSlot().Get());
 		return;
 	}
 	const char *apiMode = CybReplayCommon::MapMode(this->player->modeService->GetModeShortName());
 	if (apiMode[0] == '\0')
 	{
-		KZ_LOG_DEBUG(LogChannel::Profile, "Player %s has non-platform mode '%s', cannot request rating.\n", this->player->GetName(),
+		KZ_LOG_DEBUG(LogChannel::Profile, "Slot %d has non-platform mode '%s', cannot request rating.\n", this->player->GetPlayerSlot().Get(),
 					 this->player->modeService->GetModeShortName());
 		return;
 	}
 	u64 steamID64 = this->player->GetSteamId64();
 	if (steamID64 == 0)
 	{
-		KZ_LOG_DEBUG(LogChannel::Profile, "Player %s has invalid SteamID, cannot request rating.\n", this->player->GetName());
+		KZ_LOG_DEBUG(LogChannel::Profile, "Slot %d has invalid SteamID, cannot request rating.\n", this->player->GetPlayerSlot().Get());
 		return;
 	}
 	if (this->player->styleServices.Count() > 0)
 	{
-		KZ_LOG_DEBUG(LogChannel::Profile, "Player %s has styles enabled, skipping rating request.\n", this->player->GetName());
+		KZ_LOG_DEBUG(LogChannel::Profile, "Slot %d has styles enabled, skipping rating request.\n", this->player->GetPlayerSlot().Get());
 		return;
 	}
 	this->timeToNextRatingRefresh = g_pKZUtils->GetServerGlobals()->realtime + RATING_REFRESH_PERIOD + RandomFloat(-30.0f, 30.0f);
@@ -182,10 +191,17 @@ void KZProfileService::RequestRating()
 			return;
 		}
 		std::string body = response.Body().value_or("");
+		// Пустое тело при 200 — аномалия (обрыв/прокси), НЕ «нет очков»: молча
+		// принять его за ноль = fail-open, Master внезапно станет New.
+		if (body.empty())
+		{
+			KZ_LOG_WARN(LogChannel::Profile, "[cyb] rank_fetch_fail steam_id=%llu reason=bad_body\n", steamID64);
+			return;
+		}
 		i32 points = 0;
-		// api отвечает null (пустое тело), если у игрока ещё нет ни одного рана —
-		// это успешно загруженный ноль очков (звание New), а не отказ.
-		if (!body.empty() && body != "null")
+		// api отвечает строкой null, если у игрока ещё нет ни одного рана — это
+		// успешно загруженный ноль очков (звание New), а не отказ.
+		if (body != "null")
 		{
 			Json json(body);
 			f64 pointsF = 0.0;
@@ -263,6 +279,12 @@ void KZProfileService::OnRunFinished()
 void KZProfileService::EmitGG1Bridge()
 {
 	if (!kz_gg1_bridge.Get())
+	{
+		return;
+	}
+	// SwitchToMode зовётся и из KZPlayer::Reset() на дисконнекте — эмит после ухода
+	// игрока копил бы в приёмнике GG1 мёртвые записи на каждый выход.
+	if (!this->player->IsInGame())
 	{
 		return;
 	}

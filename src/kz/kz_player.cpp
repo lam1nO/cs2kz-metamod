@@ -131,6 +131,7 @@ void KZPlayer::Reset()
 	this->telemetryService->Reset();
 	this->recordingService->Reset();
 	this->paintService->Reset();
+	this->profileService->Reset();
 	this->ztopwatchService->Reset();
 	this->savedRunService->Reset();
 

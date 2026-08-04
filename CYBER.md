@@ -119,6 +119,21 @@ cs2kz-linux-builder .`, иначе компилируются старые ис�
   при мёрже апстрима конфликт разрешать в пользу нашей ветки; остальные 8 вариантов
   (pbpro/sr/gpb/spb…) не тронуты. Content-Type в utils/http.cpp теперь уважает
   SetHeader (имя заголовка — строго "Content-Type").
+- **Звания по платформенным NUB-очкам + мост GG1** (`src/kz/profile/*`):
+  upstream-`RequestRating` (cs2kz.org `/players/{id}`, гейт `IsAvailable`) ЗАМЕНЁН
+  целиком на `GET {cybEmitUrl}/v1/kz/ranking/player/{sid64}?mode&category=nub`;
+  `currentRating:f64` → `currentPoints:i32` (-1 = не загружено), `desiredMode` —
+  строка api-режима. Лестница из 23 званий (New→Legend) вместо 10 upstream'овских;
+  пороги per-mode (KZT=CKZ, VNL своя) — **дубль
+  `packages/contracts/src/kz/ranks.ts` монорепо** (истина — бриф rank-constants.md;
+  менять только синхронно с contracts, раскатка версией профиля). Refresh: 120с±30 +
+  ретрай 5с на ранних выходах + финиш рана (`OnRunFinished` из `TimerEnd`) + смена
+  режима. SCMD `kz_rank`/`!rank` (+ в whitelist !help, категория Records), переводы
+  `translations/cs2kz-profile.phrases.txt`. Мост: `EmitGG1Bridge` шлёт серверную
+  команду `cyb_gg1_mode <sid64> <kzt|ckz|vnl>` на OnAuthorized и смене режима
+  (гейт IsInGame; скип, пока приёмник GG1 не зарегистрировал команду; рубильник —
+  cvar `kz_gg1_bridge`). `KZPlayer::Reset()` теперь зовёт `profileService->Reset()`.
+  При мёрже апстрима конфликт в kz_profile.\* разрешать в пользу нашей ветки.
 
 ## Инварианты (не ломать при мёрже апстрима)
 
