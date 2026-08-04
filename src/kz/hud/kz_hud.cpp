@@ -27,8 +27,6 @@ extern ICS2Menus *g_pMenus;
 // Формат времени для худа: mm:ss.cc (сотые), как у кибершока. Отдельно от utils::FormatTime
 // (тысячные) — тот нужен другим местам (чат/сабмишен/реплеи), его формат не трогаем.
 // Часы добавляются при необходимости. time всегда >= 0 (таймер/PB/WR).
-// Вариант от сотых (i32) — для нижней панели: её слепок хранит время уже в сотых
-// (BottomPanelState::timeCs), одна и та же величина и сравнивается, и рендерится.
 static_function void FormatTimeHudCs(i32 rounded, char *output, u32 length)
 {
 	i32 centis = rounded % 100;
@@ -57,6 +55,11 @@ static_function void FormatTimeHud(f64 time, char *output, u32 length)
 // неизменившийся текст изредка переотправляется как есть (без пересборки). Одна секунда —
 // с запасом до угасания и в 128 раз реже, чем слать каждый тик.
 #define KZ_HUD_BOTTOM_HEARTBEAT 1.0f
+
+// Heartbeat HTML-канала минимал-худа: show_survival_respawn_status живёт ровно duration=1s
+// (см. utils::PrintHTMLCentre), heartbeat в 1.0s мигал бы на границе — переотправляем вдвое
+// чаще. Centre-канал минимала живёт общим KZ_HUD_BOTTOM_HEARTBEAT (он гаснет медленнее).
+#define KZ_HUD_MINIMAL_HTML_HEARTBEAT 0.5f
 
 static CConVar<bool> kz_force_mhud("kz_force_mhud", FCVAR_NONE, "Force the particle-based MHUD even when MultiAddonManager is not available.", false);
 
@@ -134,26 +137,30 @@ void KZHUDService::Reset()
 	this->fromDuckbug = false;
 	this->crouchJumping = false;
 	this->particlesActive = false;
-	// Слот реально освобождается (дисконнект) — только здесь гасим bottomPanelActive:
-	// ClearBottomPanel() для НОВОГО игрока в этот слот не должен считать себя обязанным
-	// клиру канала, которым никогда не владел.
+	// Слот реально освобождается (дисконнект) — только здесь гасим *Active-флаги:
+	// ClearBottomPanel()/ClearMinimalHud() для НОВОГО игрока в этот слот не должны считать
+	// себя обязанными клиру каналов, которыми никогда не владели.
 	this->bottomPanelActive = false;
-	// Кэш нижней панели (слепок/текст/heartbeat/CP-TP-строка).
+	this->minimalCentreActive = false;
+	// Кэши отправки нижней панели и минимал-худа (слепки/тексты/heartbeat).
 	this->ResetBottomPanelCache();
 	this->DestroyAllParticles();
 }
 
-// Сброс кэша нижней панели БЕЗ bottomPanelActive: раунд-старт (OnRoundStart, в т.ч.
-// посреди карты — например кик реплей-бота) не освобождает канал получателя, поэтому
-// не должен подавлять следующий клир-кадр (ClearBottomPanel полагается на этот флаг,
-// чтобы не слать лишний #SFUI_EmptyString). bottomPanelActive гасится только в Reset(),
-// где слот реально освобождён (дисконнект).
+// Сброс кэшей отправки нижней панели и минимал-худа БЕЗ *Active-флагов: раунд-старт
+// (OnRoundStart, в т.ч. посреди карты — например кик реплей-бота) не освобождает каналы
+// получателя, поэтому не должен подавлять следующий клир-кадр (ClearBottomPanel/
+// ClearMinimalHud полагаются на флаги, чтобы не слать лишний #SFUI_EmptyString).
+// Флаги гасятся только в Reset(), где слот реально освобождён (дисконнект).
 void KZHUDService::ResetBottomPanelCache()
 {
 	this->bottomStateValid = false;
 	this->lastBottomText[0] = '\0';
 	this->lastBottomSendTime = 0.0;
-	this->bottomCpTpValid = false;
+	this->lastMinimalCentreText[0] = '\0';
+	this->lastMinimalCentreSendTime = 0.0;
+	this->lastMinimalHtmlText[0] = '\0';
+	this->lastMinimalHtmlSendTime = 0.0;
 }
 
 // Раунд-старт (в т.ч. первый на новой карте — mp_restartgame из OnActivateServer). Главное —
@@ -216,9 +223,22 @@ std::string KZHUDService::GetSpeedText(const char *language, KZPlayer *dataSourc
 	V_snprintf(colorBuf, sizeof(colorBuf), "<font color='#%02x%02x%02x'>", tintCol.r(), tintCol.g(), tintCol.b());
 	char cjBuf[24];
 	V_snprintf(cjBuf, sizeof(cjBuf), "<font color='#%02x%02x%02x'>", cjCol.r(), cjCol.g(), cjCol.b());
-	std::string crouchJumpingText = src->hudService->crouchJumping ? std::string(" ") + cjBuf + "C</font>" : "";
+	// JB против C: строгая классификация jumpbug'а — тип последнего прыжка (jumps.Tail() —
+	// текущий, если ещё в воздухе; Jump::End() на приземлении может дотюнить тип, поэтому
+	// перечитываем, пока индикатор виден) — та же ветка, что в BuildVersionCHud. JB
+	// приоритетнее приписки C; без раскраски — просто буквы.
+	bool isJumpbug = src->jumpstatsService->jumps.Count() > 0 && src->jumpstatsService->jumps.Tail().GetJumpType() == JumpType_Jumpbug;
+	std::string suffixText;
+	if (isJumpbug)
+	{
+		suffixText = " JB";
+	}
+	else if (src->hudService->crouchJumping)
+	{
+		suffixText = std::string(" ") + cjBuf + "C</font>";
+	}
 	return KZLanguageService::PrepareMessageWithLang(language, "HUD - Speed Text (Takeoff)", velocity.Length2D(), colorBuf,
-													 src->takeoffVelocity.Length2D(), crouchJumpingText.c_str());
+													 src->takeoffVelocity.Length2D(), suffixText.c_str());
 }
 
 std::string KZHUDService::GetKeyText(const char *language)
@@ -298,9 +318,9 @@ std::string KZHUDService::GetTimerText(const char *language)
 	return std::string("");
 }
 
-// Числовое ядро состояния таймера: время/флаги БЕЗ строк и аллокаций — общий источник для
-// верхней строки (GetTimerParts) и слепка нижней панели (ComputeBottomState). Логика как в
-// GetTimerText (реплей-бот / обычный забег / grace после стопа); данные — this->player.
+// Числовое ядро состояния таймера: время/флаги БЕЗ строк и аллокаций — источник для
+// строки таймера кибершоковского худа (GetTimerParts). Логика как в GetTimerText
+// (реплей-бот / обычный забег / grace после стопа); данные — this->player.
 // outIdleZero — обычный игрок в простое: нулевой таймер, суффиксы стопа/паузы не показываются.
 // false — только реплей-бот, которому показывать нечего.
 bool KZHUDService::GetTimerNumbers(f64 &outTime, bool &outRunning, bool &outPaused, bool &outIdleZero)
@@ -336,12 +356,11 @@ bool KZHUDService::GetTimerNumbers(f64 &outTime, bool &outRunning, bool &outPaus
 	return true;
 }
 
-// Разбор состояния таймера для кибершоковского худа: время (сотые) и суффикс паузы/стопа
-// раздельно. outRunning — идёт ли активный забег (пауза = идёт → true); цвет/обнуление
-// времени по нему решает BuildVersionCHud. Суффикс-фразы — в языке получателя, БЕЗ скобок
-// («HUD - Bottom * Text»): единственный потребитель суффикса — нижняя панель (FormatBottomText
-// делает то же из слепка), верхняя панель его игнорирует.
-bool KZHUDService::GetTimerParts(const char *language, std::string &outTime, std::string &outSuffix, bool &outRunning)
+// Разбор состояния таймера для кибершоковского худа: время в формате до сотых.
+// outRunning — идёт ли активный забег (пауза = идёт → true); цвет/обнуление времени по
+// нему решает BuildVersionCHud (состояние стоп/пауза читается по цвету, текстового
+// суффикса у худа нет).
+bool KZHUDService::GetTimerParts(std::string &outTime, bool &outRunning)
 {
 	f64 time;
 	bool paused, idleZero;
@@ -352,18 +371,6 @@ bool KZHUDService::GetTimerParts(const char *language, std::string &outTime, std
 	char timeText[64];
 	FormatTimeHud(time, timeText, sizeof(timeText));
 	outTime = timeText;
-	outSuffix.clear();
-	if (!idleZero)
-	{
-		if (!outRunning)
-		{
-			outSuffix += KZLanguageService::PrepareMessageWithLang(language, "HUD - Bottom Stopped Text");
-		}
-		if (paused)
-		{
-			outSuffix += KZLanguageService::PrepareMessageWithLang(language, "HUD - Bottom Paused Text");
-		}
-	}
 	return true;
 }
 
@@ -402,7 +409,7 @@ bool KZHUDService::GetTimerParts(const char *language, std::string &outTime, std
 // Метка режима наблюдаемого ЗАГЛАВНЫМИ (CKZ/KZT/VNL): короткое имя через
 // CybReplayCommon::MapMode (тот же маппинг/вайтлист, что у PB/WR-фетча в kz_timer.cpp).
 // Пустая строка = кастомный режим сверх этих трёх (метку не показываем) или нет modeService.
-// Общий для обеих веток строки 1 (минимал/обновлённая); реплей-бот отсеивается вызывающим.
+// Используется строкой 1 кибершоковского худа; реплей-бот отсеивается вызывающим.
 static_function void GetModeTagUpper(KZPlayer *dataSource, char *out, i32 size)
 {
 	out[0] = '\0';
@@ -450,9 +457,6 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 	bool showSpeed = compact ? true : (masterMode ? (this->IsMHUDSpeedEnabled() && !suppressSpeed) : !suppressSpeed);
 	bool showKeys = compact ? false : (masterMode ? (this->IsMHUDKeysEnabled() && !suppressKeys) : !suppressKeys);
 	bool showExtra = !compact;
-	// Минимал-стиль таймера получателя: время уезжает в нижнюю панель, строка 1 —
-	// мелкая метка «CKZ · PRO»; скобки престрейфа в строке скорости статичны.
-	const bool minimalTimer = this->GetTimerStyle() == HUD_TIMER_STYLE_MINIMAL;
 	// showpos — тумблер получателя (this->player), данные наблюдаемого. Считаем заранее: нужен
 	// и для координат, и для решения о зазоре нижней группы (клавиши/CP-TP/showpos).
 	bool showPos = !compact && this->player->optionService->GetPreferenceBool("showPos", false);
@@ -464,59 +468,14 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 	// Это прогрессивное улучшение — если движок не подхватит класс, размер молча дефолтный,
 	// но цвета и раскладка остаются корректными (класс лишь меняет кегль, не текст/цвет).
 
-	// --- Строка 1 (минимал-стиль): CKZ · PRO|NUB|PRAC (+ имя стиля, если активен
-	//        не-дефолтный) — одна мелкая muted-строка (кегль MINOR, цвет MUTED). Время в этом
-	//        стиле рисует нижняя панель (UpdateBottomPanel), поэтому крупного таймера тут нет.
-	//        Источники и гейты частей — те же, что в обновлённой строке 1 ниже: режим через
-	//        CybReplayCommon::MapMode (пустой = кастомный → не показываем), категория только в
-	//        активном забеге/prac, стиль только при активном (Normal = отсутствие стилей).
-	//        Реплей-боту строка не рисуется вовсе (ни режима, ни категории). ---
-	if (showTimer && minimalTimer)
+	// --- Строка 1: 00:07.96 CKZ Стиль — время: зелёное когда идёт/пауза, белое 00:00.00
+	//        когда стоп/idle; рядом метка режима и метка стиля MUTED (s, только активный
+	//        не-деф. стиль). Скобок вокруг времени нет (убраны 25.07). ---
+	if (showTimer)
 	{
-		std::string parts;
-		auto addPart = [&parts](const char *text)
-		{
-			if (!parts.empty())
-			{
-				parts += "&#160;·&#160;";
-			}
-			parts += text;
-		};
-		if (!isReplay)
-		{
-			char up[8];
-			GetModeTagUpper(dataSource, up, sizeof(up));
-			if (up[0])
-			{
-				addPart(up);
-			}
-		}
-		// PRAC приоритетнее PRO/NUB (в prac таймера нет вообще); PRO/NUB — критерий
-		// Pro/Standard-типа времени (GetTeleportCount() == 0 → PRO). Гейт «идёт забег или
-		// prac» — как у proNubTag в обновлённой ветке (grace после стопа категорию не держит).
-		const bool inPrac = dataSource->pracService && dataSource->pracService->IsInPrac();
-		if ((dataSource->timerService->GetTimerRunning() || inPrac) && !isReplay && dataSource->checkpointService)
-		{
-			addPart(inPrac ? "PRAC" : (dataSource->checkpointService->GetTeleportCount() == 0 ? "PRO" : "NUB"));
-		}
-		if (!isReplay && dataSource->styleServices.Count() > 0)
-		{
-			addPart(dataSource->styleServices[0]->GetStyleName());
-		}
-		if (!parts.empty())
-		{
-			V_snprintf(buf, sizeof(buf), "<font class='" KZ_HUD_FS_MINOR "'><font color='" KZ_HUD_C_MUTED "'>%s</font></font>", parts.c_str());
-			addLine(buf);
-		}
-	}
-	// --- Строка 1 (обновлённый стиль): 00:07.96 CKZ Стиль — время: зелёное когда идёт/пауза,
-	//        белое 00:00.00 когда стоп/idle; суффикс паузы/стопа DIM, рядом метка стиля MUTED
-	//        (s, только активный не-деф. стиль). Скобок вокруг времени нет (убраны 25.07). ---
-	else if (showTimer)
-	{
-		std::string tTime, tSuffix;
+		std::string tTime;
 		bool tRunning = false;
-		if (dataSource->hudService->GetTimerParts(language, tTime, tSuffix, tRunning))
+		if (dataSource->hudService->GetTimerParts(tTime, tRunning))
 		{
 			// Идёт забег или пауза (tRunning) → зелёный + фактическое время. Стоп/idle обычного
 			// игрока → белый + 00:00.00. Реплей-бот не трогаем (свой финальный тайм остаётся).
@@ -632,8 +591,7 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 			}
 			// Суффикс состояния «(СТОП)»/«(НА ПАУЗЕ)» УБРАН из худа целиком (ломал перенос строки).
 			// Состояние читается по цвету времени: идёт → зелёное фактическое время,
-			// не идёт → белое 00:00.00 (см. timerColor/notRunning выше). tSuffix из GetTimerParts
-			// больше не используется (сам метод его по-прежнему может отдавать — здесь игнорируем).
+			// не идёт → белое 00:00.00 (см. timerColor/notRunning выше).
 			// Порядок как на кибершоке: (паддинг) → PRO/NUB/PRAC → время → режим → стиль-если-есть.
 			// Квадратные скобки вокруг времени убраны (решение пользователя 25.07) — время
 			// само по себе читается, скобки только шумели. Симметричные nbsp внутри них ушли
@@ -690,12 +648,6 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 			{
 				takeoff += "&#160;<font class='" KZ_HUD_FS_SECONDARY "'><font color='" KZ_HUD_C_CJ "'>C</font></font>";
 			}
-		}
-		else if (minimalTimer)
-		{
-			// Минимал: скобки статичны — на земле вместо престрейфа dim-плейсхолдер «( — )»,
-			// чтобы число скорости не прыгало при каждом отрыве (решение E1).
-			takeoff = "&#160;<font class='" KZ_HUD_FS_SECONDARY "'><font color='" KZ_HUD_C_DIM "'>(&#160;—&#160;)</font></font>";
 		}
 		V_snprintf(buf, sizeof(buf), "<font class='" KZ_HUD_FS_SPEED "'><font color='" KZ_HUD_C_CYAN "'>%d</font></font>%s", speed, takeoff.c_str());
 		addLine(buf);
@@ -871,8 +823,8 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 // Нижняя панель — обычный centre-канал (HUD_PRINTCENTER, ClientPrintFilter), НЕ HTML-канал
 // show_survival_respawn_status: движок рисует его ниже центра экрана, что и даёт «низ» худа.
 // Содержимое: строка CP/TP (гейт hudCpTp получателя, данные наблюдаемого, у реплей-бота —
-// из реплей-системы, как апстримный GetCheckpointText) и при минимал-стиле таймера строка
-// времени с текстовым суффиксом паузы/стопа без скобок.
+// из реплей-системы, как апстримный GetCheckpointText). Только обновлённый стиль: в
+// минимале нижней панели нет (CP/TP там рисует апстрим-композиция, см. UpdateMinimalHud).
 //
 // Слепок состояния (без строк/аллокаций — тактовый путь). player — данные (наблюдаемый),
 // target — настройки (получатель).
@@ -891,96 +843,19 @@ void KZHUDService::ComputeBottomState(KZPlayer *player, KZPlayer *target, Bottom
 		out.cpCount = isReplay ? KZ::replaysystem::GetCheckpointCount() : player->checkpointService->GetCheckpointCount();
 		out.tp = isReplay ? KZ::replaysystem::GetTeleportCount() : (i32)player->checkpointService->GetTeleportCount();
 	}
-
-	// Минимал-таймер: время внизу (строка 1 HTML-панели в этом стиле — метка режима).
-	// Гейт — тот же per-element тумблер hudTimer, что и у таймера верхней панели; компакт,
-	// как и наверху, тумблер перекрывает (иначе компакт+минимал+hudTimer=off оставались бы
-	// вовсе без времени: верх его не рисует по стилю, низ — по тумблеру).
-	if (cfg->GetTimerStyle() == HUD_TIMER_STYLE_MINIMAL && (cfg->IsCompactPanel() || cfg->IsMHUDTimerEnabled()))
-	{
-		const bool inPrac = !isReplay && player->pracService && player->pracService->IsInPrac();
-		if (inPrac)
-		{
-			// В prac настоящий таймер стоит by design — показываем prac-часы, как строка 1
-			// обновлённого стиля (иначе минимал в prac навсегда показывал бы 00:00.00);
-			// часы стоят (нет действующей попытки) → плейсхолдер той же ширины, идиом «--».
-			out.showTime = true;
-			if (player->pracService->IsPracTimeRunning())
-			{
-				out.timeCs = RoundFloatToInt(player->pracService->GetPracTime() * 100);
-			}
-			else
-			{
-				out.timePlaceholder = true;
-			}
-		}
-		else
-		{
-			f64 time;
-			bool running, paused, idleZero;
-			// false — только у реплей-бота без времени: строки времени нет вовсе.
-			if (player->hudService->GetTimerNumbers(time, running, paused, idleZero))
-			{
-				out.showTime = true;
-				out.timeCs = RoundFloatToInt(time * 100); // то же округление, что в FormatTimeHud
-				if (!idleZero)
-				{
-					out.stopped = !running;
-					out.paused = paused;
-				}
-			}
-		}
-	}
 }
 
 // Текст нижней панели — функция слепка (включая язык): рендерит ровно то, что сравнивает
 // ComputeBottomState — текст и слепок не могут разъехаться. Зовётся только на изменении
-// слепка, но при идущем minimal-таймере слепок меняется КАЖДЫЙ тик (сотые), поэтому горячий
-// путь — без аллокаций: CP/TP-строка (единственная тянущая PrepareMessageWithLang → tfm)
-// берётся из кэша по своим входам, время — стековый FormatTimeHudCs, склейка — V_strcat.
-// Суффиксы стопа/паузы аллоцируют, но достижимы только на смене состояния: у идущего
-// времени их нет, у стоящего/паузы слепок стабилен и пересборка не выполняется.
-// Разметки нет — канал plain-text, перенос строки — '\n'.
+// слепка, т.е. на смене CP/TP/языка — аллокация PrepareMessageWithLang редкая и не
+// тактовая. Разметки нет — канал plain-text.
 void KZHUDService::FormatBottomText(const BottomPanelState &state, char *buf, i32 size)
 {
 	buf[0] = '\0';
 	if (state.showCpTp)
 	{
-		if (!this->bottomCpTpValid || !state.SameCpTpInputs(this->bottomCpTpKey))
-		{
-			std::string line = KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Bottom CP/TP Text", state.cp, state.cpCount, state.tp);
-			V_strncpy(this->bottomCpTpLine, line.c_str(), sizeof(this->bottomCpTpLine));
-			this->bottomCpTpKey = state;
-			this->bottomCpTpValid = true;
-		}
-		V_strncpy(buf, this->bottomCpTpLine, size);
-	}
-	if (state.showTime)
-	{
-		char timeLine[160];
-		if (state.timePlaceholder)
-		{
-			V_strncpy(timeLine, "--:--.--", sizeof(timeLine));
-		}
-		else
-		{
-			FormatTimeHudCs(state.timeCs, timeLine, sizeof(timeLine));
-		}
-		if (state.stopped)
-		{
-			std::string suffix = KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Bottom Stopped Text");
-			V_strcat(timeLine, suffix.c_str(), sizeof(timeLine));
-		}
-		if (state.paused)
-		{
-			std::string suffix = KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Bottom Paused Text");
-			V_strcat(timeLine, suffix.c_str(), sizeof(timeLine));
-		}
-		if (buf[0])
-		{
-			V_strcat(buf, "\n", size);
-		}
-		V_strcat(buf, timeLine, size);
+		std::string line = KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Bottom CP/TP Text", state.cp, state.cpCount, state.tp);
+		V_strncpy(buf, line.c_str(), size);
 	}
 }
 
@@ -988,17 +863,13 @@ void KZHUDService::FormatBottomText(const BottomPanelState &state, char *buf, i3
 // изменении (пересборка текста — тоже только тут) либо heartbeat'ом раз в
 // KZ_HUD_BOTTOM_HEARTBEAT — centre-канал надёжный (BUF_RELIABLE), слать 128/с каждому
 // получателю расточительно, а неизменившийся текст переотправляется как есть без пересборки.
-// Честно про minimal: при ИДУЩЕМ minimal-таймере слепок меняется каждый тик (сотые) —
-// текст пересобирается и шлётся каждый тик; пересборка при этом без аллокаций
-// (см. FormatBottomText), а отправка — неизбежная цена стиля у самих minimal-игроков.
 void KZHUDService::UpdateBottomPanel(KZPlayer *dataSource)
 {
 	BottomPanelState state;
 	ComputeBottomState(dataSource, this->player, state);
 	if (!state.HasContent())
 	{
-		// Слать нечего (hudCpTp выкл и таймер updated, либо реплей-бот без времени):
-		// одноразовый клир стирает остаток, дальше — no-op.
+		// Слать нечего (hudCpTp выкл): одноразовый клир стирает остаток, дальше — no-op.
 		this->ClearBottomPanel();
 		return;
 	}
@@ -1041,6 +912,117 @@ void KZHUDService::ClearBottomPanel()
 	this->player->PrintCentre(false, false, "#SFUI_EmptyString");
 }
 
+// Тик минимал-худа получателя (this): апстрим-композиция cs2kz на живых строителях —
+// centre-канал (HUD_PRINTCENTER) = CP/TP + таймер («HUD - Center Text»), HTML-канал
+// (show_survival_respawn_status) = скорость + клавиши («HUD - HTML Center Text»);
+// компакт-режим апстрима — только html (таймер<br>скорость), centre пуст. dataSource —
+// наблюдаемый (данные), настройки/язык/цвета — this (получатель): Get*Text зовутся на
+// hudService наблюдаемого (их данные — this->player), GetSpeedText — на получателе с
+// dataSource (его цветовые префы — часть настроек), тот же контракт, что у BuildVersionCHud.
+// Композиция фиксированная, как в апстриме: per-element тумблеры (hudSpeed и др.) здесь
+// не применяются — particle-подавления нет, т.к. на particle-пути минимал не рисуется вовсе.
+// Отправка per-канал дедуплицируется слепком последнего отправленного текста + heartbeat
+// (в движении текст меняется почти каждый тик — шлётся каждый тик, это цена стиля; в
+// простое стабилен). Слепок мог обрезаться своим буфером — тогда сравнение никогда не
+// совпадает и текст шлётся каждый тик: корректно, просто без экономии.
+void KZHUDService::UpdateMinimalHud(KZPlayer *dataSource)
+{
+	const char *language = this->player->languageService->GetLanguage();
+	std::string centreText;
+	std::string htmlText;
+	if (this->IsCompactPanel())
+	{
+		std::string timerText = dataSource->hudService->GetTimerText(language);
+		std::string speedText = this->GetSpeedText(language, dataSource);
+		if (!timerText.empty() && !speedText.empty())
+		{
+			htmlText = timerText + "<br>" + speedText;
+		}
+		else
+		{
+			htmlText = timerText + speedText;
+		}
+	}
+	else
+	{
+		std::string keyText = dataSource->hudService->GetKeyText(language);
+		std::string checkpointText = dataSource->hudService->GetCheckpointText(language);
+		std::string timerText = dataSource->hudService->GetTimerText(language);
+		std::string speedText = this->GetSpeedText(language, dataSource);
+		// clang-format off
+		centreText = KZLanguageService::PrepareMessageWithLang(language, "HUD - Center Text",
+			keyText.c_str(), checkpointText.c_str(), timerText.c_str(), speedText.c_str());
+		htmlText = KZLanguageService::PrepareMessageWithLang(language, "HUD - HTML Center Text",
+			keyText.c_str(), checkpointText.c_str(), timerText.c_str(), speedText.c_str());
+		// clang-format on
+	}
+	// Хвостовые \n срезаются, как в апстриме (пустой таймер в idle оставляет висячий перенос).
+	centreText = centreText.substr(0, centreText.find_last_not_of('\n') + 1);
+	htmlText = htmlText.substr(0, htmlText.find_last_not_of('\n') + 1);
+
+	f64 now = g_pKZUtils->GetServerGlobals()->curtime;
+
+	if (centreText.empty())
+	{
+		// Компакт: centre минимал не занимает — одноразовый клир остатка полной раскладки.
+		if (this->minimalCentreActive)
+		{
+			this->minimalCentreActive = false;
+			this->lastMinimalCentreText[0] = '\0';
+			this->player->PrintCentre(false, false, "#SFUI_EmptyString");
+		}
+	}
+	else
+	{
+		const bool changed = V_strcmp(this->lastMinimalCentreText, centreText.c_str()) != 0;
+		// now < lastSendTime = curtime пошёл заново (кэш пережил смену карты — подстраховка
+		// к сбросу в OnRoundStart): считаем heartbeat истёкшим. Тот же приём в html ниже.
+		const bool heartbeatDue = now < this->lastMinimalCentreSendTime || now - this->lastMinimalCentreSendTime >= KZ_HUD_BOTTOM_HEARTBEAT;
+		if (changed || heartbeatDue)
+		{
+			V_strncpy(this->lastMinimalCentreText, centreText.c_str(), sizeof(this->lastMinimalCentreText));
+			this->player->PrintCentre(false, false, "%s", centreText.c_str());
+			this->lastMinimalCentreSendTime = now;
+			this->minimalCentreActive = true;
+		}
+	}
+
+	if (htmlText.empty())
+	{
+		// Нечего слать (реплей-бот без времени в компакте): канал сам гаснет за duration=1s.
+		this->lastMinimalHtmlText[0] = '\0';
+	}
+	else
+	{
+		const bool changed = V_strcmp(this->lastMinimalHtmlText, htmlText.c_str()) != 0;
+		const bool heartbeatDue = now < this->lastMinimalHtmlSendTime || now - this->lastMinimalHtmlSendTime >= KZ_HUD_MINIMAL_HTML_HEARTBEAT;
+		if (changed || heartbeatDue)
+		{
+			V_strncpy(this->lastMinimalHtmlText, htmlText.c_str(), sizeof(this->lastMinimalHtmlText));
+			this->player->PrintHTMLCentre(false, false, "%s", htmlText.c_str());
+			this->lastMinimalHtmlSendTime = now;
+		}
+	}
+}
+
+// Одноразовый клир минимал-худа при уходе из него (стиль Updated, particle-путь, тип Off,
+// открытое меню, смерть без спектейта): centre гасится пустым токеном — сам бы висел ещё
+// несколько секунд; html не трогаем — его либо тут же перерисовывает новый владелец
+// (обновлённый худ/меню), либо он сам гаснет за duration=1s (см. utils::PrintHTMLCentre).
+// Зовётся каждый тик на не-минимальных путях (no-op без minimalCentreActive).
+void KZHUDService::ClearMinimalHud()
+{
+	// Инвалидация кэша всегда: после клира следующий текст обязан отправиться.
+	this->lastMinimalCentreText[0] = '\0';
+	this->lastMinimalHtmlText[0] = '\0';
+	if (!this->minimalCentreActive)
+	{
+		return;
+	}
+	this->minimalCentreActive = false;
+	this->player->PrintCentre(false, false, "#SFUI_EmptyString");
+}
+
 void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 {
 	KZHUDService *cfg = target->hudService;
@@ -1075,23 +1057,25 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	}
 
 	// Тип Off — единственный рычаг «выключить худ целиком»: не рисуем ни particle (уже
-	// погашены выше), ни HTML-панель, ни нижнюю панель (клир остатков — одноразовый).
+	// погашены выше), ни HTML-панель, ни нижнюю панель, ни минимал (клир остатков —
+	// одноразовый).
 	if (cfg->GetHudType() == HUD_TYPE_OFF)
 	{
 		cfg->ClearBottomPanel();
+		cfg->ClearMinimalHud();
 		return;
 	}
 
 	// Yield the center channel while a cs2menus HTML menu is open.
-	// Нижняя панель уступает канал вместе с HTML-панелью: пока открыто меню, худ не шумит.
+	// Нижняя панель и минимал уступают каналы вместе с HTML-панелью: пока открыто меню,
+	// худ не шумит.
 	if (g_pMenus && g_pMenus->GetActiveMenuType(target->GetPlayerSlot().Get()) == MenuType::Html)
 	{
 		cfg->ClearBottomPanel();
+		cfg->ClearMinimalHud();
 		return;
 	}
 	const char *language = target->languageService->GetLanguage();
-
-	std::string htmlText;
 
 	// HTML fallback: Standard type is selected, OR no addons are available at all
 	// (no MultiAddonManager/assets), OR the particle path isn't active for some other
@@ -1099,6 +1083,23 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	// above). needHtml and useParticles must stay mutually exclusive, otherwise the
 	// recipient ends up with no HUD at all. (Off уже отсеян ранним return выше.)
 	bool needHtml = !available || cfg->GetHudType() == HUD_TYPE_STANDARD || !useParticles;
+
+	// --- Минималистичный стиль: весь худ = апстрим-композиция cs2kz (см. UpdateMinimalHud).
+	//        Кибершоковская HTML-панель и нижняя панель не рисуются вовсе; их остаток при
+	//        переключении стиля стирает одноразовый ClearBottomPanel (centre-канал переходит
+	//        к минималу), html просто перерисовывается новым текстом. ---
+	if (needHtml && cfg->GetTimerStyle() == HUD_TIMER_STYLE_MINIMAL)
+	{
+		cfg->ClearBottomPanel();
+		cfg->UpdateMinimalHud(player);
+		return;
+	}
+	// Уход из минимала (стиль Updated / оживший particle-путь): одноразовый клир его
+	// centre-канала; no-op, пока минимал не был активен.
+	cfg->ClearMinimalHud();
+
+	std::string htmlText;
+
 	if (needHtml)
 	{
 		// Единый HTML-путь: BuildVersionCHud сам уважает компакт-режим (только строки 1-2,
@@ -1116,7 +1117,7 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 		target->PrintHTMLCentre(false, false, htmlText.c_str());
 	}
 
-	// --- Нижняя панель (обычный centre-канал): CP/TP и минимал-таймер. СОПРОВОЖДАЕТ
+	// --- Нижняя панель (обычный centre-канал): строка CP/TP. СОПРОВОЖДАЕТ
 	//        HTML-панель (needHtml): CP/TP в particle-MHUD не существует (UpdateParticles —
 	//        только Speed/Timer/Keys), преф hudCpTp всегда был про HTML-путь — поэтому и
 	//        спектатор (всегда HTML), и мёртвый, и получатель с типом MHUD на HTML-фолбэке

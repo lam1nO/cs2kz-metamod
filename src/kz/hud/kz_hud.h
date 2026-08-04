@@ -24,18 +24,14 @@ private:
 	f64 timerStoppedTime {};
 	f64 currentTimeWhenTimerStopped {};
 
-	// Числовой слепок содержимого нижней панели — ключ кэша отправки: пока слепок не меняется,
-	// текст не пересобирается (PrepareMessageWithLang/tfm аллоцируют — не для тактового пути)
-	// и не шлётся (centre-канал — надёжный usermessage, слать 128/с расточительно). Сравнение
-	// пополево (memcmp нельзя — паддинг).
+	// Числовой слепок содержимого нижней панели (строка CP/TP) — ключ кэша отправки: пока
+	// слепок не меняется, текст не пересобирается (PrepareMessageWithLang/tfm аллоцируют —
+	// не для тактового пути) и не шлётся (centre-канал — надёжный usermessage, слать 128/с
+	// расточительно). Сравнение пополево (memcmp нельзя — паддинг).
 	struct BottomPanelState
 	{
 		bool showCpTp {};
 		i32 cp {}, cpCount {}, tp {};
-		bool showTime {};
-		bool timePlaceholder {}; // «--:--.--» — prac-часы стоят (нет действующей попытки)
-		i32 timeCs {};           // отображаемое время в сотых (как в FormatTimeHud)
-		bool stopped {}, paused {};
 		// Язык получателя — ЧАСТЬ слепка: kz_language меняет язык НА МЕСТЕ, без реконнекта
 		// (reconnect — только при смене языкового аддона, и есть явная ветка отказа от него
 		// при чекпоинтах/таймере) — без языка в слепке heartbeat бессрочно гнал бы
@@ -44,20 +40,12 @@ private:
 
 		bool HasContent() const
 		{
-			return showCpTp || showTime;
-		}
-
-		// Входы кэша готовой CP/TP-строки (bottomCpTpLine): только её слагаемые.
-		bool SameCpTpInputs(const BottomPanelState &o) const
-		{
-			return cp == o.cp && cpCount == o.cpCount && tp == o.tp && V_strcmp(lang, o.lang) == 0;
+			return showCpTp;
 		}
 
 		bool operator==(const BottomPanelState &o) const
 		{
-			return showCpTp == o.showCpTp && cp == o.cp && cpCount == o.cpCount && tp == o.tp && showTime == o.showTime
-				   && timePlaceholder == o.timePlaceholder && timeCs == o.timeCs && stopped == o.stopped && paused == o.paused
-				   && V_strcmp(lang, o.lang) == 0;
+			return showCpTp == o.showCpTp && cp == o.cp && cpCount == o.cpCount && tp == o.tp && V_strcmp(lang, o.lang) == 0;
 		}
 	};
 
@@ -69,12 +57,16 @@ private:
 	char lastBottomText[256] {};
 	f64 lastBottomSendTime {};
 
-	// Кэш готовой CP/TP-строки (по входам SameCpTpInputs): при идущем minimal-таймере слепок
-	// меняется каждый тик из-за timeCs, и без этого кэша единственная аллоцирующая часть
-	// текста (PrepareMessageWithLang → tfm) собиралась бы ~100/с на получателя.
-	char bottomCpTpLine[96] {};
-	BottomPanelState bottomCpTpKey {};
-	bool bottomCpTpValid {};
+	// Кэш отправки минимал-худа (this = получатель): последний отправленный текст и время
+	// отправки per-канал (centre / html). В движении текст меняется почти каждый тик
+	// (время/скорость), в простое стабилен — тогда каналы живут heartbeat'ом (см.
+	// UpdateMinimalHud). minimalCentreActive — на прошлом тике в centre уходил текст
+	// минимала (нужен одноразовый клир при уходе из стиля, см. ClearMinimalHud).
+	bool minimalCentreActive {};
+	char lastMinimalCentreText[192] {};
+	f64 lastMinimalCentreSendTime {};
+	char lastMinimalHtmlText[512] {};
+	f64 lastMinimalHtmlSendTime {};
 
 	// Источник ДАННЫХ для MHUD (скорость/клавиши/таймер/CP-TP); nullptr → сам игрок.
 	// ПОСЛЕ cyb.36 particle-путь идёт ТОЛЬКО живому владельцу (player == target в
@@ -125,9 +117,11 @@ public:
 	int GetHudType();
 	void SetHudType(int type);
 
-	// Стиль таймера стандартного HTML-худа (персистентный int-pref "hudTimerStyle").
-	// Updated (деф.) — крупное время в строке 1 панели; Minimal — время уезжает в нижнюю
-	// панель (обычный centre-канал), а строка 1 становится мелкой меткой «CKZ · PRO».
+	// Стиль стандартного HTML-худа целиком (персистентный int-pref "hudTimerStyle" —
+	// имя префа историческое, семантика расширена со «стиля таймера» до всего худа).
+	// Updated (деф.) — кибершоковская панель (BuildVersionCHud + нижняя панель CP/TP);
+	// Minimal — апстрим-композиция cs2kz: centre-канал = CP/TP + таймер, HTML-канал =
+	// скорость + клавиши (см. UpdateMinimalHud).
 	enum
 	{
 		HUD_TIMER_STYLE_UPDATED = 0,
@@ -142,16 +136,31 @@ public:
 	static void DrawPanels(KZPlayer *player, KZPlayer *target);
 
 	// Нижняя панель (обычный centre-канал HUD_PRINTCENTER, не HTML): строка CP/TP (гейт
-	// hudCpTp) и при минимал-стиле строка таймера. this — получатель (его настройки/язык),
-	// dataSource — наблюдаемый (его данные). Слепок состояния считается каждый тик (дёшево,
-	// без аллокаций); текст пересобирается и шлётся только на изменении слепка либо
-	// heartbeat'ом раз в KZ_HUD_BOTTOM_HEARTBEAT (см. BottomPanelState выше).
+	// hudCpTp). Только обновлённый стиль: в минимале CP/TP рисует апстрим-композиция.
+	// this — получатель (его настройки/язык), dataSource — наблюдаемый (его данные).
+	// Слепок состояния считается каждый тик (дёшево, без аллокаций); текст пересобирается
+	// и шлётся только на изменении слепка либо heartbeat'ом раз в KZ_HUD_BOTTOM_HEARTBEAT
+	// (см. BottomPanelState выше).
 	void UpdateBottomPanel(KZPlayer *dataSource);
 
 	// Одноразово стереть нижнюю панель (пустой токен в centre-канал): сам по себе канал
 	// гасит последний текст лишь через несколько секунд, а остаток CP/TP после смены
 	// типа худа/смерти без спектейта/открытия меню выглядит как зависший худ.
 	void ClearBottomPanel();
+
+	// Минималистичный стиль худа целиком — апстрим-композиция cs2kz на живых строителях
+	// Get*Text: centre-канал = CP/TP + таймер («HUD - Center Text»), HTML-канал = скорость
+	// + клавиши («HUD - HTML Center Text»); компакт — только html (таймер<br>скорость).
+	// this — получатель (настройки/язык/цвета), dataSource — наблюдаемый (данные) — тот же
+	// контракт data/settings, что у BuildVersionCHud. Отправка дедуплицируется слепком
+	// последнего отправленного текста per-канал + heartbeat (см. поля кэша выше).
+	void UpdateMinimalHud(KZPlayer *dataSource);
+
+	// Одноразово стереть минимал-худ при уходе из него (смена стиля/типа, particle-путь,
+	// меню, смерть без спектейта): centre гасится пустым токеном (тот же приём, что
+	// ClearBottomPanel), html не трогаем — его либо тут же перерисовывает новый владелец
+	// (обновлённый худ/меню), либо он сам гаснет за duration=1s (utils::PrintHTMLCentre).
+	void ClearMinimalHud();
 
 	void ResetShowPanel();
 	void TogglePanel();
@@ -255,38 +264,35 @@ private:
 	std::string GetTimerText(const char *language = KZ_DEFAULT_LANGUAGE);
 
 	// Числовое ядро состояния таймера (данные — this->player): время/флаги БЕЗ строк и
-	// аллокаций — общий источник для верхней строки (GetTimerParts) и слепка нижней панели
-	// (ComputeBottomState). outIdleZero — обычный игрок в простое: нулевой таймер, суффиксы
-	// стопа/паузы не показываются. false — только реплей-бот, которому показывать нечего.
+	// аллокаций — источник для строки таймера кибершоковского худа (GetTimerParts).
+	// outIdleZero — обычный игрок в простое: нулевой таймер, суффиксы стопа/паузы не
+	// показываются. false — только реплей-бот, которому показывать нечего.
 	bool GetTimerNumbers(f64 &outTime, bool &outRunning, bool &outPaused, bool &outIdleZero);
 
-	// Разбор состояния таймера для кибершоковского худа: время (формат до сотых) и суффикс
-	// паузы/стопа раздельно. outRunning — идёт ли активный забег (пауза = идёт → true); по
-	// нему BuildVersionCHud красит время (зелёное) или обнуляет в белый 00:00.00 (стоп/idle).
-	// Данные — this->player; суффикс-фразы — в языке получателя, БЕЗ скобок («HUD - Bottom
-	// * Text»): единственный потребитель суффикса — нижняя панель (FormatBottomText делает
-	// то же из слепка), BuildVersionCHud его игнорирует. У обычного игрока в простое (idle)
-	// возвращает true с нулевым таймером; false — только для реплей-бота без времени.
-	bool GetTimerParts(const char *language, std::string &outTime, std::string &outSuffix, bool &outRunning);
+	// Разбор состояния таймера для кибершоковского худа: время в формате до сотых.
+	// outRunning — идёт ли активный забег (пауза = идёт → true); по нему BuildVersionCHud
+	// красит время (зелёное) или обнуляет в белый 00:00.00 (стоп/idle). Данные —
+	// this->player. У обычного игрока в простое (idle) возвращает true с нулевым таймером;
+	// false — только для реплей-бота без времени.
+	bool GetTimerParts(std::string &outTime, bool &outRunning);
 
 	// Слепок нижней панели: player — данные (наблюдаемый), target — настройки+язык
 	// (получатель). Дёшево (интовые чтения), зовётся каждый тик из UpdateBottomPanel.
 	static void ComputeBottomState(KZPlayer *player, KZPlayer *target, BottomPanelState &out);
 
 	// Текст нижней панели — функция слепка (включая язык: текст и слепок обязаны совпадать
-	// по построению). Зовётся только на изменении слепка; при идущем minimal-таймере это
-	// каждый тик, поэтому горячий путь без аллокаций (CP/TP-строка из кэша bottomCpTpLine,
-	// время — стек). Канал plain-text: разметки нет, перенос строки — '\n'.
+	// по построению). Зовётся только на изменении слепка — аллокации PrepareMessageWithLang
+	// только на смене CP/TP/языка. Канал plain-text: разметки нет.
 	void FormatBottomText(const BottomPanelState &state, char *buf, i32 size);
 
-	// Сброс кэша нижней панели БЕЗ bottomPanelActive (см. kz_hud.cpp): используется на
-	// OnRoundStart, в т.ч. посреди карты (например, кик реплей-бота) — погасить флаг здесь
-	// подавило бы следующий клир-кадр ClearBottomPanel. bottomPanelActive гасится только в
-	// Reset() (дисконнект, слот реально освобождён).
+	// Сброс кэшей отправки нижней панели и минимал-худа БЕЗ *Active-флагов (см. kz_hud.cpp):
+	// используется на OnRoundStart, в т.ч. посреди карты (например, кик реплей-бота) —
+	// погасить флаги здесь подавило бы следующий клир-кадр ClearBottomPanel/ClearMinimalHud.
+	// Флаги гасятся только в Reset() (дисконнект, слот реально освобождён).
 	void ResetBottomPanelCache();
 
-	// Единый HTML-center HUD в стиле кибершока: строка 1 — таймер (зелёный) + режим + стиль
-	// (в минимал-стиле — мелкая метка «CKZ · PRO», время рисует нижняя панель), строка 2 —
+	// Единый HTML-center HUD в стиле кибершока (только обновлённый стиль; минимал идёт
+	// через UpdateMinimalHud): строка 1 — таймер (зелёный) + режим + стиль, строка 2 —
 	// крупная скорость + престрейф, строка 3 — Stage (только многостейдж), строка 4 —
 	// || PB | WR ||; плюс опциональные ряд клавиш и showpos по тумблерам (CP/TP живёт в
 	// нижней панели centre-канала, не здесь). Компакт (по this->IsCompactPanel()) — только

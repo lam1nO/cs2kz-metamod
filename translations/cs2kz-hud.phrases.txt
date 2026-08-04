@@ -50,42 +50,6 @@
 		"ko"		" (일시정지됨)"
 		"lv"		" (NOPAUZĒTS)"
 	}
-	// Суффиксы состояния для нижней панели (centre-канал) — те же, что выше, но БЕЗ скобок:
-	// минимал-таймер показывает «MM:SS.CC СТОП» текстом.
-	"HUD - Bottom Stopped Text"
-	{
-		// STOPPED
-		"en"		" STOPPED"
-		"chi"		" 停止"
-		"pl"		" ZATRZYMANY"
-		"ru"		" СТОП"
-		"fi"		" PYSÄYTETTY"
-		"sv"		" STOPPAD"
-		"ua"		" ЗУПИНЕНО"
-		"tr"		" DURDURULDU"
-		"it"		" FERMO"
-		"es"		" DETENIDO"
-		"de"		" GESTOPPT"
-		"ko"		" 중지됨"
-		"lv"		" APTURĒTS"
-	}
-	"HUD - Bottom Paused Text"
-	{
-		// PAUSED
-		"en"		" PAUSED"
-		"chi"		" 暂停"
-		"pl"		" WSTRZYMANY"
-		"ru"		" НА ПАУЗЕ"
-		"fi"		" KESKEYTETTY"
-		"sv"		" PAUSAD"
-		"ua"		" НА ПАУЗІ"
-		"tr"		" DURAKLATILDI"
-		"it"		" PAUSA"
-		"es"		" PAUSADO"
-		"de"		" PAUSIERT"
-		"ko"		" 일시정지됨"
-		"lv"		" NOPAUZĒTS"
-	}
 	// Строка CP/TP нижней панели (канал plain-text, без разметки). Латиница для всех
 	// языков, кроме chi — как в апстримном «HUD - Checkpoint Text».
 	"HUD - Bottom CP/TP Text"
@@ -929,14 +893,14 @@
 		"en"		"Compact panel"
 		"ru"		"Компактная панель"
 	}
-	// Пункт «Таймер: Обновлённый/Минималистичный» (подменю «Обычный HUD») и имена стилей.
+	// Пункт «Худ: Обновлённый/Минималистичный» (подменю «Обычный HUD») и имена стилей.
 	"HUD - Menu Label TimerStyle"
 	{
 		"#format"	"style:s"
-		"en"		"Timer: {style}"
-		"ru"		"Таймер: {style}"
-		"chi"		"计时器: {style}"
-		"ua"		"Таймер: {style}"
+		"en"		"HUD: {style}"
+		"ru"		"Худ: {style}"
+		"chi"		"HUD: {style}"
+		"ua"		"Худ: {style}"
 	}
 	"HUD - Timer Style Updated"
 	{

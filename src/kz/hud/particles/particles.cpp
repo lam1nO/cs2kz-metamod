@@ -248,9 +248,11 @@ void KZHUDService::SetHudType(int type)
 	this->DestroyAllParticles();
 }
 
-// === Стиль таймера (hudTimerStyle) =================================================
-// Настройка только стандартного HTML-худа: 0 = Updated (крупное время в строке 1),
-// 1 = Minimal (время в нижней панели centre-канала, строка 1 — мелкая метка режима).
+// === Стиль худа (hudTimerStyle) ====================================================
+// Настройка только стандартного HTML-худа (имя префа историческое): 0 = Updated
+// (кибершоковская панель + нижняя панель CP/TP), 1 = Minimal (весь худ — апстрим-
+// композиция cs2kz, см. KZHUDService::UpdateMinimalHud). Клир каналов при переключении
+// делает DrawPanels (взаимный одноразовый клир веток), здесь только преф.
 
 int KZHUDService::GetTimerStyle()
 {
@@ -925,7 +927,7 @@ static_function void ResetElementPrefs(KZPlayer *p, MHUDElement element)
 	}
 }
 
-// Фраза-ключ отображаемого имени стиля таймера (пункт меню и сводка).
+// Фраза-ключ отображаемого имени стиля худа (пункт меню и сводка).
 static_function const char *HudTimerStylePhrase(int style)
 {
 	return style == KZHUDService::HUD_TIMER_STYLE_MINIMAL ? "HUD - Timer Style Minimal" : "HUD - Timer Style Updated";
@@ -950,7 +952,7 @@ void KZHUDService::PrintHUDSummary()
 	lang->PrintChat(true, false, opts->GetPreferenceBool("hudKeysTwoRows", true) ? "MHUD - Keys Two Rows Enabled" : "MHUD - Keys Two Rows Disabled");
 	lang->PrintChat(true, false, opts->GetPreferenceBool("hudPbWr",        true) ? "MHUD - PB/WR Enabled"        : "MHUD - PB/WR Disabled");
 	// clang-format on
-	// Стиль таймера стандартного худа — той же фразой, что пункт меню («Таймер: <стиль>»).
+	// Стиль стандартного худа — той же фразой, что пункт меню («Худ: <стиль>»).
 	std::string styleName = KZLanguageService::PrepareMessageWithLang(lang->GetLanguage(), HudTimerStylePhrase(this->GetTimerStyle()));
 	lang->PrintChat(true, false, "HUD - Menu Label TimerStyle", styleName.c_str());
 }
@@ -1097,7 +1099,7 @@ static_function void OnHUDMenuSelect(MenuHandle menu, int slot, int item)
 		return;
 	}
 
-	// Стиль таймера — двухпозиционный цикл Обновлённый ↔ Минималистичный.
+	// Стиль худа — двухпозиционный цикл Обновлённый ↔ Минималистичный.
 	if (KZ_STREQ(key, HUD_MENU_TIMERSTYLE_TAG))
 	{
 		int next = p->hudService->GetTimerStyle() == KZHUDService::HUD_TIMER_STYLE_MINIMAL ? KZHUDService::HUD_TIMER_STYLE_UPDATED
@@ -1595,7 +1597,7 @@ u32 KZHUDService::CreateHUDMenu()
 		MenuHandle sub = makeSub(HUD_SUB_NORMAL, "HUD - Menu Label NormalHud");
 		if (sub != kInvalidMenuHandle)
 		{
-			// Стиль таймера: Обновлённый (крупное время сверху) / Минималистичный (время внизу).
+			// Стиль худа: Обновлённый (кибершоковская панель) / Минималистичный (апстрим-композиция).
 			{
 				std::string styleName = KZLanguageService::PrepareMessageWithLang(lang, HudTimerStylePhrase(this->GetTimerStyle()));
 				std::string styleText = KZLanguageService::PrepareMessageWithLang(lang, "HUD - Menu Label TimerStyle", styleName.c_str());
