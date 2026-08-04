@@ -130,9 +130,14 @@ cs2kz-linux-builder .`, иначе компилируются старые ис�
   ретрай 5с на ранних выходах + финиш рана (`OnRunFinished` из `TimerEnd`) + смена
   режима. SCMD `kz_rank`/`!rank` (+ в whitelist !help, категория Records), переводы
   `translations/cs2kz-profile.phrases.txt`. Мост: `EmitGG1Bridge` шлёт серверную
-  команду `cyb_gg1_mode <sid64> <kzt|ckz|vnl>` на OnAuthorized и смене режима
-  (гейт IsInGame; скип, пока приёмник GG1 не зарегистрировал команду; рубильник —
-  cvar `kz_gg1_bridge`). `KZPlayer::Reset()` теперь зовёт `profileService->Reset()`.
+  команду `cyb_gg1_mode <sid64> <kzt|ckz|vnl>` на входе в игру (OnPlayerActive),
+  при поздней аутентификации (OnAuthorized уже в игре; ранний auth во время
+  загрузки карты скипается гейтом IsInGame) и на смене режима; гейт живой сессии =
+  IsInGame + контроллер PlayerConnected (один IsInGame дисконнект НЕ ловит —
+  клиент остаётся SIGNONSTATE_FULL); в SwitchToMode запрос очков/эмит отсечены
+  тем же гейтом от Reset-пути (дисконнект/переиспользование слота/late load);
+  скип, пока приёмник GG1 не зарегистрировал команду; рубильник —
+  cvar `kz_gg1_bridge`. `KZPlayer::Reset()` теперь зовёт `profileService->Reset()`.
   При мёрже апстрима конфликт в kz_profile.\* разрешать в пользу нашей ветки.
 
 ## Инварианты (не ломать при мёрже апстрима)

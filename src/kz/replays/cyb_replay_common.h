@@ -2,9 +2,10 @@
  * cyb_replay_common.h — общий маппинг «шорт-нейм режима cs2kz → api-режим
  * платформы» и валидация имени карты. Потребители маппинга: реплеи (аплоад
  * cyb_replay_upload.cpp, докачка cyb_replay_download.cpp), платформенный
- * PB/WR-кэш худа (kz_timer.cpp), профиль — звания и мост GG1 (kz_profile.cpp).
- * У cyb_emitter.cpp (ingest событий kz.run_finished) — собственная локальная
- * копия MapMode, оставлена как есть (другой домен).
+ * PB/WR-кэш (kz_timer.cpp), отрисовка PB/WR в худе (kz_hud.cpp), профиль —
+ * звания и мост GG1 (kz_profile.cpp). У cyb_emitter.cpp (ingest событий
+ * kz.run_finished) — собственная локальная копия MapMode, оставлена как есть
+ * (другой домен).
  */
 #pragma once
 

@@ -282,9 +282,13 @@ void KZProfileService::EmitGG1Bridge()
 	{
 		return;
 	}
-	// SwitchToMode зовётся и из KZPlayer::Reset() на дисконнекте — эмит после ухода
-	// игрока копил бы в приёмнике GG1 мёртвые записи на каждый выход.
-	if (!this->player->IsInGame())
+	// Живой в сессии игрок. IsInGame (signon == FULL) отсекает ранний OnAuthorized —
+	// Steam обычно подтверждает тикет, пока клиент ещё качает карту; такой эмит GG1
+	// не нужен, мост уйдёт из OnPlayerActive. Но дисконнект IsInGame НЕ ловит (клиент
+	// остаётся в SIGNONSTATE_FULL до конца) — его отсекает состояние контроллера,
+	// тот же паттерн, что в UpdateClantag.
+	if (!this->player->IsInGame() || !this->player->GetController()
+		|| this->player->GetController()->m_iConnected() != PlayerConnectedState::PlayerConnected)
 	{
 		return;
 	}

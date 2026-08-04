@@ -157,6 +157,11 @@ void KZPlayer::OnPlayerActive()
 	// Mode/Styles stuff must be here for convars to be properly replicated.
 	g_pKZModeManager->SwitchToMode(this, this->modeService->GetModeName(), true, true, false);
 	g_pKZStyleManager->RefreshStyles(this, false);
+	// Основной путь моста GG1 на коннекте: клиент стал active (signon FULL, контроллер
+	// PlayerConnected) — раньше эмитить некуда (OnAuthorized обычно приходит во время
+	// загрузки карты и скипается гейтом). Force-свитч выше тоже эмитит — дубль
+	// безвреден (та же команда), но на его цепочку ранних выходов не полагаемся.
+	this->profileService->EmitGG1Bridge();
 
 	this->optionService->OnPlayerActive();
 	this->recordingService->EnsureCircularRecorderInitialized();
@@ -187,7 +192,10 @@ void KZPlayer::OnAuthorized()
 	MovementPlayer::OnAuthorized();
 	this->databaseService->SetupClient();
 	this->profileService->timeToNextRatingRefresh = 0.0f; // Force immediate refresh
-	// Мост режима для GG1: до авторизации steamId64 нулевой и эмит пропускался.
+	// Мост GG1 — путь ПОЗДНЕЙ аутентификации: Steam подтвердил тикет уже после входа
+	// в игру (эмит с OnPlayerActive ушёл со steamId64=0 и был пропущен). Обычный ранний
+	// auth приходит, пока клиент ещё качает карту (signon < FULL), — тогда этот вызов
+	// скипается гейтом IsInGame внутри эмита, а мост уходит из OnPlayerActive.
 	this->profileService->EmitGG1Bridge();
 	this->globalService->OnPlayerAuthorized();
 }

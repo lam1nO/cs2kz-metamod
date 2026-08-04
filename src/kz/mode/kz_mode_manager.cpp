@@ -308,9 +308,17 @@ bool KZModeManager::SwitchToMode(KZPlayer *player, const char *modeName, bool si
 	// аутентификации), устаревший desiredMode пропустил бы летящий ответ прежнего режима.
 	player->profileService->currentPoints = -1;
 	player->profileService->desiredMode[0] = '\0';
-	player->profileService->RequestRating();
 	player->profileService->UpdateClantag();
-	player->profileService->EmitGG1Bridge();
+	// HTTP-запрос очков и эмит моста — только живому в сессии игроку: SwitchToMode
+	// зовётся и из KZPlayer::Reset() — с дисконнекта (движковый клиент там ещё
+	// SIGNONSTATE_FULL, IsInGame не спасает), с переиспользования слота и с
+	// ResetPlayers при late load. Оттуда это был бы мусорный GET на каждый выход
+	// (ответ гарантированно выброшен SteamIdToPlayer) и мёртвая запись в приёмнике GG1.
+	if (player->IsConnected() && player->GetController() && player->GetController()->m_iConnected() == PlayerConnectedState::PlayerConnected)
+	{
+		player->profileService->RequestRating();
+		player->profileService->EmitGG1Bridge();
+	}
 	if (updatePreference)
 	{
 		player->optionService->SetPreferenceStr("preferredMode", modeName);
