@@ -1,8 +1,8 @@
 #include "kz_invisible.h"
 #include "kz/language/kz_language.h"
-#include "kz/quiet/kz_quiet.h"
 #include "kz/spec/kz_spec.h"
 
+#include "sdk/serversideclient.h"
 #include "sdk/services.h"
 #include "utils/utils.h"
 #include "utils/json.h"
@@ -23,15 +23,58 @@ static_global std::unordered_set<u64> s_invisibleSteamIds;
 // списком админов на проде непуст всегда, а вот невидимка на сервере — редкость.
 static_global i32 s_onlineInvisibleCount = 0;
 
-// Пересчитать кэш-флаги всем игрокам после смены списка.
-static_function void RefreshAllPlayers()
+// Пересчитать кэш-флаги всем игрокам после смены списка. Счётчик онлайн-невидимок
+// пересобирается с нуля — самолечение после сиротских слотов (отклонённый коннект не
+// даёт OnClientDisconnect/Reset). Возвращает, стал ли кто-то из игроков В ИГРЕ видимым —
+// тогда вызывающий должен разослать один сетевой full update (BroadcastFullUpdate).
+static_function bool RefreshAllPlayers()
 {
+	bool anyBecameVisible = false;
+	i32 onlineInvisibleCount = 0;
 	for (int i = 0; i < MAXPLAYERS + 1; i++)
 	{
 		KZPlayer *player = g_pKZPlayerManager->ToPlayer(i);
-		if (player && player->invisibleService)
+		if (!player || !player->invisibleService)
 		{
-			player->invisibleService->RefreshFlag();
+			continue;
+		}
+		anyBecameVisible |= player->invisibleService->RefreshFlag();
+		if (player->invisibleService->IsInvisible())
+		{
+			onlineInvisibleCount++;
+		}
+	}
+	s_onlineInvisibleCount = onlineInvisibleCount;
+	return anyBecameVisible;
+}
+
+// Возврат видимости: клиентам нужен полный снапшот, иначе pawn может не пересоздаться
+// у них сразу. ТОЛЬКО сетевой ForceFullUpdate + снап углов, БЕЗ SetAngles/Teleport:
+// телепорт тащит побочку на непричастных (lastTeleportTime блокирует TimerStart,
+// джампстаты рвут прыжок, триггеры с cancelOnTeleport; предупреждение в kz_player.cpp:
+// «Using SetAngles, which uses Teleport makes player movement really weird»).
+// Дедуп на вызывающем: один бродкаст на мутацию списка, не на каждого снятого.
+static_function void BroadcastFullUpdate()
+{
+	for (i32 i = 1; i < MAXPLAYERS + 1; i++)
+	{
+		KZPlayer *viewer = g_pKZPlayerManager->ToPlayer((u32)i);
+		if (!viewer || !viewer->IsInGame() || viewer->IsFakeClient() || viewer->IsCSTV())
+		{
+			continue;
+		}
+		CServerSideClient *client = g_pKZUtils->GetClientBySlot(viewer->GetPlayerSlot());
+		if (!client)
+		{
+			continue;
+		}
+		client->ForceFullUpdate();
+		// Сохраняем вид (full update может дёрнуть углы) — прецедент DisableTurnbinds.
+		if (CBasePlayerPawn *pawn = viewer->GetPlayerPawn())
+		{
+			QAngle angles;
+			viewer->GetAngles(&angles);
+			g_pKZUtils->SnapViewAngles(pawn, angles);
 		}
 	}
 }
@@ -91,7 +134,10 @@ void KZInvisibleService::LoadFromFile(const char *source)
 	{
 		// Файл отсутствует — легальное состояние: пустой список.
 		s_invisibleSteamIds.clear();
-		RefreshAllPlayers();
+		if (RefreshAllPlayers())
+		{
+			BroadcastFullUpdate();
+		}
 		KZ_LOG_INFO(LogChannel::General, "[cyb] invisible_list_loaded count=0 source=%s file=absent\n", source);
 		return;
 	}
@@ -116,13 +162,29 @@ void KZInvisibleService::LoadFromFile(const char *source)
 	}
 
 	s_invisibleSteamIds = std::move(parsed);
-	RefreshAllPlayers();
+	if (RefreshAllPlayers())
+	{
+		BroadcastFullUpdate();
+	}
 	KZ_LOG_INFO(LogChannel::General, "[cyb] invisible_list_loaded count=%u source=%s\n", (u32)s_invisibleSteamIds.size(), source);
+}
+
+void KZInvisibleService::OnAllPluginsLoaded()
+{
+	// Late load: наш Init() уже применил список, но ResetPlayers() из AllPluginsLoaded
+	// обнуляет сервисы ПОСЛЕ него — без повторного применения meta reload на живом
+	// сервере молча снимал бы невидимость до смены карты. Заодно пересобирается счётчик.
+	RefreshAllPlayers();
 }
 
 bool KZInvisibleService::IsInvisibleSteamId(u64 steamID64)
 {
 	return steamID64 != 0 && s_invisibleSteamIds.count(steamID64) > 0;
+}
+
+bool KZInvisibleService::HasOnlineInvisibles()
+{
+	return s_onlineInvisibleCount > 0;
 }
 
 bool KZInvisibleService::IsInvisible(KZPlayer *player)
@@ -139,21 +201,6 @@ bool KZInvisibleService::ShouldHideFrom(KZPlayer *subject, KZPlayer *viewer)
 	return IsInvisible(subject) && !IsInvisible(viewer);
 }
 
-// Возврат видимости: форсим остальным клиентам полный снапшот, иначе pawn может не
-// пересоздаться у них сразу (паттерн KZQuietService::SendFullUpdate/ToggleHide).
-static_function void FullUpdateOtherPlayers(KZPlayer *subject)
-{
-	for (i32 i = 1; i < MAXPLAYERS + 1; i++)
-	{
-		KZPlayer *viewer = g_pKZPlayerManager->ToPlayer((u32)i);
-		if (!viewer || viewer == subject || !viewer->IsInGame() || viewer->IsFakeClient() || viewer->IsCSTV())
-		{
-			continue;
-		}
-		viewer->quietService->SendFullUpdate();
-	}
-}
-
 void KZInvisibleService::Reset()
 {
 	if (this->invisible)
@@ -166,6 +213,12 @@ void KZInvisibleService::Reset()
 
 void KZInvisibleService::OnPlayerConnect(u64 steamID64)
 {
+	// Слот мог остаться «сиротой» после отклонённого коннекта (OnClientDisconnect не
+	// приходил, Reset не звался) — сперва снимаем его вклад из счётчика.
+	if (this->invisible)
+	{
+		s_onlineInvisibleCount--;
+	}
 	// Эпоха OnClientConnect: xuid уже известен — невидимка скрыт с первой секунды.
 	this->steamId64 = steamID64;
 	this->invisible = IsInvisibleSteamId(steamID64);
@@ -183,25 +236,27 @@ void KZInvisibleService::OnPlayerActive()
 	}
 }
 
-void KZInvisibleService::RefreshFlag()
+bool KZInvisibleService::RefreshFlag()
 {
 	// steamId64 эпохи коннекта; фолбэк для late load плагина на живом сервере.
+	// IsConnected-гейт лечит сиротский флаг (слот без клиента): снимется ближайшим
+	// полным пересчётом (map start/reload), не дожидаясь переиспользования слота.
 	u64 steamId = this->steamId64 ? this->steamId64 : this->player->GetSteamId64(false);
-	bool newInvisible = IsInvisibleSteamId(steamId);
+	bool newInvisible = this->player->IsConnected() && IsInvisibleSteamId(steamId);
 	if (newInvisible == this->invisible)
 	{
-		return;
+		return false;
 	}
 	this->invisible = newInvisible;
-	s_onlineInvisibleCount += newInvisible ? 1 : -1;
+	// Счётчик здесь не трогаем: единственный вызывающий — RefreshAllPlayers, он
+	// пересобирает s_onlineInvisibleCount целиком после обхода.
 	if (this->player->IsInGame() && !this->player->IsFakeClient())
 	{
 		this->player->languageService->PrintChat(true, false, newInvisible ? "Invisible - Active" : "Invisible - Inactive");
-		if (!newInvisible)
-		{
-			FullUpdateOtherPlayers(this->player);
-		}
+		// Возврат видимости игрока в игре — сигнал вызывающему на один BroadcastFullUpdate.
+		return !newInvisible;
 	}
+	return false;
 }
 
 void KZInvisibleService::FilterReceivers(const uint64 *clients, u32 emitterPlayerIndex)
@@ -230,7 +285,7 @@ void KZInvisibleService::OnGameFrame()
 {
 	// Общий случай флота — невидимок онлайн нет (сам файл-список непуст почти всегда):
 	// бесплатный выход, ниже ничего не тикает.
-	if (s_onlineInvisibleCount <= 0)
+	if (!HasOnlineInvisibles())
 	{
 		return;
 	}
@@ -326,7 +381,10 @@ CON_COMMAND_F(kz_invisible_add, "Add a SteamID64 to the invisible players list (
 		return;
 	}
 	s_invisibleSteamIds.insert(steamId);
-	RefreshAllPlayers();
+	if (RefreshAllPlayers())
+	{
+		BroadcastFullUpdate();
+	}
 	KZ_LOG_INFO(LogChannel::General, "[cyb] invisible_add steam_id=%llu count=%u\n", steamId, (u32)s_invisibleSteamIds.size());
 }
 
@@ -347,6 +405,9 @@ CON_COMMAND_F(kz_invisible_remove, "Remove a SteamID64 from the invisible player
 		KZ_LOG_WARN(LogChannel::General, "[cyb] invisible_remove_rejected reason=not_in_list steam_id=%llu\n", steamId);
 		return;
 	}
-	RefreshAllPlayers();
+	if (RefreshAllPlayers())
+	{
+		BroadcastFullUpdate();
+	}
 	KZ_LOG_INFO(LogChannel::General, "[cyb] invisible_remove steam_id=%llu count=%u\n", steamId, (u32)s_invisibleSteamIds.size());
 }

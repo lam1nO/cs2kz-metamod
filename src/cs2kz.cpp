@@ -153,6 +153,9 @@ void KZPlugin::AllPluginsLoaded()
 	KZ::mode::LoadModePlugins();
 	KZ::style::LoadStylePlugins();
 	g_pKZPlayerManager->ResetPlayers();
+	// ResetPlayers обнулил флаги невидимок, выставленные нашим Init() → повторное
+	// применение списка (late load на живом сервере не должен молча снимать невидимость).
+	KZInvisibleService::OnAllPluginsLoaded();
 	this->UpdateSelfMD5();
 	g_pMultiAddonManager = (IMultiAddonManager *)g_SMAPI->MetaFactory(MULTIADDONMANAGER_INTERFACE, nullptr, nullptr);
 	g_pClientCvarValue = (IClientCvarValue *)g_SMAPI->MetaFactory(CLIENTCVARVALUE_INTERFACE, nullptr, nullptr);

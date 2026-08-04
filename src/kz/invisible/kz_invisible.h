@@ -23,13 +23,17 @@ public:
 	// могут не доехать (QueryCvarValue асинхронный) — паттерн kz_player.cpp OnPlayerActive.
 	void OnPlayerActive();
 	// Пересчитать флаг по текущему списку; при смене статуса у игрока в игре — сказать ему
-	// в чат, а при возврате видимости — форснуть зрителям полный снапшот.
-	void RefreshFlag();
+	// в чат. Возвращает true, если игрок В ИГРЕ стал видимым (вызывающему нужен один
+	// сетевой full update зрителям). Счётчик онлайна пересобирает RefreshAllPlayers.
+	bool RefreshFlag();
 
 	bool IsInvisible() const
 	{
 		return this->invisible;
 	}
+
+	// Быстрый гейт горячих путей (CheckTransmit/OnGameFrame): есть ли невидимки онлайн.
+	static bool HasOnlineInvisibles();
 
 	static bool IsInvisible(KZPlayer *player);
 	// Скрывать ли subject от viewer: subject невидим, а viewer — нет (и это не сам subject).
@@ -38,6 +42,9 @@ public:
 
 	// Загрузка списка на плагин-лоаде.
 	static void Init();
+	// Late load: ResetPlayers() из AllPluginsLoaded обнуляет флаги, выставленные Init(), —
+	// повторно применяем список к живым игрокам (и пересобираем счётчик онлайна).
+	static void OnAllPluginsLoaded();
 	// Перечитка на map start (node-agent мог обновить файл между картами).
 	static void OnActivateServer();
 	// source — для лога (plugin_load/map_start/rcon_reload). Отсутствующий файл = пустой список;
