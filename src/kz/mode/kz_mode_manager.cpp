@@ -303,9 +303,11 @@ bool KZModeManager::SwitchToMode(KZPlayer *player, const char *modeName, bool si
 	player->SetVelocity({0, 0, 0});
 	player->jumpstatsService->InvalidateJumpstats("Externally modified");
 
-	player->profileService->currentRating = -1.0f;
+	// Очки привязаны к режиму: до ответа платформы по новому режиму звание не показываем.
+	player->profileService->currentPoints = -1;
 	player->profileService->RequestRating();
 	player->profileService->UpdateClantag();
+	player->profileService->EmitGG1Bridge();
 	if (updatePreference)
 	{
 		player->optionService->SetPreferenceStr("preferredMode", modeName);

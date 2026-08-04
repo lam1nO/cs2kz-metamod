@@ -186,6 +186,8 @@ void KZPlayer::OnAuthorized()
 	MovementPlayer::OnAuthorized();
 	this->databaseService->SetupClient();
 	this->profileService->timeToNextRatingRefresh = 0.0f; // Force immediate refresh
+	// Мост режима для GG1: до авторизации steamId64 нулевой и эмит пропускался.
+	this->profileService->EmitGG1Bridge();
 	this->globalService->OnPlayerAuthorized();
 }
 

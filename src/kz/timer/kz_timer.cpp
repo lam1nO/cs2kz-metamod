@@ -8,6 +8,7 @@
 #include "kz/option/kz_option.h"
 #include "kz/prac/kz_prac.h"
 #include "kz/language/kz_language.h"
+#include "kz/profile/kz_profile.h"
 #include "kz/trigger/kz_trigger.h"
 #include "kz/spec/kz_spec.h"
 #include "kz/recording/kz_recording.h"
@@ -508,6 +509,8 @@ bool KZTimerService::TimerEnd(const KZCourseDescriptor *courseDesc)
 	if (!this->player->GetPlayerPawn()->IsBot())
 	{
 		RunSubmission::Create(this->player);
+		// Ран ушёл в инджест платформы (CybEmitter) — с малым лагом подтянуть NUB-очки/звание.
+		this->player->profileService->OnRunFinished();
 	}
 
 	// Успешный финиш - ран завершён, сейв незавершённого рана по этому ключу больше не актуален.

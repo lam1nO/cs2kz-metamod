@@ -1,52 +1,93 @@
 #include "kz_profile.h"
 #include "utils/http.h"
+#include "utils/json.h"
+#include "utils/simplecmds.h"
 #include "kz/anticheat/kz_anticheat.h"
+#include "kz/language/kz_language.h"
 #include "kz/mode/kz_mode.h"
 #include "kz/style/kz_style.h"
 #include "kz/option/kz_option.h"
+#include "kz/replays/cyb_replay_common.h" // MapMode — общий маппинг шорт-нейма режима в api ("kzt"/"ckz"/"vnl")
 
 #include "sdk/recipientfilters.h"
 #include "public/networksystem/inetworkmessages.h"
 
-enum Ranks
+// Лестница из 23 званий по платформенным NUB-очкам. Значения — из брифа
+// «Константы званий» (калибровка 2026-07-30); копия для api/web —
+// packages/contracts/src/kz/ranks.ts, синхронизация версией профиля.
+#define KZ_RANK_COUNT 23
+
+// clang-format off
+static_global const char *rankNames[KZ_RANK_COUNT] = {
+	"New",      "Beginner-", "Beginner", "Beginner+",
+	"Amateur-", "Amateur",   "Amateur+",
+	"Casual-",  "Casual",    "Casual+",
+	"Regular-", "Regular",   "Regular+",
+	"Skilled-", "Skilled",   "Skilled+",
+	"Expert-",  "Expert",    "Expert+",
+	"Semipro",  "Pro",       "Master",   "Legend",
+};
+
+// {lime} — ближайший чат-токен к lightgreen из брифа (такого токена в utils_print нет).
+static_global const char *rankColors[KZ_RANK_COUNT] = {
+	"{grey}",     "{default}",  "{default}", "{default}",
+	"{blue}",     "{blue}",     "{blue}",
+	"{lime}",     "{lime}",     "{lime}",
+	"{green}",    "{green}",    "{green}",
+	"{purple}",   "{purple}",   "{purple}",
+	"{orchid}",   "{orchid}",   "{orchid}",
+	"{lightred}", "{lightred}", "{red}",     "{gold}",
+};
+
+// Пороги «с этого значения». KZT и CKZ — общая шкала; VNL сжата под малый пул карт.
+static_global const i32 rankThresholdsKztCkz[KZ_RANK_COUNT] = {
+	0,     1,     250,   500,   1000,  1500,  2000,  3000,  4000,  5000,  6500,  8000,
+	10000, 12500, 15000, 17500, 20000, 25000, 30000, 35000, 42500, 50000, 60000,
+};
+
+static_global const i32 rankThresholdsVnl[KZ_RANK_COUNT] = {
+	0,    1,    100,  200,  300,  450,  600,  800,  1000, 1250, 1500, 1750,
+	2000, 2400, 2800, 3200, 3600, 4000, 4400, 4800, 5200, 5600, 6000,
+};
+
+// clang-format on
+
+// Шкала порогов по api-режиму; nullptr — режим без званий.
+static_function const i32 *GetRankThresholds(const char *apiMode)
 {
-	Unknown = 0,
-	New,
-	Beginner,
-	Casual,
-	Regular,
-	Skilled,
-	Expert,
-	Semipro,
-	Pro,
-	Master,
-	Legend,
-	NUM_RANKS
-};
+	if (KZ_STREQ(apiMode, "vnl"))
+	{
+		return rankThresholdsVnl;
+	}
+	if (KZ_STREQ(apiMode, "kzt") || KZ_STREQ(apiMode, "ckz"))
+	{
+		return rankThresholdsKztCkz;
+	}
+	return nullptr;
+}
 
-static_global const char *rankNames[NUM_RANKS] = {
-	"Unknown", "New", "Beginner", "Casual", "Regular", "Skilled", "Expert", "Semipro", "Pro", "Master", "Legend",
-};
-
-static_global const f32 rankThresholds[NUM_RANKS] = {
-	-1.0f,     // Unknown
-	0.0f,      // New
-	0.000001f, // Beginner
-	5000.0f,   // Casual
-	10000.0f,  // Regular
-	15000.0f,  // Skilled
-	20000.0f,  // Expert
-	25000.0f,  // Semipro
-	30000.0f,  // Pro
-	35000.0f,  // Master
-	37500.0f   // Legend
-};
-static_global const char *rankColors[NUM_RANKS] = {"{default}", "{grey}", "{grey}",   "{blue}", "{darkblue}", "{purple}",
-												   "{orchid}",  "{red}",  "{yellow}", "{gold}", "{gold}"};
+static_function i32 GetRankIndexForPoints(const i32 *thresholds, i32 points)
+{
+	i32 rank = 0;
+	for (i32 i = KZ_RANK_COUNT - 1; i >= 0; i--)
+	{
+		if (points >= thresholds[i])
+		{
+			rank = i;
+			break;
+		}
+	}
+	return rank;
+}
 
 #define RATING_REFRESH_PERIOD 120.0f // seconds
+// Грейс после финиша рана: платформа должна успеть принять и посчитать ран.
+#define RATING_RUN_FINISH_DELAY 5.0f // seconds
 
 CConVar<bool> kz_profile_rating_badge_enabled("kz_profile_rating_badge_enabled", FCVAR_NONE, "Whether to show competitive rank in scoreboard.", true);
+// Мост режима для GG1 (map chooser): до его релиза команды-приёмника нет,
+// эмит тогда молча пропускается по FindConCommand (см. EmitGG1Bridge).
+CConVar<bool> kz_gg1_bridge("kz_gg1_bridge", FCVAR_NONE, "Whether to broadcast player mode to GG1 via cyb_gg1_mode server command.", true);
 
 void KZProfileService::OnGameFrame()
 {
@@ -77,25 +118,22 @@ void KZProfileService::OnCheckTransmit()
 	}
 }
 
+// Источник очков — НАША платформа (тот же корень, что PB/WR-кэш худа и эмиттер
+// ранов), а не cs2kz.org: гейт KZGlobalService::IsAvailable из апстрима снят.
 void KZProfileService::RequestRating()
 {
-	if (!KZGlobalService::IsAvailable())
-	{
-		return;
-	}
 	if (!this->player->IsAuthenticated() || !this->player->IsConnected())
 	{
 		KZ_LOG_DEBUG(LogChannel::Profile, "Player %s not authenticated or not connected, cannot request rating.\n", this->player->GetName());
 		return;
 	}
-	KZ::api::Mode mode;
-	if (!KZ::api::DecodeModeString(this->player->modeService->GetModeShortName(), mode))
+	const char *apiMode = CybReplayCommon::MapMode(this->player->modeService->GetModeShortName());
+	if (apiMode[0] == '\0')
 	{
-		KZ_LOG_DEBUG(LogChannel::Profile, "Player %s has invalid mode '%s', cannot request rating.\n", this->player->GetName(),
+		KZ_LOG_DEBUG(LogChannel::Profile, "Player %s has non-platform mode '%s', cannot request rating.\n", this->player->GetName(),
 					 this->player->modeService->GetModeShortName());
 		return;
 	}
-	this->desiredMode = static_cast<u8>(mode);
 	u64 steamID64 = this->player->GetSteamId64();
 	if (steamID64 == 0)
 	{
@@ -108,70 +146,176 @@ void KZProfileService::RequestRating()
 		return;
 	}
 	this->timeToNextRatingRefresh = g_pKZUtils->GetServerGlobals()->realtime + RATING_REFRESH_PERIOD + RandomFloat(-30.0f, 30.0f);
-	std::string apiURL = std::string(KZOptionService::GetOptionStr("apiUrl", "https://api.cs2kz.org"));
+	std::string apiURL = std::string(KZOptionService::GetOptionStr("cybEmitUrl", ""));
+	if (apiURL.empty())
+	{
+		return; // платформа не сконфигурирована — играем без званий, не отказ
+	}
 	// Removing trailing slash if present to avoid double slashes in the URL.
-	if (!apiURL.empty() && apiURL.back() == '/')
+	if (apiURL.back() == '/')
 	{
 		apiURL.pop_back();
 	}
-	std::string url = apiURL + "/players/" + std::to_string(steamID64);
+	V_strncpy(this->desiredMode, apiMode, sizeof(this->desiredMode));
+	std::string url = apiURL + "/v1/kz/ranking/player/" + std::to_string(steamID64);
 	HTTP::Request request(HTTP::Method::GET, url);
-	KZ_LOG_DEBUG(LogChannel::Profile, "Requesting rating for player %s (%llu) in mode %d.\n", this->player->GetName(), steamID64,
-				 static_cast<u8>(mode));
-	auto callback = [steamID64, mode](HTTP::Response response)
+	request.SetQuery("mode", apiMode);
+	request.SetQuery("category", "nub");
+	std::string modeStr = apiMode;
+	KZ_LOG_DEBUG(LogChannel::Profile, "Requesting rating for player %s (%llu) in mode %s.\n", this->player->GetName(), steamID64, apiMode);
+	auto onResponse = [steamID64, modeStr](HTTP::Response response)
 	{
-		KZ_LOG_DEBUG(LogChannel::Profile, "Received response for player %llu: status %d.\n", steamID64, response.status);
-		if (response.status != 200)
+		if (response.status < 200 || response.status >= 300)
 		{
-			KZ_LOG_DEBUG(LogChannel::Profile, "Non-200 response for player %llu: status %d.\n", steamID64, response.status);
+			KZ_LOG_WARN(LogChannel::Profile, "[cyb] rank_fetch_fail steam_id=%llu reason=http_%u\n", steamID64, (unsigned)response.status);
 			return;
 		}
 		KZPlayer *player = g_pKZPlayerManager->SteamIdToPlayer(steamID64);
 		if (player == nullptr)
 		{
-			KZ_LOG_DEBUG(LogChannel::Profile, "Player not found for SteamID %llu.\n", steamID64);
-			return;
+			return; // игрок вышел, пока запрос летел
 		}
 		// The player mode has changed since the request was made.
-		if (player->profileService->desiredMode != static_cast<u8>(mode))
+		if (!KZ_STREQ(player->profileService->desiredMode, modeStr.c_str()))
 		{
 			KZ_LOG_DEBUG(LogChannel::Profile, "Player %s mode changed since request, ignoring response.\n", player->GetName());
 			return;
 		}
-		Json json(response.Body().value_or(""));
-
-		const char *ratingField = (mode == KZ::api::Mode::Classic) ? "ckz_rating" : "vnl_rating";
-		if (!json.Get(ratingField, player->profileService->currentRating))
+		std::string body = response.Body().value_or("");
+		i32 points = 0;
+		// api отвечает null (пустое тело), если у игрока ещё нет ни одного рана —
+		// это успешно загруженный ноль очков (звание New), а не отказ.
+		if (!body.empty() && body != "null")
 		{
-			KZ_LOG_DEBUG(LogChannel::Profile, "Failed to parse rating from response for player %s.\n", player->GetName());
-			return;
+			Json json(body);
+			f64 pointsF = 0.0;
+			if (!json.IsValid() || !json.Get("points", pointsF))
+			{
+				KZ_LOG_WARN(LogChannel::Profile, "[cyb] rank_fetch_fail steam_id=%llu reason=bad_body\n", steamID64);
+				return;
+			}
+			points = static_cast<i32>(pointsF);
 		}
-		KZ_LOG_DEBUG(LogChannel::Profile, "Updating rating for player %s: %.2f.\n", player->GetName(), player->profileService->currentRating);
+		const i32 *thresholds = GetRankThresholds(modeStr.c_str());
+		i32 oldPoints = player->profileService->currentPoints;
+		player->profileService->currentPoints = points;
+		// Смена звания (не первая загрузка) — единственный info-лог тракта.
+		if (thresholds && oldPoints >= 0)
+		{
+			i32 oldRank = GetRankIndexForPoints(thresholds, oldPoints);
+			i32 newRank = GetRankIndexForPoints(thresholds, points);
+			if (oldRank != newRank)
+			{
+				KZ_LOG_INFO(LogChannel::Profile, "[cyb] rank_change steam_id=%llu mode=%s rank=%s points=%d\n", steamID64, modeStr.c_str(),
+							rankNames[newRank], points);
+			}
+		}
 		player->profileService->UpdateCompetitiveRank();
 		player->profileService->UpdateClantag();
 	};
-	request.Send(callback);
+	auto onError = [steamID64]() { KZ_LOG_WARN(LogChannel::Profile, "[cyb] rank_fetch_fail steam_id=%llu reason=network\n", steamID64); };
+	request.Send(onResponse, onError);
 }
 
 bool KZProfileService::CanDisplayRank()
 {
-	// Haven't obtained rating yet.
-	if (this->currentRating < 0.0f)
+	// Haven't obtained points yet.
+	if (this->currentPoints < 0)
 	{
 		return false;
 	}
-	// No rating if styles are enabled.
+	// No rank if styles are enabled.
 	if (this->player->styleServices.Count() > 0)
 	{
 		return false;
 	}
-	// No rating if player is banned.
+	// No rank if player is banned.
 	if (this->player->anticheatService->isBanned)
 	{
 		return false;
 	}
-	KZ::api::Mode mode;
-	return KZ::api::DecodeModeString(this->player->modeService->GetModeShortName(), mode);
+	return CybReplayCommon::MapMode(this->player->modeService->GetModeShortName())[0] != '\0';
+}
+
+i32 KZProfileService::GetCurrentRankIndex()
+{
+	if (!this->CanDisplayRank())
+	{
+		return -1;
+	}
+	const i32 *thresholds = GetRankThresholds(CybReplayCommon::MapMode(this->player->modeService->GetModeShortName()));
+	if (!thresholds)
+	{
+		return -1;
+	}
+	return GetRankIndexForPoints(thresholds, this->currentPoints);
+}
+
+void KZProfileService::OnRunFinished()
+{
+	f32 refreshAt = g_pKZUtils->GetServerGlobals()->realtime + RATING_RUN_FINISH_DELAY;
+	if (this->timeToNextRatingRefresh > refreshAt)
+	{
+		this->timeToNextRatingRefresh = refreshAt;
+	}
+}
+
+void KZProfileService::EmitGG1Bridge()
+{
+	if (!kz_gg1_bridge.Get())
+	{
+		return;
+	}
+	u64 steamID64 = this->player->GetSteamId64();
+	if (steamID64 == 0)
+	{
+		return;
+	}
+	const char *apiMode = CybReplayCommon::MapMode(this->player->modeService->GetModeShortName());
+	if (apiMode[0] == '\0')
+	{
+		return;
+	}
+	// Приёмник — GG1 (CSSharp), появится отдельным релизом (задача D1). Пока команда
+	// не зарегистрирована, эмит пропускаем: слепой ServerCommand печатал бы
+	// "Unknown command" в консоль на каждый заход/смену режима.
+	if (!g_pCVar || !g_pCVar->FindConCommand("cyb_gg1_mode").IsValidRef())
+	{
+		KZ_LOG_DEBUG(LogChannel::Profile, "cyb_gg1_mode is not registered, skipping GG1 bridge emit.\n");
+		return;
+	}
+	char cmd[64];
+	V_snprintf(cmd, sizeof(cmd), "cyb_gg1_mode %llu %s", steamID64, apiMode);
+	interfaces::pEngine->ServerCommand(cmd);
+}
+
+void KZProfileService::PrintRank()
+{
+	const char *apiMode = CybReplayCommon::MapMode(this->player->modeService->GetModeShortName());
+	if (apiMode[0] == '\0')
+	{
+		this->player->languageService->PrintChat(true, false, "Rank - Not Available (Mode)");
+		return;
+	}
+	if (this->player->styleServices.Count() > 0)
+	{
+		this->player->languageService->PrintChat(true, false, "Rank - Disabled (Styles)");
+		return;
+	}
+	i32 rank = this->GetCurrentRankIndex();
+	if (rank < 0)
+	{
+		this->player->languageService->PrintChat(true, false, "Rank - Not Loaded");
+		return;
+	}
+	if (rank >= KZ_RANK_COUNT - 1)
+	{
+		this->player->languageService->PrintChat(true, false, "Rank - Info (Max)", rankColors[rank], rankNames[rank], this->currentPoints);
+		return;
+	}
+	const i32 *thresholds = GetRankThresholds(apiMode);
+	this->player->languageService->PrintChat(true, false, "Rank - Info", rankColors[rank], rankNames[rank], this->currentPoints,
+											 thresholds[rank + 1] - this->currentPoints, rankColors[rank + 1], rankNames[rank + 1]);
 }
 
 void KZProfileService::UpdateClantag()
@@ -185,17 +329,9 @@ void KZProfileService::UpdateClantag()
 		}
 		return;
 	}
-	if (this->CanDisplayRank())
+	i32 rank = this->GetCurrentRankIndex();
+	if (rank >= 0)
 	{
-		i32 rank = Ranks::Unknown;
-		for (i32 i = Ranks::NUM_RANKS - 1; i >= 0; i--)
-		{
-			if (this->currentRating >= rankThresholds[i])
-			{
-				rank = i;
-				break;
-			}
-		}
 		V_snprintf(this->clanTag, sizeof(this->clanTag), "[%s %s]", this->player->modeService->GetModeShortName(), rankNames[rank]);
 	}
 	else
@@ -225,7 +361,8 @@ void KZProfileService::UpdateCompetitiveRank()
 	{
 		return;
 	}
-	i32 rating = this->CanDisplayRank() ? static_cast<i32>(floor(this->currentRating)) : 0;
+	// Цифра в скорборде = платформенные NUB-очки режима.
+	i32 rating = this->CanDisplayRank() ? this->currentPoints : 0;
 	this->player->GetController()->m_iCompetitiveRankType(11);
 	this->player->GetController()->m_iCompetitiveRanking(rating);
 }
@@ -236,17 +373,9 @@ std::string KZProfileService::GetPrefix(bool colors)
 	{
 		this->UpdateClantag();
 	}
-	if (this->CanDisplayRank())
+	i32 rank = this->GetCurrentRankIndex();
+	if (rank >= 0)
 	{
-		i32 rank = Ranks::Unknown;
-		for (i32 i = Ranks::NUM_RANKS - 1; i >= 0; i--)
-		{
-			if (this->currentRating >= rankThresholds[i])
-			{
-				rank = i;
-				break;
-			}
-		}
 		return std::string(colors ? rankColors[rank] : "") + "[" + this->player->modeService->GetModeShortName() + " " + rankNames[rank]
 			   + (colors ? "]{default}" : "]");
 	}
@@ -255,4 +384,11 @@ std::string KZProfileService::GetPrefix(bool colors)
 		return std::string(colors ? "{default}[" : "[") + this->player->modeService->GetModeShortName()
 			   + (this->player->styleServices.Count() > 0 ? "*" : "") + (colors ? "]{default}" : "]");
 	}
+}
+
+SCMD(kz_rank, SCFL_PLAYER | SCFL_HELP)
+{
+	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
+	player->profileService->PrintRank();
+	return MRES_SUPERCEDE;
 }

@@ -122,7 +122,7 @@ static_global void PrintCategoryCommands(KZPlayer *player, i32 category, bool pr
 // clang-format off
 static_global const char *helpCheckpoint[] = {"kz_cp", "kz_tp", "kz_undo", "kz_pcp", "kz_ncp", "kz_ssp", "kz_csp"};
 static_global const char *helpTimer[]      = {"kz_stop", "kz_pause", "kz_r"};
-static_global const char *helpRecords[]    = {"kz_pb", "kz_wr", "kz_maptop"};
+static_global const char *helpRecords[]    = {"kz_pb", "kz_wr", "kz_maptop", "kz_rank"};
 static_global const char *helpReplay[]     = {"kz_replay", "kz_rpmenu"};
 static_global const char *helpMap[]        = {"kz_courses", "kz_mapinfo", "kz_tier", "kz_end", "kz_lj"};
 static_global const char *helpMode[]       = {"kz_kzt", "kz_ckz", "kz_vnl"};

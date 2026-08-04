@@ -1,0 +1,31 @@
+"Phrases"
+{
+	// Ответы !rank: звание по платформенным NUB-очкам текущего режима.
+	"Rank - Info"
+	{
+		"#format"	"color:s,rank_name:s,points:d,next_points:d,next_color:s,next_rank:s"
+		"en"		"{grey}Your rank: {color}{rank_name}{grey} — {default}{points}{grey} NUB points. Next rank {next_color}{next_rank}{grey}: {default}{next_points}{grey} points to go."
+		"ru"		"{grey}Ваше звание: {color}{rank_name}{grey} — {default}{points}{grey} NUB-очков. До звания {next_color}{next_rank}{grey}: {default}{next_points}{grey} очков."
+	}
+	"Rank - Info (Max)"
+	{
+		"#format"	"color:s,rank_name:s,points:d"
+		"en"		"{grey}Your rank: {color}{rank_name}{grey} — {default}{points}{grey} NUB points. This is the maximum rank."
+		"ru"		"{grey}Ваше звание: {color}{rank_name}{grey} — {default}{points}{grey} NUB-очков. Это максимальное звание."
+	}
+	"Rank - Not Loaded"
+	{
+		"en"		"{grey}Your rank is not loaded yet, try again in a few seconds."
+		"ru"		"{grey}Звание ещё не загружено, попробуйте через несколько секунд."
+	}
+	"Rank - Disabled (Styles)"
+	{
+		"en"		"{grey}Ranks are disabled while styles are enabled."
+		"ru"		"{grey}Со включёнными стилями звания не начисляются."
+	}
+	"Rank - Not Available (Mode)"
+	{
+		"en"		"{grey}Ranks are not available in this mode."
+		"ru"		"{grey}В этом режиме звания недоступны."
+	}
+}

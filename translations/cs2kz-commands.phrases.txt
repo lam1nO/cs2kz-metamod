@@ -1173,6 +1173,11 @@
 		"en"		"Switch to KZTimer mode."
 		"ru"		"Переключить режим на KZTimer (KZT)."
 	}
+	"Command Description - kz_rank"
+	{
+		"en"		"Your rank and points in the current mode."
+		"ru"		"Ваше звание и очки в текущем режиме."
+	}
 	"Command Description - kz_pb"
 	{
 		"en"		"Your personal best (server and global)."
