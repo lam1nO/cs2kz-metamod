@@ -24,9 +24,10 @@ static_global std::unordered_set<u64> s_invisibleSteamIds;
 static_global i32 s_onlineInvisibleCount = 0;
 
 // Пересчитать кэш-флаги всем игрокам после смены списка. Счётчик онлайн-невидимок
-// пересобирается с нуля — самолечение после сиротских слотов (отклонённый коннект не
-// даёт OnClientDisconnect/Reset). Возвращает, стал ли кто-то из игроков В ИГРЕ видимым —
-// тогда вызывающий должен разослать один сетевой full update (BroadcastFullUpdate).
+// пересобирается с нуля — защита от дрейфа инкрементальной арифметики (сиротский флаг
+// отклонённого коннекта чинит декремент в OnPlayerConnect при переиспользовании слота).
+// Возвращает, стал ли кто-то из игроков В ИГРЕ видимым — тогда вызывающий должен
+// разослать один сетевой full update (BroadcastFullUpdate).
 static_function bool RefreshAllPlayers()
 {
 	bool anyBecameVisible = false;
@@ -63,6 +64,11 @@ static_function void BroadcastFullUpdate()
 		{
 			continue;
 		}
+		// Невидимкам (в т.ч. вернувшемуся) апдейт не нужен — они субъекта и так видели.
+		if (KZInvisibleService::IsInvisible(viewer))
+		{
+			continue;
+		}
 		CServerSideClient *client = g_pKZUtils->GetClientBySlot(viewer->GetPlayerSlot());
 		if (!client)
 		{
@@ -70,11 +76,17 @@ static_function void BroadcastFullUpdate()
 		}
 		client->ForceFullUpdate();
 		// Сохраняем вид (full update может дёрнуть углы) — прецедент DisableTurnbinds.
-		if (CBasePlayerPawn *pawn = viewer->GetPlayerPawn())
+		// Только живым: GetAngles() читает moveDataPost, который у не-симулируемых
+		// (мёртвый/спектатор/после смены карты) хранит углы прошлой жизни; им снап и не
+		// нужен — они смотрят через observer pawn.
+		if (viewer->IsAlive())
 		{
-			QAngle angles;
-			viewer->GetAngles(&angles);
-			g_pKZUtils->SnapViewAngles(pawn, angles);
+			if (CBasePlayerPawn *pawn = viewer->GetPlayerPawn())
+			{
+				QAngle angles;
+				viewer->GetAngles(&angles);
+				g_pKZUtils->SnapViewAngles(pawn, angles);
+			}
 		}
 	}
 }
@@ -239,10 +251,14 @@ void KZInvisibleService::OnPlayerActive()
 bool KZInvisibleService::RefreshFlag()
 {
 	// steamId64 эпохи коннекта; фолбэк для late load плагина на живом сервере.
-	// IsConnected-гейт лечит сиротский флаг (слот без клиента): снимется ближайшим
-	// полным пересчётом (map start/reload), не дожидаясь переиспользования слота.
+	// НИКАКИХ гейтов по IsConnected()/контроллеру: он требует сущности-контроллера,
+	// которой нет ни в окне OnClientConnect→PutInServer, ни у кого на map start
+	// (Hook_ActivateServer) — пересчёт в эти моменты молча снимал бы невидимость на всю
+	// сессию. Сиротский флаг (коннект отклонён) безвреден: pawn нет, максимум держит
+	// горячий гейт открытым; вклад в счётчик снимает декремент в OnPlayerConnect при
+	// переиспользовании слота.
 	u64 steamId = this->steamId64 ? this->steamId64 : this->player->GetSteamId64(false);
-	bool newInvisible = this->player->IsConnected() && IsInvisibleSteamId(steamId);
+	bool newInvisible = IsInvisibleSteamId(steamId);
 	if (newInvisible == this->invisible)
 	{
 		return false;

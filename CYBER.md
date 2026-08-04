@@ -47,6 +47,19 @@ cs2kz-linux-builder .`, иначе компилируются старые ис�
 - **Чат**: `!`-команды и серверный шум (beta join, website tip, turnbinds,
   broadcast jumpstat) скрыты; `!maps`/`!mcustom` работают через релей.
 - **Ноги**: hideLegs по умолчанию true (`!hidelegs` — тумблер).
+- **Невидимки — режим слежки за читерами** (`src/kz/invisible/kz_invisible.*`):
+  игрок из списка невидим обычным игрокам — pawn+оружие (инверсия !hide в
+  `KZ::quiet::OnCheckTransmit`, спектируемая цель не гасится — краш-страховка,
+  зрителя снимает ретаргет `OnGameFrame`), звуки (`FilterReceivers` в OnPostEvent),
+  `!specs`/`!spec`/`!goto`, join/leave-анонсы (`bDontBroadcast` в `Hook_FireEvent`;
+  `[cyb] player_join/leave`-логи целы). Видят его только он сам и другие невидимки;
+  скорборд/клиентский `status` НЕ скрывают (controller не трогаем). Контракт: файл
+  `csgo/cfg/cyb_invisible.json` `{"steamids":["7656...", ...]}` — кладёт **node-agent**
+  до первого коннекта (отсутствует = пустой список; битый = список не меняем, warn);
+  живое управление — ConCommand'ы `kz_invisible_reload` / `kz_invisible_add <sid64>` /
+  `kz_invisible_remove <sid64>` (только сервер/RCON, рантайм-only). Флаг по xuid с
+  эпохи OnClientConnect; возврат видимости = один сетевой `ForceFullUpdate` без
+  SetAngles/Teleport.
 - **SavedRuns** (`src/kz/savedrun/kz_savedrun.*`): персистентный незавершённый
   таймер — таблица `SavedRuns` в общей MySQL флота, ключ хранения
   (steam, map, course, mode, styles), поиск на заходе — БЕЗ course (курс
