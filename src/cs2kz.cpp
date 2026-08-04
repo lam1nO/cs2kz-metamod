@@ -19,6 +19,7 @@
 #include "kz/goto/kz_goto.h"
 #include "kz/style/kz_style.h"
 #include "kz/quiet/kz_quiet.h"
+#include "kz/invisible/kz_invisible.h"
 #include "kz/ztopwatch/kz_ztopwatch.h"
 #include "kz/tip/kz_tip.h"
 #include "kz/option/kz_option.h"
@@ -84,6 +85,7 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 	KZ::misc::Init();
 	KZ::misc::customchangemap::Init();
 	KZQuietService::Init();
+	KZInvisibleService::Init();
 	KZZtopwatchService::Init();
 	AsyncFileIO::Init();
 	KZRecordingService::Init();

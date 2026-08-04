@@ -35,6 +35,7 @@ class KZDatabaseService;
 class KZGlobalService;
 class KZGlobalService;
 class KZHUDService;
+class KZInvisibleService;
 class KZJumpstatsService;
 class KZLanguageService;
 class KZMapService;
@@ -160,6 +161,7 @@ public:
 	KZDatabaseService *databaseService {};
 	KZGlobalService *globalService {};
 	KZHUDService *hudService {};
+	KZInvisibleService *invisibleService {};
 	KZJumpstatsService *jumpstatsService {};
 	KZLanguageService *languageService {};
 	KZMeasureService *measureService {};

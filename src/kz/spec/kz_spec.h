@@ -29,11 +29,13 @@ public:
 
 	// Кандидаты на спек по подстроке ника (case-insensitive). Точные совпадения
 	// приоритетны: при наличии хотя бы одного точного возвращаются только точные.
-	// Кандидаты — подключённые не-спектаторы, исключая самого игрока.
+	// Кандидаты — подключённые не-спектаторы, исключая самого игрока и невидимок
+	// (невидимку нельзя ни увидеть в меню, ни выбрать целью по имени).
 	// Заполняет candidates (не более maxCandidates), возвращает ПОЛНОЕ число совпадений.
 	i32 CollectSpectateCandidates(const char *query, KZPlayer **candidates, i32 maxCandidates);
 
-	void GetSpectatorList(CUtlVector<CUtlString> &spectatorList);
+	// Список зрителей this->player глазами viewer: невидимые для viewer зрители пропускаются.
+	void GetSpectatorList(CUtlVector<CUtlString> &spectatorList, KZPlayer *viewer);
 	KZPlayer *GetSpectatedPlayer();
 	KZPlayer *GetNextSpectator(KZPlayer *current);
 };

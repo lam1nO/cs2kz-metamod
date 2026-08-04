@@ -1,6 +1,7 @@
 #include "kz_spec.h"
 #include "kz_spec_menu.h"
 #include "../timer/kz_timer.h"
+#include "kz/invisible/kz_invisible.h"
 #include "kz/language/kz_language.h"
 #include "utils/simplecmds.h"
 #include "utils/ctimer.h"
@@ -73,6 +74,11 @@ i32 KZSpecService::CollectSpectateCandidates(const char *query, KZPlayer **candi
 			continue;
 		}
 		if (other->GetController()->GetTeam() == CS_TEAM_SPECTATOR)
+		{
+			continue;
+		}
+		// Невидимку не выдаём ни в меню, ни по точному имени.
+		if (KZInvisibleService::ShouldHideFrom(other, this->player))
 		{
 			continue;
 		}
@@ -177,12 +183,18 @@ bool KZSpecService::CanSpectate()
 	return !this->player->IsAlive() || this->player->timerService->GetPaused() || this->player->timerService->CanPause();
 }
 
-void KZSpecService::GetSpectatorList(CUtlVector<CUtlString> &spectatorList)
+void KZSpecService::GetSpectatorList(CUtlVector<CUtlString> &spectatorList, KZPlayer *viewer)
 {
 	KZPlayer *spectator = this->player->specService->GetNextSpectator(nullptr);
 	while (spectator)
 	{
-		spectatorList.AddToTail(spectator->GetName());
+		// Невидимого зрителя в списке видят только он сам и другие невидимки.
+		// Сам GetNextSpectator не фильтруем: это ещё и итератор ДОСТАВКИ сообщений
+		// зрителям (kz_timer, language, replays) — невидимка должен их получать.
+		if (!KZInvisibleService::ShouldHideFrom(spectator, viewer))
+		{
+			spectatorList.AddToTail(spectator->GetName());
+		}
 		spectator = this->player->specService->GetNextSpectator(spectator);
 	}
 }
@@ -285,7 +297,7 @@ SCMD(kz_specs, SCFL_SPEC)
 		return MRES_SUPERCEDE;
 	}
 	CUtlVector<CUtlString> spectatorList;
-	targetPlayer->specService->GetSpectatorList(spectatorList);
+	targetPlayer->specService->GetSpectatorList(spectatorList, player);
 	if (spectatorList.Count() == 0)
 	{
 		if (targetPlayer == player)

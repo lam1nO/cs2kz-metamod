@@ -1,0 +1,14 @@
+"Phrases"
+{
+	// Индикация режима невидимки самому игроку (при заходе и при живом включении по RCON).
+	"Invisible - Active"
+	{
+		"en"		"{gold}You are invisible: other players don't see you, your sounds or your join/leave messages."
+		"ru"		"{gold}Вы невидимы: другие игроки не видят вас, ваши звуки и сообщения о входе/выходе."
+	}
+	"Invisible - Inactive"
+	{
+		"en"		"{grey}You are no longer invisible."
+		"ru"		"{grey}Режим невидимки снят."
+	}
+}

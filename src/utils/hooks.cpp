@@ -15,6 +15,7 @@
 #include "kz/kz.h"
 #include "kz/beam/kz_beam.h"
 #include "kz/hud/kz_hud.h"
+#include "kz/invisible/kz_invisible.h"
 #include "kz/jumpstats/kz_jumpstats.h"
 #include "kz/option/kz_option.h"
 #include "kz/paint/kz_paint.h"
@@ -526,6 +527,7 @@ static_function void Hook_GameFrame(bool simulating, bool bFirstTick, bool bLast
 	KZBeamService::UpdateBeams();
 	KZPaintService::OnGameFrame();
 	KZProfileService::OnGameFrame();
+	KZInvisibleService::OnGameFrame();
 	KZ::replaysystem::OnGameFrame();
 	KZRacingService::BroadcastRaceInfo();
 	RETURN_META(MRES_IGNORED);
@@ -697,6 +699,19 @@ static_function bool Hook_FireEvent(IGameEvent *event, bool bDontBroadcast)
 				}
 			}
 		}
+		else if (KZ_STREQI(event->GetName(), "player_connect") || KZ_STREQI(event->GetName(), "player_disconnect"))
+		{
+			// Вход/выход невидимки не анонсируем клиентам (чат/консоль). Серверные
+			// листенеры событие получают как обычно; лог [cyb] player_join/leave живёт
+			// в клиент-хуках (Hook_ClientPutInServer/Hook_ClientDisconnect) и не тронут.
+			// xuid берём из самого события — состояние игрока на этих эпохах ещё/уже
+			// неполное. Guard по bDontBroadcast: NEWPARAMS перезапускает цепочку хуков
+			// (recall) — без него будет рекурсия.
+			if (!bDontBroadcast && KZInvisibleService::IsInvisibleSteamId(event->GetUint64("xuid")))
+			{
+				RETURN_META_VALUE_NEWPARAMS(MRES_HANDLED, true, &IGameEventManager2::FireEvent, (event, true));
+			}
+		}
 	}
 	RETURN_META_VALUE(MRES_IGNORED, true);
 }
@@ -747,6 +762,7 @@ static_function bool Hook_ActivateServer()
 
 	RunSubmission::Clear();
 	KZ::misc::OnActivateServer();
+	KZInvisibleService::OnActivateServer();
 	KZDatabaseService::SetupMap();
 	KZRecordingService::OnActivateServer();
 	KZRacingService::OnActivateServer();

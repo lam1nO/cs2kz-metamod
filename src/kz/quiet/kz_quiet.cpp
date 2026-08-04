@@ -7,6 +7,7 @@
 #include "sdk/services.h"
 
 #include "kz_quiet.h"
+#include "kz/invisible/kz_invisible.h"
 #include "kz/pistol/kz_pistol.h"
 #include "kz/beam/kz_beam.h"
 #include "kz/measure/kz_measure.h"
@@ -131,6 +132,28 @@ void KZ::quiet::OnCheckTransmit(CCheckTransmitInfo **pInfo, int infoCount)
 				continue;
 			}
 #endif
+			// Невидимка (инверсия !hide): pawn скрываем от всех, кроме него самого и других
+			// невидимок, — вместе с его оружием, чтобы ствол не висел в воздухе.
+			// Controller не трогаем (крашеопасно, скорборд — вне v1).
+			if (KZInvisibleService::ShouldHideFrom(g_pKZPlayerManager->ToPlayer(pawn), targetPlayer))
+			{
+				if (pawn->m_pWeaponServices())
+				{
+					auto pVecWeapons = pawn->m_pWeaponServices->m_hMyWeapons();
+
+					FOR_EACH_VEC(*pVecWeapons, w)
+					{
+						auto pWeapon = (*pVecWeapons)[w].Get();
+
+						if (pWeapon)
+						{
+							pTransmitInfo->m_pTransmitEdict->Clear(pWeapon->entindex());
+						}
+					}
+				}
+				pTransmitInfo->m_pTransmitEdict->Clear(pawn->entindex());
+				continue;
+			}
 			// Finally check if player is using !hide.
 			if (!targetPlayer->quietService->ShouldHide())
 			{
@@ -295,6 +318,8 @@ void KZ::quiet::OnPostEvent(INetworkMessageInternal *pEvent, const CNetMessage *
 		CBasePlayerPawn *pawn = static_cast<CBasePlayerPawn *>(emitterEnt);
 		u32 emitterPlayerIndex = g_pKZPlayerManager->ToPlayer(utils::GetController(pawn))->index;
 		FilterQuietClients(clients, emitterPlayerIndex);
+		// Звуки невидимки (выстрелы, шаги, перезарядка) не слышит никто, кроме невидимок.
+		KZInvisibleService::FilterReceivers(clients, emitterPlayerIndex);
 	}
 	else if (V_strstr(emitterEnt->GetClassname(), "weapon_"))
 	{
@@ -304,6 +329,7 @@ void KZ::quiet::OnPostEvent(INetworkMessageInternal *pEvent, const CNetMessage *
 			CBasePlayerPawn *ownerPawn = static_cast<CBasePlayerPawn *>(emitterEnt->m_hOwnerEntity().Get());
 			u32 emitterPlayerIndex = g_pKZPlayerManager->ToPlayer(ownerPawn)->index;
 			FilterQuietClients(clients, emitterPlayerIndex);
+			KZInvisibleService::FilterReceivers(clients, emitterPlayerIndex);
 		}
 		// Otherwise just hide from everyone having !hide enabled.
 		else

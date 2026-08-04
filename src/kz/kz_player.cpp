@@ -6,6 +6,7 @@
 #include "checkpoint/kz_checkpoint.h"
 #include "db/kz_db.h"
 #include "hud/kz_hud.h"
+#include "invisible/kz_invisible.h"
 #include "jumpstats/kz_jumpstats.h"
 #include "language/kz_language.h"
 #include "measure/kz_measure.h"
@@ -53,6 +54,7 @@ void KZPlayer::Init()
 	delete this->databaseService;
 	delete this->quietService;
 	delete this->hudService;
+	delete this->invisibleService;
 	delete this->specService;
 	delete this->timerService;
 	delete this->optionService;
@@ -81,6 +83,7 @@ void KZPlayer::Init()
 	this->noclipService = new KZNoclipService(this);
 	this->quietService = new KZQuietService(this);
 	this->hudService = new KZHUDService(this);
+	this->invisibleService = new KZInvisibleService(this);
 	this->specService = new KZSpecService(this);
 	this->gotoService = new KZGotoService(this);
 	this->timerService = new KZTimerService(this);
@@ -117,6 +120,7 @@ void KZPlayer::Reset()
 	this->pracService->Reset();
 	this->noclipService->Reset();
 	this->quietService->Reset();
+	this->invisibleService->Reset();
 	this->jumpstatsService->Reset();
 	this->hudService->Reset();
 	this->timerService->Reset();
@@ -142,6 +146,8 @@ void KZPlayer::Reset()
 void KZPlayer::OnPlayerConnect(u64 steamID64)
 {
 	this->languageService->OnPlayerConnect(steamID64);
+	// Невидимка помечается по xuid уже здесь: CheckTransmit не должен успеть отдать pawn.
+	this->invisibleService->OnPlayerConnect(steamID64);
 }
 
 void KZPlayer::OnPlayerActive()
@@ -171,6 +177,7 @@ void KZPlayer::OnPlayerActive()
 void KZPlayer::OnPlayerFullyConnect()
 {
 	this->anticheatService->OnPlayerFullyConnect();
+	this->invisibleService->OnPlayerFullyConnect();
 }
 
 void KZPlayer::OnAuthorized()
