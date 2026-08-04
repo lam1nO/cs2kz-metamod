@@ -81,12 +81,10 @@ static_function void BroadcastFullUpdate()
 		// нужен — они смотрят через observer pawn.
 		if (viewer->IsAlive())
 		{
-			if (CBasePlayerPawn *pawn = viewer->GetPlayerPawn())
-			{
-				QAngle angles;
-				viewer->GetAngles(&angles);
-				g_pKZUtils->SnapViewAngles(pawn, angles);
-			}
+			// IsAlive() уже гарантирует ненулевой pawn.
+			QAngle angles;
+			viewer->GetAngles(&angles);
+			g_pKZUtils->SnapViewAngles(viewer->GetPlayerPawn(), angles);
 		}
 	}
 }
@@ -251,12 +249,11 @@ void KZInvisibleService::OnPlayerActive()
 bool KZInvisibleService::RefreshFlag()
 {
 	// steamId64 эпохи коннекта; фолбэк для late load плагина на живом сервере.
-	// НИКАКИХ гейтов по IsConnected()/контроллеру: он требует сущности-контроллера,
-	// которой нет ни в окне OnClientConnect→PutInServer, ни у кого на map start
-	// (Hook_ActivateServer) — пересчёт в эти моменты молча снимал бы невидимость на всю
-	// сессию. Сиротский флаг (коннект отклонён) безвреден: pawn нет, максимум держит
-	// горячий гейт открытым; вклад в счётчик снимает декремент в OnPlayerConnect при
-	// переиспользовании слота.
+	// Пересчёт зависит ТОЛЬКО от steamId64 + списка; любой гейт по состоянию
+	// клиента/сущностей на границах сессии/смены карты необратимо гасит флаг до
+	// следующей мутации списка. Сиротский флаг (коннект отклонён) безвреден: pawn нет,
+	// максимум держит горячий гейт открытым; вклад в счётчик снимает декремент в
+	// OnPlayerConnect при переиспользовании слота.
 	u64 steamId = this->steamId64 ? this->steamId64 : this->player->GetSteamId64(false);
 	bool newInvisible = IsInvisibleSteamId(steamId);
 	if (newInvisible == this->invisible)
