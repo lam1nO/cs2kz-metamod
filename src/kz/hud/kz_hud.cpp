@@ -14,6 +14,7 @@
 #include "kz/style/kz_style.h" // GetStyleName для лейбла стиля (деф. Normal) в строке 1
 #include "kz/mode/kz_mode.h" // KZModeService::GetModeShortName для метки режима в строке 1
 #include "kz/replays/cyb_replay_common.h" // MapMode — тот же маппинг режима, что у PB/WR-фетча
+#include "kz/jumpstats/kz_jumpstats.h" // JumpType_Jumpbug/jumps.Tail() для приписки JB у скорости
 
 #include <vendor/MultiAddonManager/public/imultiaddonmanager.h>
 extern IMultiAddonManager *g_pMultiAddonManager;
@@ -133,16 +134,22 @@ void KZHUDService::Reset()
 	this->fromDuckbug = false;
 	this->crouchJumping = false;
 	this->particlesActive = false;
-	// Кэш нижней панели (слепок/текст/heartbeat/CP-TP-строка) — целиком.
+	// Слот реально освобождается (дисконнект) — только здесь гасим bottomPanelActive:
+	// ClearBottomPanel() для НОВОГО игрока в этот слот не должен считать себя обязанным
+	// клиру канала, которым никогда не владел.
+	this->bottomPanelActive = false;
+	// Кэш нижней панели (слепок/текст/heartbeat/CP-TP-строка).
 	this->ResetBottomPanelCache();
 	this->DestroyAllParticles();
 }
 
-// Полный сброс кэша нижней панели без клир-кадра: дисконнект (Reset) и раунд-старт
-// (OnRoundStart) — в обоих случаях канал получателя и так чист/неактуален.
+// Сброс кэша нижней панели БЕЗ bottomPanelActive: раунд-старт (OnRoundStart, в т.ч.
+// посреди карты — например кик реплей-бота) не освобождает канал получателя, поэтому
+// не должен подавлять следующий клир-кадр (ClearBottomPanel полагается на этот флаг,
+// чтобы не слать лишний #SFUI_EmptyString). bottomPanelActive гасится только в Reset(),
+// где слот реально освобождён (дисконнект).
 void KZHUDService::ResetBottomPanelCache()
 {
-	this->bottomPanelActive = false;
 	this->bottomStateValid = false;
 	this->lastBottomText[0] = '\0';
 	this->lastBottomSendTime = 0.0;
@@ -637,9 +644,11 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		}
 	}
 
-	// --- Строка 2: 2064 (784) [C] — крупная белая скорость (m), мелкий престрейф (s) в
-	//        перф/jumpbug/базовом цвете, приписка C при crouch-jump в cj-цвете. Всё — по
-	//        текущему условию onGroundSettled (престрейф/C скрыты, когда игрок осел на земле). ---
+	// --- Строка 2: 2064 (784) [JB] — крупная белая скорость (m), мелкий престрейф (s) в
+	//        перф/jumpbug/базовом цвете, приписка JB при строго классифицированном jumpbug
+	//        (KZ_HUD_C_JUMPBUG) либо C при crouch-jump (KZ_HUD_C_CJ) — взаимоисключающе, JB
+	//        приоритетнее. Всё — по текущему условию onGroundSettled (престрейф/C/JB скрыты,
+	//        когда игрок осел на земле). ---
 	if (showSpeed)
 	{
 		Vector velocity, baseVelocity;
@@ -667,7 +676,17 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 			V_snprintf(tk, sizeof(tk), "&#160;<font class='" KZ_HUD_FS_SECONDARY "'><font color='%s'>(%d)</font></font>", tint,
 					   RoundFloatToInt(dataSource->takeoffVelocity.Length2D()));
 			takeoff = tk;
-			if (dataSource->hudService->crouchJumping)
+			// JB против C: перечитываем классификацию каждый тик (в полёте тип может
+			// инвалидироваться) — jumps.Tail() это последний (текущий, если ещё в воздухе)
+			// прыжок; классификация ставится на отрыве в тот же тик, что и takeoffVelocity
+			// выше, гонки нет (см. Jump::GetJumpType, kz_jumpstats.h:316-319). JB приоритетнее.
+			bool isJumpbug = dataSource->jumpstatsService->jumps.Count() > 0
+							 && dataSource->jumpstatsService->jumps.Tail().GetJumpType() == JumpType_Jumpbug;
+			if (isJumpbug)
+			{
+				takeoff += "&#160;<font class='" KZ_HUD_FS_SECONDARY "'><font color='" KZ_HUD_C_JUMPBUG "'>JB</font></font>";
+			}
+			else if (dataSource->hudService->crouchJumping)
 			{
 				takeoff += "&#160;<font class='" KZ_HUD_FS_SECONDARY "'><font color='" KZ_HUD_C_CJ "'>C</font></font>";
 			}
