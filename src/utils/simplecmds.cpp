@@ -533,12 +533,14 @@ META_RES scmd::OnDispatchConCommand(ConCommandRef cmd, const CCommandContext &ct
 		// команды матчатся на первом проходе, поэтому не ломаются (RemapCyrillicToLatin
 		// без кириллицы вернёт false). Аргументы команды остаются как есть — в callback
 		// уходит исходный cmdArgs.
+		// Результат второго прохода дальше не нужен: решение принимает только suppress
+		// (его выставляет сама команда), поэтому возврат намеренно не сохраняем.
 		if (!matched)
 		{
 			char remapped[SCMD_MAX_NAME_LEN];
 			if (RemapCyrillicToLatin(cmdName, remapped, sizeof(remapped)))
 			{
-				matched = DispatchChatByName(controller, cmdArgs, remapped, trigger, suppress);
+				(void)DispatchChatByName(controller, cmdArgs, remapped, trigger, suppress);
 			}
 		}
 
@@ -548,14 +550,12 @@ META_RES scmd::OnDispatchConCommand(ConCommandRef cmd, const CCommandContext &ct
 			return MRES_SUPERCEDE;
 		}
 
-		// Неизвестная команда одним словом (без аргументов) — покажем список команд
-		// этому игроку и проглотим строку, чтобы «!опечатка» не ушла в общий чат.
-		// Многословные «!фразы» пропускаем как обычный чат.
-		if (!matched && cmdArgs.ArgC() == 1 && cmdName[0] != '\0')
-		{
-			PrintChatCommandList(g_pKZPlayerManager->ToPlayer(controller));
-			return MRES_SUPERCEDE;
-		}
+		// Неизвестную команду НЕ проглатываем: `!`-команды есть и у соседних плагинов
+		// (GG1MapChooser — !rtv/!maps/!nominate, скины — !ws/!knife, !mcustom), а они
+		// разбирают чат из игрового события player_chat, которое возникает только если
+		// say реально исполнится. MRES_SUPERCEDE здесь глушил их все разом (cyb.86..100:
+		// голосование за карту на флоте было мертво). Своих команд это не касается —
+		// они уже обработаны выше. Список !-команд игрок получает по !help.
 	}
 	else // Are we overriding a console command?
 	{
