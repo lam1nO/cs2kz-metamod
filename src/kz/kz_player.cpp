@@ -159,6 +159,7 @@ void KZPlayer::OnPlayerActive()
 
 	this->optionService->OnPlayerActive();
 	this->recordingService->EnsureCircularRecorderInitialized();
+	this->invisibleService->OnPlayerActive();
 
 	// Страховка доставки контент-ассета (particle-MHUD/звуки/jumpstats) на тяжёлых картах:
 	// клиент уже active (карта скачана) — досылаем ассет, если MAM его ещё не догрузил.
@@ -177,7 +178,6 @@ void KZPlayer::OnPlayerActive()
 void KZPlayer::OnPlayerFullyConnect()
 {
 	this->anticheatService->OnPlayerFullyConnect();
-	this->invisibleService->OnPlayerFullyConnect();
 }
 
 void KZPlayer::OnAuthorized()

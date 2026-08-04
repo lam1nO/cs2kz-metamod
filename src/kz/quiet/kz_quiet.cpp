@@ -47,6 +47,11 @@ void KZ::quiet::OnCheckTransmit(CCheckTransmitInfo **pInfo, int infoCount)
 		}
 		targetPlayer->quietService->UpdateHideState();
 		CCSPlayerPawn *targetPlayerPawn = targetPlayer->GetPlayerPawn();
+		// Кого этот клиент сейчас спектатит: такой pawn не гасим даже для невидимки —
+		// страховка апстрима (ShouldHideIndex: «Don't hide the player being spectated»,
+		// иначе краш-класс). Ретаргет KZInvisibleService::OnGameFrame живёт в pre-хуке
+		// GameFrame, а движок может прицепить зрителя ВНУТРИ тика — окно ≥1 тик.
+		KZPlayer *targetObserved = targetPlayer->specService->GetSpectatedPlayer();
 
 		EntityInstanceByClassIter_t iterParticleSystem(NULL, "info_particle_system");
 
@@ -132,10 +137,13 @@ void KZ::quiet::OnCheckTransmit(CCheckTransmitInfo **pInfo, int infoCount)
 				continue;
 			}
 #endif
-			// Невидимка (инверсия !hide): pawn скрываем от всех, кроме него самого и других
-			// невидимок, — вместе с его оружием, чтобы ствол не висел в воздухе.
-			// Controller не трогаем (крашеопасно, скорборд — вне v1).
-			if (KZInvisibleService::ShouldHideFrom(g_pKZPlayerManager->ToPlayer(pawn), targetPlayer))
+			// Невидимка (инверсия !hide): pawn скрываем от всех, кроме него самого, других
+			// невидимок и зрителя, у которого этот pawn — текущая цель обзёрвера (см.
+			// targetObserved выше: тик-другой видимости дешевле краша, ретаргет добьёт).
+			// Гасим вместе с оружием, чтобы ствол не висел в воздухе. Controller не
+			// трогаем (крашеопасно, скорборд — вне v1).
+			KZPlayer *pawnPlayer = g_pKZPlayerManager->ToPlayer(pawn);
+			if (pawnPlayer != targetObserved && KZInvisibleService::ShouldHideFrom(pawnPlayer, targetPlayer))
 			{
 				if (pawn->m_pWeaponServices())
 				{

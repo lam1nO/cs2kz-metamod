@@ -19,8 +19,11 @@ public:
 	virtual void Reset() override;
 
 	void OnPlayerConnect(u64 steamID64);
-	void OnPlayerFullyConnect();
-	// Пересчитать флаг по текущему списку; при смене статуса у игрока в игре — сказать ему в чат.
+	// Чат-индикация невидимке. Эпоха ClientActive: язык/чат на более ранних эпохах
+	// могут не доехать (QueryCvarValue асинхронный) — паттерн kz_player.cpp OnPlayerActive.
+	void OnPlayerActive();
+	// Пересчитать флаг по текущему списку; при смене статуса у игрока в игре — сказать ему
+	// в чат, а при возврате видимости — форснуть зрителям полный снапшот.
 	void RefreshFlag();
 
 	bool IsInvisible() const

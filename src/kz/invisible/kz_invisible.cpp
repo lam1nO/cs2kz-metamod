@@ -1,5 +1,6 @@
 #include "kz_invisible.h"
 #include "kz/language/kz_language.h"
+#include "kz/quiet/kz_quiet.h"
 #include "kz/spec/kz_spec.h"
 
 #include "sdk/services.h"
@@ -17,6 +18,10 @@
 // Список невидимок (steamid64). Мутации только на игровом потоке (плагин-лоад,
 // map start, ConCommand'ы), чтение — CheckTransmit/PostEvent там же.
 static_global std::unordered_set<u64> s_invisibleSteamIds;
+
+// Сколько невидимок сейчас ОНЛАЙН (кэш-флаги игроков). Гейт горячих путей: файл со
+// списком админов на проде непуст всегда, а вот невидимка на сервере — редкость.
+static_global i32 s_onlineInvisibleCount = 0;
 
 // Пересчитать кэш-флаги всем игрокам после смены списка.
 static_function void RefreshAllPlayers()
@@ -134,8 +139,27 @@ bool KZInvisibleService::ShouldHideFrom(KZPlayer *subject, KZPlayer *viewer)
 	return IsInvisible(subject) && !IsInvisible(viewer);
 }
 
+// Возврат видимости: форсим остальным клиентам полный снапшот, иначе pawn может не
+// пересоздаться у них сразу (паттерн KZQuietService::SendFullUpdate/ToggleHide).
+static_function void FullUpdateOtherPlayers(KZPlayer *subject)
+{
+	for (i32 i = 1; i < MAXPLAYERS + 1; i++)
+	{
+		KZPlayer *viewer = g_pKZPlayerManager->ToPlayer((u32)i);
+		if (!viewer || viewer == subject || !viewer->IsInGame() || viewer->IsFakeClient() || viewer->IsCSTV())
+		{
+			continue;
+		}
+		viewer->quietService->SendFullUpdate();
+	}
+}
+
 void KZInvisibleService::Reset()
 {
+	if (this->invisible)
+	{
+		s_onlineInvisibleCount--;
+	}
 	this->steamId64 = 0;
 	this->invisible = false;
 }
@@ -145,9 +169,13 @@ void KZInvisibleService::OnPlayerConnect(u64 steamID64)
 	// Эпоха OnClientConnect: xuid уже известен — невидимка скрыт с первой секунды.
 	this->steamId64 = steamID64;
 	this->invisible = IsInvisibleSteamId(steamID64);
+	if (this->invisible)
+	{
+		s_onlineInvisibleCount++;
+	}
 }
 
-void KZInvisibleService::OnPlayerFullyConnect()
+void KZInvisibleService::OnPlayerActive()
 {
 	if (this->invisible && !this->player->IsFakeClient())
 	{
@@ -165,9 +193,14 @@ void KZInvisibleService::RefreshFlag()
 		return;
 	}
 	this->invisible = newInvisible;
+	s_onlineInvisibleCount += newInvisible ? 1 : -1;
 	if (this->player->IsInGame() && !this->player->IsFakeClient())
 	{
 		this->player->languageService->PrintChat(true, false, newInvisible ? "Invisible - Active" : "Invisible - Inactive");
+		if (!newInvisible)
+		{
+			FullUpdateOtherPlayers(this->player);
+		}
 	}
 }
 
@@ -195,8 +228,9 @@ void KZInvisibleService::FilterReceivers(const uint64 *clients, u32 emitterPlaye
 
 void KZInvisibleService::OnGameFrame()
 {
-	// Общий случай флота — пустой список: бесплатный выход, ниже ничего не тикает.
-	if (s_invisibleSteamIds.empty())
+	// Общий случай флота — невидимок онлайн нет (сам файл-список непуст почти всегда):
+	// бесплатный выход, ниже ничего не тикает.
+	if (s_onlineInvisibleCount <= 0)
 	{
 		return;
 	}
@@ -235,7 +269,11 @@ void KZInvisibleService::OnGameFrame()
 			break;
 		}
 		// Наборы полей — зеркало KZSpecService::SpectatePlayer (kz_spec.cpp): in-eye на
-		// другого игрока либо free roam без телепорта.
+		// другого игрока либо free roam без телепорта. Пинг-понга «жив только невидимка»
+		// в стационаре нет: после форса roam цель обнулена → GetSpectatedPlayer() == null
+		// → ветка выше делает continue, пока движок сам не прицепит зрителя заново
+		// (клик цикла целей / авто-attach) — тогда форсим снова. Живое подтверждение —
+		// в чек-листе смоука.
 		if (next)
 		{
 			obsService->m_iObserverMode(OBS_MODE_IN_EYE);
