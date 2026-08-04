@@ -421,6 +421,19 @@ void KZCheckpointService::TpHoldPlayerStill()
 
 void KZCheckpointService::SetStartPosition()
 {
+	// Fail-closed: !ssp делает read-modify-write ВСЕЙ таблицы startPositions. До загрузки
+	// локальных префов эта таблица — пустой дефолт, и SetPreferenceTable пометил бы
+	// startPositions как user-set навсегда, лишив игрока его реальных стартпозиций
+	// с других карт при следующей загрузке (MergePreferences исключает user-set ключи).
+	if (!this->player->optionService->IsLoaded())
+	{
+		this->player->languageService->PrintChat(true, false, "Custom Start Position - Prefs Not Loaded");
+		this->player->PlayErrorSound();
+		// GetSteamId64(false): гейт срабатывает и в окне до завершения Steam-auth, где
+		// validated-вариант отдал бы 0.
+		KZ_LOG_WARN(LogChannel::Option, "[cyb] ssp_rejected steam_id=%llu reason=prefs_not_loaded\n", this->player->GetSteamId64(false));
+		return;
+	}
 	CCSPlayerPawn *pawn = this->player->GetPlayerPawn();
 	if (!pawn)
 	{
@@ -458,6 +471,15 @@ void KZCheckpointService::SetStartPosition()
 
 void KZCheckpointService::ClearStartPosition()
 {
+	// Тот же fail-closed гейт, что в SetStartPosition: !csp — тоже read-modify-write
+	// всей таблицы startPositions.
+	if (!this->player->optionService->IsLoaded())
+	{
+		this->player->languageService->PrintChat(true, false, "Custom Start Position - Prefs Not Loaded");
+		this->player->PlayErrorSound();
+		KZ_LOG_WARN(LogChannel::Option, "[cyb] csp_rejected steam_id=%llu reason=prefs_not_loaded\n", this->player->GetSteamId64(false));
+		return;
+	}
 	this->hasCustomStartPosition = false;
 
 	bool hasMapName = false;

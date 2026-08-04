@@ -232,6 +232,13 @@ void KZOptionService::InitializeGlobalPrefs(std::string json)
 
 void KZOptionService::SaveLocalPrefs()
 {
+	// Fail-closed: без успешной InitializeLocalPrefs prefKV — пустая таблица по
+	// умолчанию. Запись такой "пустоты" в БД до загрузки затирала бы реальные префы
+	// игрока (гонка автотриггеров записи с InitializeLocalPrefs, см. GetHudType).
+	if (!this->IsLoaded())
+	{
+		return;
+	}
 	if (this->player->IsFakeClient() || !this->player->IsAuthenticated())
 	{
 		return;

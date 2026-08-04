@@ -466,6 +466,10 @@ void KZOptionServiceEventListener_Modes::OnPlayerPreferencesLoaded(KZPlayer *pla
 	// Give up changing modes if the player is already in the server for a while.
 	if (player->telemetryService->GetTimeInServer() < 30.0f && !player->timerService->GetTimerRunning())
 	{
-		modeManager.SwitchToMode(player, mode, false, false);
+		// updatePreference=false: это листенер факта загрузки, а не выбора игрока.
+		// С дефолтным true SetPreferenceStr помечал бы preferredMode как user-set —
+		// последующий OnPlayerPreferencesLoaded с GLOBAL уже не смог бы применить
+		// значение с платформы (MergePreferences исключает user-set ключи).
+		modeManager.SwitchToMode(player, mode, false, false, false);
 	}
 }

@@ -141,6 +141,18 @@ cs2kz-linux-builder .`, иначе компилируются старые ис�
   команду; рубильник —
   cvar `kz_gg1_bridge`. `KZPlayer::Reset()` теперь зовёт `profileService->Reset()`.
   При мёрже апстрима конфликт в kz_profile.\* разрешать в пользу нашей ветки.
+- **Fail-closed префы** (`src/kz/option/kz_option.h`): `KZOptionService::IsLoaded()` —
+  публичный гейт `dataState >= LOCAL`. До первого успешного `InitializeLocalPrefs`
+  `prefKV` — пустой дефолт; `SaveLocalPrefs` теперь выходит первой строкой, если
+  `!IsLoaded()` (иначе автотриггеры записи ДО загрузки — миграция `hudType` в
+  `GetHudType`, автовыбор режима на `OnPlayerPreferencesLoaded`, `!ssp`/`!csp`
+  (read-modify-write всей таблицы `startPositions`) — флашили бы дефолт поверх
+  настоящих префов игрока). `GetHudType` при `!IsLoaded()` возвращает вычисленный
+  дефолт без записи; mode-листенер зовёт `SwitchToMode(..., updatePreference=false)`,
+  чтобы не помечать `preferredMode` user-set на каждый коннект; `!ssp`/`!csp` отказывают
+  в чат + `[cyb] reason=prefs_not_loaded` до загрузки. `KZDatabaseService::isSetUp`
+  (гейт `SavePrefs`) теперь ставится ПОСЛЕ `InitializeLocalPrefs`, а не до —
+  отражает факт успешной загрузки, а не только апсерт строки игрока.
 
 ## Инварианты (не ломать при мёрже апстрима)
 

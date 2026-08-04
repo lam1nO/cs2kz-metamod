@@ -92,8 +92,12 @@ void KZDatabaseService::SetupClient()
 					isBanned = true;
 				}
 				const char *prefs = result->FetchRow() ? result->GetString(0) : "";
-				this->isSetUp = true;
 				pl->optionService->InitializeLocalPrefs(prefs);
+				// isSetUp гейтит SavePrefs (save_prefs.cpp): ставим ТОЛЬКО после успешной
+				// загрузки локальных префов, а не заранее — иначе битый JSON из БД (dataState
+				// остаётся NONE) не мешал бы флашу пустого дефолта поверх настоящих префов
+				// при первой же записи (SetPreference*/SaveLocalPrefs).
+				this->isSetUp = pl->optionService->IsLoaded();
 				CALL_FORWARD(KZDatabaseService::eventListeners, OnClientSetup, pl, pl->GetSteamId64(), isBanned);
 				// Рестор персист-рана: первый спаун почти всегда происходит ДО завершения
 				// Steam-auth (спаун мгновенный, auth — секунды), а второго спауна на KZ нет —

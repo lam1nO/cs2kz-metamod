@@ -54,6 +54,14 @@ public:
 	void InitializeLocalPrefs(CUtlString text);
 	void InitializeGlobalPrefs(std::string json);
 
+	// Локальные префы загружены из БД (хотя бы раз, InitializeLocalPrefs прошла успешно).
+	// Fail-closed гейт для путей записи/чтения, которым нужны реальные данные, а не
+	// пустая таблица по умолчанию (см. SaveLocalPrefs, GetHudType, !ssp/!csp).
+	bool IsLoaded()
+	{
+		return this->dataState >= LOCAL;
+	}
+
 	void SaveLocalPrefs();
 
 	void SaveGlobalPrefs() {}

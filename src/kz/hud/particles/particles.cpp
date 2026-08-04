@@ -226,10 +226,16 @@ int KZHUDService::GetHudType()
 	int stored = opts->GetPreferenceInt("hudType", -1);
 	if (stored == -1)
 	{
-		// Первый запрос — мигрируем из mhudMaster.
 		bool legacyMaster = opts->GetPreferenceBool("mhudMaster", false);
 		int migrated = legacyMaster ? 1 : 0;
-		opts->SetPreferenceInt("hudType", migrated);
+		// Миграция пишет hudType только после загрузки префов из БД: этот геттер дёргается
+		// на первом тике движения, задолго до InitializeLocalPrefs. Запись здесь до загрузки
+		// зафиксировала бы дефолт в fail-closed prefKV и SaveLocalPrefs потом не смог бы её
+		// перезаписать (см. IsLoaded). Читающий путь просто отдаёт вычисленный дефолт.
+		if (opts->IsLoaded())
+		{
+			opts->SetPreferenceInt("hudType", migrated);
+		}
 		return migrated;
 	}
 	return stored;
