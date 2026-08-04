@@ -676,10 +676,10 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 			V_snprintf(tk, sizeof(tk), "&#160;<font class='" KZ_HUD_FS_SECONDARY "'><font color='%s'>(%d)</font></font>", tint,
 					   RoundFloatToInt(dataSource->takeoffVelocity.Length2D()));
 			takeoff = tk;
-			// JB против C: перечитываем классификацию каждый тик (в полёте тип может
-			// инвалидироваться) — jumps.Tail() это последний (текущий, если ещё в воздухе)
-			// прыжок; классификация ставится на отрыве в тот же тик, что и takeoffVelocity
-			// выше, гонки нет (см. Jump::GetJumpType, kz_jumpstats.h:316-319). JB приоритетнее.
+			// JB против C: перечитываем классификацию, пока индикатор виден (grace) — тип
+			// ставится на отрыве, но Jump::End() на приземлении может дотюнить классификацию;
+			// jumps.Tail() это последний (текущий, если ещё в воздухе) прыжок (см.
+			// Jump::GetJumpType, kz_jumpstats.h:316-319). JB приоритетнее.
 			bool isJumpbug = dataSource->jumpstatsService->jumps.Count() > 0
 							 && dataSource->jumpstatsService->jumps.Tail().GetJumpType() == JumpType_Jumpbug;
 			if (isJumpbug)

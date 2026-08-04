@@ -278,8 +278,10 @@ private:
 	// время — стек). Канал plain-text: разметки нет, перенос строки — '\n'.
 	void FormatBottomText(const BottomPanelState &state, char *buf, i32 size);
 
-	// Полный сброс кэша нижней панели БЕЗ клир-кадра (для OnRoundStart: канал новой карты
-	// и так чист, а посылать usermessage посреди смены карты незачем).
+	// Сброс кэша нижней панели БЕЗ bottomPanelActive (см. kz_hud.cpp): используется на
+	// OnRoundStart, в т.ч. посреди карты (например, кик реплей-бота) — погасить флаг здесь
+	// подавило бы следующий клир-кадр ClearBottomPanel. bottomPanelActive гасится только в
+	// Reset() (дисконнект, слот реально освобождён).
 	void ResetBottomPanelCache();
 
 	// Единый HTML-center HUD в стиле кибершока: строка 1 — таймер (зелёный) + режим + стиль
