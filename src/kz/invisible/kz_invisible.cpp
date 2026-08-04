@@ -1,6 +1,5 @@
 #include "kz_invisible.h"
 #include "kz/language/kz_language.h"
-#include "kz/spec/kz_spec.h"
 
 #include "sdk/serversideclient.h"
 #include "sdk/services.h"
@@ -270,92 +269,6 @@ bool KZInvisibleService::RefreshFlag()
 		return !newInvisible;
 	}
 	return false;
-}
-
-void KZInvisibleService::FilterReceivers(const uint64 *clients, u32 emitterPlayerIndex)
-{
-	KZPlayer *emitter = g_pKZPlayerManager->ToPlayer(emitterPlayerIndex);
-	if (!IsInvisible(emitter))
-	{
-		return;
-	}
-	for (i32 recipientPlayerIndex = 1; recipientPlayerIndex < MAXPLAYERS + 1; recipientPlayerIndex++)
-	{
-		if ((u32)recipientPlayerIndex == emitterPlayerIndex)
-		{
-			continue;
-		}
-		KZPlayer *recipient = g_pKZPlayerManager->ToPlayer(recipientPlayerIndex);
-		if (IsInvisible(recipient))
-		{
-			continue;
-		}
-		*(uint64 *)clients &= ~(1ull << (recipientPlayerIndex - 1));
-	}
-}
-
-void KZInvisibleService::OnGameFrame()
-{
-	// Общий случай флота — невидимок онлайн нет (сам файл-список непуст почти всегда):
-	// бесплатный выход, ниже ничего не тикает.
-	if (!HasOnlineInvisibles())
-	{
-		return;
-	}
-	for (i32 i = 1; i < MAXPLAYERS + 1; i++)
-	{
-		KZPlayer *viewer = g_pKZPlayerManager->ToPlayer((u32)i);
-		if (!viewer || !viewer->IsInGame() || viewer->IsFakeClient() || viewer->IsCSTV() || viewer->invisibleService->IsInvisible())
-		{
-			continue;
-		}
-		KZPlayer *target = viewer->specService->GetSpectatedPlayer();
-		if (!ShouldHideFrom(target, viewer))
-		{
-			continue;
-		}
-		// GetSpectatedPlayer вернул цель — controller/observer pawn/сервис валидны.
-		CPlayer_ObserverServices *obsService = viewer->GetController()->m_hObserverPawn()->m_pObserverServices;
-		if (!obsService)
-		{
-			continue;
-		}
-		// Следующая валидная цель, которую viewer имеет право видеть.
-		KZPlayer *next = nullptr;
-		for (i32 j = 1; j < MAXPLAYERS + 1; j++)
-		{
-			KZPlayer *candidate = g_pKZPlayerManager->ToPlayer((u32)j);
-			if (candidate == viewer || !candidate->IsInGame() || !candidate->IsAlive() || !candidate->GetPlayerPawn())
-			{
-				continue;
-			}
-			if (ShouldHideFrom(candidate, viewer))
-			{
-				continue;
-			}
-			next = candidate;
-			break;
-		}
-		// Наборы полей — зеркало KZSpecService::SpectatePlayer (kz_spec.cpp): in-eye на
-		// другого игрока либо free roam без телепорта. Пинг-понга «жив только невидимка»
-		// в стационаре нет: после форса roam цель обнулена → GetSpectatedPlayer() == null
-		// → ветка выше делает continue, пока движок сам не прицепит зрителя заново
-		// (клик цикла целей / авто-attach) — тогда форсим снова. Живое подтверждение —
-		// в чек-листе смоука.
-		if (next)
-		{
-			obsService->m_iObserverMode(OBS_MODE_IN_EYE);
-			obsService->m_iObserverLastMode(OBS_MODE_NONE);
-			obsService->m_hObserverTarget(next->GetPlayerPawn());
-		}
-		else
-		{
-			viewer->GetController()->m_DesiredObserverMode(OBS_MODE_ROAMING);
-			viewer->GetController()->m_hDesiredObserverTarget(nullptr);
-			obsService->m_iObserverMode(OBS_MODE_ROAMING);
-			obsService->m_hObserverTarget(nullptr);
-		}
-	}
 }
 
 // Живое управление списком без файла. Настоящие ConCommand'ы (не SCMD) — зовутся с

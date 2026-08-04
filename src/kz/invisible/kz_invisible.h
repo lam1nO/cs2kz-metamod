@@ -1,10 +1,10 @@
 #pragma once
 #include "../kz.h"
 
-// Режим невидимки (слежка за читерами): игрок из списка не передаётся другим клиентам
-// (pawn/оружие в CheckTransmit), его звуки глушатся (PostEvent), он не виден в
-// спектатор-списках и не анонсируется в чате при входе/выходе. Видят его только он сам
-// и другие невидимки. Controller и скорборд не трогаем (v1).
+// Режим невидимки (слежка за читерами), скоуп v2: скрытие из TAB (controller в
+// CheckTransmit, только пока невидимка — спектатор) и из !specs, тихий вход/выход
+// (анонсы подавлены). Модель/звуки НЕ скрываем — невидимка обязан быть спектатором,
+// живым он виден как обычный игрок. Видят его только он сам и другие невидимки.
 // Источник списка: csgo/cfg/cyb_invisible.json ({"steamids": ["7656119...", ...]}),
 // живое управление — ConCommand'ы kz_invisible_reload/add/remove (только сервер/RCON).
 class KZInvisibleService : public KZBaseService
@@ -32,7 +32,7 @@ public:
 		return this->invisible;
 	}
 
-	// Быстрый гейт горячих путей (CheckTransmit/OnGameFrame): есть ли невидимки онлайн.
+	// Быстрый гейт горячего пути (CheckTransmit): есть ли невидимки онлайн.
 	static bool HasOnlineInvisibles();
 
 	static bool IsInvisible(KZPlayer *player);
@@ -50,14 +50,4 @@ public:
 	// source — для лога (plugin_load/map_start/rcon_reload). Отсутствующий файл = пустой список;
 	// битый файл = текущий список не меняем (warn с reason).
 	static void LoadFromFile(const char *source);
-
-	// Выкинуть из маски получателей всех, от кого невидимка-эмиттер должен быть скрыт
-	// (паттерн FilterQuietClients, kz_quiet.cpp).
-	static void FilterReceivers(const uint64 *clients, u32 emitterPlayerIndex);
-
-	// Движковый выбор цели обзёрвера (цикл кнопками, авто-attach) не знает про
-	// transmit-гейт: in-eye на непередаваемый pawn — крашеопасный класс (прецедент —
-	// исключение спектируемой цели в KZQuietService::ShouldHideIndex). Каждый тик
-	// снимаем обычных зрителей с невидимок: на следующую валидную цель или во free roam.
-	static void OnGameFrame();
 };

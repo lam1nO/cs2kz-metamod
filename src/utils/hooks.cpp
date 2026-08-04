@@ -527,7 +527,6 @@ static_function void Hook_GameFrame(bool simulating, bool bFirstTick, bool bLast
 	KZBeamService::UpdateBeams();
 	KZPaintService::OnGameFrame();
 	KZProfileService::OnGameFrame();
-	KZInvisibleService::OnGameFrame();
 	KZ::replaysystem::OnGameFrame();
 	KZRacingService::BroadcastRaceInfo();
 	RETURN_META(MRES_IGNORED);

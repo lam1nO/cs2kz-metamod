@@ -1,7 +1,6 @@
 // Меню выбора цели !spec при неоднозначной подстроке (cs2menus, паттерн !rpmenu).
 #include "kz_spec_menu.h"
 #include "kz_spec.h"
-#include "kz/invisible/kz_invisible.h"
 #include "kz/language/kz_language.h"
 #include "utils/utils.h"
 
@@ -24,11 +23,10 @@ static_function void OnSpecMenuSelect(MenuHandle menu, int slot, int item)
 	{
 		return;
 	}
-	// info — userID кандидата строкой; ревалидация: цель могла выйти, уйти в спек
-	// или стать невидимкой (RCON), пока меню висело.
+	// info — userID кандидата строкой; ревалидация: цель могла выйти или уйти в спек,
+	// пока меню висело.
 	KZPlayer *target = g_pKZPlayerManager->ToPlayer(CPlayerUserId(V_StringToInt32(info, -1)));
-	if (!target || !target->GetController() || target->GetController()->GetTeam() == CS_TEAM_SPECTATOR
-		|| KZInvisibleService::ShouldHideFrom(target, p))
+	if (!target || !target->GetController() || target->GetController()->GetTeam() == CS_TEAM_SPECTATOR)
 	{
 		p->languageService->PrintChat(true, false, "Spectate Failure (Player Not Found)");
 		return;

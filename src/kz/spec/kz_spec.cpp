@@ -77,11 +77,6 @@ i32 KZSpecService::CollectSpectateCandidates(const char *query, KZPlayer **candi
 		{
 			continue;
 		}
-		// Невидимку не выдаём ни в меню, ни по точному имени.
-		if (KZInvisibleService::ShouldHideFrom(other, this->player))
-		{
-			continue;
-		}
 		if (KZ_STREQI(other->GetName(), query))
 		{
 			exact[exactCount++] = other;

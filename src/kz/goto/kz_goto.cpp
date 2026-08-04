@@ -3,7 +3,6 @@
 #include "utils/simplecmds.h"
 #include "utils/utils.h"
 
-#include "../invisible/kz_invisible.h"
 #include "../language/kz_language.h"
 #include "../timer/kz_timer.h"
 
@@ -31,11 +30,6 @@ i32 KZGotoService::CollectGotoCandidates(const char *query, KZPlayer **candidate
 			continue;
 		}
 		if (other->GetController()->GetTeam() == CS_TEAM_SPECTATOR)
-		{
-			continue;
-		}
-		// Невидимку не выдаём ни в меню !goto, ни по точному имени.
-		if (KZInvisibleService::ShouldHideFrom(other, this->player))
 		{
 			continue;
 		}
@@ -127,10 +121,8 @@ static_function void OnGotoMenuSelect(MenuHandle menu, int slot, int item)
 	{
 		return;
 	}
-	// Ревалидация невидимости: цель могли добавить в список (RCON), пока меню висело.
 	KZPlayer *target = g_pKZPlayerManager->ToPlayer(CPlayerUserId(V_StringToInt32(info, -1)));
-	if (!target || !target->GetController() || target->GetController()->GetTeam() == CS_TEAM_SPECTATOR
-		|| KZInvisibleService::ShouldHideFrom(target, p))
+	if (!target || !target->GetController() || target->GetController()->GetTeam() == CS_TEAM_SPECTATOR)
 	{
 		p->languageService->PrintChat(true, false, "Goto - Player Unavailable");
 		return;

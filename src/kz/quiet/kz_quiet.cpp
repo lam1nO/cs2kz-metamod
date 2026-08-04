@@ -47,13 +47,42 @@ void KZ::quiet::OnCheckTransmit(CCheckTransmitInfo **pInfo, int infoCount)
 		}
 		targetPlayer->quietService->UpdateHideState();
 		CCSPlayerPawn *targetPlayerPawn = targetPlayer->GetPlayerPawn();
-		// Быстрый путь: невидимок онлайн нет — инвизибл-логика ниже не тикает вовсе.
-		const bool anyInvisibleOnline = KZInvisibleService::HasOnlineInvisibles();
-		// Кого этот клиент сейчас спектатит: такой pawn не гасим даже для невидимки —
-		// страховка апстрима (ShouldHideIndex: «Don't hide the player being spectated»,
-		// иначе краш-класс). Ретаргет KZInvisibleService::OnGameFrame живёт в pre-хуке
-		// GameFrame, а движок может прицепить зрителя ВНУТРИ тика — окно ≥1 тик.
-		KZPlayer *targetObserved = anyInvisibleOnline ? targetPlayer->specService->GetSpectatedPlayer() : nullptr;
+
+		// Невидимка v2: скрытие из TAB. Скорборд клиент строит сам из реплицируемых
+		// CCSPlayerController (контроллеры сетятся вне PVS) — чистим у обычных получателей
+		// бит КОНТРОЛЛЕРА невидимки. Жёсткий гейт: только пока невидимка в команде
+		// спектаторов — непереданный controller у переданного живого pawn'а даёт тот же
+		// краш-класс, что давит страховка ниже («Do not transmit a pawn without any
+		// controller»). Защитно гасим и его observer pawn (тоже ссылается на controller).
+		// Невидимки видят друг друга, сам себя видит — внутри ShouldHideFrom. Гейт
+		// HasOnlineInvisibles: на сервере без невидимок блок не тикает вовсе.
+		if (KZInvisibleService::HasOnlineInvisibles())
+		{
+			for (i32 subjectIndex = 1; subjectIndex < MAXPLAYERS + 1; subjectIndex++)
+			{
+				KZPlayer *subject = g_pKZPlayerManager->ToPlayer((u32)subjectIndex);
+				if (!subject || !KZInvisibleService::ShouldHideFrom(subject, targetPlayer))
+				{
+					continue;
+				}
+				CCSPlayerController *subjectController = subject->GetController();
+				if (!subjectController || subjectController->GetTeam() != CS_TEAM_SPECTATOR)
+				{
+					continue;
+				}
+				pTransmitInfo->m_pTransmitEdict->Clear(subjectController->entindex());
+				if (CCSPlayerPawnBase *observerPawn = subjectController->GetObserverPawn())
+				{
+					pTransmitInfo->m_pTransmitEdict->Clear(observerPawn->entindex());
+				}
+				// Переходный тик ChangeTeam: команда уже SPECTATOR, а player pawn ещё не
+				// удалён — гасим и его, чтобы не отдать pawn со скрытым controller'ом.
+				if (CCSPlayerPawn *playerPawn = subjectController->GetPlayerPawn())
+				{
+					pTransmitInfo->m_pTransmitEdict->Clear(playerPawn->entindex());
+				}
+			}
+		}
 
 		EntityInstanceByClassIter_t iterParticleSystem(NULL, "info_particle_system");
 
@@ -140,30 +169,6 @@ void KZ::quiet::OnCheckTransmit(CCheckTransmitInfo **pInfo, int infoCount)
 			}
 #endif
 			KZPlayer *pawnPlayer = g_pKZPlayerManager->ToPlayer(pawn);
-			// Невидимка (инверсия !hide): pawn скрываем от всех, кроме него самого, других
-			// невидимок и зрителя, у которого этот pawn — текущая цель обзёрвера (см.
-			// targetObserved выше: тик-другой видимости дешевле краша, ретаргет добьёт).
-			// Гасим вместе с оружием, чтобы ствол не висел в воздухе. Controller не
-			// трогаем (крашеопасно, скорборд — вне v1).
-			if (anyInvisibleOnline && pawnPlayer != targetObserved && KZInvisibleService::ShouldHideFrom(pawnPlayer, targetPlayer))
-			{
-				if (pawn->m_pWeaponServices())
-				{
-					auto pVecWeapons = pawn->m_pWeaponServices->m_hMyWeapons();
-
-					FOR_EACH_VEC(*pVecWeapons, w)
-					{
-						auto pWeapon = (*pVecWeapons)[w].Get();
-
-						if (pWeapon)
-						{
-							pTransmitInfo->m_pTransmitEdict->Clear(pWeapon->entindex());
-						}
-					}
-				}
-				pTransmitInfo->m_pTransmitEdict->Clear(pawn->entindex());
-				continue;
-			}
 			// Finally check if player is using !hide.
 			if (!targetPlayer->quietService->ShouldHide())
 			{
@@ -327,8 +332,6 @@ void KZ::quiet::OnPostEvent(INetworkMessageInternal *pEvent, const CNetMessage *
 		CBasePlayerPawn *pawn = static_cast<CBasePlayerPawn *>(emitterEnt);
 		u32 emitterPlayerIndex = g_pKZPlayerManager->ToPlayer(utils::GetController(pawn))->index;
 		FilterQuietClients(clients, emitterPlayerIndex);
-		// Звуки невидимки (выстрелы, шаги, перезарядка) не слышит никто, кроме невидимок.
-		KZInvisibleService::FilterReceivers(clients, emitterPlayerIndex);
 	}
 	else if (V_strstr(emitterEnt->GetClassname(), "weapon_"))
 	{
@@ -338,7 +341,6 @@ void KZ::quiet::OnPostEvent(INetworkMessageInternal *pEvent, const CNetMessage *
 			CBasePlayerPawn *ownerPawn = static_cast<CBasePlayerPawn *>(emitterEnt->m_hOwnerEntity().Get());
 			u32 emitterPlayerIndex = g_pKZPlayerManager->ToPlayer(ownerPawn)->index;
 			FilterQuietClients(clients, emitterPlayerIndex);
-			KZInvisibleService::FilterReceivers(clients, emitterPlayerIndex);
 		}
 		// Otherwise just hide from everyone having !hide enabled.
 		else

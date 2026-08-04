@@ -47,13 +47,18 @@ cs2kz-linux-builder .`, иначе компилируются старые ис�
 - **Чат**: `!`-команды и серверный шум (beta join, website tip, turnbinds,
   broadcast jumpstat) скрыты; `!maps`/`!mcustom` работают через релей.
 - **Ноги**: hideLegs по умолчанию true (`!hidelegs` — тумблер).
-- **Невидимки — режим слежки за читерами** (`src/kz/invisible/kz_invisible.*`):
-  игрок из списка невидим обычным игрокам — pawn+оружие (инверсия !hide в
-  `KZ::quiet::OnCheckTransmit`, спектируемая цель не гасится — краш-страховка,
-  зрителя снимает ретаргет `OnGameFrame`), звуки (`FilterReceivers` в OnPostEvent),
-  `!specs`/`!spec`/`!goto`, join/leave-анонсы (`bDontBroadcast` в `Hook_FireEvent`;
-  `[cyb] player_join/leave`-логи целы). Видят его только он сам и другие невидимки;
-  скорборд/клиентский `status` НЕ скрывают (controller не трогаем). Контракт: файл
+- **Невидимки — режим слежки за читерами, v2** (`src/kz/invisible/kz_invisible.*`):
+  игрок из списка скрыт из TAB (в `KZ::quiet::OnCheckTransmit` чистится бит его
+  **КОНТРОЛЛЕРА** + защитно observer pawn — строго пока он в команде спектаторов,
+  иначе краш-класс «переданный pawn без controller») и из `!specs`
+  (`GetSpectatorList`); join/leave-анонсы подавлены (`bDontBroadcast` в
+  `Hook_FireEvent`; `[cyb] player_join/leave`-логи целы). Модель/звуки/ретаргет
+  зрителей НЕ скрываем (вырезано в v2) — **невидимка обязан сидеть в спектаторах**,
+  живым он виден всем как обычный игрок (поэтому фильтров в `!spec`/`!goto` больше
+  нет — спектаторов те не выдают и так). Видят его в TAB только он сам и другие
+  невидимки. Известные побочки v2: чат/войс невидимки у обычных игроков не
+  рендерится (клиент не знает controller); клиентский `status` и A2S_PLAYER имя
+  отдают — вне охвата, на сайте закрыто api-фильтром. Контракт: файл
   `csgo/cfg/cyb_invisible.json` `{"steamids":["7656...", ...]}` — кладёт **node-agent**
   до первого коннекта (отсутствует = пустой список; битый = список не меняем, warn);
   живое управление — ConCommand'ы `kz_invisible_reload` / `kz_invisible_add <sid64>` /
