@@ -11,10 +11,10 @@
 #include "kz/checkpoint/kz_checkpoint.h"
 #include "kz/prac/kz_prac.h"
 #include "kz/replays/kz_replaysystem.h"
-#include "kz/style/kz_style.h" // GetStyleName для лейбла стиля (деф. Normal) в строке 1
-#include "kz/mode/kz_mode.h" // KZModeService::GetModeShortName для метки режима в строке 1
+#include "kz/style/kz_style.h"            // GetStyleName для лейбла стиля (деф. Normal) в строке 1
+#include "kz/mode/kz_mode.h"              // KZModeService::GetModeShortName для метки режима в строке 1
 #include "kz/replays/cyb_replay_common.h" // MapMode — тот же маппинг режима, что у PB/WR-фетча
-#include "kz/jumpstats/kz_jumpstats.h" // JumpType_Jumpbug/jumps.Tail() для приписки JB у скорости
+#include "kz/jumpstats/kz_jumpstats.h"    // JumpType_Jumpbug/jumps.Tail() для приписки JB у скорости
 
 #include <vendor/MultiAddonManager/public/imultiaddonmanager.h>
 extern IMultiAddonManager *g_pMultiAddonManager;
@@ -680,8 +680,8 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 			// ставится на отрыве, но Jump::End() на приземлении может дотюнить классификацию;
 			// jumps.Tail() это последний (текущий, если ещё в воздухе) прыжок (см.
 			// Jump::GetJumpType, kz_jumpstats.h:316-319). JB приоритетнее.
-			bool isJumpbug = dataSource->jumpstatsService->jumps.Count() > 0
-							 && dataSource->jumpstatsService->jumps.Tail().GetJumpType() == JumpType_Jumpbug;
+			bool isJumpbug =
+				dataSource->jumpstatsService->jumps.Count() > 0 && dataSource->jumpstatsService->jumps.Tail().GetJumpType() == JumpType_Jumpbug;
 			if (isJumpbug)
 			{
 				takeoff += "&#160;<font class='" KZ_HUD_FS_SECONDARY "'><font color='" KZ_HUD_C_JUMPBUG "'>JB</font></font>";
@@ -948,8 +948,7 @@ void KZHUDService::FormatBottomText(const BottomPanelState &state, char *buf, i3
 	{
 		if (!this->bottomCpTpValid || !state.SameCpTpInputs(this->bottomCpTpKey))
 		{
-			std::string line =
-				KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Bottom CP/TP Text", state.cp, state.cpCount, state.tp);
+			std::string line = KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Bottom CP/TP Text", state.cp, state.cpCount, state.tp);
 			V_strncpy(this->bottomCpTpLine, line.c_str(), sizeof(this->bottomCpTpLine));
 			this->bottomCpTpKey = state;
 			this->bottomCpTpValid = true;

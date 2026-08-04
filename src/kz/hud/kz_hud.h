@@ -133,6 +133,7 @@ public:
 		HUD_TIMER_STYLE_UPDATED = 0,
 		HUD_TIMER_STYLE_MINIMAL = 1,
 	};
+
 	int GetTimerStyle();
 	void SetTimerStyle(int style);
 
