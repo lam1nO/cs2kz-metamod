@@ -41,6 +41,16 @@ private:
 		i32 speed {}, prespeed {};
 		bool showPrespeed {};
 		u8 keyMask {}; // биты KeyParticleFlags (KPF_*), порядок строки A W S D C J
+		// Раскладка клавиш получателя (преф hudKeysTwoRows): ВКЛ — два ряда «C W J» / «A S D»,
+		// как в HTML-худе; ВЫКЛ — одна строка A W S D C J. Часть слепка — это настройка
+		// ПОЛУЧАТЕЛЯ, и её смена обязана перерисовать низ.
+		bool keysTwoRows {};
+		// Сколько пустых строк подставить НАД содержимым. Верхний оверлей (наша HTML-панель
+		// либо открытое Html-меню) и нижняя панель позиционируются движком независимо и о
+		// высотах друг друга не знают — при высоком верхе он просто накрывает низ. Отступ —
+		// единственный доступный способ их развести; входит в слепок, иначе изменение высоты
+		// верха не перерисовало бы низ.
+		u8 padLines {};
 		bool hasTimer {}, timerRunning {}, timerPaused {};
 		i32 timeCs {}; // время в сотых (гранулярность FormatTimeHudCs)
 		// Язык получателя — ЧАСТЬ слепка: kz_language меняет язык НА МЕСТЕ, без реконнекта
@@ -57,8 +67,9 @@ private:
 		bool operator==(const BottomPanelState &o) const
 		{
 			return showCpTp == o.showCpTp && cp == o.cp && cpCount == o.cpCount && tp == o.tp && menuOpen == o.menuOpen && speed == o.speed
-				   && prespeed == o.prespeed && showPrespeed == o.showPrespeed && keyMask == o.keyMask && hasTimer == o.hasTimer
-				   && timerRunning == o.timerRunning && timerPaused == o.timerPaused && timeCs == o.timeCs && V_strcmp(lang, o.lang) == 0;
+				   && prespeed == o.prespeed && showPrespeed == o.showPrespeed && keyMask == o.keyMask && keysTwoRows == o.keysTwoRows
+				   && padLines == o.padLines && hasTimer == o.hasTimer && timerRunning == o.timerRunning && timerPaused == o.timerPaused
+				   && timeCs == o.timeCs && V_strcmp(lang, o.lang) == 0;
 		}
 	};
 
@@ -155,7 +166,10 @@ public:
 	// и шлётся только на изменении слепка либо heartbeat'ом раз в KZ_HUD_BOTTOM_HEARTBEAT
 	// (см. BottomPanelState выше). menuOpen — спектатор с открытым Html-меню: вместо CP/TP
 	// шлём plain-text худ наблюдаемого (скорость/время/клавиши) тем же каналом и дедупом.
-	void UpdateBottomPanel(KZPlayer *dataSource, bool menuOpen = false);
+	// linesAbove — высота верхнего оверлея В СТРОКАХ (наша HTML-панель либо открытое
+	// Html-меню). Движок позиционирует оверлеи независимо, поэтому высокий верх просто
+	// накрывает низ; из linesAbove считается отступ, разводящий их (см. BottomPadLines).
+	void UpdateBottomPanel(KZPlayer *dataSource, bool menuOpen = false, int linesAbove = 0);
 
 	// Одноразово стереть нижнюю панель (пустой токен в centre-канал): сам по себе канал
 	// гасит последний текст лишь через несколько секунд, а остаток CP/TP после смены
@@ -293,7 +307,7 @@ private:
 	// Слепок нижней панели: player — данные (наблюдаемый), target — настройки+язык
 	// (получатель). Дёшево (интовые чтения), зовётся каждый тик из UpdateBottomPanel.
 	// menuOpen — заполняет поля плайн-худа под меню (скорость/время/клавиши) вместо CP/TP.
-	static void ComputeBottomState(KZPlayer *player, KZPlayer *target, BottomPanelState &out, bool menuOpen);
+	static void ComputeBottomState(KZPlayer *player, KZPlayer *target, BottomPanelState &out, bool menuOpen, int linesAbove);
 
 	// Текст нижней панели — функция слепка (включая язык: текст и слепок обязаны совпадать
 	// по построению). Зовётся только на изменении слепка — аллокации PrepareMessageWithLang

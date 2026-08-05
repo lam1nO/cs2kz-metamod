@@ -28,6 +28,44 @@ static_global KeyValues *translationKV;
 static_global KeyValues *languagesKV;
 static_global KeyValues *addonsKV;
 
+// Плоский индекс фраз: имя секции -> её KeyValues. Нужен потому, что KeyValues::FindKey
+// трактует '/' в имени как разделитель ПУТИ до вложенной секции, а парсер (LoadFromFile)
+// кладёт ключ буквально, со слэшем внутри. Асимметрия делает НЕДОСТИЖИМОЙ любую фразу со
+// слэшем в имени: FindKey("HUD - Bottom CP/TP Text") ищет секцию "HUD - Bottom CP" и в ней
+// "TP Text", не находит, и GetTranslatedFormat возвращает само имя ключа — игрок видит в
+// худе строку «HUD - Bottom CP/TP Text» вместо «CP 4/4 | TP 12» (баг найден 05.08). Тем же
+// были сломаны и апстримные "MHUD - CP/TP Enabled/Disabled", "MHUD - PB/WR Enabled/Disabled",
+// "WR/SR Command Usage[ - Console]" — просто их видно реже. Индекс обходит подсекции
+// напрямую, поэтому имя сравнивается целиком и слэш в нём ничего не значит.
+static_global std::unordered_map<std::string, KeyValues *> phraseIndex;
+
+// Перестроить индекс по текущему translationKV. Зовётся после загрузки всех *.phrases.txt.
+// При дубликате имени (одна фраза в двух файлах) побеждает ПЕРВОЕ вхождение — как у
+// FindKey, который возвращает первую подходящую подсекцию.
+static_function void RebuildPhraseIndex()
+{
+	phraseIndex.clear();
+	if (!translationKV)
+	{
+		return;
+	}
+	for (KeyValues *kv = translationKV->GetFirstSubKey(); kv; kv = kv->GetNextKey())
+	{
+		const char *name = kv->GetName();
+		if (!name || !name[0])
+		{
+			continue;
+		}
+		phraseIndex.emplace(name, kv);
+	}
+}
+
+static_function KeyValues *FindPhrase(const char *phrase)
+{
+	auto it = phraseIndex.find(phrase);
+	return it == phraseIndex.end() ? nullptr : it->second;
+}
+
 void KZLanguageService::Init()
 {
 	KZLanguageService::LoadConfigFiles();
@@ -55,12 +93,17 @@ void KZLanguageService::LoadConfigFiles()
 	addonsKV = new KeyValues("Addons");
 	addonsKV->UsesEscapeSequences(true);
 	KZLanguageService::LoadTranslations();
+	// Строго ПОСЛЕ загрузки всех *.phrases.txt: индекс держит указатели на подсекции
+	// translationKV, и любая перезагрузка (пересоздание KV выше) их инвалидирует.
+	RebuildPhraseIndex();
 	KZLanguageService::LoadLanguages();
 	KZLanguageService::ClearTemplateCache();
 }
 
 void KZLanguageService::Cleanup()
 {
+	// Индекс держит указатели внутрь translationKV — снимаем ДО его удаления.
+	phraseIndex.clear();
 	if (translationKV)
 	{
 		delete translationKV;
@@ -138,12 +181,14 @@ const char *KZLanguageService::GetLanguage()
 
 const char *KZLanguageService::GetTranslatedFormat(const char *language, const char *phrase)
 {
-	if (!translationKV->FindKey(phrase))
+	// Через индекс, а не FindKey: тот режет имя по '/' (см. phraseIndex выше).
+	KeyValues *kv = FindPhrase(phrase);
+	if (!kv)
 	{
 		// KZ_LOG_DEBUG(LogChannel::Language, "Warning: Phrase '%s' not found, returning orignal message!\n", phrase);
 		return phrase;
 	}
-	const char *outFormat = translationKV->FindKey(phrase)->GetString(language);
+	const char *outFormat = kv->GetString(language);
 	if (outFormat[0] == '\0')
 	{
 		if (!V_stricmp(language, "#format"))
@@ -152,7 +197,7 @@ const char *KZLanguageService::GetTranslatedFormat(const char *language, const c
 			return NULL;
 		}
 		// KZ_LOG_DEBUG(LogChannel::Language, "Warning: Phrase '%s' not found for language %s!\n", phrase, language);
-		return translationKV->FindKey(phrase)->GetString(KZ_DEFAULT_LANGUAGE);
+		return kv->GetString(KZ_DEFAULT_LANGUAGE);
 	}
 	return outFormat;
 }

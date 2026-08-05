@@ -197,6 +197,86 @@ void KZHUDService::OnJoinSpectator()
 // MHUD-префы игрока: префы mhud*Color принадлежат particle-MHUD («Внешний вид MHUD»), и
 // сохранённое там экзотическое значение красило престрейф в невидимый цвет на тёмной панели
 // (баг 25.07: у игрока mhudSpeedColor = чёрный ⇒ (престрейф) не виден вне перфа).
+// Верхний оверлей (наша HTML-панель либо открытое Html-меню) и нижняя панель — два
+// НЕЗАВИСИМО позиционируемых движком канала: ни один из них не знает о высоте другого,
+// поэтому достаточно высокий верх (все элементы + клавиши в 2 ряда; открытое !rpmenu)
+// просто накрывает низ, и нижнюю строку не видно. Развести их можно только отступом —
+// пустыми строками над содержимым нижней панели.
+//
+// Значения подобраны эмпирически и заведомо приблизительны: реальная высота зависит от
+// кегля, языка и разрешения клиента, а измерить её сервер не может. Порог — высота, начиная
+// с которой верх дотягивается до низа; дальше добавляем по строке на строку верха, с
+// потолком, чтобы низ не уехал за край экрана.
+#define KZ_HUD_BOTTOM_PAD_FREE_LINES 3 // столько строк верха низ переживает без отступа
+#define KZ_HUD_BOTTOM_PAD_MAX        6 // потолок отступа
+// Строки меню помимо пунктов: заголовок + строка выхода (обвязка cs2menus).
+#define KZ_HUD_MENU_CHROME_LINES     2
+
+static_function u8 BottomPadLines(int linesAbove)
+{
+	const int pad = linesAbove - KZ_HUD_BOTTOM_PAD_FREE_LINES;
+	if (pad <= 0)
+	{
+		return 0;
+	}
+	return (u8)(pad > KZ_HUD_BOTTOM_PAD_MAX ? KZ_HUD_BOTTOM_PAD_MAX : pad);
+}
+
+static_function std::string PadAbove(const std::string &text, u8 padLines)
+{
+	if (!padLines || text.empty())
+	{
+		return text;
+	}
+	return std::string(padLines, '\n') + text;
+}
+
+// Число строк в готовом тексте HTML-панели: разделитель рядов там <br>.
+static_function int CountHtmlLines(const std::string &html)
+{
+	if (html.empty())
+	{
+		return 0;
+	}
+	int lines = 1;
+	for (size_t pos = html.find("<br>"); pos != std::string::npos; pos = html.find("<br>", pos + 4))
+	{
+		lines++;
+	}
+	return lines;
+}
+
+// Выбросить пустые сегменты из строки, склеенной фиксированным разделителем. Нужен минимал-
+// стилю: его композиция задана фразой («{checkpoint_text}\n{timer_text}»), и выключенный
+// тумблером элемент подставляется пустой строкой — без чистки на его месте остаётся пустой
+// ряд или висячий <br>. Порядок сегментов и сам разделитель при этом остаются из фразы.
+static_function std::string DropEmptySegments(const std::string &text, const char *sep)
+{
+	const size_t sepLen = V_strlen(sep);
+	std::string out;
+	out.reserve(text.size());
+	size_t pos = 0;
+	while (pos <= text.size())
+	{
+		size_t next = text.find(sep, pos);
+		const size_t end = next == std::string::npos ? text.size() : next;
+		if (end > pos)
+		{
+			if (!out.empty())
+			{
+				out += sep;
+			}
+			out.append(text, pos, end - pos);
+		}
+		if (next == std::string::npos)
+		{
+			break;
+		}
+		pos = next + sepLen;
+	}
+	return out;
+}
+
 // Объявлены до GetSpeedText: жёлтый KZ_HUD_C_JUMPBUG красит и бейдж JB минимал-стиля.
 #define KZ_HUD_C_PERF    "#40FF40" // престрейф после перфа
 #define KZ_HUD_C_JUMPBUG "#FFFF20" // престрейф после jumpbug/duckbug
@@ -833,13 +913,14 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 // Слепок состояния (без строк/аллокаций — тактовый путь). player — данные (наблюдаемый),
 // target — настройки (получатель). menuOpen — плайн-худ под открытым Html-меню: скорость/
 // время/клавиши вместо CP/TP (см. FormatBottomText).
-void KZHUDService::ComputeBottomState(KZPlayer *player, KZPlayer *target, BottomPanelState &out, bool menuOpen)
+void KZHUDService::ComputeBottomState(KZPlayer *player, KZPlayer *target, BottomPanelState &out, bool menuOpen, int linesAbove)
 {
 	out = BottomPanelState {};
 	KZHUDService *cfg = target->hudService;
 	const bool isReplay = KZ::replaysystem::IsReplayBot(player);
 	// Язык получателя — часть слепка (kz_language меняет его на месте, без реконнекта).
 	V_strncpy(out.lang, target->languageService->GetLanguage(), sizeof(out.lang));
+	out.padLines = BottomPadLines(linesAbove);
 
 	if (menuOpen)
 	{
@@ -872,7 +953,10 @@ void KZHUDService::ComputeBottomState(KZPlayer *player, KZPlayer *target, Bottom
 			out.timerRunning = running;
 			out.timerPaused = paused;
 		}
-		// Маска клавиш: как однострочный ряд худа (J = отпрыг этим тиком либо зажатый IN_JUMP).
+		// Маска клавиш + раскладка получателя: тот же преф hudKeysTwoRows, что у HTML-худа —
+		// иначе у игрока с двухстрочными клавишами второй ряд в спеках просто пропадал.
+		// (J = отпрыг этим тиком либо зажатый IN_JUMP.)
+		out.keysTwoRows = cfg->IsMHUDKeysTwoRowsEnabled();
 		const bool jump = player->hudService->jumpedThisTick || player->IsButtonPressed(IN_JUMP);
 		out.keyMask = (u8)((player->IsButtonPressed(IN_MOVELEFT) ? KPF_Left : 0) | (player->IsButtonPressed(IN_FORWARD) ? KPF_Forward : 0)
 						   | (player->IsButtonPressed(IN_BACK) ? KPF_Back : 0) | (player->IsButtonPressed(IN_MOVERIGHT) ? KPF_Right : 0)
@@ -923,22 +1007,37 @@ void KZHUDService::FormatBottomText(const BottomPanelState &state, char *buf, i3
 				state.timerPaused ? KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Paused Text").c_str() : "");
 			// clang-format on
 		}
-		// clang-format off
-		text += "\n" + KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Key Text",
-			(state.keyMask & KPF_Left) ? 'A' : '_',
-			(state.keyMask & KPF_Forward) ? 'W' : '_',
-			(state.keyMask & KPF_Back) ? 'S' : '_',
-			(state.keyMask & KPF_Right) ? 'D' : '_',
-			(state.keyMask & KPF_Duck) ? 'C' : '_',
-			(state.keyMask & KPF_Jump) ? 'J' : '_');
-		// clang-format on
-		V_strncpy(buf, text.c_str(), size);
+		if (state.keysTwoRows)
+		{
+			// Те же два ряда, что в HTML-худе: «C W J» сверху, «A S D» снизу (W встаёт над S
+			// при центровке движком). Канал plain-text — цвета нажатия недоступны, поэтому
+			// нажатие показываем апстримной конвенцией: буква против «_».
+			char row1[16], row2[16];
+			V_snprintf(row1, sizeof(row1), "%c %c %c", (state.keyMask & KPF_Duck) ? 'C' : '_', (state.keyMask & KPF_Forward) ? 'W' : '_',
+					   (state.keyMask & KPF_Jump) ? 'J' : '_');
+			V_snprintf(row2, sizeof(row2), "%c %c %c", (state.keyMask & KPF_Left) ? 'A' : '_', (state.keyMask & KPF_Back) ? 'S' : '_',
+					   (state.keyMask & KPF_Right) ? 'D' : '_');
+			text += "\n" + std::string(row1) + "\n" + row2;
+		}
+		else
+		{
+			// clang-format off
+			text += "\n" + KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Key Text",
+				(state.keyMask & KPF_Left) ? 'A' : '_',
+				(state.keyMask & KPF_Forward) ? 'W' : '_',
+				(state.keyMask & KPF_Back) ? 'S' : '_',
+				(state.keyMask & KPF_Right) ? 'D' : '_',
+				(state.keyMask & KPF_Duck) ? 'C' : '_',
+				(state.keyMask & KPF_Jump) ? 'J' : '_');
+			// clang-format on
+		}
+		V_strncpy(buf, PadAbove(text, state.padLines).c_str(), size);
 		return;
 	}
 	if (state.showCpTp)
 	{
 		std::string line = KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Bottom CP/TP Text", state.cp, state.cpCount, state.tp);
-		V_strncpy(buf, line.c_str(), size);
+		V_strncpy(buf, PadAbove(line, state.padLines).c_str(), size);
 	}
 }
 
@@ -946,10 +1045,10 @@ void KZHUDService::FormatBottomText(const BottomPanelState &state, char *buf, i3
 // изменении (пересборка текста — тоже только тут) либо heartbeat'ом раз в
 // KZ_HUD_BOTTOM_HEARTBEAT — centre-канал надёжный (BUF_RELIABLE), слать 128/с каждому
 // получателю расточительно, а неизменившийся текст переотправляется как есть без пересборки.
-void KZHUDService::UpdateBottomPanel(KZPlayer *dataSource, bool menuOpen)
+void KZHUDService::UpdateBottomPanel(KZPlayer *dataSource, bool menuOpen, int linesAbove)
 {
 	BottomPanelState state;
-	ComputeBottomState(dataSource, this->player, state, menuOpen);
+	ComputeBottomState(dataSource, this->player, state, menuOpen, linesAbove);
 	if (!state.HasContent())
 	{
 		// Слать нечего (hudCpTp выкл): одноразовый клир стирает остаток, дальше — no-op.
@@ -1002,8 +1101,10 @@ void KZHUDService::ClearBottomPanel()
 // наблюдаемый (данные), настройки/язык/цвета — this (получатель): Get*Text зовутся на
 // hudService наблюдаемого (их данные — this->player), GetSpeedText — на получателе с
 // dataSource (его цветовые префы — часть настроек), тот же контракт, что у BuildVersionCHud.
-// Композиция фиксированная, как в апстриме: per-element тумблеры (hudSpeed и др.) здесь
-// не применяются — particle-подавления нет, т.к. на particle-пути минимал не рисуется вовсе.
+// Порядок и разделители композиции — апстримные (берутся из фраз), но per-element тумблеры
+// (hudKeys/hudCpTp/hudTimer/hudSpeed) применяются и здесь: выключенный элемент приходит
+// пустой строкой, а осиротевший разделитель снимает DropEmptySegments. Particle-подавления
+// нет — на particle-пути минимал не рисуется вовсе.
 // Отправка per-канал дедуплицируется слепком последнего отправленного текста + heartbeat
 // (в движении текст меняется почти каждый тик — шлётся каждый тик, это цена стиля; в
 // простое стабилен). Слепок мог обрезаться своим буфером — тогда сравнение никогда не
@@ -1011,12 +1112,20 @@ void KZHUDService::ClearBottomPanel()
 void KZHUDService::UpdateMinimalHud(KZPlayer *dataSource)
 {
 	const char *language = this->player->languageService->GetLanguage();
+	// Тумблеры элементов читаем с ПОЛУЧАТЕЛЯ (this = настройки), данные — с dataSource:
+	// тот же контракт разведения data/settings, что в BuildVersionCHud и GetSpeedText.
+	// Апстримные геттеры про наши per-element префы не знают вовсе — до 05.08 из-за этого
+	// в минималистичном стиле выключенные элементы (cp/tp и прочие) продолжали рисоваться.
+	const bool wantKeys = this->IsMHUDKeysEnabled();
+	const bool wantCpTp = this->IsMHUDCpTpEnabled();
+	const bool wantTimer = this->IsMHUDTimerEnabled();
+	const bool wantSpeed = this->IsMHUDSpeedEnabled();
 	std::string centreText;
 	std::string htmlText;
 	if (this->IsCompactPanel())
 	{
-		std::string timerText = dataSource->hudService->GetTimerText(language);
-		std::string speedText = this->GetSpeedText(language, dataSource);
+		std::string timerText = wantTimer ? dataSource->hudService->GetTimerText(language) : std::string();
+		std::string speedText = wantSpeed ? this->GetSpeedText(language, dataSource) : std::string();
 		if (!timerText.empty() && !speedText.empty())
 		{
 			htmlText = timerText + "<br>" + speedText;
@@ -1028,16 +1137,22 @@ void KZHUDService::UpdateMinimalHud(KZPlayer *dataSource)
 	}
 	else
 	{
-		std::string keyText = dataSource->hudService->GetKeyText(language);
-		std::string checkpointText = dataSource->hudService->GetCheckpointText(language);
-		std::string timerText = dataSource->hudService->GetTimerText(language);
-		std::string speedText = this->GetSpeedText(language, dataSource);
+		std::string keyText = wantKeys ? dataSource->hudService->GetKeyText(language) : std::string();
+		std::string checkpointText = wantCpTp ? dataSource->hudService->GetCheckpointText(language) : std::string();
+		std::string timerText = wantTimer ? dataSource->hudService->GetTimerText(language) : std::string();
+		std::string speedText = wantSpeed ? this->GetSpeedText(language, dataSource) : std::string();
 		// clang-format off
 		centreText = KZLanguageService::PrepareMessageWithLang(language, "HUD - Center Text",
 			keyText.c_str(), checkpointText.c_str(), timerText.c_str(), speedText.c_str());
 		htmlText = KZLanguageService::PrepareMessageWithLang(language, "HUD - HTML Center Text",
 			keyText.c_str(), checkpointText.c_str(), timerText.c_str(), speedText.c_str());
 		// clang-format on
+		// Композиционные фразы склеивают элементы ФИКСИРОВАННЫМ разделителем, поэтому
+		// выключенный элемент оставляет по себе пустой ряд (\n) или лишний <br>. Порядок и
+		// сам разделитель остаются апстримными (фраза может отличаться по языкам) — мы лишь
+		// выбрасываем пустые сегменты.
+		centreText = DropEmptySegments(centreText, "\n");
+		htmlText = DropEmptySegments(htmlText, "<br>");
 	}
 	// Хвостовые \n срезаются, как в апстриме (пустой таймер в idle оставляет висячий перенос).
 	centreText = centreText.substr(0, centreText.find_last_not_of('\n') + 1);
@@ -1160,7 +1275,10 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 		cfg->ClearMinimalHud();
 		if (player != target)
 		{
-			cfg->UpdateBottomPanel(player, /*menuOpen=*/true);
+			// Высоту меню берём у самого движка меню: заголовок + пункты + строка выхода.
+			// Без этого !rpmenu (длинное меню) накрывало плайн-худ спектатора целиком.
+			const int items = g_pMenus->GetItemCount(g_pMenus->GetActiveMenu(target->GetPlayerSlot().Get()));
+			cfg->UpdateBottomPanel(player, /*menuOpen=*/true, /*linesAbove=*/items + KZ_HUD_MENU_CHROME_LINES);
 		}
 		else
 		{
@@ -1221,7 +1339,9 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	//        свой вызов DrawPanels → includeSpectators=false. ---
 	if (needHtml)
 	{
-		cfg->UpdateBottomPanel(player);
+		// Высота нашей же HTML-панели — из её готового текста: при всех включённых элементах
+		// и клавишах в 2 ряда она дорастала до нижней панели и накрывала CP/TP.
+		cfg->UpdateBottomPanel(player, /*menuOpen=*/false, /*linesAbove=*/CountHtmlLines(htmlText));
 	}
 	else
 	{
