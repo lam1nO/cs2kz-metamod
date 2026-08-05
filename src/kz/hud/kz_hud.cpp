@@ -207,19 +207,30 @@ void KZHUDService::OnJoinSpectator()
 // кегля, языка и разрешения клиента, а измерить её сервер не может. Порог — высота, начиная
 // с которой верх дотягивается до низа; дальше добавляем по строке на строку верха, с
 // потолком, чтобы низ не уехал за край экрана.
-#define KZ_HUD_BOTTOM_PAD_FREE_LINES 3 // столько строк верха низ переживает без отступа
-#define KZ_HUD_BOTTOM_PAD_MAX        6 // потолок отступа
+// Пороги — cvar'ы, а НЕ константы: подобрать их расчётом нельзя, а перебирать пересборкой
+// форка (CI + публикация + раскатка) ради строки отступа — час на итерацию. Крутятся по
+// rcon на живом сервере во время смоука.
+static CConVar<int> kz_hud_bottom_pad_free("kz_hud_bottom_pad_free", FCVAR_NONE,
+										   "Сколько строк верхнего оверлея нижняя панель переживает без отступа.", 3);
+static CConVar<int> kz_hud_bottom_pad_max("kz_hud_bottom_pad_max", FCVAR_NONE, "Потолок отступа нижней панели в строках.", 6);
+
 // Строки меню помимо пунктов: заголовок + строка выхода (обвязка cs2menus).
-#define KZ_HUD_MENU_CHROME_LINES     2
+#define KZ_HUD_MENU_CHROME_LINES 2
 
 static_function u8 BottomPadLines(int linesAbove)
 {
-	const int pad = linesAbove - KZ_HUD_BOTTOM_PAD_FREE_LINES;
+	const int freeLines = kz_hud_bottom_pad_free.Get();
+	const int maxPad = kz_hud_bottom_pad_max.Get();
+	if (maxPad <= 0)
+	{
+		return 0; // 0 — способ выключить развод целиком, не пересобирая плагин
+	}
+	const int pad = linesAbove - freeLines;
 	if (pad <= 0)
 	{
 		return 0;
 	}
-	return (u8)(pad > KZ_HUD_BOTTOM_PAD_MAX ? KZ_HUD_BOTTOM_PAD_MAX : pad);
+	return (u8)(pad > maxPad ? maxPad : pad);
 }
 
 static_function std::string PadAbove(const std::string &text, u8 padLines)
