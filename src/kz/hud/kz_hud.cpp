@@ -16,6 +16,8 @@
 #include "kz/replays/cyb_replay_common.h" // MapMode — тот же маппинг режима, что у PB/WR-фетча
 #include "kz/jumpstats/kz_jumpstats.h"    // JumpType_Jumpbug/jumps.Tail() для приписки JB у скорости
 
+#include <algorithm>
+
 #include <vendor/MultiAddonManager/public/imultiaddonmanager.h>
 extern IMultiAddonManager *g_pMultiAddonManager;
 
@@ -205,16 +207,31 @@ void KZHUDService::OnJoinSpectator()
 // клиента, серверу она недоступна, а перебирать значения пересборкой форка (CI + публикация
 // + раскатка) — час на итерацию. Крутятся по rcon на живом сервере во время смоука.
 static CConVar<int> kz_hud_bottom_pad_free("kz_hud_bottom_pad_free", FCVAR_NONE,
-										   "Сколько строк верхнего оверлея нижняя панель переживает без отступа.", 3);
-static CConVar<int> kz_hud_bottom_pad_max("kz_hud_bottom_pad_max", FCVAR_NONE, "Потолок отступа нижней панели в строках.", 6);
+										   "Lines of the top overlay the bottom panel survives without any padding.", 3);
+static CConVar<int> kz_hud_bottom_pad_max("kz_hud_bottom_pad_max", FCVAR_NONE, "Maximum padding of the bottom panel, in lines (0 = disabled).", 6);
 
-// Строки меню помимо пунктов: заголовок + строка выхода (обвязка cs2menus).
+// Жёсткий потолок отступа: значения cvar'ов недоверенные (их крутят по rcon на живом
+// сервере), а padLines возвращается в u8 — kz_hud_bottom_pad_max 300 давал (u8)297 = 41
+// пустую строку, т.е. низ уезжал за экран. Больше десятка строк отступа не осмысленно ни
+// на одном разрешении.
+#define KZ_HUD_BOTTOM_PAD_HARD_MAX 16
+
+// Обвязка Html-меню помимо пунктов: строка заголовка (счётчик [n/N] в ней же) + строка футера.
 #define KZ_HUD_MENU_CHROME_LINES 2
+// Сколько строк ПУНКТОВ Html-меню видно за раз. Меню не растёт с числом пунктов: cs2menus
+// рисует окно прокрутки с бюджетом ЭКРАННЫХ строк (kHtmlPanelLineBudget = 9 в
+// vendor/mm-cs2menus/src/menu/menu_manager.cpp, оттуда же вычитается заголовок и футер),
+// поэтому !maps на 100 пунктов занимает столько же высоты, сколько на 7. Значение —
+// зеркало вендорного бюджета минус обвязка; расхождение с ним стоит одну строку отступа
+// (механизм и так эмпирический), тогда как оценка по GetItemCount врала в 10 раз.
+#define KZ_HUD_MENU_ITEM_WINDOW (9 - KZ_HUD_MENU_CHROME_LINES)
 
 static_function u8 BottomPadLines(int linesAbove)
 {
-	const int freeLines = kz_hud_bottom_pad_free.Get();
-	const int maxPad = kz_hud_bottom_pad_max.Get();
+	// Клэмпы обязательны: freeLines -1 дал бы отступ даже пустому верху, maxPad 300 —
+	// переполнение u8 на возврате.
+	const int freeLines = (std::max)(0, kz_hud_bottom_pad_free.Get());
+	const int maxPad = (std::min)(KZ_HUD_BOTTOM_PAD_HARD_MAX, kz_hud_bottom_pad_max.Get());
 	if (maxPad <= 0)
 	{
 		return 0; // 0 — способ выключить развод целиком, не пересобирая плагин
@@ -225,6 +242,16 @@ static_function u8 BottomPadLines(int linesAbove)
 		return 0;
 	}
 	return (u8)(pad > maxPad ? maxPad : pad);
+}
+
+// Высота ОТРИСОВАННОЙ страницы открытого Html-меню в строках (не число его пунктов).
+// Ряд «Выход» cs2menus рисует последним пунктом, в GetItemCount он не входит, а публичного
+// признака «показан ли он» в ics2menus.h нет — считаем, что показан: переоценка на строку
+// безопасна (отступ всё равно клэмпится), недооценка снова прячет низ под меню.
+static_function int MenuLinesAbove(int itemCount)
+{
+	const int rows = (std::max)(1, itemCount) + 1;
+	return (std::min)(rows, KZ_HUD_MENU_ITEM_WINDOW) + KZ_HUD_MENU_CHROME_LINES;
 }
 
 static_function std::string PadAbove(const std::string &text, u8 padLines)
@@ -539,13 +566,15 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		html += line;
 	};
 
-	// Компакт-режим: только строки 1-2 (таймер+скорость), всегда — как в прежнем компакте
-	// (per-element тумблеры в компакте не смотрим). Полный режим: прежняя логика тумблеров.
+	// Компакт-режим — это ВЁРСТКА, а не отдельный набор элементов: он оставляет только строки
+	// 1-2 (таймер+скорость), убирая клавиши/стейдж/PB-WR/showpos. Сами элементы в нём подчиняются
+	// тем же per-element тумблерам, что и в полной раскладке (единый контракт: тумблер действует
+	// на всех путях худа; «выключить целиком» — это hudType=Off, а не компакт).
 	// showExtra — стейдж/PB-WR (только полный режим). Клавиши/showpos — по своим тумблерам.
 	// CP/TP из HTML-панели убран целиком (решение E1) — теперь живёт в нижней панели
 	// centre-канала (UpdateBottomPanel/FormatBottomText), гейт hudCpTp там же.
-	bool showTimer = compact ? true : (masterMode ? (this->IsMHUDTimerEnabled() && !suppressTimer) : !suppressTimer);
-	bool showSpeed = compact ? true : (masterMode ? (this->IsMHUDSpeedEnabled() && !suppressSpeed) : !suppressSpeed);
+	bool showTimer = masterMode ? (this->IsMHUDTimerEnabled() && !suppressTimer) : !suppressTimer;
+	bool showSpeed = masterMode ? (this->IsMHUDSpeedEnabled() && !suppressSpeed) : !suppressSpeed;
 	bool showKeys = compact ? false : (masterMode ? (this->IsMHUDKeysEnabled() && !suppressKeys) : !suppressKeys);
 	bool showExtra = !compact;
 	// showpos — тумблер получателя (this->player), данные наблюдаемого. Считаем заранее: нужен
@@ -916,8 +945,9 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 // Содержимое: строка CP/TP (гейт hudCpTp получателя, данные наблюдаемого, у реплей-бота —
 // из реплей-системы, как апстримный GetCheckpointText). Только обновлённый стиль: в
 // минимале нижней панели нет (CP/TP там рисует апстрим-композиция, см. UpdateMinimalHud).
-// Второй режим (menuOpen) — плайн-худ спектатора под открытым Html-меню: три строки
-// скорость/время/клавиши наблюдаемого вместо CP/TP (гейт — в DrawPanels, любой стиль).
+// Второй режим (menuOpen) — плайн-худ спектатора под открытым Html-меню: скорость/время/
+// клавиши наблюдаемого вместо CP/TP (гейт — в DrawPanels, любой стиль), каждый элемент — по
+// своему тумблеру ПОЛУЧАТЕЛЯ (hudSpeed/hudTimer/hudKeys), как и на остальных путях худа.
 //
 // Слепок состояния (без строк/аллокаций — тактовый путь). player — данные (наблюдаемый),
 // target — настройки (получатель). menuOpen — плайн-худ под открытым Html-меню: скорость/
@@ -936,26 +966,34 @@ void KZHUDService::ComputeBottomState(KZPlayer *player, KZPlayer *target, Bottom
 		// Значения — в гранулярности отображения (целые юниты, сотые секунды): слепок не
 		// должен меняться чаще текста.
 		out.menuOpen = true;
-		Vector velocity, baseVelocity;
-		player->GetVelocity(&velocity);
-		player->GetBaseVelocity(&baseVelocity);
-		velocity += baseVelocity;
-		out.speed = RoundFloatToInt(velocity.Length2D());
-		// Точка отрыва в скобках — то же условие, что в GetSpeedText: в воздухе либо сразу
-		// после приземления (сглаживание мерцания); на лестнице — только с зажатым прыжком.
-		const bool onGround = player->GetPlayerPawn()->m_fFlags & FL_ONGROUND
-							  && g_pKZUtils->GetServerGlobals()->curtime - player->landingTime > KZ_HUD_ON_GROUND_THRESHOLD;
-		const bool ladderIdle = player->GetPlayerPawn()->m_MoveType == MOVETYPE_LADDER && !player->IsButtonPressed(IN_JUMP);
-		if (!onGround && !ladderIdle)
+		// Тумблеры элементов — с ПОЛУЧАТЕЛЯ (cfg), данные — с наблюдаемого: тот же контракт
+		// data/settings, что в BuildVersionCHud и UpdateMinimalHud. До 05.08 плайн-худ под меню
+		// их не смотрел вовсе и показывал выключенные элементы.
+		out.showSpeed = cfg->IsMHUDSpeedEnabled();
+		out.showKeys = cfg->IsMHUDKeysEnabled();
+		if (out.showSpeed)
 		{
-			out.showPrespeed = true;
-			out.prespeed = RoundFloatToInt(player->takeoffVelocity.Length2D());
+			Vector velocity, baseVelocity;
+			player->GetVelocity(&velocity);
+			player->GetBaseVelocity(&baseVelocity);
+			velocity += baseVelocity;
+			out.speed = RoundFloatToInt(velocity.Length2D());
+			// Точка отрыва в скобках — то же условие, что в GetSpeedText: в воздухе либо сразу
+			// после приземления (сглаживание мерцания); на лестнице — только с зажатым прыжком.
+			const bool onGround = player->GetPlayerPawn()->m_fFlags & FL_ONGROUND
+								  && g_pKZUtils->GetServerGlobals()->curtime - player->landingTime > KZ_HUD_ON_GROUND_THRESHOLD;
+			const bool ladderIdle = player->GetPlayerPawn()->m_MoveType == MOVETYPE_LADDER && !player->IsButtonPressed(IN_JUMP);
+			if (!onGround && !ladderIdle)
+			{
+				out.showPrespeed = true;
+				out.prespeed = RoundFloatToInt(player->takeoffVelocity.Length2D());
+			}
 		}
 		// Таймер: то же числовое ядро, что у худа (реплей-бот внутри); idle-игроку строку
 		// не показываем — как GetTimerText.
 		f64 time;
 		bool running, paused, idleZero;
-		if (player->hudService->GetTimerNumbers(time, running, paused, idleZero) && !idleZero)
+		if (cfg->IsMHUDTimerEnabled() && player->hudService->GetTimerNumbers(time, running, paused, idleZero) && !idleZero)
 		{
 			out.hasTimer = true;
 			out.timeCs = RoundFloatToInt(time * 100);
@@ -965,11 +1003,14 @@ void KZHUDService::ComputeBottomState(KZPlayer *player, KZPlayer *target, Bottom
 		// Маска клавиш + раскладка получателя: тот же преф hudKeysTwoRows, что у HTML-худа —
 		// иначе у игрока с двухстрочными клавишами второй ряд в спеках просто пропадал.
 		// (J = отпрыг этим тиком либо зажатый IN_JUMP.)
-		out.keysTwoRows = cfg->IsMHUDKeysTwoRowsEnabled();
-		const bool jump = player->hudService->jumpedThisTick || player->IsButtonPressed(IN_JUMP);
-		out.keyMask = (u8)((player->IsButtonPressed(IN_MOVELEFT) ? KPF_Left : 0) | (player->IsButtonPressed(IN_FORWARD) ? KPF_Forward : 0)
-						   | (player->IsButtonPressed(IN_BACK) ? KPF_Back : 0) | (player->IsButtonPressed(IN_MOVERIGHT) ? KPF_Right : 0)
-						   | (player->IsButtonPressed(IN_DUCK) ? KPF_Duck : 0) | (jump ? KPF_Jump : 0));
+		if (out.showKeys)
+		{
+			out.keysTwoRows = cfg->IsMHUDKeysTwoRowsEnabled();
+			const bool jump = player->hudService->jumpedThisTick || player->IsButtonPressed(IN_JUMP);
+			out.keyMask = (u8)((player->IsButtonPressed(IN_MOVELEFT) ? KPF_Left : 0) | (player->IsButtonPressed(IN_FORWARD) ? KPF_Forward : 0)
+							   | (player->IsButtonPressed(IN_BACK) ? KPF_Back : 0) | (player->IsButtonPressed(IN_MOVERIGHT) ? KPF_Right : 0)
+							   | (player->IsButtonPressed(IN_DUCK) ? KPF_Duck : 0) | (jump ? KPF_Jump : 0));
+		}
 		return;
 	}
 
@@ -991,32 +1032,46 @@ void KZHUDService::FormatBottomText(const BottomPanelState &state, char *buf, i3
 	buf[0] = '\0';
 	if (state.menuOpen)
 	{
-		// Плайн-худ под меню: скорость (преспид) / время / клавиши. Канал plain-text — фразы
+		// Плайн-худ под меню: скорость (преспид) / время / клавиши, каждый — по своему тумблеру
+		// получателя (слепок уже посчитан в ComputeBottomState). Канал plain-text — фразы
 		// без разметки: у взлётной скорости своя нижняя фраза (апстримная содержит font-теги).
+		// Разделитель между строками добавляем ТОЛЬКО к непустому тексту, иначе выключенный
+		// элемент оставлял бы пустой ряд.
 		std::string text;
-		if (state.showPrespeed)
+		auto addRow = [&text](const std::string &row)
 		{
-			// clang-format off
-			text = KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Bottom Speed Text (Takeoff)",
-				(f64)state.speed, (f64)state.prespeed);
-			// clang-format on
-		}
-		else
+			if (!text.empty())
+			{
+				text += "\n";
+			}
+			text += row;
+		};
+		if (state.showSpeed)
 		{
-			text = KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Speed Text", (f64)state.speed);
+			if (state.showPrespeed)
+			{
+				// clang-format off
+				addRow(KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Bottom Speed Text (Takeoff)",
+					(f64)state.speed, (f64)state.prespeed));
+				// clang-format on
+			}
+			else
+			{
+				addRow(KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Speed Text", (f64)state.speed));
+			}
 		}
 		if (state.hasTimer)
 		{
 			char timeText[32];
 			FormatTimeHudCs(state.timeCs, timeText, sizeof(timeText));
 			// clang-format off
-			text += "\n" + KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Timer Text",
+			addRow(KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Timer Text",
 				timeText,
 				state.timerRunning ? "" : KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Stopped Text").c_str(),
-				state.timerPaused ? KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Paused Text").c_str() : "");
+				state.timerPaused ? KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Paused Text").c_str() : ""));
 			// clang-format on
 		}
-		if (state.keysTwoRows)
+		if (state.showKeys && state.keysTwoRows)
 		{
 			// Те же два ряда, что в HTML-худе: «C W J» сверху, «A S D» снизу (W встаёт над S
 			// при центровке движком). Канал plain-text — цвета нажатия недоступны, поэтому
@@ -1026,18 +1081,19 @@ void KZHUDService::FormatBottomText(const BottomPanelState &state, char *buf, i3
 					   (state.keyMask & KPF_Jump) ? 'J' : '_');
 			V_snprintf(row2, sizeof(row2), "%c %c %c", (state.keyMask & KPF_Left) ? 'A' : '_', (state.keyMask & KPF_Back) ? 'S' : '_',
 					   (state.keyMask & KPF_Right) ? 'D' : '_');
-			text += "\n" + std::string(row1) + "\n" + row2;
+			addRow(row1);
+			addRow(row2);
 		}
-		else
+		else if (state.showKeys)
 		{
 			// clang-format off
-			text += "\n" + KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Key Text",
+			addRow(KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Key Text",
 				(state.keyMask & KPF_Left) ? 'A' : '_',
 				(state.keyMask & KPF_Forward) ? 'W' : '_',
 				(state.keyMask & KPF_Back) ? 'S' : '_',
 				(state.keyMask & KPF_Right) ? 'D' : '_',
 				(state.keyMask & KPF_Duck) ? 'C' : '_',
-				(state.keyMask & KPF_Jump) ? 'J' : '_');
+				(state.keyMask & KPF_Jump) ? 'J' : '_'));
 			// clang-format on
 		}
 		V_strncpy(buf, PadAbove(text, state.padLines).c_str(), size);
@@ -1060,7 +1116,8 @@ void KZHUDService::UpdateBottomPanel(KZPlayer *dataSource, bool menuOpen, int li
 	ComputeBottomState(dataSource, this->player, state, menuOpen, linesAbove);
 	if (!state.HasContent())
 	{
-		// Слать нечего (hudCpTp выкл): одноразовый клир стирает остаток, дальше — no-op.
+		// Слать нечего (hudCpTp выкл; под меню — все три тумблера выкл): одноразовый клир
+		// стирает остаток, дальше — no-op.
 		this->ClearBottomPanel();
 		return;
 	}
@@ -1284,10 +1341,11 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 		cfg->ClearMinimalHud();
 		if (player != target)
 		{
-			// Высоту меню берём у самого движка меню: заголовок + пункты + строка выхода.
-			// Без этого !rpmenu (длинное меню) накрывало плайн-худ спектатора целиком.
+			// Высота ОТРИСОВАННОЙ страницы меню (окно прокрутки + обвязка), а НЕ число его
+			// пунктов: без отступа !rpmenu накрывало плайн-худ спектатора, а по общему счётчику
+			// !maps на 100 пунктов давал бы отступ на 100 строк (см. MenuLinesAbove).
 			const int items = g_pMenus->GetItemCount(g_pMenus->GetActiveMenu(target->GetPlayerSlot().Get()));
-			cfg->UpdateBottomPanel(player, /*menuOpen=*/true, /*linesAbove=*/items + KZ_HUD_MENU_CHROME_LINES);
+			cfg->UpdateBottomPanel(player, /*menuOpen=*/true, /*linesAbove=*/MenuLinesAbove(items));
 		}
 		else
 		{

@@ -33,11 +33,15 @@ private:
 		bool showCpTp {};
 		i32 cp {}, cpCount {}, tp {};
 		// Плайн-худ спектатора под открытым Html-меню (DrawPanels → UpdateBottomPanel с
-		// menuOpen): три строки скорость/время/клавиши наблюдаемого вместо CP/TP. Значения —
+		// menuOpen): скорость/время/клавиши наблюдаемого вместо CP/TP. Значения —
 		// в гранулярности отображения (целые юниты, сотые секунды), иначе слепок менялся бы
 		// чаще текста. menuOpen — часть слепка: закрытие меню обязано перерисовать низ,
 		// даже если остальные поля совпали.
 		bool menuOpen {};
+		// Тумблеры элементов ПОЛУЧАТЕЛЯ (hudSpeed/hudTimer/hudKeys) действуют и здесь: игрок с
+		// выключенными клавишами не должен видеть их под меню. Часть слепка — это настройки,
+		// их смена обязана перерисовать низ.
+		bool showSpeed {}, showKeys {};
 		i32 speed {}, prespeed {};
 		bool showPrespeed {};
 		u8 keyMask {}; // биты KeyParticleFlags (KPF_*), порядок строки A W S D C J
@@ -61,15 +65,17 @@ private:
 
 		bool HasContent() const
 		{
-			return showCpTp || menuOpen;
+			// Под меню содержимое есть только если хоть один элемент включён (таймер — ещё и
+			// показывается): иначе шлём клир, а не пустую строку.
+			return showCpTp || (menuOpen && (showSpeed || hasTimer || showKeys));
 		}
 
 		bool operator==(const BottomPanelState &o) const
 		{
-			return showCpTp == o.showCpTp && cp == o.cp && cpCount == o.cpCount && tp == o.tp && menuOpen == o.menuOpen && speed == o.speed
-				   && prespeed == o.prespeed && showPrespeed == o.showPrespeed && keyMask == o.keyMask && keysTwoRows == o.keysTwoRows
-				   && padLines == o.padLines && hasTimer == o.hasTimer && timerRunning == o.timerRunning && timerPaused == o.timerPaused
-				   && timeCs == o.timeCs && V_strcmp(lang, o.lang) == 0;
+			return showCpTp == o.showCpTp && cp == o.cp && cpCount == o.cpCount && tp == o.tp && menuOpen == o.menuOpen && showSpeed == o.showSpeed
+				   && showKeys == o.showKeys && speed == o.speed && prespeed == o.prespeed && showPrespeed == o.showPrespeed && keyMask == o.keyMask
+				   && keysTwoRows == o.keysTwoRows && padLines == o.padLines && hasTimer == o.hasTimer && timerRunning == o.timerRunning
+				   && timerPaused == o.timerPaused && timeCs == o.timeCs && V_strcmp(lang, o.lang) == 0;
 		}
 	};
 
