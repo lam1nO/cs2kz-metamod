@@ -32,6 +32,17 @@ private:
 	{
 		bool showCpTp {};
 		i32 cp {}, cpCount {}, tp {};
+		// Плайн-худ спектатора под открытым Html-меню (DrawPanels → UpdateBottomPanel с
+		// menuOpen): три строки скорость/время/клавиши наблюдаемого вместо CP/TP. Значения —
+		// в гранулярности отображения (целые юниты, сотые секунды), иначе слепок менялся бы
+		// чаще текста. menuOpen — часть слепка: закрытие меню обязано перерисовать низ,
+		// даже если остальные поля совпали.
+		bool menuOpen {};
+		i32 speed {}, prespeed {};
+		bool showPrespeed {};
+		u8 keyMask {}; // биты KeyParticleFlags (KPF_*), порядок строки A W S D C J
+		bool hasTimer {}, timerRunning {}, timerPaused {};
+		i32 timeCs {}; // время в сотых (гранулярность FormatTimeHudCs)
 		// Язык получателя — ЧАСТЬ слепка: kz_language меняет язык НА МЕСТЕ, без реконнекта
 		// (reconnect — только при смене языкового аддона, и есть явная ветка отказа от него
 		// при чекпоинтах/таймере) — без языка в слепке heartbeat бессрочно гнал бы
@@ -40,12 +51,14 @@ private:
 
 		bool HasContent() const
 		{
-			return showCpTp;
+			return showCpTp || menuOpen;
 		}
 
 		bool operator==(const BottomPanelState &o) const
 		{
-			return showCpTp == o.showCpTp && cp == o.cp && cpCount == o.cpCount && tp == o.tp && V_strcmp(lang, o.lang) == 0;
+			return showCpTp == o.showCpTp && cp == o.cp && cpCount == o.cpCount && tp == o.tp && menuOpen == o.menuOpen && speed == o.speed
+				   && prespeed == o.prespeed && showPrespeed == o.showPrespeed && keyMask == o.keyMask && hasTimer == o.hasTimer
+				   && timerRunning == o.timerRunning && timerPaused == o.timerPaused && timeCs == o.timeCs && V_strcmp(lang, o.lang) == 0;
 		}
 	};
 
@@ -140,8 +153,9 @@ public:
 	// this — получатель (его настройки/язык), dataSource — наблюдаемый (его данные).
 	// Слепок состояния считается каждый тик (дёшево, без аллокаций); текст пересобирается
 	// и шлётся только на изменении слепка либо heartbeat'ом раз в KZ_HUD_BOTTOM_HEARTBEAT
-	// (см. BottomPanelState выше).
-	void UpdateBottomPanel(KZPlayer *dataSource);
+	// (см. BottomPanelState выше). menuOpen — спектатор с открытым Html-меню: вместо CP/TP
+	// шлём plain-text худ наблюдаемого (скорость/время/клавиши) тем же каналом и дедупом.
+	void UpdateBottomPanel(KZPlayer *dataSource, bool menuOpen = false);
 
 	// Одноразово стереть нижнюю панель (пустой токен в centre-канал): сам по себе канал
 	// гасит последний текст лишь через несколько секунд, а остаток CP/TP после смены
@@ -278,7 +292,8 @@ private:
 
 	// Слепок нижней панели: player — данные (наблюдаемый), target — настройки+язык
 	// (получатель). Дёшево (интовые чтения), зовётся каждый тик из UpdateBottomPanel.
-	static void ComputeBottomState(KZPlayer *player, KZPlayer *target, BottomPanelState &out);
+	// menuOpen — заполняет поля плайн-худа под меню (скорость/время/клавиши) вместо CP/TP.
+	static void ComputeBottomState(KZPlayer *player, KZPlayer *target, BottomPanelState &out, bool menuOpen);
 
 	// Текст нижней панели — функция слепка (включая язык: текст и слепок обязаны совпадать
 	// по построению). Зовётся только на изменении слепка — аллокации PrepareMessageWithLang

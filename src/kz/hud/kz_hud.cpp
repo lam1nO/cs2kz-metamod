@@ -193,6 +193,15 @@ void KZHUDService::OnJoinSpectator()
 	this->DestroyAllParticles();
 }
 
+// Престрейф в скобках и приписка C кибершоковской панели — ФИКСИРОВАННАЯ палитра, не
+// MHUD-префы игрока: префы mhud*Color принадлежат particle-MHUD («Внешний вид MHUD»), и
+// сохранённое там экзотическое значение красило престрейф в невидимый цвет на тёмной панели
+// (баг 25.07: у игрока mhudSpeedColor = чёрный ⇒ (престрейф) не виден вне перфа).
+// Объявлены до GetSpeedText: жёлтый KZ_HUD_C_JUMPBUG красит и бейдж JB минимал-стиля.
+#define KZ_HUD_C_PERF    "#40FF40" // престрейф после перфа
+#define KZ_HUD_C_JUMPBUG "#FFFF20" // престрейф после jumpbug/duckbug
+#define KZ_HUD_C_CJ      "#71EEB8" // приписка C (crouch-jump)
+
 std::string KZHUDService::GetSpeedText(const char *language, KZPlayer *dataSource)
 {
 	// dataSource — источник ДАННЫХ (скорость/перф/крауч-джамп), settings (цвета, через
@@ -226,12 +235,13 @@ std::string KZHUDService::GetSpeedText(const char *language, KZPlayer *dataSourc
 	// JB против C: строгая классификация jumpbug'а — тип последнего прыжка (jumps.Tail() —
 	// текущий, если ещё в воздухе; Jump::End() на приземлении может дотюнить тип, поэтому
 	// перечитываем, пока индикатор виден) — та же ветка, что в BuildVersionCHud. JB
-	// приоритетнее приписки C; без раскраски — просто буквы.
+	// приоритетнее приписки C; красится тем же фиксированным жёлтым бейджа JB, что и в
+	// BuildVersionCHud (KZ_HUD_C_JUMPBUG), — канал html, цвет легален (сосед C цветной).
 	bool isJumpbug = src->jumpstatsService->jumps.Count() > 0 && src->jumpstatsService->jumps.Tail().GetJumpType() == JumpType_Jumpbug;
 	std::string suffixText;
 	if (isJumpbug)
 	{
-		suffixText = " JB";
+		suffixText = " <font color='" KZ_HUD_C_JUMPBUG "'>JB</font>";
 	}
 	else if (src->hudService->crouchJumping)
 	{
@@ -384,14 +394,6 @@ bool KZHUDService::GetTimerParts(std::string &outTime, bool &outRunning)
 #define KZ_HUD_C_TIMER  "#4CD964" // таймер и WR-время (кибершоковский зелёный)
 #define KZ_HUD_C_CYAN   "#22D3EE" // число скорости (циан); подстроить: #00E5FF/#00FFFF
 #define KZ_HUD_C_RED    "#FF3B3B" // overlap клавиш (W+S / A+D при hudKeysOverlap): все нажатые красным
-// Престрейф в скобках и приписка C — тоже ФИКСИРОВАННАЯ палитра, не MHUD-префы игрока:
-// префы mhud*Color принадлежат particle-MHUD («Внешний вид MHUD»), и сохранённое там
-// экзотическое значение красило престрейф в невидимый цвет на тёмной панели (баг 25.07:
-// у игрока mhudSpeedColor = чёрный ⇒ (престрейф) не виден вне перфа).
-#define KZ_HUD_C_PERF    "#40FF40" // престрейф после перфа
-#define KZ_HUD_C_JUMPBUG "#FFFF20" // престрейф после jumpbug/duckbug
-#define KZ_HUD_C_CJ      "#71EEB8" // приписка C (crouch-jump)
-
 // Скобок вокруг времени больше нет (убраны 25.07 по решению пользователя) — прежние
 // #define KZ_HUD_BRACKET_* и вариант с уголковыми ⌈ ⌋ удалены вместе с ними.
 
@@ -825,16 +827,58 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 // Содержимое: строка CP/TP (гейт hudCpTp получателя, данные наблюдаемого, у реплей-бота —
 // из реплей-системы, как апстримный GetCheckpointText). Только обновлённый стиль: в
 // минимале нижней панели нет (CP/TP там рисует апстрим-композиция, см. UpdateMinimalHud).
+// Второй режим (menuOpen) — плайн-худ спектатора под открытым Html-меню: три строки
+// скорость/время/клавиши наблюдаемого вместо CP/TP (гейт — в DrawPanels, любой стиль).
 //
 // Слепок состояния (без строк/аллокаций — тактовый путь). player — данные (наблюдаемый),
-// target — настройки (получатель).
-void KZHUDService::ComputeBottomState(KZPlayer *player, KZPlayer *target, BottomPanelState &out)
+// target — настройки (получатель). menuOpen — плайн-худ под открытым Html-меню: скорость/
+// время/клавиши вместо CP/TP (см. FormatBottomText).
+void KZHUDService::ComputeBottomState(KZPlayer *player, KZPlayer *target, BottomPanelState &out, bool menuOpen)
 {
 	out = BottomPanelState {};
 	KZHUDService *cfg = target->hudService;
 	const bool isReplay = KZ::replaysystem::IsReplayBot(player);
 	// Язык получателя — часть слепка (kz_language меняет его на месте, без реконнекта).
 	V_strncpy(out.lang, target->languageService->GetLanguage(), sizeof(out.lang));
+
+	if (menuOpen)
+	{
+		// Значения — в гранулярности отображения (целые юниты, сотые секунды): слепок не
+		// должен меняться чаще текста.
+		out.menuOpen = true;
+		Vector velocity, baseVelocity;
+		player->GetVelocity(&velocity);
+		player->GetBaseVelocity(&baseVelocity);
+		velocity += baseVelocity;
+		out.speed = RoundFloatToInt(velocity.Length2D());
+		// Точка отрыва в скобках — то же условие, что в GetSpeedText: в воздухе либо сразу
+		// после приземления (сглаживание мерцания); на лестнице — только с зажатым прыжком.
+		const bool onGround = player->GetPlayerPawn()->m_fFlags & FL_ONGROUND
+							  && g_pKZUtils->GetServerGlobals()->curtime - player->landingTime > KZ_HUD_ON_GROUND_THRESHOLD;
+		const bool ladderIdle = player->GetPlayerPawn()->m_MoveType == MOVETYPE_LADDER && !player->IsButtonPressed(IN_JUMP);
+		if (!onGround && !ladderIdle)
+		{
+			out.showPrespeed = true;
+			out.prespeed = RoundFloatToInt(player->takeoffVelocity.Length2D());
+		}
+		// Таймер: то же числовое ядро, что у худа (реплей-бот внутри); idle-игроку строку
+		// не показываем — как GetTimerText.
+		f64 time;
+		bool running, paused, idleZero;
+		if (player->hudService->GetTimerNumbers(time, running, paused, idleZero) && !idleZero)
+		{
+			out.hasTimer = true;
+			out.timeCs = RoundFloatToInt(time * 100);
+			out.timerRunning = running;
+			out.timerPaused = paused;
+		}
+		// Маска клавиш: как однострочный ряд худа (J = отпрыг этим тиком либо зажатый IN_JUMP).
+		const bool jump = player->hudService->jumpedThisTick || player->IsButtonPressed(IN_JUMP);
+		out.keyMask = (u8)((player->IsButtonPressed(IN_MOVELEFT) ? KPF_Left : 0) | (player->IsButtonPressed(IN_FORWARD) ? KPF_Forward : 0)
+						   | (player->IsButtonPressed(IN_BACK) ? KPF_Back : 0) | (player->IsButtonPressed(IN_MOVERIGHT) ? KPF_Right : 0)
+						   | (player->IsButtonPressed(IN_DUCK) ? KPF_Duck : 0) | (jump ? KPF_Jump : 0));
+		return;
+	}
 
 	if (cfg->IsMHUDCpTpEnabled())
 	{
@@ -852,6 +896,45 @@ void KZHUDService::ComputeBottomState(KZPlayer *player, KZPlayer *target, Bottom
 void KZHUDService::FormatBottomText(const BottomPanelState &state, char *buf, i32 size)
 {
 	buf[0] = '\0';
+	if (state.menuOpen)
+	{
+		// Плайн-худ под меню: скорость (преспид) / время / клавиши. Канал plain-text — фразы
+		// без разметки: у взлётной скорости своя нижняя фраза (апстримная содержит font-теги).
+		std::string text;
+		if (state.showPrespeed)
+		{
+			// clang-format off
+			text = KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Bottom Speed Text (Takeoff)",
+				(f64)state.speed, (f64)state.prespeed);
+			// clang-format on
+		}
+		else
+		{
+			text = KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Speed Text", (f64)state.speed);
+		}
+		if (state.hasTimer)
+		{
+			char timeText[32];
+			FormatTimeHudCs(state.timeCs, timeText, sizeof(timeText));
+			// clang-format off
+			text += "\n" + KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Timer Text",
+				timeText,
+				state.timerRunning ? "" : KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Stopped Text").c_str(),
+				state.timerPaused ? KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Paused Text").c_str() : "");
+			// clang-format on
+		}
+		// clang-format off
+		text += "\n" + KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Key Text",
+			(state.keyMask & KPF_Left) ? 'A' : '_',
+			(state.keyMask & KPF_Forward) ? 'W' : '_',
+			(state.keyMask & KPF_Back) ? 'S' : '_',
+			(state.keyMask & KPF_Right) ? 'D' : '_',
+			(state.keyMask & KPF_Duck) ? 'C' : '_',
+			(state.keyMask & KPF_Jump) ? 'J' : '_');
+		// clang-format on
+		V_strncpy(buf, text.c_str(), size);
+		return;
+	}
 	if (state.showCpTp)
 	{
 		std::string line = KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Bottom CP/TP Text", state.cp, state.cpCount, state.tp);
@@ -863,10 +946,10 @@ void KZHUDService::FormatBottomText(const BottomPanelState &state, char *buf, i3
 // изменении (пересборка текста — тоже только тут) либо heartbeat'ом раз в
 // KZ_HUD_BOTTOM_HEARTBEAT — centre-канал надёжный (BUF_RELIABLE), слать 128/с каждому
 // получателю расточительно, а неизменившийся текст переотправляется как есть без пересборки.
-void KZHUDService::UpdateBottomPanel(KZPlayer *dataSource)
+void KZHUDService::UpdateBottomPanel(KZPlayer *dataSource, bool menuOpen)
 {
 	BottomPanelState state;
-	ComputeBottomState(dataSource, this->player, state);
+	ComputeBottomState(dataSource, this->player, state, menuOpen);
 	if (!state.HasContent())
 	{
 		// Слать нечего (hudCpTp выкл): одноразовый клир стирает остаток, дальше — no-op.
@@ -1067,12 +1150,22 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	}
 
 	// Yield the center channel while a cs2menus HTML menu is open.
-	// Нижняя панель и минимал уступают каналы вместе с HTML-панелью: пока открыто меню,
-	// худ не шумит.
+	// Живому игроку (player == target) худ молчит целиком, как раньше. Спектатору centre-канал
+	// с меню не конфликтует (рендерится ниже центра — та же механика, что у нижней панели):
+	// вместо глушения шлём plain-text худ наблюдаемого (скорость/время/клавиши) машинерией
+	// нижней панели — дедуп/heartbeat штатные, закрытие меню меняет слепок (menuOpen) и низ
+	// перерисовывается/стирается сам.
 	if (g_pMenus && g_pMenus->GetActiveMenuType(target->GetPlayerSlot().Get()) == MenuType::Html)
 	{
-		cfg->ClearBottomPanel();
 		cfg->ClearMinimalHud();
+		if (player != target)
+		{
+			cfg->UpdateBottomPanel(player, /*menuOpen=*/true);
+		}
+		else
+		{
+			cfg->ClearBottomPanel();
+		}
 		return;
 	}
 	const char *language = target->languageService->GetLanguage();

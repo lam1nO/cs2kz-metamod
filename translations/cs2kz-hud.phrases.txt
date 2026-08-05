@@ -106,6 +106,26 @@
 		"ko"		"속도: {speed} ({color}{takeoff_speed}</font>){crouch_jump}"
 		"lv"		"Ātrums: {speed} ({color}{takeoff_speed}</font>){crouch_jump}"
 	}
+	// Плайн-вариант взлётной скорости для нижней панели (худ спектатора под открытым меню,
+	// канал plain-text): апстримная «HUD - Speed Text (Takeoff)» содержит font-теги.
+	"HUD - Bottom Speed Text (Takeoff)"
+	{
+		// Speed: 234 (200)
+		"#format"	"speed:.0f,takeoff_speed:.0f"
+		"en"		"Speed: {speed} ({takeoff_speed})"
+		"chi"		"速度: {speed} ({takeoff_speed})"
+		"pl"		"Prędkość: {speed} ({takeoff_speed})"
+		"ru"		"Скорость: {speed} ({takeoff_speed})"
+		"fi"		"Nopeus: {speed} ({takeoff_speed})"
+		"sv"		"Hastighet: {speed} ({takeoff_speed})"
+		"ua"		"Швидкість: {speed} ({takeoff_speed})"
+		"tr"		"Hız: {speed} ({takeoff_speed})"
+		"it"		"Vel: {speed} ({takeoff_speed})"
+		"es"		"Velocidad: {speed} ({takeoff_speed})"
+		"de"		"Geschwindigkeit: {speed} ({takeoff_speed})"
+		"ko"		"속도: {speed} ({takeoff_speed})"
+		"lv"		"Ātrums: {speed} ({takeoff_speed})"
+	}
 	"HUD - Key Text"
 	{
 		// Keys: A W S D C J
