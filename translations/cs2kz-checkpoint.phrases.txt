@@ -239,7 +239,18 @@
 	"Custom Start Position - Prefs Not Loaded"
 	{
 		"en"		"{darkred}Your preferences are not loaded yet, try again in a moment."
+		"chi"		"{darkred}你的设置还未加载,请稍后再试."
 		"ru"		"{darkred}Ваши настройки ещё не загружены, попробуйте снова через секунду."
+		"pl"		"{darkred}Twoje preferencje jeszcze się nie załadowały, spróbuj ponownie za chwilę."
+		"fi"		"{darkred}Asetuksiasi ei ole vielä ladattu, yritä hetken kuluttua uudelleen."
+		"sv"		"{darkred}Dina inställningar har inte laddats än, försök igen om en stund."
+		"ua"		"{darkred}Ваші налаштування ще не завантажені, спробуйте ще раз за мить."
+		"tr"		"{darkred}Ayarların henüz yüklenmedi, biraz sonra tekrar dene."
+		"it"		"{darkred}Le tue preferenze non sono ancora state caricate, riprova tra un momento."
+		"es"		"{darkred}Tus preferencias aún no se han cargado, inténtalo de nuevo en un momento."
+		"de"		"{darkred}Deine Einstellungen sind noch nicht geladen, versuch es gleich noch einmal."
+		"ko"		"{darkred}설정이 아직 로드되지 않았습니다. 잠시 후 다시 시도하세요."
+		"lv"		"{darkred}Tavi iestatījumi vēl nav ielādēti, mēģini vēlreiz pēc brīža."
 	}
 	"Set Custom Start Position"
 	{
