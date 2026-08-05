@@ -9,6 +9,8 @@
 #include "kz/checkpoint/kz_checkpoint.h"
 #include "kz/timer/kz_timer.h"
 
+#include <map>
+
 #include <vendor/ClientCvarValue/public/iclientcvarvalue.h>
 #include <vendor/MultiAddonManager/public/imultiaddonmanager.h>
 
@@ -37,7 +39,37 @@ static_global KeyValues *addonsKV;
 // были сломаны и апстримные "MHUD - CP/TP Enabled/Disabled", "MHUD - PB/WR Enabled/Disabled",
 // "WR/SR Command Usage[ - Console]" — просто их видно реже. Индекс обходит подсекции
 // напрямую, поэтому имя сравнивается целиком и слэш в нём ничего не значит.
-static_global std::unordered_map<std::string, KeyValues *> phraseIndex;
+//
+// Сравнение имён РЕГИСТРОНЕЗАВИСИМОЕ — ровно как у FindKey (тот интернирует имя через
+// символ-таблицу KeyValues, а она регистр игнорирует). Байтовое сравнение сразу ломает
+// склейки ключей в рантайме: kz_mode_manager собирает "Command Description - kz_%s" из
+// MODE_NAME_SHORT (заглавные VNL/CKZ/KZT), а в файле лежит "Command Description - kz_vnl" —
+// в !help игрок видел сырой ключ. Регистр — свойство ИНДЕКСА, а не отдельной склейки.
+struct PhraseNameLess
+{
+	using is_transparent = void;
+
+	static const char *Cstr(const char *name)
+	{
+		return name;
+	}
+
+	static const char *Cstr(const std::string &name)
+	{
+		return name.c_str();
+	}
+
+	template<typename L, typename R>
+	bool operator()(const L &lhs, const R &rhs) const
+	{
+		return V_stricmp(Cstr(lhs), Cstr(rhs)) < 0;
+	}
+};
+
+// std::map, а не unordered_map: гетерогенный поиск (is_transparent) по const char* в C++17
+// есть только у упорядоченных контейнеров. Иначе каждый lookup строил бы временную
+// std::string, а GetTranslatedFormat зовётся из построения худа каждый тик.
+static_global std::map<std::string, KeyValues *, PhraseNameLess> phraseIndex;
 
 // Перестроить индекс по текущему translationKV. Зовётся после загрузки всех *.phrases.txt.
 // При дубликате имени (одна фраза в двух файлах) побеждает ПЕРВОЕ вхождение — как у
@@ -74,6 +106,10 @@ void KZLanguageService::Init()
 
 void KZLanguageService::LoadConfigFiles()
 {
+	// Первой строкой, ДО delete: индекс держит указатели внутрь translationKV, а перезагрузка
+	// (kz_reload_translations — публичная rcon-команда) удаляет его и потом читает ~27 файлов.
+	// Всё это время висячие указатели были бы достижимы из GetTranslatedFormat.
+	phraseIndex.clear();
 	if (translationKV)
 	{
 		delete translationKV;
