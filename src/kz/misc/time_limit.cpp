@@ -30,28 +30,44 @@ CConVarRef<float> mp_roundtime_hostage("mp_roundtime_hostage");
 CConVarRef<CUtlString> nextlevel("nextlevel");
 ConVarRefAbstract *convars[] = {&mp_timelimit, &mp_roundtime, &mp_roundtime_defuse, &mp_roundtime_hostage};
 
-static_global std::string GetDefaultMapName()
+// Значение для ПУСТОГО nextlevel — имя ТЕКУЩЕЙ карты (пустая строка = не знаем).
+//
+// Апстрим брал его из командной строки (`+map <name>`), и это первопричина падений
+// kz-серверов по тайм-лимиту: наша launch-цепочка — «+map de_dust2 +host_workshop_map <id>»
+// (workshop-карта обязана идти ПОСЛЕ +map), поэтому парсер ВСЕГДА возвращал de_dust2. Каждый
+// старт ставил nextlevel=de_dust2 (факт с флота 05.08: так на всех восьми инстансах, при
+// mp_match_end_changelevel false — тот этот путь не закрывает), и на «Game Over ... after N
+// min» движок уводил kz-инстанс на официальную карту, чего он не переживает; контейнер потом
+// поднимал node-agent. Правильный nextlevel для kz — та же карта: истечение тайм-лимита
+// перезагружает её, ротацией занимается GG1 (голосование/setnextmap ставят nextlevel сами, и
+// непустое значение мы не трогаем).
+static_global std::string GetCurrentLevelName()
 {
-	// Most if not all servers are launched with +map <mapname> in the command line: eg +map de_dust2 +host_workshop_map 123456789
-	std::string commandLine = CommandLine()->GetCmdLine();
-	size_t pos = commandLine.find("+map ");
-	if (pos != std::string::npos)
+	bool hasMapName = false;
+	CUtlString mapName = g_pKZUtils->GetCurrentMapName(&hasMapName);
+	if (!hasMapName || mapName.IsEmpty())
 	{
-		size_t start = pos + 5; // length of "+map "
-		size_t end = commandLine.find(' ', start);
-		if (end == std::string::npos)
-		{
-			end = commandLine.length();
-		}
-		// We also need to remove all the quotes that the user might have put around the map name.
-		std::string mapName = commandLine.substr(start, end - start);
-		mapName.erase(std::remove(mapName.begin(), mapName.end(), '\"'), mapName.end());
-		return mapName;
+		// Ранняя фаза (EnforceTimeLimit из KZ::misc::Init до первой карты): НЕ подставляем
+		// ничего. Пустой nextlevel хуже правильного, но безопаснее чужого: пустой движок
+		// никуда не уводит, а EnforceTimeLimit зовётся ещё раз из OnActivateServer, когда имя
+		// карты уже есть. Дефолт «de_dust2» в этой ветке недопустим ни в каком виде.
+		return "";
 	}
-	else
+	return mapName.Get();
+}
+
+// Заполнить nextlevel текущей картой. Пишем только в ПУСТОЙ nextlevel (проверяет вызывающий);
+// смена состояния сервера, не восстановимая из БД → логируем оба исхода с reason.
+static_global void SetNextLevelToCurrentMap()
+{
+	std::string mapName = GetCurrentLevelName();
+	if (mapName.empty())
 	{
-		return "de_dust2"; // Fallback to a common map
+		KZ_LOG_WARN(LogChannel::General, "[cyb] nextlevel_skip reason=no_map_name\n");
+		return;
 	}
+	nextlevel.Set(mapName.c_str());
+	KZ_LOG_INFO(LogChannel::General, "[cyb] nextlevel_set map=%s reason=empty_nextlevel\n", mapName.c_str());
 }
 
 static_global void OnCvarChanged(ConVarRefAbstract *ref, CSplitScreenSlot nSlot, const char *pNewValue, const char *pOldValue, void *__unk01)
@@ -67,7 +83,7 @@ static_global void OnCvarChanged(ConVarRefAbstract *ref, CSplitScreenSlot nSlot,
 	if (nextlevel.GetAccessIndex() == ref->GetAccessIndex() && nextlevel.Get().IsEmpty())
 	{
 		// The addon will be unloaded upon map change, so we need to set a valid nextlevel.
-		nextlevel.Set(GetDefaultMapName().c_str());
+		SetNextLevelToCurrentMap();
 		return;
 	}
 
@@ -113,7 +129,7 @@ void KZ::misc::EnforceTimeLimit()
 {
 	if (nextlevel.Get().IsEmpty())
 	{
-		nextlevel.Set(GetDefaultMapName().c_str());
+		SetNextLevelToCurrentMap();
 	}
 
 	if (cvarLoaded || !mp_timelimit.IsValidRef() || !mp_roundtime.IsValidRef() || !mp_roundtime_defuse.IsValidRef()
