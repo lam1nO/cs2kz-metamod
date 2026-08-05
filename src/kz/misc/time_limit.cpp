@@ -63,7 +63,11 @@ static_global void SetNextLevelToCurrentMap()
 	std::string mapName = GetCurrentLevelName();
 	if (mapName.empty())
 	{
-		KZ_LOG_WARN(LogChannel::General, "[cyb] nextlevel_skip reason=no_map_name\n");
+		// info, а не warn: на холодном старте это ШТАТНО (EnforceTimeLimit зовётся из
+		// KZ::misc::Init до первой карты, а доставит значение OnActivateServer). По
+		// инварианту логов warn = «отказали пользователю», а здесь ничего не отказало —
+		// warn'ом строка была бы фоновым шумом на каждом старте каждого инстанса.
+		KZ_LOG_INFO(LogChannel::General, "[cyb] nextlevel_skip reason=no_map_name\n");
 		return;
 	}
 	nextlevel.Set(mapName.c_str());

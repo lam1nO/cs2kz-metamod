@@ -67,8 +67,10 @@ struct PhraseNameLess
 };
 
 // std::map, а не unordered_map: гетерогенный поиск (is_transparent) по const char* в C++17
-// есть только у упорядоченных контейнеров. Иначе каждый lookup строил бы временную
-// std::string, а GetTranslatedFormat зовётся из построения худа каждый тик.
+// есть только у упорядоченных контейнеров, иначе каждый lookup строил бы временную
+// std::string на ключ. Сам поиск РЕДКИЙ — PrepareMessageWithLang заходит сюда только на
+// промахе formattedTemplateCache, т.е. один раз на пару (язык, фраза), — но лишняя
+// аллокация на пути построения текста всё равно не нужна.
 static_global std::map<std::string, KeyValues *, PhraseNameLess> phraseIndex;
 
 // Перестроить индекс по текущему translationKV. Зовётся после загрузки всех *.phrases.txt.
