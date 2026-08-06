@@ -3,6 +3,7 @@
 #include "utils/simplecmds.h"
 #include "utils/utils.h"
 
+#include "../invisible/kz_invisible.h"
 #include "../language/kz_language.h"
 #include "../timer/kz_timer.h"
 
@@ -29,7 +30,7 @@ i32 KZGotoService::CollectGotoCandidates(const char *query, KZPlayer **candidate
 		{
 			continue;
 		}
-		if (other->GetController()->GetTeam() == CS_TEAM_SPECTATOR)
+		if (other->GetController()->IsObserverTeam())
 		{
 			continue;
 		}
@@ -68,14 +69,17 @@ bool KZGotoService::GotoPlayer(KZPlayer *targetPlayer)
 		return false;
 	}
 
-	if (targetPlayer->GetController()->GetTeam() == CS_TEAM_SPECTATOR)
+	if (targetPlayer->GetController()->IsObserverTeam())
 	{
 		this->player->languageService->PrintChat(true, false, "Goto - Error Message (Player In Spec)", targetPlayer->GetName());
 		return false;
 	}
 
-	if (this->player->GetController()->GetTeam() == CS_TEAM_SPECTATOR)
+	if (this->player->GetController()->IsObserverTeam())
 	{
+		// Заход в игру мимо KZ::misc::JoinTeam — наблюдение снимаем сами, иначе сторож
+		// невидимки вернёт игрока в наблюдатели прямо из-под !goto.
+		this->player->invisibleService->OnObserveEnd();
 		this->player->GetController()->SwitchTeam(CS_TEAM_CT);
 		this->player->GetController()->Respawn();
 	}
@@ -122,7 +126,7 @@ static_function void OnGotoMenuSelect(MenuHandle menu, int slot, int item)
 		return;
 	}
 	KZPlayer *target = g_pKZPlayerManager->ToPlayer(CPlayerUserId(V_StringToInt32(info, -1)));
-	if (!target || !target->GetController() || target->GetController()->GetTeam() == CS_TEAM_SPECTATOR)
+	if (!target || !target->GetController() || target->GetController()->IsObserverTeam())
 	{
 		p->languageService->PrintChat(true, false, "Goto - Player Unavailable");
 		return;

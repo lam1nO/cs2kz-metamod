@@ -6,6 +6,7 @@
 
 #include "kz/anticheat/kz_anticheat.h"
 #include "kz/checkpoint/kz_checkpoint.h"
+#include "kz/invisible/kz_invisible.h"
 #include "kz/jumpstats/kz_jumpstats.h"
 #include "kz/quiet/kz_quiet.h"
 #include "kz/mode/kz_mode.h"
@@ -408,7 +409,7 @@ void KZ::misc::Init()
 
 // TODO: Fullupdate spectators on spec_mode/spec_next/spec_player/spec_prev
 
-void KZ::misc::JoinTeam(KZPlayer *player, int newTeam, bool restorePos)
+void KZ::misc::JoinTeam(KZPlayer *player, int newTeam, bool restorePos, bool savePos)
 {
 	int currentTeam = player->GetController()->GetTeam();
 
@@ -424,9 +425,15 @@ void KZ::misc::JoinTeam(KZPlayer *player, int newTeam, bool restorePos)
 		newTeam = CS_TEAM_SPECTATOR;
 	}
 
-	if (newTeam == CS_TEAM_SPECTATOR && currentTeam != CS_TEAM_SPECTATOR)
+	// В CS_TEAM_NONE игрока уводит ТОЛЬКО KZInvisibleService (скрытие из TAB), и для него
+	// это уже «в наблюдателях» — повторно прогонять вход не нужно. Спрашиваем именно
+	// IsObserving, а не команду: только что зашедший игрок (в т.ч. невидимка) тоже сидит
+	// в NONE, но вход в наблюдатели — пауза таймера, гашение худа — ему ещё предстоит.
+	bool alreadyObserving = currentTeam == CS_TEAM_SPECTATOR || (currentTeam == CS_TEAM_NONE && player->invisibleService->IsObserving());
+
+	if (newTeam == CS_TEAM_SPECTATOR && !alreadyObserving)
 	{
-		if (currentTeam != CS_TEAM_NONE)
+		if (savePos && currentTeam != CS_TEAM_NONE)
 		{
 			player->specService->SavePosition();
 		}
@@ -436,6 +443,11 @@ void KZ::misc::JoinTeam(KZPlayer *player, int newTeam, bool restorePos)
 			player->timerService->TimerStop(true, "pause_denied");
 		}
 		player->GetController()->ChangeTeam(CS_TEAM_SPECTATOR);
+		// Невидимку в CS_TEAM_NONE уводит сторож следующим кадром, а НЕ мы здесь: наш
+		// вызывающий (SpectatePlayer) сразу после этой функции читает observer pawn и
+		// ставит цель наблюдения, а вторая смена команды в том же кадре может его
+		// пересоздать — админ получал бы «Spectate Failure» вместо слежки за читером.
+		// Цена — строка невидимки живёт в TAB один снапшот-тик.
 		// Партикли мхуда гасим сразу: у обсервера движение не тикает и штатное
 		// выключение в OnProcessMovement не сработает (жалоба: висят в спеках).
 		player->hudService->OnJoinSpectator();
@@ -446,6 +458,9 @@ void KZ::misc::JoinTeam(KZPlayer *player, int newTeam, bool restorePos)
 	}
 	else if (newTeam == CS_TEAM_CT && currentTeam != CS_TEAM_CT || newTeam == CS_TEAM_T && currentTeam != CS_TEAM_T)
 	{
+		// Игрок сам попросился в игру: снимаем наблюдение до смены команды, иначе сторож
+		// невидимки увидит живую команду при поднятом observing и вернёт его обратно.
+		player->invisibleService->OnObserveEnd();
 		if (player->GetPlayerPawn())
 		{
 			player->GetPlayerPawn()->CommitSuicide(false, true);

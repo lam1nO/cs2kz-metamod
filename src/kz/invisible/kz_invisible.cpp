@@ -1,7 +1,7 @@
 #include "kz_invisible.h"
 #include "kz/language/kz_language.h"
+#include "kz/timer/kz_timer.h"
 
-#include "sdk/serversideclient.h"
 #include "sdk/services.h"
 #include "utils/utils.h"
 #include "utils/json.h"
@@ -14,8 +14,17 @@
 
 #define KZ_INVISIBLE_LIST_FILE "cfg/cyb_invisible.json"
 
+// Возврат выдернутого наблюдателя: не чаще раза в этот интервал.
+#define KZ_INVISIBLE_RESTORE_PERIOD 5.0f
+// Что считать ОДНОЙ серией. Драка — это возвраты, ложащиеся вплотную к рубежу выше;
+// вдвое больший интервал даёт запас на джиттер и при этом в разы меньше периода
+// mp_force_pick_time (60 с), чтобы ожидаемый периодический форс в серию не складывался.
+#define KZ_INVISIBLE_RESTORE_STREAK (2.0f * KZ_INVISIBLE_RESTORE_PERIOD)
+// Длина серии, после которой сдаёмся (см. OnGameFrame).
+#define KZ_INVISIBLE_MAX_RESTORES 3
+
 // Список невидимок (steamid64). Мутации только на игровом потоке (плагин-лоад,
-// map start, ConCommand'ы), чтение — CheckTransmit/PostEvent там же.
+// map start, ConCommand'ы), чтение — сторож OnGameFrame/JoinTeam/!specs там же.
 static_global std::unordered_set<u64> s_invisibleSteamIds;
 
 // Сколько невидимок сейчас ОНЛАЙН (кэш-флаги игроков). Гейт горячих путей: файл со
@@ -25,11 +34,8 @@ static_global i32 s_onlineInvisibleCount = 0;
 // Пересчитать кэш-флаги всем игрокам после смены списка. Счётчик онлайн-невидимок
 // пересобирается с нуля — защита от дрейфа инкрементальной арифметики (сиротский флаг
 // отклонённого коннекта чинит декремент в OnPlayerConnect при переиспользовании слота).
-// Возвращает, стал ли кто-то из игроков В ИГРЕ видимым — тогда вызывающий должен
-// разослать один сетевой full update (BroadcastFullUpdate).
-static_function bool RefreshAllPlayers()
+static_function void RefreshAllPlayers()
 {
-	bool anyBecameVisible = false;
 	i32 onlineInvisibleCount = 0;
 	for (int i = 0; i < MAXPLAYERS + 1; i++)
 	{
@@ -38,54 +44,13 @@ static_function bool RefreshAllPlayers()
 		{
 			continue;
 		}
-		anyBecameVisible |= player->invisibleService->RefreshFlag();
+		player->invisibleService->RefreshFlag();
 		if (player->invisibleService->IsInvisible())
 		{
 			onlineInvisibleCount++;
 		}
 	}
 	s_onlineInvisibleCount = onlineInvisibleCount;
-	return anyBecameVisible;
-}
-
-// Возврат видимости: клиентам нужен полный снапшот, иначе pawn может не пересоздаться
-// у них сразу. ТОЛЬКО сетевой ForceFullUpdate + снап углов, БЕЗ SetAngles/Teleport:
-// телепорт тащит побочку на непричастных (lastTeleportTime блокирует TimerStart,
-// джампстаты рвут прыжок, триггеры с cancelOnTeleport; предупреждение в kz_player.cpp:
-// «Using SetAngles, which uses Teleport makes player movement really weird»).
-// Дедуп на вызывающем: один бродкаст на мутацию списка, не на каждого снятого.
-static_function void BroadcastFullUpdate()
-{
-	for (i32 i = 1; i < MAXPLAYERS + 1; i++)
-	{
-		KZPlayer *viewer = g_pKZPlayerManager->ToPlayer((u32)i);
-		if (!viewer || !viewer->IsInGame() || viewer->IsFakeClient() || viewer->IsCSTV())
-		{
-			continue;
-		}
-		// Невидимкам (в т.ч. вернувшемуся) апдейт не нужен — они субъекта и так видели.
-		if (KZInvisibleService::IsInvisible(viewer))
-		{
-			continue;
-		}
-		CServerSideClient *client = g_pKZUtils->GetClientBySlot(viewer->GetPlayerSlot());
-		if (!client)
-		{
-			continue;
-		}
-		client->ForceFullUpdate();
-		// Сохраняем вид (full update может дёрнуть углы) — прецедент DisableTurnbinds.
-		// Только живым: GetAngles() читает moveDataPost, который у не-симулируемых
-		// (мёртвый/спектатор/после смены карты) хранит углы прошлой жизни; им снап и не
-		// нужен — они смотрят через observer pawn.
-		if (viewer->IsAlive())
-		{
-			// IsAlive() уже гарантирует ненулевой pawn.
-			QAngle angles;
-			viewer->GetAngles(&angles);
-			g_pKZUtils->SnapViewAngles(viewer->GetPlayerPawn(), angles);
-		}
-	}
 }
 
 // Разбор {"steamids": ["7656119...", ...]}. Любая невалидная запись бракует весь файл
@@ -143,10 +108,7 @@ void KZInvisibleService::LoadFromFile(const char *source)
 	{
 		// Файл отсутствует — легальное состояние: пустой список.
 		s_invisibleSteamIds.clear();
-		if (RefreshAllPlayers())
-		{
-			BroadcastFullUpdate();
-		}
+		RefreshAllPlayers();
 		KZ_LOG_INFO(LogChannel::General, "[cyb] invisible_list_loaded count=0 source=%s file=absent\n", source);
 		return;
 	}
@@ -171,10 +133,7 @@ void KZInvisibleService::LoadFromFile(const char *source)
 	}
 
 	s_invisibleSteamIds = std::move(parsed);
-	if (RefreshAllPlayers())
-	{
-		BroadcastFullUpdate();
-	}
+	RefreshAllPlayers();
 	KZ_LOG_INFO(LogChannel::General, "[cyb] invisible_list_loaded count=%u source=%s\n", (u32)s_invisibleSteamIds.size(), source);
 }
 
@@ -221,6 +180,14 @@ void KZInvisibleService::Reset()
 	}
 	this->steamId64 = 0;
 	this->invisible = false;
+	this->observing = false;
+	this->suppressTeamEvent = false;
+	this->nextRestoreTime = 0.0f;
+	this->restoreAttempts = 0;
+	this->lastRestoreTime = 0.0f;
+	this->pendingObserverTarget.Term();
+	this->pendingObserverMode = OBS_MODE_NONE;
+	this->reassertObserver = false;
 }
 
 void KZInvisibleService::OnPlayerConnect(u64 steamID64)
@@ -248,7 +215,181 @@ void KZInvisibleService::OnPlayerActive()
 	}
 }
 
-bool KZInvisibleService::RefreshFlag()
+void KZInvisibleService::SetObserverTeam(int team)
+{
+	CCSPlayerController *controller = this->player->GetController();
+	if (!controller || controller->GetTeam() == team)
+	{
+		return;
+	}
+	// Смена команды может пересоздать observer pawn и потерять цель наблюдения — админ
+	// оказался бы во фрикаме вместо читера, за которым следил. Живьём это не проверено,
+	// поэтому снимаем слепок цели и возвращаем его после: верно и если pawn пережил смену
+	// команды (тогда восстановление — no-op), и если нет.
+	this->pendingObserverTarget.Term();
+	this->pendingObserverMode = OBS_MODE_NONE;
+	if (CCSPlayerPawnBase *observerPawn = controller->GetObserverPawn())
+	{
+		if (CPlayer_ObserverServices *obsService = observerPawn->m_pObserverServices)
+		{
+			this->pendingObserverMode = obsService->m_iObserverMode();
+			this->pendingObserverTarget = obsService->m_hObserverTarget();
+		}
+	}
+
+	this->suppressTeamEvent = true;
+	controller->ChangeTeam(team);
+	// Снимаем и здесь: хук ChangeTeam синхронный и флаг уже съеден, но если движок
+	// почему-то не позвал его, подавление не должно утечь на чужую смену команды.
+	this->suppressTeamEvent = false;
+
+	// Если pawn пересоздаётся не синхронно с ChangeTeam, сейчас цель вернуть некуда —
+	// повторим ровно один раз следующим кадром из сторожа.
+	this->reassertObserver = !this->RestoreObserverTarget();
+	if (!this->reassertObserver)
+	{
+		this->pendingObserverTarget.Term();
+	}
+}
+
+bool KZInvisibleService::RestoreObserverTarget()
+{
+	if (!this->pendingObserverTarget.IsValid())
+	{
+		return true; // наблюдали фрикамом — возвращать нечего
+	}
+	CCSPlayerController *controller = this->player->GetController();
+	if (!controller)
+	{
+		return true;
+	}
+	CCSPlayerPawnBase *observerPawn = controller->GetObserverPawn();
+	if (!observerPawn || !observerPawn->m_pObserverServices)
+	{
+		return false; // pawn ещё не готов
+	}
+	CPlayer_ObserverServices *obsService = observerPawn->m_pObserverServices;
+	if (obsService->m_hObserverTarget() != this->pendingObserverTarget)
+	{
+		obsService->m_iObserverMode(this->pendingObserverMode);
+		obsService->m_hObserverTarget(this->pendingObserverTarget);
+	}
+	return true;
+}
+
+void KZInvisibleService::EnforceObserverTeam()
+{
+	if (!this->invisible || !this->player->IsInGame())
+	{
+		return;
+	}
+	CCSPlayerController *controller = this->player->GetController();
+	// Живая команда — это игрок, который сам попросился в игру: невидимость даётся только
+	// наблюдателю (инвариант), возвращать его сюда нельзя.
+	if (!controller || controller->GetTeam() != CS_TEAM_SPECTATOR)
+	{
+		return;
+	}
+	this->SetObserverTeam(CS_TEAM_NONE);
+	this->observing = true;
+	KZ_LOG_INFO(LogChannel::General, "[cyb] invisible_observer_team steam_id=%llu team=none\n", this->steamId64);
+}
+
+bool KZInvisibleService::OnChangeTeamPost(i32 team)
+{
+	if (this->suppressTeamEvent)
+	{
+		this->suppressTeamEvent = false;
+		return true;
+	}
+	// Страховка к явным OnObserveEnd() в обёртках: если заход в живую команду прошёл
+	// мимо них, но внутри намеренной смены (changingTeam), это всё равно не форс движка —
+	// наблюдение окончено, сторож игрока больше не возвращает.
+	if (team >= CS_TEAM_T && this->player->timerService->IsChangingTeam())
+	{
+		this->observing = false;
+	}
+	return false;
+}
+
+void KZInvisibleService::OnGameFrame()
+{
+	if (!HasOnlineInvisibles())
+	{
+		return;
+	}
+	for (i32 i = 1; i < MAXPLAYERS + 1; i++)
+	{
+		KZPlayer *player = g_pKZPlayerManager->ToPlayer((u32)i);
+		if (!player || !player->invisibleService || !player->invisibleService->IsInvisible() || !player->IsInGame())
+		{
+			continue;
+		}
+		KZInvisibleService *service = player->invisibleService;
+		CCSPlayerController *controller = player->GetController();
+		if (!controller)
+		{
+			continue;
+		}
+		// Ровно одна повторная попытка вернуть цель наблюдения (observer pawn мог
+		// пересоздаться кадром позже смены команды).
+		if (service->reassertObserver)
+		{
+			service->reassertObserver = false;
+			service->RestoreObserverTarget();
+			service->pendingObserverTarget.Term();
+		}
+		// Штатный путь скрытия: сюда игрок приходит следующим кадром после ухода в
+		// наблюдатели (KZ::misc::JoinTeam намеренно НЕ прячет сам — см. комментарий там).
+		if (controller->GetTeam() == CS_TEAM_SPECTATOR)
+		{
+			service->EnforceObserverTeam();
+			continue;
+		}
+		// Наблюдателя выдернули в живую команду мимо наших обёрток — единственный известный
+		// источник этого движковый mp_force_pick_time. Возвращаем, но не чаще раза в 5 с:
+		// если движок будет спорить, мы не уйдём с ним в покадровую драку, а оставим след.
+		// realtime, а не curtime: игровое время обнуляется на смене карты, и рубеж из
+		// прошлой карты заблокировал бы возврат на новой.
+		f32 now = g_pKZUtils->GetServerGlobals()->realtime;
+		if (service->observing && controller->GetTeam() >= CS_TEAM_T && now >= service->nextRestoreTime)
+		{
+			// Новый эпизод, а не продолжение драки: серию рвёт пауза. Без этого счётчик
+			// мерил бы «сколько раз за сессию нас трогали» и выдыхался бы на самом
+			// ожидаемом источнике — периодическом mp_force_pick_time.
+			if (now - service->lastRestoreTime > KZ_INVISIBLE_RESTORE_STREAK)
+			{
+				service->restoreAttempts = 0;
+			}
+			service->lastRestoreTime = now;
+			service->nextRestoreTime = now + KZ_INVISIBLE_RESTORE_PERIOD;
+			if (service->restoreAttempts >= KZ_INVISIBLE_MAX_RESTORES)
+			{
+				// Капитуляция: команду держит не движок, а кто-то, кто спорит с нами всерьёз.
+				// Оставляем игрока обычным видимым живым игроком — инвариант «невидимость
+				// только наблюдателю» этим не нарушен, а вечный флап был бы хуже.
+				// Игроку говорим В ЧАТ: он пришёл следить за читером и обязан узнать, что
+				// скрытности больше нет, — молчаливая её потеря хуже самого отказа.
+				service->observing = false;
+				KZ_LOG_WARN(LogChannel::General, "[cyb] invisible_restore_gaveup steam_id=%llu attempts=%d\n", service->steamId64,
+							service->restoreAttempts);
+				if (!player->IsFakeClient())
+				{
+					player->languageService->PrintChat(true, false, "Invisible - Observe Lost");
+				}
+				continue;
+			}
+			service->restoreAttempts++;
+			KZ_LOG_WARN(LogChannel::General, "[cyb] invisible_team_forced steam_id=%llu team=%d attempt=%d reason=external\n", service->steamId64,
+						controller->GetTeam(), service->restoreAttempts);
+			// savePos=false: точку возврата игрок задал, когда уходил наблюдать сам, —
+			// перезаписывать её местом форс-спавна нельзя.
+			KZ::misc::JoinTeam(player, CS_TEAM_SPECTATOR, false, false);
+		}
+	}
+}
+
+void KZInvisibleService::RefreshFlag()
 {
 	// steamId64 эпохи коннекта; фолбэк для late load плагина на живом сервере.
 	// Пересчёт зависит ТОЛЬКО от steamId64 + списка; любой гейт по состоянию
@@ -260,7 +401,7 @@ bool KZInvisibleService::RefreshFlag()
 	bool newInvisible = IsInvisibleSteamId(steamId);
 	if (newInvisible == this->invisible)
 	{
-		return false;
+		return;
 	}
 	this->invisible = newInvisible;
 	// Диагностика репорта 05.08 («мигаю в TAB»): по этой строке видно, мигает ли САМ ФЛАГ
@@ -272,10 +413,18 @@ bool KZInvisibleService::RefreshFlag()
 	if (this->player->IsInGame() && !this->player->IsFakeClient())
 	{
 		this->player->languageService->PrintChat(true, false, newInvisible ? "Invisible - Active" : "Invisible - Inactive");
-		// Возврат видимости игрока в игре — сигнал вызывающему на один BroadcastFullUpdate.
-		return !newInvisible;
 	}
-	return false;
+	// Смена статуса на живом игроке в наблюдателях меняет и его команду: попал в список —
+	// прячем (NONE), выпал — возвращаем в спектаторы, иначе он остался бы скрыт навсегда.
+	if (newInvisible)
+	{
+		this->EnforceObserverTeam();
+	}
+	else if (this->observing)
+	{
+		this->SetObserverTeam(CS_TEAM_SPECTATOR);
+		this->observing = false;
+	}
 }
 
 // Живое управление списком без файла. Настоящие ConCommand'ы (не SCMD) — зовутся с
@@ -314,10 +463,7 @@ CON_COMMAND_F(kz_invisible_add, "Add a SteamID64 to the invisible players list (
 		return;
 	}
 	s_invisibleSteamIds.insert(steamId);
-	if (RefreshAllPlayers())
-	{
-		BroadcastFullUpdate();
-	}
+	RefreshAllPlayers();
 	KZ_LOG_INFO(LogChannel::General, "[cyb] invisible_add steam_id=%llu count=%u\n", steamId, (u32)s_invisibleSteamIds.size());
 }
 
@@ -338,9 +484,6 @@ CON_COMMAND_F(kz_invisible_remove, "Remove a SteamID64 from the invisible player
 		KZ_LOG_WARN(LogChannel::General, "[cyb] invisible_remove_rejected reason=not_in_list steam_id=%llu\n", steamId);
 		return;
 	}
-	if (RefreshAllPlayers())
-	{
-		BroadcastFullUpdate();
-	}
+	RefreshAllPlayers();
 	KZ_LOG_INFO(LogChannel::General, "[cyb] invisible_remove steam_id=%llu count=%u\n", steamId, (u32)s_invisibleSteamIds.size());
 }

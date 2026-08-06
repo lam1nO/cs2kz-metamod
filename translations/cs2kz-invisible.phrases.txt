@@ -1,9 +1,9 @@
 "Phrases"
 {
 	// Индикация режима невидимки самому игроку (при заходе и при живом включении по RCON).
-	// Текст описывает v2 (fd27aa3): скрытие ТОЛЬКО из TAB и !specs и ТОЛЬКО пока игрок в
-	// спектаторах. Прежний текст обещал скрытие модели и звуков (это была v1) — из-за него
-	// тестер 05.08 счёл режим сломанным, играя живым и видя себя в TAB.
+	// Текст описывает v3: скрытие ТОЛЬКО из TAB и !specs и ТОЛЬКО пока игрок наблюдает.
+	// Прежний текст обещал скрытие модели и звуков (это была v1) — из-за него тестер 05.08
+	// счёл режим сломанным, играя живым и видя себя в TAB.
 	"Invisible - Active"
 	{
 		"en"		"{gold}Invisible mode: while you stay in spectators, you are hidden from the scoreboard and !specs, and your join/leave messages are suppressed. Join a team and everyone sees you as usual."
@@ -13,5 +13,13 @@
 	{
 		"en"		"{grey}You are no longer invisible."
 		"ru"		"{grey}Режим невидимки снят."
+	}
+	// Капитуляция сторожа: сервер несколько раз ПОДРЯД вернул игрока в команду, и мы
+	// перестали спорить. Молчать здесь нельзя — человек пришёл следить за читером и
+	// продолжил бы считать себя скрытым, уже будучи видимым всем.
+	"Invisible - Observe Lost"
+	{
+		"en"		"{red}Stealth lost: the server keeps putting you back into a team, so hiding was stopped. You are visible as a regular player now — use !spec to go back to spectators."
+		"ru"		"{red}Скрытность снята: сервер раз за разом возвращает вас в команду, и мы перестали спорить. Сейчас вас видно как обычного игрока — вернитесь в наблюдатели через !spec."
 	}
 }

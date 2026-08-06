@@ -26,7 +26,7 @@ static_function void OnSpecMenuSelect(MenuHandle menu, int slot, int item)
 	// info — userID кандидата строкой; ревалидация: цель могла выйти или уйти в спек,
 	// пока меню висело.
 	KZPlayer *target = g_pKZPlayerManager->ToPlayer(CPlayerUserId(V_StringToInt32(info, -1)));
-	if (!target || !target->GetController() || target->GetController()->GetTeam() == CS_TEAM_SPECTATOR)
+	if (!target || !target->GetController() || target->GetController()->IsObserverTeam())
 	{
 		p->languageService->PrintChat(true, false, "Spectate Failure (Player Not Found)");
 		return;

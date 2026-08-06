@@ -577,6 +577,14 @@ public:
 		this->changingTeam = value;
 	}
 
+	// Идёт ли намеренная смена команды. Невидимке это ВТОРАЯ линия против «команду сменил
+	// движок» (mp_force_pick_time); первая и основная — явный OnObserveEnd() в обёртках
+	// захода в игру, потому что !goto меняет команду мимо JoinTeam и этот флаг не поднимает.
+	bool IsChangingTeam() const
+	{
+		return this->changingTeam;
+	}
+
 	virtual void Reset() override;
 	void OnPhysicsSimulatePost();
 	void OnStartTouchGround();

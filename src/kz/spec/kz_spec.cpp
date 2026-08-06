@@ -73,7 +73,7 @@ i32 KZSpecService::CollectSpectateCandidates(const char *query, KZPlayer **candi
 		{
 			continue;
 		}
-		if (other->GetController()->GetTeam() == CS_TEAM_SPECTATOR)
+		if (other->GetController()->IsObserverTeam())
 		{
 			continue;
 		}
@@ -140,13 +140,23 @@ bool KZSpecService::SpectatePlayer(KZPlayer *target)
 		return false;
 	}
 	// Join spectator team if not already in it.
+	// Здесь вопрос не «он наблюдатель?», а «надо ли уводить его в наблюдатели», поэтому
+	// IsObserverTeam() не годится: обычный игрок, ещё не выбравший команду, тоже сидит в
+	// CS_TEAM_NONE, и пропуск входа оставил бы его неопределившимся — без паузы, без
+	// гашения худа и под движковым mp_force_pick_time. Предикат тот же, что в
+	// KZ::misc::JoinTeam: в NONE «уже наблюдает» только спрятанный нами невидимка.
 	CCSPlayerController *controller = this->player->GetController();
-	if (controller->GetTeam() != CS_TEAM_SPECTATOR)
+	bool alreadyObserving =
+		controller->GetTeam() == CS_TEAM_SPECTATOR || (controller->GetTeam() == CS_TEAM_NONE && this->player->invisibleService->IsObserving());
+	if (!alreadyObserving)
 	{
 		KZ::misc::JoinTeam(this->player, CS_TEAM_SPECTATOR, true);
 	}
 
-	CPlayer_ObserverServices *obsService = player->GetController()->m_hObserverPawn()->m_pObserverServices;
+	// Обсервер-pawn проверяем на null: на переходных кадрах смены команды его может не
+	// быть, а разыменование сырого хендла роняло бы сервер (было до этой правки).
+	CCSPlayerPawnBase *observerPawn = player->GetController()->GetObserverPawn();
+	CPlayer_ObserverServices *obsService = observerPawn ? observerPawn->m_pObserverServices : nullptr;
 	if (!obsService)
 	{
 		player->languageService->PrintChat(true, false, "Spectate Failure (Generic)");
@@ -258,7 +268,7 @@ SCMD(kz_spec, SCFL_SPEC | SCFL_HELP)
 	}
 
 	// !spec без аргументов — тоггл: спектатор возвращается в игру на сохранённое место.
-	if (player->GetController() && player->GetController()->GetTeam() == CS_TEAM_SPECTATOR)
+	if (player->GetController() && player->GetController()->IsObserverTeam())
 	{
 		if (player->specService->HasSavedPosition())
 		{

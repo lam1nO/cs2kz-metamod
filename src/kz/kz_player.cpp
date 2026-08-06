@@ -1012,6 +1012,18 @@ void KZPlayer::UpdateTriggerTouchList()
 
 void KZPlayer::OnChangeTeamPost(i32 team)
 {
+	// Наш собственный перевод СПЕК→NONE (скрытие невидимки) — не второй уход в наблюдатели:
+	// повторный OnPausePost сдвинул бы кулдаун паузы внутри бегущего рана.
+	if (this->invisibleService->OnChangeTeamPost(team))
+	{
+		return;
+	}
+	// Подменять здесь CS_TEAM_NONE на CS_TEAM_SPECTATOR НЕЛЬЗЯ, хотя невидимка наблюдает
+	// именно из NONE: вход в наблюдатели уже отработал шагом раньше — KZ::misc::JoinTeam
+	// сперва делает ChangeTeam(SPECTATOR), и пауза встаёт на нём, а наш перевод SPEC→NONE
+	// проглатывается строкой выше. Осталась бы только ложь: Hook_ClientDisconnect зовёт
+	// SwitchTeam(0) на КАЖДОМ выходе, и подмена ставила бы паузу и дёргала prac на уже
+	// сохранённом ране уходящего игрока.
 	this->timerService->OnPlayerJoinTeam(team);
 	if (team == CS_TEAM_SPECTATOR)
 	{

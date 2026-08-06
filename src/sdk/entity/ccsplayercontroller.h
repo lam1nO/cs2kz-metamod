@@ -81,6 +81,16 @@ public:
 		return m_hObserverPawn.Get();
 	}
 
+	// Наблюдатель: спектатор ИЛИ ещё не выбравший команду. Живого pawn'а нет ни у того,
+	// ни у другого, поэтому все проверки «этого игрока нельзя взять целью / он уже в
+	// наблюдателях» обязаны спрашивать именно это, а не равенство CS_TEAM_SPECTATOR:
+	// невидимку мы держим в CS_TEAM_NONE (скрытие из TAB, см. KZInvisibleService).
+	bool IsObserverTeam()
+	{
+		int team = this->GetTeam();
+		return team == CS_TEAM_NONE || team == CS_TEAM_SPECTATOR;
+	}
+
 	void ChangeTeam(int iTeam)
 	{
 		CALL_VIRTUAL(void, g_pGameConfig->GetOffset("ControllerChangeTeam"), this, iTeam);

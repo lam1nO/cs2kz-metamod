@@ -270,7 +270,10 @@ namespace KZ
 	{
 		void Init();
 		void OnActivateServer();
-		void JoinTeam(KZPlayer *player, int newTeam, bool restorePos = true);
+		// savePos=false — не перезаписывать сохранённую точку возврата текущей позицией
+		// игрока. Нужно возврату невидимки в наблюдатели: его туда выдернул не он сам, и
+		// точка форс-спавна затёрла бы место, откуда он реально уходил наблюдать.
+		void JoinTeam(KZPlayer *player, int newTeam, bool restorePos = true, bool savePos = true);
 		void ProcessConCommand(ConCommandRef cmd, const CCommandContext &ctx, const CCommand &args);
 		META_RES CheckBlockedRadioCommands(const char *cmd);
 		void OnRoundStart();
