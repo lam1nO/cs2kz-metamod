@@ -203,12 +203,48 @@ void KZHUDService::OnJoinSpectator()
 // с которой он дотягивается до низа; дальше по строке отступа на строку верха, с потолком,
 // чтобы низ не уехал за край экрана.
 //
+// ЧЕГО ЭТОТ РЫЧАГ НЕ УМЕЕТ (репорты 05.08 по cyb.104, из-за них дефолт CP/TP переехал в саму
+// панель — см. kz_hud_cptp_in_panel): строка отступа НЕ равна строке верхнего оверлея. Движок
+// вписывает ВЕСЬ текст канала в рамку фиксированной высоты, поэтому каждая добавленная строка
+// уменьшает кегль (тестер: «шрифт cp/tp мельчает по мере включения элементов худа») и двигает
+// содержимое вниз только до нижнего края рамки — под достаточно высоким верхом низ остаётся
+// накрытым при ЛЮБОМ отступе. За пределом вместимости хвостовые строки просто не рисуются
+// (пропавший второй ряд клавиш под !rpmenu). Отсюда правило: чем меньше строк уходит в этот
+// канал, тем лучше; отступ — не первый инструмент, а последний.
+//
 // Пороги — cvar'ы, а НЕ константы: реальная высота зависит от кегля, языка и разрешения
 // клиента, серверу она недоступна, а перебирать значения пересборкой форка (CI + публикация
 // + раскатка) — час на итерацию. Крутятся по rcon на живом сервере во время смоука.
 static CConVar<int> kz_hud_bottom_pad_free("kz_hud_bottom_pad_free", FCVAR_NONE,
 										   "Lines of the top overlay the bottom panel survives without any padding.", 3);
 static CConVar<int> kz_hud_bottom_pad_max("kz_hud_bottom_pad_max", FCVAR_NONE, "Maximum padding of the bottom panel, in lines (0 = disabled).", 6);
+
+// Бюджет ВСЕГО текста centre-канала в строках (отступ + содержимое). Канал показывает
+// ограниченное число строк: лишние с хвоста не рисуются, а сам текст движок ужимает под
+// фиксированную рамку — чем больше строк, тем мельче кегль. Репорт 05.08: под открытым
+// !rpmenu (отступ 5 + четыре строки худа = 9) пропадал ВТОРОЙ ряд клавиш — поэтому фикс
+// cyb.104 «2 ряда клавиш в спеках» и не был виден: ряд отправлялся, но не рисовался.
+// Отступ уступает содержимому: сначала строки худа, отступ — только в остаток бюджета.
+// Значение эмпирическое (реальная вместимость зависит от клиента) — крутится по rcon.
+static CConVar<int> kz_hud_bottom_max_lines("kz_hud_bottom_max_lines", FCVAR_NONE, "Total lines (padding + content) the bottom centre panel may use.",
+											7);
+
+// CP/TP обновлённого стиля: 1 (деф.) — последняя строка HTML-панели, 0 — прежняя отдельная
+// нижняя панель centre-канала с отступом. Дефолт сменён 05.08 по трём репортам сразу: в
+// centre-канале кегль зависит от числа строк (каждая строка отступа мельчила CP/TP —
+// «ооочень маленький шрифт»), а вниз отступ двигает лишь до нижнего края рамки канала,
+// поэтому высокая HTML-панель всё равно накрывала низ («наслаивается»). В HTML-панели кегль
+// задаётся классом и не плывёт, а панель — один блок, сама себя накрыть не может.
+// Рубильник оставлен, чтобы вернуть прежнюю раскладку по rcon, не пересобирая плагин.
+static CConVar<bool> kz_hud_cptp_in_panel("kz_hud_cptp_in_panel", FCVAR_NONE,
+										  "Draw the CP/TP line as the last row of the HTML panel instead of a separate bottom panel.", true);
+
+// Канал нижней панели: 0 (деф.) — centre-print, 1 — alert. Запаска из спеки фикс-пака на
+// случай, если под открытым Html-меню centre-канал остаётся ПОД меню при любом отступе
+// (отступ упирается в нижний край рамки канала). Alert — третий канал апстрима (его пустая
+// фраза «HUD - Alert Text» описана как «actually more center»), рисуется движком в своём
+// месте: проверяется одной rcon-командой на канарейке, без пересборки плагина.
+static CConVar<int> kz_hud_bottom_channel("kz_hud_bottom_channel", FCVAR_NONE, "Bottom panel channel: 0 = centre print, 1 = alert.", 0);
 
 // Жёсткий потолок отступа: значения cvar'ов недоверенные (их крутят по rcon на живом
 // сервере), а padLines возвращается в u8 — kz_hud_bottom_pad_max 300 давал (u8)297 = 41
@@ -226,12 +262,18 @@ static CConVar<int> kz_hud_bottom_pad_max("kz_hud_bottom_pad_max", FCVAR_NONE, "
 // (механизм и так эмпирический), тогда как оценка по GetItemCount врала в 10 раз.
 #define KZ_HUD_MENU_ITEM_WINDOW (9 - KZ_HUD_MENU_CHROME_LINES)
 
-static_function u8 BottomPadLines(int linesAbove)
+// contentLines — сколько строк займёт САМО содержимое низа: отступ не имеет права вытеснить
+// его за бюджет канала (иначе хвост просто не рисуется, см. kz_hud_bottom_max_lines).
+static_function u8 BottomPadLines(int linesAbove, int contentLines)
 {
 	// Клэмпы обязательны: freeLines -1 дал бы отступ даже пустому верху, maxPad 300 —
 	// переполнение u8 на возврате.
 	const int freeLines = (std::max)(0, kz_hud_bottom_pad_free.Get());
-	const int maxPad = (std::min)(KZ_HUD_BOTTOM_PAD_HARD_MAX, kz_hud_bottom_pad_max.Get());
+	int maxPad = (std::min)(KZ_HUD_BOTTOM_PAD_HARD_MAX, kz_hud_bottom_pad_max.Get());
+	// Остаток бюджета после содержимого; отрицательное значение (содержимое само не влезло)
+	// трактуем как «отступа нет вовсе».
+	const int budgetLeft = kz_hud_bottom_max_lines.Get() - (std::max)(0, contentLines);
+	maxPad = (std::min)(maxPad, budgetLeft);
 	if (maxPad <= 0)
 	{
 		return 0; // 0 — способ выключить развод целиком, не пересобирая плагин
@@ -580,6 +622,9 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 	// showpos — тумблер получателя (this->player), данные наблюдаемого. Считаем заранее: нужен
 	// и для координат, и для решения о зазоре нижней группы (клавиши/CP-TP/showpos).
 	bool showPos = !compact && this->player->optionService->GetPreferenceBool("showPos", false);
+	// CP/TP — самая нижняя строка панели (гейт hudCpTp получателя). Компакт её НЕ убирает:
+	// у элемента свой тумблер, и в прежней нижней панели он тоже переживал компакт.
+	bool showCpTp = kz_hud_cptp_in_panel.Get() && this->IsMHUDCpTpEnabled();
 
 	// Типографика (иерархия): скорость — KZ_HUD_FS_SPEED, таймер — KZ_HUD_FS_TIMER, вторичная инфа
 	// (PB/WR, CP/TP, престрейф, Stage, координаты) — KZ_HUD_FS_SECONDARY, клавиши и метка стиля —
@@ -861,7 +906,7 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 	//        showpos): маленькая пустая строка в мелком кегле (FS_MINOR), а не полная строка —
 	//        органичный отступ, не зияние; экономит высоту под крупные клавиши (l). Только если
 	//        обе группы непусты (иначе висячий <br>). Высота center-HTML ограничена (обрезка низа). ---
-	bool lowerGroup = showKeys || showPos;
+	bool lowerGroup = showKeys || showPos || showCpTp;
 	if (lowerGroup && !html.empty())
 	{
 		// <br> закрывает строку PB/WR; nbsp мелким кеглем = невысокая строка-зазор; addLine ниже
@@ -919,9 +964,21 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		}
 	}
 
-	// CP/TP-строки здесь больше нет: перенесена в нижнюю панель centre-канала
-	// (UpdateBottomPanel, гейт hudCpTp там же) — решение E1. Заодно ушло прежнее
-	// взаимоисключение с showpos: координаты теперь просто отдельная строка.
+	// --- Строка CP/TP — нижняя строка панели (решение E1 «низом» осталось, сменился канал:
+	//        см. kz_hud_cptp_in_panel). Данные — наблюдаемого, у реплей-бота из реплей-системы,
+	//        как в ComputeBottomState. Кегль — вторичной инфы, один в один с PB/WR: в centre-канале
+	//        он зависел от числа строк отступа и с полным набором элементов становился нечитаемым.
+	//        Идёт ДО showpos намеренно: высота center-HTML ограничена (обрезка низа), и если
+	//        обрезать, то отладочные координаты (по умолчанию выключены), а не счётчик CP/TP. ---
+	if (showCpTp && (isReplay || dataSource->checkpointService))
+	{
+		const i32 cp = isReplay ? KZ::replaysystem::GetCurrentCpIndex() : dataSource->checkpointService->GetCurrentCpIndex();
+		const i32 cpCount = isReplay ? KZ::replaysystem::GetCheckpointCount() : dataSource->checkpointService->GetCheckpointCount();
+		const i32 tp = isReplay ? KZ::replaysystem::GetTeleportCount() : (i32)dataSource->checkpointService->GetTeleportCount();
+		std::string cpTpText = KZLanguageService::PrepareMessageWithLang(language, "HUD - Bottom CP/TP Text", cp, cpCount, tp);
+		V_snprintf(buf, sizeof(buf), "<font class='" KZ_HUD_FS_SECONDARY "'><font color='" KZ_HUD_C_WHITE "'>%s</font></font>", cpTpText.c_str());
+		addLine(buf);
+	}
 
 	// --- Координаты и углы (!showpos). Тумблер — настройка получателя (this), данные —
 	//        наблюдаемого (dataSource). В компакте скрыто (как раньше). Стиль как раньше. ---
@@ -959,7 +1016,6 @@ void KZHUDService::ComputeBottomState(KZPlayer *player, KZPlayer *target, Bottom
 	const bool isReplay = KZ::replaysystem::IsReplayBot(player);
 	// Язык получателя — часть слепка (kz_language меняет его на месте, без реконнекта).
 	V_strncpy(out.lang, target->languageService->GetLanguage(), sizeof(out.lang));
-	out.padLines = BottomPadLines(linesAbove);
 
 	if (menuOpen)
 	{
@@ -1011,6 +1067,10 @@ void KZHUDService::ComputeBottomState(KZPlayer *player, KZPlayer *target, Bottom
 							   | (player->IsButtonPressed(IN_BACK) ? KPF_Back : 0) | (player->IsButtonPressed(IN_MOVERIGHT) ? KPF_Right : 0)
 							   | (player->IsButtonPressed(IN_DUCK) ? KPF_Duck : 0) | (jump ? KPF_Jump : 0));
 		}
+		// Строк содержимого ровно столько, сколько соберёт FormatBottomText: скорость и время
+		// идут ОДНОЙ строкой, клавиши — одной либо двумя. Отступ считаем последним: он берёт
+		// только остаток бюджета канала (иначе вытеснял бы второй ряд клавиш).
+		out.padLines = BottomPadLines(linesAbove, ((out.showSpeed || out.hasTimer) ? 1 : 0) + (out.showKeys ? (out.keysTwoRows ? 2 : 1) : 0));
 		return;
 	}
 
@@ -1021,6 +1081,7 @@ void KZHUDService::ComputeBottomState(KZPlayer *player, KZPlayer *target, Bottom
 		out.cpCount = isReplay ? KZ::replaysystem::GetCheckpointCount() : player->checkpointService->GetCheckpointCount();
 		out.tp = isReplay ? KZ::replaysystem::GetTeleportCount() : (i32)player->checkpointService->GetTeleportCount();
 	}
+	out.padLines = BottomPadLines(linesAbove, out.showCpTp ? 1 : 0);
 }
 
 // Текст нижней панели — функция слепка (включая язык): рендерит ровно то, что сравнивает
@@ -1046,30 +1107,41 @@ void KZHUDService::FormatBottomText(const BottomPanelState &state, char *buf, i3
 			}
 			text += row;
 		};
-		if (state.showSpeed)
-		{
-			if (state.showPrespeed)
-			{
-				// clang-format off
-				addRow(KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Bottom Speed Text (Takeoff)",
-					(f64)state.speed, (f64)state.prespeed));
-				// clang-format on
-			}
-			else
-			{
-				addRow(KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Speed Text", (f64)state.speed));
-			}
-		}
+		// Время и скорость — ОДНОЙ строкой (порядок как в HTML-панели: сначала время).
+		// Раздельными строками содержимое худа под меню занимало четыре строки и вместе с
+		// отступом вылезало за бюджет канала — не рисовался второй ряд клавиш. Разделитель
+		// « | » — тот же, что в строке CP/TP (пробелы в этом канале ненадёжны).
+		std::string head;
 		if (state.hasTimer)
 		{
 			char timeText[32];
 			FormatTimeHudCs(state.timeCs, timeText, sizeof(timeText));
 			// clang-format off
-			addRow(KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Timer Text",
+			head = KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Timer Text",
 				timeText,
 				state.timerRunning ? "" : KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Stopped Text").c_str(),
-				state.timerPaused ? KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Paused Text").c_str() : ""));
+				state.timerPaused ? KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Paused Text").c_str() : "");
 			// clang-format on
+		}
+		if (state.showSpeed)
+		{
+			std::string speedText;
+			if (state.showPrespeed)
+			{
+				// clang-format off
+				speedText = KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Bottom Speed Text (Takeoff)",
+					(f64)state.speed, (f64)state.prespeed);
+				// clang-format on
+			}
+			else
+			{
+				speedText = KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Speed Text", (f64)state.speed);
+			}
+			head = head.empty() ? speedText : head + " | " + speedText;
+		}
+		if (!head.empty())
+		{
+			addRow(head);
 		}
 		if (state.showKeys && state.keysTwoRows)
 		{
@@ -1106,6 +1178,23 @@ void KZHUDService::FormatBottomText(const BottomPanelState &state, char *buf, i3
 	}
 }
 
+// Отправка готового текста нижней панели в выбранный канал (kz_hud_bottom_channel).
+static_function void SendBottomText(KZPlayer *player, const char *text)
+{
+	if (kz_hud_bottom_channel.Get() != 1)
+	{
+		player->PrintCentre(false, false, "%s", text);
+		return;
+	}
+	// У alert-канала обёртки на KZPlayer нет; контроллер обязателен — utils::GetController
+	// разыменовывает переданную сущность.
+	CBasePlayerController *controller = player->GetController();
+	if (controller)
+	{
+		utils::PrintAlert(controller, "%s", text);
+	}
+}
+
 // Тик нижней панели получателя (this): пересчитать слепок; отправлять только на его
 // изменении (пересборка текста — тоже только тут) либо heartbeat'ом раз в
 // KZ_HUD_BOTTOM_HEARTBEAT — centre-канал надёжный (BUF_RELIABLE), слать 128/с каждому
@@ -1131,7 +1220,7 @@ void KZHUDService::UpdateBottomPanel(KZPlayer *dataSource, bool menuOpen, int li
 		{
 			return;
 		}
-		this->player->PrintCentre(false, false, "%s", this->lastBottomText);
+		SendBottomText(this->player, this->lastBottomText);
 		this->lastBottomSendTime = now;
 		return;
 	}
@@ -1140,7 +1229,7 @@ void KZHUDService::UpdateBottomPanel(KZPlayer *dataSource, bool menuOpen, int li
 	this->lastBottomState = state;
 	this->bottomStateValid = true;
 	V_strncpy(this->lastBottomText, buf, sizeof(this->lastBottomText));
-	this->player->PrintCentre(false, false, "%s", buf);
+	SendBottomText(this->player, buf);
 	this->lastBottomSendTime = now;
 	this->bottomPanelActive = true;
 }
@@ -1157,7 +1246,14 @@ void KZHUDService::ClearBottomPanel()
 	this->bottomPanelActive = false;
 	// Пустой локализационный токен — тот же приём, что в TogglePanel: канал сам гасит
 	// текст лишь через несколько секунд, а остаток нижней панели читается как зависший худ.
+	// Гасим ОБА канала: kz_hud_bottom_channel могли переключить на живом сервере, и остаток
+	// висел бы в прежнем канале до самозатухания.
 	this->player->PrintCentre(false, false, "#SFUI_EmptyString");
+	CBasePlayerController *controller = this->player->GetController();
+	if (controller)
+	{
+		utils::PrintAlert(controller, "#SFUI_EmptyString");
+	}
 }
 
 // Тик минимал-худа получателя (this): апстрим-композиция cs2kz на живых строителях —
@@ -1395,7 +1491,10 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 		target->PrintHTMLCentre(false, false, htmlText.c_str());
 	}
 
-	// --- Нижняя панель (обычный centre-канал): строка CP/TP. СОПРОВОЖДАЕТ
+	// --- Нижняя панель (обычный centre-канал): строка CP/TP — ТОЛЬКО при kz_hud_cptp_in_panel 0.
+	//        По умолчанию CP/TP уже нарисован последней строкой HTML-панели выше (там кегль
+	//        фиксированный и накрыть себя панель не может), а этот канал остаётся пустым.
+	//        Ниже — про прежнюю раскладку (cvar 0): СОПРОВОЖДАЕТ
 	//        HTML-панель (needHtml): CP/TP в particle-MHUD не существует (UpdateParticles —
 	//        только Speed/Timer/Keys), преф hudCpTp всегда был про HTML-путь — поэтому и
 	//        спектатор (всегда HTML), и мёртвый, и получатель с типом MHUD на HTML-фолбэке
@@ -1404,7 +1503,7 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	//        + heartbeat (см. UpdateBottomPanel); переход «был текст → стало нечего» стирает
 	//        остаток одноразовым клиром. Каждый получатель (владелец/спектатор) получает
 	//        свой вызов DrawPanels → includeSpectators=false. ---
-	if (needHtml)
+	if (needHtml && !kz_hud_cptp_in_panel.Get())
 	{
 		// Высота нашей же HTML-панели — из её готового текста: при всех включённых элементах
 		// и клавишах в 2 ряда она дорастала до нижней панели и накрывала CP/TP.
@@ -1412,6 +1511,9 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	}
 	else
 	{
+		// CP/TP уехал последней строкой В САМУ панель (деф.) — centre-канал свободен, остаток
+		// прежней нижней панели стирает одноразовый клир (в т.ч. при смене cvar'а на живом
+		// сервере). На particle-пути владельца (needHtml=false) — тот же клир, что и раньше.
 		cfg->ClearBottomPanel();
 	}
 }
