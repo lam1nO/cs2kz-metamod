@@ -612,9 +612,7 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 	// 1-2 (таймер+скорость), убирая клавиши/стейдж/PB-WR/showpos. Сами элементы в нём подчиняются
 	// тем же per-element тумблерам, что и в полной раскладке (единый контракт: тумблер действует
 	// на всех путях худа; «выключить целиком» — это hudType=Off, а не компакт).
-	// showExtra — стейдж/PB-WR (только полный режим). Клавиши/showpos — по своим тумблерам.
-	// CP/TP из HTML-панели убран целиком (решение E1) — теперь живёт в нижней панели
-	// centre-канала (UpdateBottomPanel/FormatBottomText), гейт hudCpTp там же.
+	// showExtra — стейдж/PB-WR (только полный режим). Клавиши/showpos/CP-TP — по своим тумблерам.
 	bool showTimer = masterMode ? (this->IsMHUDTimerEnabled() && !suppressTimer) : !suppressTimer;
 	bool showSpeed = masterMode ? (this->IsMHUDSpeedEnabled() && !suppressSpeed) : !suppressSpeed;
 	bool showKeys = compact ? false : (masterMode ? (this->IsMHUDKeysEnabled() && !suppressKeys) : !suppressKeys);
@@ -622,8 +620,10 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 	// showpos — тумблер получателя (this->player), данные наблюдаемого. Считаем заранее: нужен
 	// и для координат, и для решения о зазоре нижней группы (клавиши/CP-TP/showpos).
 	bool showPos = !compact && this->player->optionService->GetPreferenceBool("showPos", false);
-	// CP/TP — самая нижняя строка панели (гейт hudCpTp получателя). Компакт её НЕ убирает:
-	// у элемента свой тумблер, и в прежней нижней панели он тоже переживал компакт.
+	// CP/TP — нижняя строка панели (гейт hudCpTp получателя). Компакт её НЕ убирает: у элемента
+	// свой тумблер, и в прежней нижней панели он тоже переживал компакт. Без ветки masterMode
+	// (в отличие от соседей выше): suppress-флага у CP/TP нет и быть не может — particle-MHUD
+	// такого элемента не рисует, дублировать нечего, поэтому тумблер действует всегда.
 	bool showCpTp = kz_hud_cptp_in_panel.Get() && this->IsMHUDCpTpEnabled();
 
 	// Типографика (иерархия): скорость — KZ_HUD_FS_SPEED, таймер — KZ_HUD_FS_TIMER, вторичная инфа
@@ -1074,7 +1074,9 @@ void KZHUDService::ComputeBottomState(KZPlayer *player, KZPlayer *target, Bottom
 		return;
 	}
 
-	if (cfg->IsMHUDCpTpEnabled())
+	// Гейт на checkpointService — как в панельном пути (BuildVersionCHud) и в блоке PRO/NUB:
+	// у реплей-бота данные идут из реплей-системы, у живого игрока сервис обязан быть.
+	if (cfg->IsMHUDCpTpEnabled() && (isReplay || player->checkpointService))
 	{
 		out.showCpTp = true;
 		out.cp = isReplay ? KZ::replaysystem::GetCurrentCpIndex() : player->checkpointService->GetCurrentCpIndex();
@@ -1178,21 +1180,24 @@ void KZHUDService::FormatBottomText(const BottomPanelState &state, char *buf, i3
 	}
 }
 
-// Отправка готового текста нижней панели в выбранный канал (kz_hud_bottom_channel).
-static_function void SendBottomText(KZPlayer *player, const char *text)
+// Текст нижней панели в конкретный канал: alert=false — centre-print, true — alert.
+static_function void SendBottomText(KZPlayer *player, bool alert, const char *text)
 {
-	if (kz_hud_bottom_channel.Get() != 1)
+	if (alert)
+	{
+		player->PrintAlert(false, false, "%s", text);
+	}
+	else
 	{
 		player->PrintCentre(false, false, "%s", text);
-		return;
 	}
-	// У alert-канала обёртки на KZPlayer нет; контроллер обязателен — utils::GetController
-	// разыменовывает переданную сущность.
-	CBasePlayerController *controller = player->GetController();
-	if (controller)
-	{
-		utils::PrintAlert(controller, "%s", text);
-	}
+}
+
+// Погасить канал одноразовым пустым токеном (сам он гаснет лишь через несколько секунд, а
+// остаток нижней панели читается как зависший худ) — тот же приём, что в TogglePanel.
+static_function void ClearBottomChannel(KZPlayer *player, bool alert)
+{
+	SendBottomText(player, alert, "#SFUI_EmptyString");
 }
 
 // Тик нижней панели получателя (this): пересчитать слепок; отправлять только на его
@@ -1210,6 +1215,14 @@ void KZHUDService::UpdateBottomPanel(KZPlayer *dataSource, bool menuOpen, int li
 		this->ClearBottomPanel();
 		return;
 	}
+	// Канал берём один раз на тик: его могли переключить по rcon прямо сейчас — тогда прежний
+	// гасим одноразово, иначе в нём остался бы наш текст до самозатухания.
+	const bool alert = kz_hud_bottom_channel.Get() == 1;
+	if (this->bottomPanelActive && this->bottomOnAlert != alert)
+	{
+		ClearBottomChannel(this->player, this->bottomOnAlert);
+	}
+	this->bottomOnAlert = alert;
 	f64 now = g_pKZUtils->GetServerGlobals()->curtime;
 	if (this->bottomStateValid && state == this->lastBottomState)
 	{
@@ -1220,7 +1233,7 @@ void KZHUDService::UpdateBottomPanel(KZPlayer *dataSource, bool menuOpen, int li
 		{
 			return;
 		}
-		SendBottomText(this->player, this->lastBottomText);
+		SendBottomText(this->player, alert, this->lastBottomText);
 		this->lastBottomSendTime = now;
 		return;
 	}
@@ -1229,7 +1242,7 @@ void KZHUDService::UpdateBottomPanel(KZPlayer *dataSource, bool menuOpen, int li
 	this->lastBottomState = state;
 	this->bottomStateValid = true;
 	V_strncpy(this->lastBottomText, buf, sizeof(this->lastBottomText));
-	SendBottomText(this->player, buf);
+	SendBottomText(this->player, alert, buf);
 	this->lastBottomSendTime = now;
 	this->bottomPanelActive = true;
 }
@@ -1244,16 +1257,9 @@ void KZHUDService::ClearBottomPanel()
 		return;
 	}
 	this->bottomPanelActive = false;
-	// Пустой локализационный токен — тот же приём, что в TogglePanel: канал сам гасит
-	// текст лишь через несколько секунд, а остаток нижней панели читается как зависший худ.
-	// Гасим ОБА канала: kz_hud_bottom_channel могли переключить на живом сервере, и остаток
-	// висел бы в прежнем канале до самозатухания.
-	this->player->PrintCentre(false, false, "#SFUI_EmptyString");
-	CBasePlayerController *controller = this->player->GetController();
-	if (controller)
-	{
-		utils::PrintAlert(controller, "#SFUI_EmptyString");
-	}
+	// Гасим ИМЕННО тот канал, в который писали (bottomOnAlert): alert общий — там же печатают
+	// гонки и античит, и слепой клир стёр бы этому игроку чужое сообщение.
+	ClearBottomChannel(this->player, this->bottomOnAlert);
 }
 
 // Тик минимал-худа получателя (this): апстрим-композиция cs2kz на живых строителях —
