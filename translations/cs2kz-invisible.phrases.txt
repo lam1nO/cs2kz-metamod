@@ -1,10 +1,13 @@
 "Phrases"
 {
 	// Индикация режима невидимки самому игроку (при заходе и при живом включении по RCON).
+	// Текст описывает v2 (fd27aa3): скрытие ТОЛЬКО из TAB и !specs и ТОЛЬКО пока игрок в
+	// спектаторах. Прежний текст обещал скрытие модели и звуков (это была v1) — из-за него
+	// тестер 05.08 счёл режим сломанным, играя живым и видя себя в TAB.
 	"Invisible - Active"
 	{
-		"en"		"{gold}You are invisible: other players don't see you, your sounds or your join/leave messages."
-		"ru"		"{gold}Вы невидимы: другие игроки не видят вас, ваши звуки и сообщения о входе/выходе."
+		"en"		"{gold}Invisible mode: while you stay in spectators, you are hidden from the scoreboard and !specs. Join a team and everyone sees you as usual."
+		"ru"		"{gold}Режим невидимки: пока вы в спектаторах, вас не видно в TAB и в !specs. Зайдёте в команду — видны всем как обычный игрок."
 	}
 	"Invisible - Inactive"
 	{

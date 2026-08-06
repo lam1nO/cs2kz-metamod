@@ -260,6 +260,12 @@ bool KZInvisibleService::RefreshFlag()
 		return false;
 	}
 	this->invisible = newInvisible;
+	// Смена состояния — не восстановимая из БД смена состояния, логируем. Диагностическая
+	// ценность: по этой строке видно, ФЛАГ ли мигает (список приезжает то с игроком, то без —
+	// значит спорят два писателя списка на платформе) или флаг стоит, а мигает картинка у
+	// зрителя (тогда спор идёт на уровне снапшота, см. UpdateCompetitiveRank). Путь холодный —
+	// только мутация списка.
+	KZ_LOG_INFO(LogChannel::General, "[cyb] invisible_flag steam_id=%llu state=%s\n", steamId, newInvisible ? "on" : "off");
 	// Счётчик здесь не трогаем: единственный вызывающий — RefreshAllPlayers, он
 	// пересобирает s_onlineInvisibleCount целиком после обхода.
 	if (this->player->IsInGame() && !this->player->IsFakeClient())

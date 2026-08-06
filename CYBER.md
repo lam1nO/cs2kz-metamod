@@ -132,7 +132,20 @@ cs2kz-linux-builder .`, иначе компилируются старые ис�
   живое управление — ConCommand'ы `kz_invisible_reload` / `kz_invisible_add <sid64>` /
   `kz_invisible_remove <sid64>` (только сервер/RCON, рантайм-only). Флаг по xuid с
   эпохи OnClientConnect; возврат видимости = один сетевой `ForceFullUpdate` без
-  SetAngles/Teleport.
+  SetAngles/Teleport. Смена флага пишет `[cyb] invisible_flag steam_id=… state=on|off` —
+  по ней в Loki видно, мигает ли САМ ФЛАГ (значит, список на платформе пишут двое) или
+  флаг стоит, а мигает картинка у зрителя (значит, спор идёт на уровне снапшота).
+  **Инвариант: сетевые поля СКРЫТОГО контроллера в тактовом пути не трогаем.** Скрытие живёт
+  ровно один тик (мы чистим бит в `CheckTransmit`), а любой `SCHEMA`-сеттер безусловно зовёт
+  `NetworkStateChanged` — писать в скрытый controller каждый тик значит спорить со своим же
+  скрытием. Апстримный `KZProfileService::UpdateCompetitiveRank` делал именно это: он
+  вызывается из ТОГО ЖЕ хука сразу за нашим клиром (`hooks.cpp`: quiet → profile) и писал
+  `m_iCompetitiveRankType`/`m_iCompetitiveRanking` всем игрокам на каждом кадре, одним и тем же
+  значением. Теперь он (а) вовсе пропускает невидимок, (б) пишет только по разнице (идиома
+  `kz_fov.cpp`). Тот же запрет — на любую будущую периодическую запись в controller
+  (клантег, значки): либо по разнице, либо мимо невидимок.
+  Текст `Invisible - Active` описывает ИМЕННО v2 (TAB+`!specs`, только в спектаторах) —
+  прежний обещал скрытие модели/звуков от v1, и это стоило ложного багрепорта.
 - **SavedRuns** (`src/kz/savedrun/kz_savedrun.*`): персистентный незавершённый
   таймер — таблица `SavedRuns` в общей MySQL флота, ключ хранения
   (steam, map, course, mode, styles), поиск на заходе — БЕЗ course (курс
