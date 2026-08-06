@@ -3,7 +3,6 @@
 #include "utils/json.h"
 #include "utils/simplecmds.h"
 #include "kz/anticheat/kz_anticheat.h"
-#include "kz/invisible/kz_invisible.h" // значок ранга не пишем скрытому контроллеру (см. UpdateCompetitiveRank)
 #include "kz/language/kz_language.h"
 #include "kz/mode/kz_mode.h"
 #include "kz/style/kz_style.h"
@@ -96,6 +95,15 @@ CConVar<bool> kz_gg1_bridge("kz_gg1_bridge", FCVAR_NONE, "Whether to broadcast p
 
 void KZProfileService::OnGameFrame()
 {
+	// Гейт тем же cvar'ом, что и сам значок: сообщение существует ровно ради раскрытия
+	// рангов в скорборде — при выключенном значке это чистый бродкаст всем 2 раза в секунду.
+	// Заодно даёт разведку одной командой: `kz_profile_rating_badge_enabled 0` гасит ВЕСЬ
+	// ранго-скорбордный тракт (и записи в контроллеры, и этот бродкаст) — если TAB при этом
+	// перестаёт дёргаться, виновник здесь, а не в скрытии невидимок (репорт 05.08).
+	if (!kz_profile_rating_badge_enabled.Get())
+	{
+		return;
+	}
 	if (g_pKZUtils->GetServerGlobals()->tickcount % 64 != 0)
 	{
 		return;
@@ -388,20 +396,10 @@ void KZProfileService::UpdateCompetitiveRank()
 	{
 		return;
 	}
-	// Невидимку не трогаем ВООБЩЕ: его controller мы намеренно вычищаем из снапшота обычных
-	// клиентов (KZ::quiet::OnCheckTransmit), а этот метод зовётся из ТОГО ЖЕ хука строкой
-	// ниже (hooks.cpp: сначала наш клир, потом KZProfileService::OnCheckTransmit) и пишет
-	// сетевые поля контроллера — то есть каждый тик дёргает NetworkStateChanged на сущности,
-	// которую мы только что скрыли. Значка в скорборде у скрытого игрока всё равно никто
-	// не видит, так что терять нечего.
-	if (KZInvisibleService::IsInvisible(this->player))
-	{
-		return;
-	}
 	// Цифра в скорборде = платформенные NUB-очки режима.
 	i32 rating = this->CanDisplayRank() ? this->currentPoints : 0;
 	CCSPlayerController *controller = this->player->GetController();
-	// Пишем ТОЛЬКО по разнице (идиома kz_fov.cpp:13): SCHEMA-сеттер безусловно зовёт
+	// Пишем ТОЛЬКО по разнице (идиома kz_fov.cpp): SCHEMA-сеттер безусловно зовёт
 	// NetworkStateChanged, а метод крутится на КАЖДОМ CheckTransmit — апстрим помечал
 	// контроллеры всех игроков грязными 128 раз в секунду одним и тем же значением.
 	if (controller->m_iCompetitiveRankType() != 11)

@@ -6,8 +6,8 @@
 	// тестер 05.08 счёл режим сломанным, играя живым и видя себя в TAB.
 	"Invisible - Active"
 	{
-		"en"		"{gold}Invisible mode: while you stay in spectators, you are hidden from the scoreboard and !specs. Join a team and everyone sees you as usual."
-		"ru"		"{gold}Режим невидимки: пока вы в спектаторах, вас не видно в TAB и в !specs. Зайдёте в команду — видны всем как обычный игрок."
+		"en"		"{gold}Invisible mode: while you stay in spectators, you are hidden from the scoreboard and !specs, and your join/leave messages are suppressed. Join a team and everyone sees you as usual."
+		"ru"		"{gold}Режим невидимки: пока вы в спектаторах, вас не видно в TAB и в !specs, сообщения о входе/выходе скрыты. Зайдёте в команду — видны всем как обычный игрок."
 	}
 	"Invisible - Inactive"
 	{

@@ -215,6 +215,9 @@ void KZInvisibleService::Reset()
 	if (this->invisible)
 	{
 		s_onlineInvisibleCount--;
+		// Второй (и единственный молчаливый) путь гашения флага — без него карта диагностики
+		// неполна: по логу видно, что невидимость снял дисконнект/реюз слота, а не список.
+		KZ_LOG_INFO(LogChannel::General, "[cyb] invisible_flag steam_id=%llu state=off reason=reset\n", this->steamId64);
 	}
 	this->steamId64 = 0;
 	this->invisible = false;
@@ -260,12 +263,10 @@ bool KZInvisibleService::RefreshFlag()
 		return false;
 	}
 	this->invisible = newInvisible;
-	// Смена состояния — не восстановимая из БД смена состояния, логируем. Диагностическая
-	// ценность: по этой строке видно, ФЛАГ ли мигает (список приезжает то с игроком, то без —
-	// значит спорят два писателя списка на платформе) или флаг стоит, а мигает картинка у
-	// зрителя (тогда спор идёт на уровне снапшота, см. UpdateCompetitiveRank). Путь холодный —
-	// только мутация списка.
-	KZ_LOG_INFO(LogChannel::General, "[cyb] invisible_flag steam_id=%llu state=%s\n", steamId, newInvisible ? "on" : "off");
+	// Диагностика репорта 05.08 («мигаю в TAB»): по этой строке видно, мигает ли САМ ФЛАГ
+	// (список приезжает то с игроком, то без — значит на платформе спорят два писателя) или
+	// флаг стоит, а мигает картинка у зрителя. Путь холодный — только мутация списка.
+	KZ_LOG_INFO(LogChannel::General, "[cyb] invisible_flag steam_id=%llu state=%s reason=list\n", steamId, newInvisible ? "on" : "off");
 	// Счётчик здесь не трогаем: единственный вызывающий — RefreshAllPlayers, он
 	// пересобирает s_onlineInvisibleCount целиком после обхода.
 	if (this->player->IsInGame() && !this->player->IsFakeClient())
