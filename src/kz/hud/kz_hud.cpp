@@ -226,8 +226,8 @@ static CConVar<int> kz_hud_bottom_pad_max("kz_hud_bottom_pad_max", FCVAR_NONE, "
 // cyb.104 «2 ряда клавиш в спеках» и не был виден: ряд отправлялся, но не рисовался.
 // Отступ уступает содержимому: сначала строки худа, отступ — только в остаток бюджета.
 // Значение эмпирическое (реальная вместимость зависит от клиента) — крутится по rcon.
-static CConVar<int> kz_hud_bottom_max_lines("kz_hud_bottom_max_lines", FCVAR_NONE, "Total lines (padding + content) the bottom centre panel may use.",
-											7);
+static CConVar<int> kz_hud_bottom_max_lines("kz_hud_bottom_max_lines", FCVAR_NONE,
+											"Bottom centre panel budget: lines left for padding on top of the content.", 7);
 
 // CP/TP обновлённого стиля: 1 (деф.) — последняя строка HTML-панели, 0 — прежняя отдельная
 // нижняя панель centre-канала с отступом. Дефолт сменён 05.08 по трём репортам сразу: в
@@ -264,6 +264,8 @@ static CConVar<int> kz_hud_bottom_channel("kz_hud_bottom_channel", FCVAR_NONE, "
 
 // contentLines — сколько строк займёт САМО содержимое низа: отступ не имеет права вытеснить
 // его за бюджет канала (иначе хвост просто не рисуется, см. kz_hud_bottom_max_lines).
+// Бюджет ограничивает ТОЛЬКО отступ: содержимое здесь не режется намеренно — потерять
+// строку худа хуже, чем вылезти за эмпирическую вместимость канала.
 static_function u8 BottomPadLines(int linesAbove, int contentLines)
 {
 	// Клэмпы обязательны: freeLines -1 дал бы отступ даже пустому верху, maxPad 300 —
@@ -272,7 +274,10 @@ static_function u8 BottomPadLines(int linesAbove, int contentLines)
 	int maxPad = (std::min)(KZ_HUD_BOTTOM_PAD_HARD_MAX, kz_hud_bottom_pad_max.Get());
 	// Остаток бюджета после содержимого; отрицательное значение (содержимое само не влезло)
 	// трактуем как «отступа нет вовсе».
-	const int budgetLeft = kz_hud_bottom_max_lines.Get() - (std::max)(0, contentLines);
+	// Клэмп бюджета — как у maxPad выше: значение приходит по rcon, INT_MIN дал бы
+	// знаковое переполнение на вычитании.
+	const int budget = (std::max)(0, (std::min)(KZ_HUD_BOTTOM_PAD_HARD_MAX, kz_hud_bottom_max_lines.Get()));
+	const int budgetLeft = budget - (std::max)(0, contentLines);
 	maxPad = (std::min)(maxPad, budgetLeft);
 	if (maxPad <= 0)
 	{
@@ -1221,6 +1226,9 @@ void KZHUDService::UpdateBottomPanel(KZPlayer *dataSource, bool menuOpen, int li
 	if (this->bottomPanelActive && this->bottomOnAlert != alert)
 	{
 		ClearBottomChannel(this->player, this->bottomOnAlert);
+		// Слепок не изменился, поэтому без сброса текст ушёл бы в новый канал только по
+		// heartbeat'у (до секунды) — у стоящего игрока это выглядит как «худ пропал».
+		this->bottomStateValid = false;
 	}
 	this->bottomOnAlert = alert;
 	f64 now = g_pKZUtils->GetServerGlobals()->curtime;
