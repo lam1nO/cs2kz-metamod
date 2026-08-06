@@ -162,6 +162,7 @@ void KZPlayer::OnPlayerActive()
 	// загрузки карты и скипается гейтом). Force-свитч выше тоже эмитит — дубль
 	// безвреден (та же команда), но на его цепочку ранних выходов не полагаемся.
 	this->profileService->EmitGG1Bridge();
+	this->profileService->OnPlayerActive();
 
 	this->optionService->OnPlayerActive();
 	this->recordingService->EnsureCircularRecorderInitialized();

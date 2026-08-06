@@ -93,26 +93,75 @@ CConVar<bool> kz_profile_rating_badge_enabled("kz_profile_rating_badge_enabled",
 // эмит тогда молча пропускается по FindConCommand (см. EmitGG1Bridge).
 CConVar<bool> kz_gg1_bridge("kz_gg1_bridge", FCVAR_NONE, "Whether to broadcast player mode to GG1 via cyb_gg1_mode server command.", true);
 
+// Есть ли неразосланное «цифры рангов изменились». Взводится ТОЛЬКО реальной записью в
+// контроллер (UpdateCompetitiveRank), гасится рассылкой.
+static_global bool s_rankRevealPending = false;
+static_global f32 s_nextRankRevealTime = 0.0f;
+
+// Склейка пачки: после загрузки карты очки приезжают всем игрокам почти одновременно, и
+// без окна это была бы очередь из десятков одинаковых бродкастов подряд. Секунда — на два
+// порядка реже прежних 2 Гц и незаметна человеку, который в этот момент ещё грузится.
+#define RANK_REVEAL_COALESCE_PERIOD 1.0f
+
+// «Раскрыть ранги в скорборде». Флаг живёт на клиенте, у сервера его не спросить, поэтому
+// шлём по событиям, когда скорборд клиента создаётся или когда цифра в нём поменялась.
+static_function void PostRankReveal(IRecipientFilter &filter)
+{
+	INetworkMessageInternal *netmsg = g_pNetworkMessages->FindNetworkMessagePartial("CCSUsrMsg_ServerRankRevealAll");
+	if (!netmsg)
+	{
+		return;
+	}
+	CNetMessage *msg = netmsg->AllocateMessage();
+	interfaces::pGameEventSystem->PostEventAbstract(0, false, &filter, netmsg, msg, 0);
+	delete msg;
+}
+
 void KZProfileService::OnGameFrame()
 {
-	// Гейт тем же cvar'ом, что и сам значок: сообщение существует ровно ради раскрытия
-	// рангов в скорборде — при выключенном значке это чистый бродкаст всем 2 раза в секунду.
-	// Заодно даёт разведку одной командой: `kz_profile_rating_badge_enabled 0` гасит ВЕСЬ
-	// ранго-скорбордный тракт (и записи в контроллеры, и этот бродкаст) — если TAB при этом
-	// перестаёт дёргаться, виновник здесь, а не в скрытии невидимок (репорт 05.08).
+	// НЕ таймер: это флаш склеенной пачки изменений рангов. Без изменений — молчим совсем
+	// (прежняя версия слала бродкаст всем каждые 64 тика = 2 раза в секунду бессрочно).
+	// Гейт тем же cvar'ом, что и сам значок: сообщение существует ровно ради него.
+	if (!s_rankRevealPending || !kz_profile_rating_badge_enabled.Get())
+	{
+		return;
+	}
+	f32 now = g_pKZUtils->GetServerGlobals()->realtime;
+	if (now < s_nextRankRevealTime)
+	{
+		return;
+	}
+	s_rankRevealPending = false;
+	s_nextRankRevealTime = now + RANK_REVEAL_COALESCE_PERIOD;
+	CBroadcastRecipientFilter filter;
+	PostRankReveal(filter);
+}
+
+void KZProfileService::OnPlayerActive()
+{
+	// Первый момент, когда у клиента есть скорборд: заход на сервер И каждая смена карты
+	// (ClientActive приходит заново). Адресно ему одному — остальным раскрывать нечего.
+	// Страховка на случай, если клиент не готов принять флаг ровно в эту секунду: его
+	// собственная запись m_iCompetitiveRankType на первом же CheckTransmit взведёт
+	// s_rankRevealPending, и бродкаст догонит его в течение секунды.
+	if (!kz_profile_rating_badge_enabled.Get() || this->player->IsFakeClient())
+	{
+		return;
+	}
+	CSingleRecipientFilter filter(this->player->GetPlayerSlot());
+	PostRankReveal(filter);
+}
+
+void KZProfileService::OnRoundStart()
+{
+	// Рестарт раунда пересобирает клиентский худ — раскрытие переутверждаем. На KZ это
+	// редкое событие (загрузка карты, mp_restartgame), а не периодический тик.
 	if (!kz_profile_rating_badge_enabled.Get())
 	{
 		return;
 	}
-	if (g_pKZUtils->GetServerGlobals()->tickcount % 64 != 0)
-	{
-		return;
-	}
 	CBroadcastRecipientFilter filter;
-	INetworkMessageInternal *netmsg = g_pNetworkMessages->FindNetworkMessagePartial("CCSUsrMsg_ServerRankRevealAll");
-	CNetMessage *msg = netmsg->AllocateMessage();
-	interfaces::pGameEventSystem->PostEventAbstract(0, false, &filter, netmsg, msg, 0);
-	delete msg;
+	PostRankReveal(filter);
 }
 
 void KZProfileService::OnCheckTransmit()
@@ -405,10 +454,14 @@ void KZProfileService::UpdateCompetitiveRank()
 	if (controller->m_iCompetitiveRankType() != 11)
 	{
 		controller->m_iCompetitiveRankType(11);
+		// Единственный источник рассылки «раскрыть ранги»: цифра в скорборде реально
+		// поменялась (новый игрок, новые очки, смена режима) — значит есть что раскрывать.
+		s_rankRevealPending = true;
 	}
 	if (controller->m_iCompetitiveRanking() != rating)
 	{
 		controller->m_iCompetitiveRanking(rating);
+		s_rankRevealPending = true;
 	}
 }
 

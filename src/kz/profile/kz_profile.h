@@ -6,8 +6,14 @@ class KZProfileService : public KZBaseService
 public:
 	using KZBaseService::KZBaseService;
 
+	// Флаш склеенной пачки «раскрыть ранги», а не периодическая рассылка: без изменений
+	// рангов не шлёт ничего.
 	static void OnGameFrame();
 	static void OnCheckTransmit();
+	// Рестарт раунда пересобирает клиентский худ — переутверждаем раскрытие рангов.
+	static void OnRoundStart();
+	// Заход на сервер и каждая смена карты: адресное раскрытие рангов этому клиенту.
+	void OnPlayerActive();
 
 	virtual void Reset() override
 	{
