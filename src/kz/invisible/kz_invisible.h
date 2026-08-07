@@ -36,18 +36,10 @@ class KZInvisibleService : public KZBaseService
 	i32 restoreAttempts {};
 	f32 lastRestoreTime {};
 
-	// Слепок цели наблюдения на время смены команды и одноразовое переутверждение на
-	// следующем кадре: если движок пересоздаёт observer pawn не синхронно с ChangeTeam,
-	// восстановление внутри SetObserverTeam пропало бы молча — админ оказался бы во
-	// фрикаме вместо читера, за которым следил.
-	CHandle<CBaseEntity> pendingObserverTarget;
-	ObserverMode_t pendingObserverMode {OBS_MODE_NONE};
-	bool reassertObserver {};
-
 	// Перевести контроллер в команду team, не поднимая событие ухода в наблюдатели.
+	// Цель наблюдения переживает переход: слепок снимается до ChangeTeam и возвращается
+	// после, а если observer pawn пересоздаётся не синхронно — отложенным на кадр таймером.
 	void SetObserverTeam(int team);
-	// Вернуть цель наблюдения из слепка. false — observer pawn ещё не готов, надо повторить.
-	bool RestoreObserverTarget();
 
 public:
 	virtual void Reset() override;

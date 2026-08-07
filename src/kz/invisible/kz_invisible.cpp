@@ -4,6 +4,7 @@
 
 #include "sdk/services.h"
 #include "utils/utils.h"
+#include "utils/ctimer.h"
 #include "utils/json.h"
 
 #include <cstdio>
@@ -185,9 +186,6 @@ void KZInvisibleService::Reset()
 	this->nextRestoreTime = 0.0f;
 	this->restoreAttempts = 0;
 	this->lastRestoreTime = 0.0f;
-	this->pendingObserverTarget.Term();
-	this->pendingObserverMode = OBS_MODE_NONE;
-	this->reassertObserver = false;
 }
 
 void KZInvisibleService::OnPlayerConnect(u64 steamID64)
@@ -215,6 +213,48 @@ void KZInvisibleService::OnPlayerActive()
 	}
 }
 
+// Вернуть цель наблюдения после смены команды. false — observer pawn ещё не создан,
+// вызывающему надо повторить.
+static_function bool ApplyObserverTarget(CCSPlayerController *controller, CHandle<CBaseEntity> target, ObserverMode_t mode)
+{
+	if (!target.IsValid())
+	{
+		return true; // наблюдали фрикамом — возвращать нечего
+	}
+	if (!controller)
+	{
+		return true;
+	}
+	CCSPlayerPawnBase *observerPawn = controller->GetObserverPawn();
+	if (!observerPawn || !observerPawn->m_pObserverServices)
+	{
+		return false;
+	}
+	CPlayer_ObserverServices *obsService = observerPawn->m_pObserverServices;
+	if (obsService->m_hObserverTarget() != target)
+	{
+		obsService->m_iObserverMode(mode);
+		obsService->m_hObserverTarget(target);
+	}
+	return true;
+}
+
+// Одна повторная попытка на ближайшем ProcessTimers (пост-симулейт того же кадра — между
+// планированием и повтором проходит шаг симуляции, в котором пешки и создаются). Больше не
+// повторяем: если pawn не появился и там, цель потеряна по причине, которую отсюда не починить.
+// Отказ ОБЯЗАН быть в логах: живьём механизм не проверен, и без строки он неотличим от мёртвого
+// кода — с флота никак не узнать, срабатывает ли гипотеза «ChangeTeam роняет цель» вообще.
+static_function f64 ReassertObserverTarget(CPlayerUserId userID, CHandle<CBaseEntity> target, ObserverMode_t mode)
+{
+	KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
+	if (player && !ApplyObserverTarget(player->GetController(), target, mode))
+	{
+		KZ_LOG_WARN(LogChannel::General, "[cyb] invisible_observer_target_lost steam_id=%llu reason=pawn_not_ready\n",
+					player->GetSteamId64(false));
+	}
+	return 0.0f;
+}
+
 void KZInvisibleService::SetObserverTeam(int team)
 {
 	CCSPlayerController *controller = this->player->GetController();
@@ -226,14 +266,14 @@ void KZInvisibleService::SetObserverTeam(int team)
 	// оказался бы во фрикаме вместо читера, за которым следил. Живьём это не проверено,
 	// поэтому снимаем слепок цели и возвращаем его после: верно и если pawn пережил смену
 	// команды (тогда восстановление — no-op), и если нет.
-	this->pendingObserverTarget.Term();
-	this->pendingObserverMode = OBS_MODE_NONE;
+	ObserverMode_t mode = OBS_MODE_NONE;
+	CHandle<CBaseEntity> target;
 	if (CCSPlayerPawnBase *observerPawn = controller->GetObserverPawn())
 	{
 		if (CPlayer_ObserverServices *obsService = observerPawn->m_pObserverServices)
 		{
-			this->pendingObserverMode = obsService->m_iObserverMode();
-			this->pendingObserverTarget = obsService->m_hObserverTarget();
+			mode = obsService->m_iObserverMode();
+			target = obsService->m_hObserverTarget();
 		}
 	}
 
@@ -243,38 +283,25 @@ void KZInvisibleService::SetObserverTeam(int team)
 	// почему-то не позвал его, подавление не должно утечь на чужую смену команды.
 	this->suppressTeamEvent = false;
 
-	// Если pawn пересоздаётся не синхронно с ChangeTeam, сейчас цель вернуть некуда —
-	// повторим ровно один раз следующим кадром из сторожа.
-	this->reassertObserver = !this->RestoreObserverTarget();
-	if (!this->reassertObserver)
+	if (ApplyObserverTarget(controller, target, mode))
 	{
-		this->pendingObserverTarget.Term();
+		return;
 	}
-}
-
-bool KZInvisibleService::RestoreObserverTarget()
-{
-	if (!this->pendingObserverTarget.IsValid())
+	// pawn ещё не готов — доделываем таймером, а НЕ сторожом: сторож фильтрует игроков по
+	// IsInvisible и может вовсе не тикать (гейт HasOnlineInvisibles), поэтому обратный путь —
+	// «сняли из списка во время слежки» — до него не дошёл бы никогда. Ключ — userID, а не
+	// указатель: за кадр игрок мог выйти, а слот — переиспользоваться. Идиома взята у
+	// TeleportObserver (kz_spec.cpp). Нулевой интервал здесь ещё и защита от переноса CHandle
+	// через смену карты: RemoveNonPersistentTimers() в форке ниоткуда не зовётся, так что на
+	// флаг preserveMapChange полагаться нельзя — таймер успевает отработать задолго до
+	// changelevel только потому, что интервал нулевой.
+	CServerSideClient *client = this->player->GetClient();
+	if (!client)
 	{
-		return true; // наблюдали фрикамом — возвращать нечего
+		KZ_LOG_WARN(LogChannel::General, "[cyb] invisible_observer_target_lost steam_id=%llu reason=no_client\n", this->steamId64);
+		return;
 	}
-	CCSPlayerController *controller = this->player->GetController();
-	if (!controller)
-	{
-		return true;
-	}
-	CCSPlayerPawnBase *observerPawn = controller->GetObserverPawn();
-	if (!observerPawn || !observerPawn->m_pObserverServices)
-	{
-		return false; // pawn ещё не готов
-	}
-	CPlayer_ObserverServices *obsService = observerPawn->m_pObserverServices;
-	if (obsService->m_hObserverTarget() != this->pendingObserverTarget)
-	{
-		obsService->m_iObserverMode(this->pendingObserverMode);
-		obsService->m_hObserverTarget(this->pendingObserverTarget);
-	}
-	return true;
+	StartTimer<CPlayerUserId, CHandle<CBaseEntity>, ObserverMode_t>(ReassertObserverTarget, client->GetUserID(), target, mode, 0.0f, false, false);
 }
 
 void KZInvisibleService::EnforceObserverTeam()
@@ -330,14 +357,6 @@ void KZInvisibleService::OnGameFrame()
 		if (!controller)
 		{
 			continue;
-		}
-		// Ровно одна повторная попытка вернуть цель наблюдения (observer pawn мог
-		// пересоздаться кадром позже смены команды).
-		if (service->reassertObserver)
-		{
-			service->reassertObserver = false;
-			service->RestoreObserverTarget();
-			service->pendingObserverTarget.Term();
 		}
 		// Штатный путь скрытия: сюда игрок приходит следующим кадром после ухода в
 		// наблюдатели (KZ::misc::JoinTeam намеренно НЕ прячет сам — см. комментарий там).
