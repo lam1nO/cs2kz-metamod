@@ -26,6 +26,10 @@ private:
 	// стирал бы чужое сообщение этому же игроку. Смена cvar'а на живом сервере гасит прежний
 	// канал одноразово (см. UpdateBottomPanel).
 	bool bottomOnAlert {};
+	// Последняя отправка низа ушла не в канал движка, а строкой показаний внутрь панели меню
+	// (cs2menus 005, SetSlotStatus). Приёмник, как и канал, — часть состояния: при его смене
+	// прежний обязан быть погашен одноразово, иначе строка остаётся висеть в двух местах.
+	bool bottomOnMenuStatus {};
 	f64 timerStoppedTime {};
 	f64 currentTimeWhenTimerStopped {};
 
@@ -37,13 +41,17 @@ private:
 	{
 		bool showCpTp {};
 		i32 cp {}, cpCount {}, tp {};
-		// Плайн-худ спектатора под открытым Html-меню (DrawPanels → UpdateBottomPanel с
-		// menuOpen): «время | скорость» ОДНОЙ строкой + клавиши наблюдаемого вместо CP/TP
-		// (строк в этом канале должно быть как можно меньше, см. BottomPadLines). Значения —
-		// в гранулярности отображения (целые юниты, сотые секунды), иначе слепок менялся бы
-		// чаще текста. menuOpen — часть слепка: закрытие меню обязано перерисовать низ,
-		// даже если остальные поля совпали.
+		// Худ спектатора под открытым Html-меню (DrawPanels → UpdateBottomPanel с menuOpen):
+		// время/скорость/клавиши наблюдаемого вместо CP/TP. Значения — в гранулярности
+		// отображения (целые юниты, сотые секунды), иначе слепок менялся бы чаще текста.
+		// menuOpen — часть слепка: закрытие меню обязано перерисовать низ, даже если остальные
+		// поля совпали.
 		bool menuOpen {};
+		// Приёмник: true — строка показаний ВНУТРИ панели меню (cs2menus 005), false — старый
+		// plain-text-канал поверх/под меню. Меняет и вёрстку (в панели всё умещается в ОДНУ
+		// строку — каждая лишняя отнимает пункт у меню), поэтому это поле слепка, а не флаг
+		// сбоку: смена приёмника обязана пересобрать текст, а не только переадресовать его.
+		bool menuStatus {};
 		// Тумблеры элементов ПОЛУЧАТЕЛЯ (hudSpeed/hudTimer/hudKeys) действуют и здесь: игрок с
 		// выключенными клавишами не должен видеть их под меню. Часть слепка — это настройки,
 		// их смена обязана перерисовать низ.
@@ -80,10 +88,11 @@ private:
 
 		bool operator==(const BottomPanelState &o) const
 		{
-			return showCpTp == o.showCpTp && cp == o.cp && cpCount == o.cpCount && tp == o.tp && menuOpen == o.menuOpen && showSpeed == o.showSpeed
-				   && showKeys == o.showKeys && speed == o.speed && prespeed == o.prespeed && showPrespeed == o.showPrespeed && keyMask == o.keyMask
-				   && keysTwoRows == o.keysTwoRows && padLines == o.padLines && hasTimer == o.hasTimer && timerRunning == o.timerRunning
-				   && timerPaused == o.timerPaused && timeCs == o.timeCs && V_strcmp(lang, o.lang) == 0;
+			return showCpTp == o.showCpTp && cp == o.cp && cpCount == o.cpCount && tp == o.tp && menuOpen == o.menuOpen && menuStatus == o.menuStatus
+				   && showSpeed == o.showSpeed && showKeys == o.showKeys && speed == o.speed && prespeed == o.prespeed
+				   && showPrespeed == o.showPrespeed && keyMask == o.keyMask && keysTwoRows == o.keysTwoRows && padLines == o.padLines
+				   && hasTimer == o.hasTimer && timerRunning == o.timerRunning && timerPaused == o.timerPaused && timeCs == o.timeCs
+				   && V_strcmp(lang, o.lang) == 0;
 		}
 	};
 

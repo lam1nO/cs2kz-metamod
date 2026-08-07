@@ -23,6 +23,9 @@ extern IMultiAddonManager *g_pMultiAddonManager;
 
 #include <vendor/mm-cs2menus/src/public/ics2menus.h>
 extern ICS2Menus *g_pMenus;
+// Умеет ли текущая сборка cs2menus SetSlotStatus (интерфейс 005) — см. cs2kz.cpp: со старой
+// сборкой указатель получен по 004, и нового метода в его vtable нет.
+extern bool g_menusHasSlotStatus;
 
 #include "tier0/memdbgon.h"
 
@@ -255,6 +258,9 @@ static CConVar<bool> kz_hud_cptp_in_panel("kz_hud_cptp_in_panel", FCVAR_NONE,
 // действительно рисуется ПОВЕРХ меню — но в его же середине. То есть канал меняет только
 // порядок перекрытия, а не место, и «под меню» отдельным каналом недостижимо: позицию всех
 // трёх каналов задаёт клиент, а под меню текст попадёт только из САМОЙ панели меню (cs2menus).
+// ПОЭТОМУ под открытым Html-меню этот cvar НИ НА ЧТО не влияет, пока рядом cs2menus 005:
+// там низ уходит строкой в панель меню (SetSlotStatus), а канал остаётся только фолбэком
+// для старой сборки cs2menus и обычным путём CP/TP при kz_hud_cptp_in_panel 0.
 static CConVar<int> kz_hud_bottom_channel("kz_hud_bottom_channel", FCVAR_NONE, "Bottom panel channel: 0 = centre print, 1 = alert.", 0);
 
 // Жёсткий потолок отступа: значения cvar'ов недоверенные (их крутят по rcon на живом
@@ -1018,6 +1024,9 @@ void KZHUDService::ComputeBottomState(KZPlayer *player, KZPlayer *target, Bottom
 		// Значения — в гранулярности отображения (целые юниты, сотые секунды): слепок не
 		// должен меняться чаще текста.
 		out.menuOpen = true;
+		// Приёмник выбираем ЗДЕСЬ, а не на отправке: от него зависит вёрстка (см. ниже про
+		// клавиши), а вёрстка обязана быть функцией слепка — иначе текст и слепок разъедутся.
+		out.menuStatus = g_pMenus != nullptr && g_menusHasSlotStatus;
 		// Тумблеры элементов — с ПОЛУЧАТЕЛЯ (cfg), данные — с наблюдаемого: тот же контракт
 		// data/settings, что в BuildVersionCHud и UpdateMinimalHud. До 05.08 плайн-худ под меню
 		// их не смотрел вовсе и показывал выключенные элементы.
@@ -1057,7 +1066,11 @@ void KZHUDService::ComputeBottomState(KZPlayer *player, KZPlayer *target, Bottom
 		// (J = отпрыг этим тиком либо зажатый IN_JUMP.)
 		if (out.showKeys)
 		{
-			out.keysTwoRows = cfg->IsMHUDKeysTwoRowsEnabled();
+			// Два ряда клавиш — только в plain-text-канале. В строке показаний меню их нет:
+			// строка там ровно одна (вторая отняла бы пункт у самого меню), поэтому клавиши
+			// идут компактной группой. В САМОМ худе (меню закрыто) два ряда остаются — их
+			// чинили отдельно по репорту 05.08, и этот путь их не касается.
+			out.keysTwoRows = !out.menuStatus && cfg->IsMHUDKeysTwoRowsEnabled();
 			const bool jump = player->hudService->jumpedThisTick || player->IsButtonPressed(IN_JUMP);
 			out.keyMask = (u8)((player->IsButtonPressed(IN_MOVELEFT) ? KPF_Left : 0) | (player->IsButtonPressed(IN_FORWARD) ? KPF_Forward : 0)
 							   | (player->IsButtonPressed(IN_BACK) ? KPF_Back : 0) | (player->IsButtonPressed(IN_MOVERIGHT) ? KPF_Right : 0)
@@ -1091,6 +1104,70 @@ void KZHUDService::ComputeBottomState(KZPlayer *player, KZPlayer *target, Bottom
 void KZHUDService::FormatBottomText(const BottomPanelState &state, char *buf, i32 size)
 {
 	buf[0] = '\0';
+	if (state.menuOpen && state.menuStatus)
+	{
+		// Строка показаний ВНУТРИ панели меню (cs2menus 005) — ровно ОДНА строка: каждая лишняя
+		// ужимает окно пунктов самого меню (бюджет панели 9 строк на всё). Отсюда предельно
+		// короткая вёрстка: время без подписи, скорость голыми цифрами, клавиши одной группой.
+		// Ориентир длины — kHtmlWrapChars (35 знаков) в cs2menus: типовое
+		// «00:06.92 | 274 (250) | _W__CJ» = 29 знаков, запас есть.
+		std::string line;
+		auto addPart = [&line](const std::string &part)
+		{
+			if (part.empty())
+			{
+				return;
+			}
+			if (!line.empty())
+			{
+				line += " | ";
+			}
+			line += part;
+		};
+		if (state.hasTimer)
+		{
+			char timeText[32];
+			FormatTimeHudCs(state.timeCs, timeText, sizeof(timeText));
+			std::string part = timeText;
+			// Метка состояния — КОРОТКАЯ, отдельными фразами: апстримные « (СТОП)»/« (НА ПАУЗЕ)»
+			// вместе со скоростью и клавишами не влезают в строку, а перенос стоит пункта меню.
+			// Выкинуть состояние нельзя: на реплее пауза игроку важнее подписи «Скорость».
+			if (state.timerPaused)
+			{
+				part += " " + KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Menu Status Paused");
+			}
+			else if (!state.timerRunning)
+			{
+				part += " " + KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Menu Status Stopped");
+			}
+			addPart(part);
+		}
+		if (state.showSpeed)
+		{
+			char speedText[32];
+			if (state.showPrespeed)
+			{
+				V_snprintf(speedText, sizeof(speedText), "%d (%d)", state.speed, state.prespeed);
+			}
+			else
+			{
+				V_snprintf(speedText, sizeof(speedText), "%d", state.speed);
+			}
+			addPart(speedText);
+		}
+		if (state.showKeys)
+		{
+			// Тот же порядок A W S D C J, что в однорядной раскладке худа, но без пробелов:
+			// нажатие — буква, отпущено — «_» (канал без цветов, конвенция апстрима).
+			char keys[8];
+			V_snprintf(keys, sizeof(keys), "%c%c%c%c%c%c", (state.keyMask & KPF_Left) ? 'A' : '_', (state.keyMask & KPF_Forward) ? 'W' : '_',
+					   (state.keyMask & KPF_Back) ? 'S' : '_', (state.keyMask & KPF_Right) ? 'D' : '_', (state.keyMask & KPF_Duck) ? 'C' : '_',
+					   (state.keyMask & KPF_Jump) ? 'J' : '_');
+			addPart(keys);
+		}
+		V_strncpy(buf, line.c_str(), size);
+		return;
+	}
 	if (state.menuOpen)
 	{
 		// Плайн-худ под меню: скорость (преспид) / время / клавиши, каждый — по своему тумблеру
@@ -1178,9 +1255,18 @@ void KZHUDService::FormatBottomText(const BottomPanelState &state, char *buf, i3
 	}
 }
 
-// Текст нижней панели в конкретный канал: alert=false — centre-print, true — alert.
-static_function void SendBottomText(KZPlayer *player, bool alert, const char *text)
+// Текст нижней панели в выбранный приёмник: menuStatus — строка показаний внутри панели
+// открытого меню (cs2menus 005), иначе канал движка (alert=false — centre-print, true — alert).
+static_function void SendBottomText(KZPlayer *player, bool menuStatus, bool alert, const char *text)
 {
+	if (menuStatus)
+	{
+		if (g_pMenus)
+		{
+			g_pMenus->SetSlotStatus(player->GetPlayerSlot().Get(), text);
+		}
+		return;
+	}
 	if (alert)
 	{
 		player->PrintAlert(false, false, "%s", text);
@@ -1191,11 +1277,13 @@ static_function void SendBottomText(KZPlayer *player, bool alert, const char *te
 	}
 }
 
-// Погасить канал одноразовым пустым токеном (сам он гаснет лишь через несколько секунд, а
-// остаток нижней панели читается как зависший худ) — тот же приём, что в TogglePanel.
-static_function void ClearBottomChannel(KZPlayer *player, bool alert)
+// Погасить приёмник, в который писали. У строки меню это пустой текст (движок снимет её и
+// вернёт пункту меню строку бюджета), у канала — одноразовый пустой токен: сам канал гаснет
+// лишь через несколько секунд, а остаток нижней панели читается как зависший худ (тот же
+// приём, что в TogglePanel).
+static_function void ClearBottomSink(KZPlayer *player, bool menuStatus, bool alert)
 {
-	SendBottomText(player, alert, "#SFUI_EmptyString");
+	SendBottomText(player, menuStatus, alert, menuStatus ? "" : "#SFUI_EmptyString");
 }
 
 // Тик нижней панели получателя (this): пересчитать слепок; отправлять только на его
@@ -1213,16 +1301,19 @@ void KZHUDService::UpdateBottomPanel(KZPlayer *dataSource, bool menuOpen, int li
 		this->ClearBottomPanel();
 		return;
 	}
-	// Канал берём один раз на тик: его могли переключить по rcon прямо сейчас — тогда прежний
-	// гасим одноразово, иначе в нём остался бы наш текст до самозатухания.
+	// Приёмник берём один раз на тик: канал могли переключить по rcon прямо сейчас, а строка
+	// меню появляется/исчезает вместе с самим меню — тогда прежний гасим одноразово, иначе в
+	// нём остался бы наш текст до самозатухания (в канале) или до чужого клира (в меню).
+	const bool menuStatus = state.menuStatus;
 	const bool alert = kz_hud_bottom_channel.Get() == 1;
-	if (this->bottomPanelActive && this->bottomOnAlert != alert)
+	if (this->bottomPanelActive && (this->bottomOnMenuStatus != menuStatus || (!menuStatus && this->bottomOnAlert != alert)))
 	{
-		ClearBottomChannel(this->player, this->bottomOnAlert);
-		// Слепок не изменился, поэтому без сброса текст ушёл бы в новый канал только по
+		ClearBottomSink(this->player, this->bottomOnMenuStatus, this->bottomOnAlert);
+		// Слепок мог не измениться, и без сброса текст ушёл бы в новый приёмник только по
 		// heartbeat'у (до секунды) — у стоящего игрока это выглядит как «худ пропал».
 		this->bottomStateValid = false;
 	}
+	this->bottomOnMenuStatus = menuStatus;
 	this->bottomOnAlert = alert;
 	f64 now = g_pKZUtils->GetServerGlobals()->curtime;
 	if (this->bottomStateValid && state == this->lastBottomState)
@@ -1234,7 +1325,7 @@ void KZHUDService::UpdateBottomPanel(KZPlayer *dataSource, bool menuOpen, int li
 		{
 			return;
 		}
-		SendBottomText(this->player, alert, this->lastBottomText);
+		SendBottomText(this->player, menuStatus, alert, this->lastBottomText);
 		this->lastBottomSendTime = now;
 		return;
 	}
@@ -1243,7 +1334,7 @@ void KZHUDService::UpdateBottomPanel(KZPlayer *dataSource, bool menuOpen, int li
 	this->lastBottomState = state;
 	this->bottomStateValid = true;
 	V_strncpy(this->lastBottomText, buf, sizeof(this->lastBottomText));
-	SendBottomText(this->player, alert, buf);
+	SendBottomText(this->player, menuStatus, alert, buf);
 	this->lastBottomSendTime = now;
 	this->bottomPanelActive = true;
 }
@@ -1258,9 +1349,10 @@ void KZHUDService::ClearBottomPanel()
 		return;
 	}
 	this->bottomPanelActive = false;
-	// Гасим ИМЕННО тот канал, в который писали (bottomOnAlert): alert общий — там же печатают
-	// гонки и античит, и слепой клир стёр бы этому игроку чужое сообщение.
-	ClearBottomChannel(this->player, this->bottomOnAlert);
+	// Гасим ИМЕННО тот приёмник, в который писали: alert общий — там же печатают гонки и
+	// античит, и слепой клир стёр бы этому игроку чужое сообщение; строка меню общая с самим
+	// меню — её чистит и cs2menus на закрытии, но остановка спектейта закрытием не является.
+	ClearBottomSink(this->player, this->bottomOnMenuStatus, this->bottomOnAlert);
 }
 
 // Тик минимал-худа получателя (this): апстрим-композиция cs2kz на живых строителях —

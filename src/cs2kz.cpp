@@ -45,7 +45,24 @@ KZPlugin g_KZPlugin;
 IMultiAddonManager *g_pMultiAddonManager;
 IClientCvarValue *g_pClientCvarValue;
 ICS2Menus *g_pMenus;
+// Умеет ли рядом стоящий cs2menus строку показаний под меню (SetSlotStatus, интерфейс 005).
+// Отдельный флаг, а не «g_pMenus != nullptr»: со СТАРОЙ сборкой cs2menus интерфейс 005 не
+// находится, и запрашивать только его нельзя — g_pMenus стал бы null и форк остался бы вообще
+// без меню (!options/!maps/!rpmenu) из-за одной строки худа. Поэтому откатываемся на 004 и
+// просто не зовём новый метод: у полученного по 004 указателя его нет в vtable.
+bool g_menusHasSlotStatus;
 CSteamGameServerAPIContext g_steamAPI;
+
+// Получить интерфейс меню: сначала актуальная ревизия, при неудаче — предыдущая.
+static void AcquireMenusInterface()
+{
+	g_pMenus = (ICS2Menus *)g_SMAPI->MetaFactory(CS2MENUS_INTERFACE, nullptr, nullptr);
+	g_menusHasSlotStatus = g_pMenus != nullptr;
+	if (!g_pMenus)
+	{
+		g_pMenus = (ICS2Menus *)g_SMAPI->MetaFactory(CS2MENUS_INTERFACE_004, nullptr, nullptr);
+	}
+}
 
 PLUGIN_EXPOSE(KZPlugin, g_KZPlugin);
 
@@ -159,21 +176,21 @@ void KZPlugin::AllPluginsLoaded()
 	this->UpdateSelfMD5();
 	g_pMultiAddonManager = (IMultiAddonManager *)g_SMAPI->MetaFactory(MULTIADDONMANAGER_INTERFACE, nullptr, nullptr);
 	g_pClientCvarValue = (IClientCvarValue *)g_SMAPI->MetaFactory(CLIENTCVARVALUE_INTERFACE, nullptr, nullptr);
-	g_pMenus = (ICS2Menus *)g_SMAPI->MetaFactory(CS2MENUS_INTERFACE, nullptr, nullptr);
+	AcquireMenusInterface();
 }
 
 void KZPlugin::OnPluginLoad(PluginId id)
 {
 	g_pMultiAddonManager = (IMultiAddonManager *)g_SMAPI->MetaFactory(MULTIADDONMANAGER_INTERFACE, nullptr, nullptr);
 	g_pClientCvarValue = (IClientCvarValue *)g_SMAPI->MetaFactory(CLIENTCVARVALUE_INTERFACE, nullptr, nullptr);
-	g_pMenus = (ICS2Menus *)g_SMAPI->MetaFactory(CS2MENUS_INTERFACE, nullptr, nullptr);
+	AcquireMenusInterface();
 }
 
 void KZPlugin::OnPluginUnload(PluginId id)
 {
 	g_pMultiAddonManager = (IMultiAddonManager *)g_SMAPI->MetaFactory(MULTIADDONMANAGER_INTERFACE, nullptr, nullptr);
 	g_pClientCvarValue = (IClientCvarValue *)g_SMAPI->MetaFactory(CLIENTCVARVALUE_INTERFACE, nullptr, nullptr);
-	g_pMenus = (ICS2Menus *)g_SMAPI->MetaFactory(CS2MENUS_INTERFACE, nullptr, nullptr);
+	AcquireMenusInterface();
 }
 
 void KZPlugin::AddonInit()

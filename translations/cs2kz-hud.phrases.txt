@@ -50,6 +50,44 @@
 		"ko"		" (일시정지됨)"
 		"lv"		" (NOPAUZĒTS)"
 	}
+	// Состояние таймера для строки показаний ПОД МЕНЮ (cs2menus SetSlotStatus). Отдельно от
+	// «HUD - Stopped/Paused Text» ровно из-за длины: там строка одна на ~35 знаков вместе со
+	// скоростью и клавишами, и « (НА ПАУЗЕ)» переносит её на вторую — а вторая строка отнимает
+	// ПУНКТ у самого меню. Поэтому здесь одно слово, без скобок и ведущего пробела.
+	"HUD - Menu Status Stopped"
+	{
+		// STOP
+		"en"		"STOP"
+		"chi"		"停止"
+		"pl"		"STOP"
+		"ru"		"СТОП"
+		"fi"		"SEIS"
+		"sv"		"STOPP"
+		"ua"		"СТОП"
+		"tr"		"DUR"
+		"it"		"STOP"
+		"es"		"ALTO"
+		"de"		"STOPP"
+		"ko"		"중지"
+		"lv"		"STOP"
+	}
+	"HUD - Menu Status Paused"
+	{
+		// PAUSE
+		"en"		"PAUSE"
+		"chi"		"暂停"
+		"pl"		"PAUZA"
+		"ru"		"ПАУЗА"
+		"fi"		"TAUKO"
+		"sv"		"PAUS"
+		"ua"		"ПАУЗА"
+		"tr"		"DURAKLA"
+		"it"		"PAUSA"
+		"es"		"PAUSA"
+		"de"		"PAUSE"
+		"ko"		"일시정지"
+		"lv"		"PAUZE"
+	}
 	// Строка CP/TP нижней строки худа: и в HTML-панели (деф.), и в отдельной нижней панели
 	// centre-канала (kz_hud_cptp_in_panel 0) — поэтому БЕЗ разметки, теги здесь недопустимы.
 	// Латиница для всех языков, кроме chi — как в апстримном «HUD - Checkpoint Text».
