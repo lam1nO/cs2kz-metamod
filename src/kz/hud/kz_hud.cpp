@@ -61,6 +61,13 @@ static_function void FormatTimeHud(f64 time, char *output, u32 length)
 // с запасом до угасания и в 128 раз реже, чем слать каждый тик.
 #define KZ_HUD_BOTTOM_HEARTBEAT 1.0f
 
+// Heartbeat строки показаний в панели меню — на порядок чаще. Причина не в угасании (её
+// держит сам cs2menus), а в том, что он ЧИСТИТ статус в EndDisplay: переход в подменю
+// закрывает один показ и открывает другой, и на статичной цели (пауза на реплее) слепок не
+// меняется — показания пропадали бы до целой секунды. Повтор того же текста в cs2menus
+// бесплатен (сравнение строки), поэтому цена частоты — только взятие его мьютекса.
+#define KZ_HUD_BOTTOM_MENU_HEARTBEAT 0.1f
+
 // Heartbeat HTML-канала минимал-худа: show_survival_respawn_status живёт ровно duration=1s
 // (см. utils::PrintHTMLCentre), heartbeat в 1.0s мигал бы на границе — переотправляем вдвое
 // чаще. Centre-канал минимала живёт общим KZ_HUD_BOTTOM_HEARTBEAT (он гаснет медленнее).
@@ -999,6 +1006,17 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 	return html;
 }
 
+// Можно ли ПРЯМО СЕЙЧАС звать метод cs2menus 005 (SetSlotStatus): указатель есть И получен он
+// по 005-строке. Гейт обязан стоять на КАЖДОМ пути вызова, а не только на выборе приёмника:
+// bottomOnMenuStatus — СОХРАНЁННОЕ состояние, оно переживает горячую замену cs2menus на сборку
+// без 005 (флаг уже false, а состояние ещё true), и путь гашения прежнего приёмника уехал бы
+// вызовом по индексу 005-метода на короткой vtable — это падение сервера, а не отказ.
+// Единая функция, а не два одинаковых условия: разъехавшись, они дают ровно этот сценарий.
+static_function bool MenuStatusAvailable()
+{
+	return g_pMenus != nullptr && g_menusHasSlotStatus;
+}
+
 // Нижняя панель — обычный centre-канал (HUD_PRINTCENTER, ClientPrintFilter), НЕ HTML-канал
 // show_survival_respawn_status: движок рисует его ниже центра экрана, что и даёт «низ» худа.
 // Содержимое: строка CP/TP (гейт hudCpTp получателя, данные наблюдаемого, у реплей-бота —
@@ -1026,7 +1044,7 @@ void KZHUDService::ComputeBottomState(KZPlayer *player, KZPlayer *target, Bottom
 		out.menuOpen = true;
 		// Приёмник выбираем ЗДЕСЬ, а не на отправке: от него зависит вёрстка (см. ниже про
 		// клавиши), а вёрстка обязана быть функцией слепка — иначе текст и слепок разъедутся.
-		out.menuStatus = g_pMenus != nullptr && g_menusHasSlotStatus;
+		out.menuStatus = MenuStatusAvailable();
 		// Тумблеры элементов — с ПОЛУЧАТЕЛЯ (cfg), данные — с наблюдаемого: тот же контракт
 		// data/settings, что в BuildVersionCHud и UpdateMinimalHud. До 05.08 плайн-худ под меню
 		// их не смотрел вовсе и показывал выключенные элементы.
@@ -1261,7 +1279,10 @@ static_function void SendBottomText(KZPlayer *player, bool menuStatus, bool aler
 {
 	if (menuStatus)
 	{
-		if (g_pMenus)
+		// Гейт по MenuStatusAvailable, а не по одному g_pMenus: сюда приходит и СОХРАНЁННЫЙ
+		// bottomOnMenuStatus (гашение прежнего приёмника), который мог пережить подмену
+		// cs2menus на сборку без 005 — см. MenuStatusAvailable.
+		if (MenuStatusAvailable())
 		{
 			g_pMenus->SetSlotStatus(player->GetPlayerSlot().Get(), text);
 		}
@@ -1320,7 +1341,8 @@ void KZHUDService::UpdateBottomPanel(KZPlayer *dataSource, bool menuOpen, int li
 	{
 		// now < lastBottomSendTime = curtime пошёл заново (кэш пережил смену карты —
 		// подстраховка к сбросу в OnRoundStart): считаем heartbeat истёкшим.
-		const bool heartbeatDue = now < this->lastBottomSendTime || now - this->lastBottomSendTime >= KZ_HUD_BOTTOM_HEARTBEAT;
+		const f64 heartbeat = menuStatus ? KZ_HUD_BOTTOM_MENU_HEARTBEAT : KZ_HUD_BOTTOM_HEARTBEAT;
+		const bool heartbeatDue = now < this->lastBottomSendTime || now - this->lastBottomSendTime >= heartbeat;
 		if (!heartbeatDue)
 		{
 			return;
