@@ -267,11 +267,14 @@ void KZTriggerService::OnMappingApiTriggerStartTouchPost(TriggerTouchTracker tra
 			// В prac стартовая зона (любого курса, включая бонусы) — не событие вообще
 			// (решение пользователя 07.08): игрок отрабатывает начало курса и обязан иметь
 			// право влетать в старт, не теряя ни prac-часов, ни курса, ни живых чекпоинтов.
-			// Гасим оба эффекта: ResetCheckpoints чистил бы чекпоинты замороженного рана
-			// (восстановились бы только на выходе) и обнулял tpCount, а StartZoneStartTouch
-			// взводил бы touchedGroundSinceTouchingStartZone под будущий TimerStart.
+			// ResetCheckpoints иначе чистил бы чекпоинты замороженного рана (восстановились бы
+			// только на выходе) и обнулял tpCount, а StartZoneStartTouch остановил бы таймер.
+			// ЕДИНСТВЕННОЕ, что делаем и в prac, — сброс «касался ли земли внутри зоны»:
+			// это не эффект зоны, а защита от старта рана в воздухе, и пропуск оставил бы
+			// флаг с догоночного значения (вышел из prac внутри зоны → ран стартует в полёте).
 			if (this->player->pracService->IsInPrac())
 			{
+				this->player->timerService->ResetStartZoneGroundTouch();
 				break;
 			}
 			this->player->checkpointService->ResetCheckpoints();

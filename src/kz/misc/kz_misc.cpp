@@ -257,6 +257,12 @@ void KZ::misc::TeleportToCourse(KZPlayer *player, const KZCourseDescriptor *cour
 
 void KZ::misc::HandleTeleportToCourse(KZPlayer *player, const CCommand *args)
 {
+	// Отказ prac — ДО резолва курса: иначе `!course <курс без стартпозиции>` в prac печатал бы
+	// «No Start Position For Course» вместо настоящей причины. Воронка ниже всё равно закрыта.
+	if (player->pracService->RejectMapTeleport("teleport_to_start"))
+	{
+		return;
+	}
 	const KZCourseDescriptor *startPosCourse = nullptr;
 	// If the player specify a course name, we first check if it's valid or not.
 	if (V_strlen(args->ArgS()) > 0)

@@ -446,6 +446,13 @@ public:
 		return this->player->checkpointService->GetTeleportCount() > 0 ? TimeType_Standard : TimeType_Pro;
 	}
 
+	// Пересчёт «касался ли земли с момента влёта в стартовую зону» по текущему FL_ONGROUND.
+	// Это защита от старта рана в воздухе: StartZoneEndTouch пускает таймер только по true.
+	// Вынесено из StartZoneStartTouch отдельным методом, потому что в prac эффекты стартовой
+	// зоны подавлены целиком (trigger/callbacks.cpp), а ЭТА бухгалтерия обязана вестись всегда —
+	// иначе флаг остаётся с догоночного значения и игрок, вышедший из prac внутри зоны,
+	// стартует ран в воздухе с разгоном, набранным снаружи.
+	void ResetStartZoneGroundTouch();
 	void StartZoneStartTouch(const KZCourseDescriptor *course);
 	void StartZoneEndTouch(const KZCourseDescriptor *course);
 	void SplitZoneStartTouch(const KZCourseDescriptor *course, i32 splitNumber);

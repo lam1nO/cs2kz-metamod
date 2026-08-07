@@ -8,6 +8,10 @@
 // Порог «игрок стоял» для возврата из prac: ниже него скорость считаем нулевой и
 // возвращаем на паузе. Единицы движка (u/s).
 #define KZ_PRAC_STILL_SPEED 5.0f
+// Кулдаун ПОДСКАЗКИ при отказе телепорта в prac (сек). !r у KZ-игроков на бинде и жмётся
+// сериями — двухстрочная фраза на каждое нажатие даёт стену в чате и поток WARN. Отказ при
+// этом остаётся видимым всегда: звук ошибки играет на каждое нажатие, гасится только текст и лог.
+#define KZ_PRAC_REJECT_HINT_COOLDOWN 4.0f
 
 class KZPracService : public KZBaseService
 {
@@ -77,6 +81,10 @@ private:
 	// часы стоят всегда.
 	f64 pracTime {};
 	bool pracTimeRunning {};
+	// Момент последней НАПЕЧАТАННОЙ подсказки об отказе телепорта (realtime сервера —
+	// curtime обнуляется на смене карты, а это поле её переживает).
+	// Пер-игроковое состояние, см. KZ_PRAC_REJECT_HINT_COOLDOWN.
+	f32 lastRejectHintTime {};
 
 public:
 	static void Init();
@@ -131,9 +139,11 @@ public:
 	// Единый гард «в prac по карте двигаемся только по prac-точкам» (решение пользователя 07.08).
 	// Закрывает ВСЕ пути рестарта/телепорта разом: !r/!restart/!course/!main/!b* и меню !courses
 	// (общая воронка KZ::misc::TeleportToCourse), !end, !lj/!ljarea/!jsarea, !goto. true = игрок
-	// в prac, действие отменено, отказ уже напечатан и залогирован. action — машинная причина
-	// в лог, словарь общий с TimerStop (kz_timer.h): teleport_to_start, teleport_to_end,
-	// jumpstat_area, goto.
+	// в prac, действие отменено, отказ уже показан игроку (звук — всегда, текст и лог — не чаще
+	// KZ_PRAC_REJECT_HINT_COOLDOWN). action — машинная причина в лог; значения берём из словаря
+	// TimerStop (kz_timer.h), чтобы одно действие игрока давало одно значение в обеих строках:
+	// teleport_to_start, teleport_to_end, jumpstat_area, team_change. Своё только "goto" —
+	// у !goto нет собственного TimerStop, коррелировать не с чем.
 	bool RejectMapTeleport(const char *action);
 
 	// Тик prac-часов. Зовётся из KZPlayer::OnPhysicsSimulatePost рядом с таймерным хуком и

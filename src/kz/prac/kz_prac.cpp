@@ -41,6 +41,7 @@ void KZPracService::Reset()
 {
 	this->inPrac = false;
 	this->noclipBeforeSpec = false;
+	this->lastRejectHintTime = 0.0f;
 	this->frozen = {};
 	this->ClearPoints();
 	this->ResetPracTime();
@@ -75,11 +76,24 @@ bool KZPracService::RejectMapTeleport(const char *action)
 	{
 		return false;
 	}
-	this->player->languageService->PrintChat(true, false, "Prac - No Teleport");
+	// Звук — на каждое нажатие: он и есть мгновенная обратная связь «команда отбита».
 	this->player->PlayErrorSound();
-	// WARN: отказали пользователю. Актор + машинная причина — иначе жалоба «!r не работает»
-	// неотличима от «команда не дошла».
-	KZ_LOG_WARN(LogChannel::Timer, "[cyb] prac_teleport_rejected steam_id=%llu reason=%s\n", this->player->GetSteamId64(false), action);
+	// realtime, а не curtime: curtime обнуляется на смене карты, а Reset() зовётся только на
+	// дисконнекте — с curtime поле пережило бы карту с большим значением, разница стала бы
+	// отрицательной, и подсказка с логом замолчали бы до конца сессии. Отказ обязан остаться
+	// видимым, поэтому сравнение ещё и защищено от хода часов назад.
+	const f32 now = g_pKZUtils->GetServerGlobals()->realtime;
+	const bool cooled = this->lastRejectHintTime == 0.0f || now < this->lastRejectHintTime
+						|| now - this->lastRejectHintTime > KZ_PRAC_REJECT_HINT_COOLDOWN;
+	if (cooled)
+	{
+		this->lastRejectHintTime = now;
+		this->player->languageService->PrintChat(true, false, "Prac - No Teleport");
+		// WARN: отказали пользователю. Актор + машинная причина — иначе жалоба «!r не работает»
+		// неотличима от «команда не дошла». Под тем же кулдауном, что и текст: серия нажатий
+		// на бинде — одно событие для разбора, а не десять строк.
+		KZ_LOG_WARN(LogChannel::Timer, "[cyb] prac_teleport_rejected steam_id=%llu reason=%s\n", this->player->GetSteamId64(false), action);
+	}
 	return true;
 }
 

@@ -158,9 +158,14 @@ bool KZTimerService::UnregisterEventListener(KZTimerServiceEventListener *eventL
 	return eventListeners.FindAndRemove(eventListener);
 }
 
-void KZTimerService::StartZoneStartTouch(const KZCourseDescriptor *course)
+void KZTimerService::ResetStartZoneGroundTouch()
 {
 	this->touchedGroundSinceTouchingStartZone = !!(this->player->GetPlayerPawn()->m_fFlags & FL_ONGROUND);
+}
+
+void KZTimerService::StartZoneStartTouch(const KZCourseDescriptor *course)
+{
+	this->ResetStartZoneGroundTouch();
 	this->TimerStop(false, "start_zone");
 }
 
