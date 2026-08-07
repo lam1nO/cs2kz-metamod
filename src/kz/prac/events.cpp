@@ -8,10 +8,11 @@ static_global class PracTimerListener : public KZTimerServiceEventListener
 public:
 	virtual bool OnTimerStart(KZPlayer *player, u32 courseGUID) override
 	{
-		// Ровно вето и ничего больше (решение пользователя 07.08): стартовая зона в prac — не
-		// событие, prac-часы она не заводит и не сбрасывает. Сами зоны сюда уже не доходят —
-		// KZTriggerService гасит KZTRIGGER_ZONE_START до таймера; это защита от любого другого
-		// вызывающего TimerStart, потому что на timerRunning висит весь сабмит.
+		// Ровно вето и ничего больше: НАСТОЯЩИЙ таймер в prac стартовать не должен ни от чего,
+		// потому что на timerRunning висит весь сабмит. Сами зоны сюда уже не доходят —
+		// KZTriggerService гасит KZTRIGGER_ZONE_START до таймера и на выходе из зоны вместо
+		// TimerStart заводит prac-часы (KZPracService::OnStartZoneEndTouch); это вето — защита
+		// от любого другого вызывающего TimerStart.
 		return !player->pracService->IsInPrac();
 	}
 } pracTimerListener;

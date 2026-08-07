@@ -269,19 +269,26 @@ void KZTimerService::StageZoneStartTouch(const KZCourseDescriptor *course, i32 s
 	}
 }
 
-bool KZTimerService::TimerStart(const KZCourseDescriptor *courseDesc, bool playSound)
+// Бескурсовая часть гарда TimerStart. Вынесена, чтобы prac-часы заводились ровно по тем же
+// условиям (KZPracService::OnStartZoneEndTouch): один список на два вызывающих не разъедется.
+bool KZTimerService::CanStartRunHere()
 {
 	// clang-format off
-	if (!this->player->GetPlayerPawn()->IsAlive()
-		|| this->JustStartedTimer()
-		|| this->player->JustTeleported()
-		|| this->player->inPerf
-		|| this->player->noclipService->JustNoclipped()
-		|| !this->HasValidMoveType()
-		|| this->JustLanded()
-		|| (this->GetTimerRunning() && courseDesc->guid == this->currentCourseGUID)
-		|| (!(this->player->GetPlayerPawn()->m_fFlags & FL_ONGROUND) && !this->GetValidJump()))
+	return this->player->GetPlayerPawn()->IsAlive()
+		&& !this->JustStartedTimer()
+		&& !this->player->JustTeleported()
+		&& !this->player->inPerf
+		&& !this->player->noclipService->JustNoclipped()
+		&& this->HasValidMoveType()
+		&& !this->JustLanded()
+		&& ((this->player->GetPlayerPawn()->m_fFlags & FL_ONGROUND) || this->GetValidJump());
 	// clang-format on
+}
+
+bool KZTimerService::TimerStart(const KZCourseDescriptor *courseDesc, bool playSound)
+{
+	// Курсовое условие осталось здесь: prac-часы курса не ведут (см. CanStartRunHere).
+	if (!this->CanStartRunHere() || (this->GetTimerRunning() && courseDesc->guid == this->currentCourseGUID))
 	{
 		return false;
 	}

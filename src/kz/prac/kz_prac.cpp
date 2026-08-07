@@ -57,6 +57,8 @@ void KZPracService::ResetPracTime()
 {
 	this->pracTime = 0.0;
 	this->pracTimeRunning = false;
+	// Курс — часть попытки, а не отдельное состояние: нет часов — нет и курса.
+	this->pracCourseGUID = 0;
 }
 
 void KZPracService::OnPhysicsSimulatePost()
@@ -104,8 +106,8 @@ void KZPracService::OnNoclipEnabled()
 		return;
 	}
 	// Пролетев участок насквозь, игрок не имеет права на время за него — попытка
-	// недействительна целиком. Осмысленные часы возвращает только !practp (стартовая зона
-	// на prac не влияет, см. events.cpp).
+	// недействительна целиком. Новую заводят !practp (время точки) и выход из стартовой зоны
+	// (с нуля, см. OnStartZoneEndTouch).
 	const bool hadAttempt = this->pracTimeRunning || this->pracTime > 0.0;
 	this->ResetPracTime();
 	if (hadAttempt)
@@ -115,11 +117,54 @@ void KZPracService::OnNoclipEnabled()
 	}
 }
 
-bool KZPracService::OnEndZoneTouch()
+void KZPracService::OnStartZoneEndTouch(const KZCourseDescriptor *course)
+{
+	if (!this->inPrac || !this->player->GetPlayerPawn())
+	{
+		return;
+	}
+	// Ровно те же два условия, по которым здесь стартовал бы настоящий ран: флаг «коснулся земли
+	// внутри зоны» (его проверяет KZTimerService::StartZoneEndTouch) и бескурсовой гард TimerStart
+	// (CanStartRunHere: жив, не телепортировался, не в перфе, не наноклипился, валидный movetype,
+	// достаточно постоял на земле, на земле или в валидном прыжке). Один список на два вызывающих —
+	// иначе репетиция старта давала бы время там, где ран бы не завёлся. Сюда же попадают и
+	// «выходы», которых игрок не делал: телепорт на prac-точку из зоны и EndTouchAll от ноуклипа
+	// или смерти (KZTriggerService::UpdateTriggerTouchList) — их снимают JustTeleported и
+	// IsAlive/HasValidMoveType внутри гарда.
+	if (!this->player->timerService->GetTouchedGroundInStartZone() || !this->player->timerService->CanStartRunHere())
+	{
+		return;
+	}
+	// Часы — С НУЛЯ: зона это начало попытки. Сброс ЧАСОВ, а не prac: замороженный ран, prac-точки,
+	// живые чекпоинты и tpCount остаются нетронутыми (в точках лежат свои показания часов, !practp
+	// по-прежнему откручивает к ним, а показание рана на входе — в точке №1).
+	// Отрицательный субтиковый офсет — тот же приём, что в TimerStart: prac-часы тикают полными
+	// тиками в OnPhysicsSimulatePost, а зону игрок пересёк внутри тика. Без офсета репетиция
+	// систематически шла бы дольше рана на величину до тика — при том, что она для сравнения с ним
+	// и существует. Худ отрицательного не увидит: DrawPanels идёт после инкремента (kz_player.cpp).
+	this->pracTime = g_pKZUtils->GetGlobals()->curtime - g_pKZUtils->GetServerGlobals()->curtime;
+	this->pracTimeRunning = true;
+	// Курс попытки — чтобы финиш чужого курса не печатал время про забег, которого не было.
+	this->pracCourseGUID = course ? course->guid : 0;
+	// INFO: смена состояния, которой нет ни в БД, ни в событиях (в prac ничего не сабмитится) —
+	// без неё жалоба «в отработке не идёт время» неразличима с «зона не сработала». Кулдауна нет
+	// намеренно: строка = одна начатая попытка, а попытку игрок начинает ногами, не биндом.
+	KZ_LOG_INFO(LogChannel::Timer, "[cyb] prac_attempt_start steam_id=%llu course=%s\n", this->player->GetSteamId64(false),
+				course ? course->name : "unknown");
+}
+
+bool KZPracService::OnEndZoneTouch(const KZCourseDescriptor *course)
 {
 	// Часы стоят (или prac нет вовсе) — печатать нечего, отдаём касание обычному тракту:
 	// там оно упрётся в !timerRunning и даст привычный false-end.
 	if (!this->inPrac || !this->pracTimeRunning)
+	{
+		return false;
+	}
+	// Финиш ЧУЖОГО курса: попытка начата в другом месте (вышел из старта главного — забежал в
+	// финиш бонуса), печатать про неё время нельзя. 0 = курс попытки неизвестен (часы пришли с
+	// забранной у наблюдаемого точки) — тогда не выбираем за игрока и печатаем как раньше.
+	if (this->pracCourseGUID != 0 && course && course->guid != this->pracCourseGUID)
 	{
 		return false;
 	}
@@ -278,11 +323,13 @@ void KZPracService::EnterPrac()
 	// ветка HandleNoclip подавлена по inPrac, таймер уже остановлен.
 
 	// prac-часы: с раном — продолжают время рана (репетиция идёт дальше), без рана — стоят в 0
-	// (стартовая зона их больше не заводит, см. events.cpp — решение пользователя 07.08).
+	// до первого выхода из стартовой зоны (OnStartZoneEndTouch), которая и заводит попытку.
 	// MAX: снапшот, снятый на самом тике старта рана, содержит отрицательный субтиковый офсет
 	// (см. TimerStart) — в prac-часах он не нужен.
 	this->pracTime = this->frozen.active ? MAX(0.0, this->frozen.timer.time) : 0.0;
 	this->pracTimeRunning = this->frozen.active;
+	// Курс попытки — курс замороженного рана: финиш печатается только на нём (см. pracCourseGUID).
+	this->pracCourseGUID = this->frozen.active ? this->frozen.courseGUID : 0;
 	// Точка №1 — текущее состояние (со скоростью и показанием часов): !practp сразу после входа
 	// возвращает ровно туда, откуда игрок вошёл, включая полёт. Общий путь захвата, без гардов
 	// (пешка проверена в начале) и без своего сообщения — про точку говорит фраза входа ниже.
@@ -686,6 +733,9 @@ void KZPracService::DoTpToPoint(const PracPoint &pt)
 	// рождать время из ничего (см. PracPoint).
 	this->pracTime = pt.pracTime;
 	this->pracTimeRunning = pt.pracTimeRunning;
+	// Курс попытки телепорт не меняет: это та же репетиция, просто с другого места. Отдельной
+	// защиты от «EndTouch стартовой зоны сразу после телепорта отсюда» не нужно — его снимает
+	// JustTeleported внутри CanStartRunHere (см. OnStartZoneEndTouch).
 	this->player->checkpointService->PlayTeleportSound();
 }
 

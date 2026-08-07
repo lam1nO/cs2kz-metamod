@@ -264,14 +264,16 @@ void KZTriggerService::OnMappingApiTriggerStartTouchPost(TriggerTouchTracker tra
 
 		case KZTRIGGER_ZONE_START:
 		{
-			// В prac стартовая зона (любого курса, включая бонусы) — не событие вообще
-			// (решение пользователя 07.08): игрок отрабатывает начало курса и обязан иметь
-			// право влетать в старт, не теряя ни prac-часов, ни курса, ни живых чекпоинтов.
-			// ResetCheckpoints иначе чистил бы чекпоинты замороженного рана (восстановились бы
-			// только на выходе) и обнулял tpCount, а StartZoneStartTouch остановил бы таймер.
-			// ЕДИНСТВЕННОЕ, что делаем и в prac, — сброс «касался ли земли внутри зоны»:
-			// это не эффект зоны, а защита от старта рана в воздухе, и пропуск оставил бы
-			// флаг с догоночного значения (вышел из prac внутри зоны → ран стартует в полёте).
+			// ВЛЁТ в стартовую зону (любого курса, включая бонусы) в prac — не событие:
+			// игрок отрабатывает начало курса и обязан иметь право влетать в старт, не теряя
+			// ни prac-часов, ни курса, ни живых чекпоинтов. ResetCheckpoints иначе чистил бы
+			// чекпоинты замороженного рана (восстановились бы только на выходе) и обнулял
+			// tpCount, а StartZoneStartTouch остановил бы таймер. Единственный эффект зоны
+			// в prac — запуск prac-часов, и он на ВЫХОДЕ из неё (см. EndTouch ниже).
+			// А сброс «касался ли земли внутри зоны» делаем и в prac: это не эффект зоны, а
+			// защита от старта В ВОЗДУХЕ, и пропуск оставил бы флаг с догоночного значения
+			// (вышел из prac внутри зоны → ран стартует в полёте). Тот же флаг читают
+			// и prac-часы, поэтому вести его надо на обоих путях.
 			if (this->player->pracService->IsInPrac())
 			{
 				this->player->timerService->ResetStartZoneGroundTouch();
@@ -288,7 +290,7 @@ void KZTriggerService::OnMappingApiTriggerStartTouchPost(TriggerTouchTracker tra
 			// TimerEnd на этом пути не зовём вовсе, иначе к нему подтянулся бы весь тракт
 			// сабмита (Times/реплей/PB-WR/kz.run_finished). Часы стоят → обычный тракт
 			// (там касание упрётся в !timerRunning и даст привычный false-end).
-			if (this->player->pracService->OnEndZoneTouch())
+			if (this->player->pracService->OnEndZoneTouch(course))
 			{
 				break;
 			}
@@ -410,10 +412,14 @@ void KZTriggerService::OnMappingApiTriggerEndTouchPost(TriggerTouchTracker track
 
 		case KZTRIGGER_ZONE_START:
 		{
-			// Симметрично StartTouch: выход из стартовой зоны в prac ничего не запускает и
-			// ничего не сбрасывает. Вето OnTimerStart остаётся вторым рубежом (prac/events.cpp).
+			// В prac выход из стартовой зоны запускает ТОЛЬКО prac-часы (решение пользователя
+			// 07.08): попытка начинается здесь, как начался бы ран. Настоящего TimerStart нет
+			// и быть не может — на timerRunning висит весь сабмит; ResetCheckpoints тоже не
+			// зовём (чекпоинты замороженного рана живые). Вето OnTimerStart остаётся вторым
+			// рубежом (prac/events.cpp).
 			if (this->player->pracService->IsInPrac())
 			{
+				this->player->pracService->OnStartZoneEndTouch(course);
 				break;
 			}
 			this->player->checkpointService->ResetCheckpoints();

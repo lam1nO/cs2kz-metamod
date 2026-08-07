@@ -109,9 +109,9 @@
 	"Prac - Time Void Noclip"
 	{
 		// Ноуклип обнуляет prac-часы: за пролетевший насквозь участок времени не даём.
-		// Стартовая зона в prac ничего не запускает (07.08), поэтому вернуть часы может только !practp.
-		"en"		"{grey}Noclip — practice time is {default}void{grey}. Use {default}!practp{grey} to go back to a point and pick the time up from there."
-		"ru"		"{grey}Ноуклип — prac-время {default}обнулено{grey}. Вернуть его можно только телепортом на точку: {default}!practp{grey}."
+		// Заводят новую попытку только !practp (время точки) и выход из стартовой зоны (с нуля).
+		"en"		"{grey}Noclip — practice time is {default}void{grey}. Pick it up again with {default}!practp{grey}, or start a fresh attempt by leaving the start zone."
+		"ru"		"{grey}Ноуклип — prac-время {default}обнулено{grey}. Вернуть его — телепортом на точку ({default}!practp{grey}), новую попытку — выходом из стартовой зоны."
 	}
 	"Prac - Point Stolen"
 	{
