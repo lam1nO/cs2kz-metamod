@@ -69,19 +69,18 @@ void KZPracService::OnPhysicsSimulatePost()
 	}
 }
 
-void KZPracService::OnTimerStartBlocked()
+bool KZPracService::RejectMapTeleport(const char *action)
 {
 	if (!this->inPrac)
 	{
-		return;
+		return false;
 	}
-	// Свежая попытка. Точка вызова — вето OnTimerStart, то есть ровно тот тик, на котором
-	// пошёл бы настоящий таймер (все гарды TimerStart уже пройдены), поэтому prac-время
-	// сопоставимо с настоящим и не включает время, проведённое внутри стартовой зоны.
-	// Молча: обратная связь — сами часы в худе (0 и зелёные), чат на каждом рестарте
-	// бхоп-попытки был бы спамом.
-	this->pracTime = 0.0;
-	this->pracTimeRunning = true;
+	this->player->languageService->PrintChat(true, false, "Prac - No Teleport");
+	this->player->PlayErrorSound();
+	// WARN: отказали пользователю. Актор + машинная причина — иначе жалоба «!r не работает»
+	// неотличима от «команда не дошла».
+	KZ_LOG_WARN(LogChannel::Timer, "[cyb] prac_teleport_rejected steam_id=%llu reason=%s\n", this->player->GetSteamId64(false), action);
+	return true;
 }
 
 void KZPracService::OnNoclipEnabled()
@@ -91,8 +90,8 @@ void KZPracService::OnNoclipEnabled()
 		return;
 	}
 	// Пролетев участок насквозь, игрок не имеет права на время за него — попытка
-	// недействительна целиком. Осмысленные часы возвращает только !practp или новый заход
-	// через стартовую зону.
+	// недействительна целиком. Осмысленные часы возвращает только !practp (стартовая зона
+	// на prac не влияет, см. events.cpp).
 	const bool hadAttempt = this->pracTimeRunning || this->pracTime > 0.0;
 	this->ResetPracTime();
 	if (hadAttempt)
@@ -265,8 +264,9 @@ void KZPracService::EnterPrac()
 	// ветка HandleNoclip подавлена по inPrac, таймер уже остановлен.
 
 	// prac-часы: с раном — продолжают время рана (репетиция идёт дальше), без рана — стоят в 0
-	// до касания стартовой зоны. MAX: снапшот, снятый на самом тике старта рана, содержит
-	// отрицательный субтиковый офсет (см. TimerStart) — в prac-часах он не нужен.
+	// (стартовая зона их больше не заводит, см. events.cpp — решение пользователя 07.08).
+	// MAX: снапшот, снятый на самом тике старта рана, содержит отрицательный субтиковый офсет
+	// (см. TimerStart) — в prac-часах он не нужен.
 	this->pracTime = this->frozen.active ? MAX(0.0, this->frozen.timer.time) : 0.0;
 	this->pracTimeRunning = this->frozen.active;
 	// Точка №1 — текущее состояние (со скоростью и показанием часов): !practp сразу после входа

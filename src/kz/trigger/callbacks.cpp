@@ -264,6 +264,16 @@ void KZTriggerService::OnMappingApiTriggerStartTouchPost(TriggerTouchTracker tra
 
 		case KZTRIGGER_ZONE_START:
 		{
+			// В prac стартовая зона (любого курса, включая бонусы) — не событие вообще
+			// (решение пользователя 07.08): игрок отрабатывает начало курса и обязан иметь
+			// право влетать в старт, не теряя ни prac-часов, ни курса, ни живых чекпоинтов.
+			// Гасим оба эффекта: ResetCheckpoints чистил бы чекпоинты замороженного рана
+			// (восстановились бы только на выходе) и обнулял tpCount, а StartZoneStartTouch
+			// взводил бы touchedGroundSinceTouchingStartZone под будущий TimerStart.
+			if (this->player->pracService->IsInPrac())
+			{
+				break;
+			}
 			this->player->checkpointService->ResetCheckpoints();
 			this->player->timerService->StartZoneStartTouch(course);
 		}
@@ -397,6 +407,12 @@ void KZTriggerService::OnMappingApiTriggerEndTouchPost(TriggerTouchTracker track
 
 		case KZTRIGGER_ZONE_START:
 		{
+			// Симметрично StartTouch: выход из стартовой зоны в prac ничего не запускает и
+			// ничего не сбрасывает. Вето OnTimerStart остаётся вторым рубежом (prac/events.cpp).
+			if (this->player->pracService->IsInPrac())
+			{
+				break;
+			}
 			this->player->checkpointService->ResetCheckpoints();
 			this->player->timerService->StartZoneEndTouch(course);
 		}

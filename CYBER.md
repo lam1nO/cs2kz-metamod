@@ -210,7 +210,7 @@ cs2kz-linux-builder .`, иначе компилируются старые ис�
   поэтому возврат через `!prac` и через реконнект дают одинаковый ран. Гарды входа (ревизия 2):
   живая пешка + `!pro`-предохранитель + отказ участнику активной гонки + antipause-зона
   (`CanPause` убран — входить можно в воздухе). Стек точек стирается на
-  выходе и на уходе в спек; сам prac переживает спектатор, но не смерть/`!r`/рестарт
+  выходе и на уходе в спек; сам prac переживает спектатор, но не смерть/рестарт
   раунда/смену карты. cvar'ы `kz_prac_enable`, `kz_prac_run_policy` (0 = ран NUB,
   1 = ран не начинать вовсе). Спека — в монорепо
   `docs/superpowers/specs/2026-07-25-kz-prac-mode-design.md`.
@@ -218,8 +218,8 @@ cs2kz-linux-builder .`, иначе компилируются старые ис�
   запускает **prac-часы** — отдельный счётчик `KZPracService::pracTime` (тикает в
   `KZPracService::OnPhysicsSimulatePost` рядом с таймерным хуком, тем же
   `ENGINE_FIXED_TICK_INTERVAL`), а НЕ настоящий таймер: на `timerRunning` висит весь сабмит.
-  Правила: с раном часы стартуют со времени рана, без рана стоят до старт-зоны; касание старт-зоны
-  (вето `OnTimerStart`) = сброс в 0 и пуск; `practp` откручивает часы к показанию точки;
+  Правила: с раном часы стартуют со времени рана, без рана стоят всегда (стартовая зона их не
+  заводит, см. «prac строгий» ниже); `practp` откручивает часы к показанию точки;
   **включение ноуклипа обнуляет и останавливает** их (ловится на переходе в `MOVETYPE_NOCLIP` в
   `HandleNoclip`, а не в команде `!nc`); выход сбрасывает. Финишная зона при идущих часах
   (`KZPracService::OnEndZoneTouch` в `KZTRIGGER_ZONE_END`) печатает время **только игроку** и
@@ -231,6 +231,21 @@ cs2kz-linux-builder .`, иначе компилируются старые ис�
   (`TimerStop` выходит по `!timerRunning` до листенеров) — поэтому свой `DropFrozenRunAll` в
   `OnRoundStart`; `TryRestoreOnSpawn` гейтится в АСИНХРОННОМ колбэке, а не на входе (у неё два
   вызывающих, второй — `db/setup_client.cpp`).
+  **prac строгий (решение пользователя 07.08):** в prac по карте двигаются ТОЛЬКО по своим
+  prac-точкам, всё остальное запрещено явным отказом (`KZPracService::RejectMapTeleport`, фраза
+  `Prac - No Teleport`, лог `[cyb] prac_teleport_rejected reason=…`). Закрыты: `!r`/`!restart`,
+  `!course`, `!main`, `!b`/`!bonus`/`!b1..!b9` и меню `!courses` — все через ОДНУ воронку
+  `KZ::misc::TeleportToCourse`; `!end`; `!lj`/`!ljarea`/`!jsarea`; `!goto` (обе перегрузки
+  `KZGotoService::GotoPlayer` — вторая ловит колбэк меню, открытого до входа в prac).
+  `!ssp` отказывает в `KZCheckpointService::SetStartPosition` (гард в сервисе, а не в команде —
+  туда же ходит пункт меню `!options`), лог `ssp_rejected reason=in_prac`; `!csp` не тронут.
+  **Стартовая зона в prac — не событие вообще**: `KZTRIGGER_ZONE_START` (и StartTouch, и
+  EndTouch) в `trigger/callbacks.cpp` выходит по `IsInPrac()` до `ResetCheckpoints` и
+  `StartZone*Touch`, поэтому влёт в старт (главного курса ИЛИ бонуса) не сбрасывает prac-часы,
+  не меняет курс, не чистит живые чекпоинты/`tpCount` и не роняет prac. Вето `OnTimerStart`
+  осталось вторым рубежом, но prac-часы больше не трогает. Следствие: в свободном prac (вход без
+  рана) prac-часы не заводятся ничем, кроме `!practp` на точку со временем — значит и
+  `Prac - Finish` там не печатается.
 - **Центральные реплеи PB/WR** (`src/kz/replays/cyb_replay_{common,upload,download}.*`,
   cyb.26): авто-upload при новом локальном PB и серверном рекорде (WR = overall/nub;
   pro отдельно НЕ выгружается) через api `POST /replays/v1/upload` (Bearer

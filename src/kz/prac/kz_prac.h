@@ -72,7 +72,9 @@ private:
 	// prac-часы («репетиция»): СВОЙ счётчик, а не таймер рана. Настоящий таймер в prac обязан
 	// оставаться остановленным — на timerRunning висит вся машинерия финиша/сабмита/реплеев/
 	// SavedRuns (см. четыре Critical в спеке). Эти часы никуда не уезжают: только худ и строка
-	// в чат на финише.
+	// в чат на финише. Заводятся ТОЛЬКО от замороженного рана (вход) и откручиваются !practp:
+	// стартовая зона с 07.08 на prac не влияет вовсе, поэтому в свободном prac (вход без рана)
+	// часы стоят всегда.
 	f64 pracTime {};
 	bool pracTimeRunning {};
 
@@ -126,13 +128,18 @@ public:
 	void TpToNextPoint();
 	void ResetPoints();
 
+	// Единый гард «в prac по карте двигаемся только по prac-точкам» (решение пользователя 07.08).
+	// Закрывает ВСЕ пути рестарта/телепорта разом: !r/!restart/!course/!main/!b* и меню !courses
+	// (общая воронка KZ::misc::TeleportToCourse), !end, !lj/!ljarea/!jsarea, !goto. true = игрок
+	// в prac, действие отменено, отказ уже напечатан и залогирован. action — машинная причина
+	// в лог, словарь общий с TimerStop (kz_timer.h): teleport_to_start, teleport_to_end,
+	// jumpstat_area, goto.
+	bool RejectMapTeleport(const char *action);
+
 	// Тик prac-часов. Зовётся из KZPlayer::OnPhysicsSimulatePost рядом с таймерным хуком и
 	// тем же шагом ENGINE_FIXED_TICK_INTERVAL — иначе prac-время нельзя было бы сравнивать
 	// с настоящим.
 	void OnPhysicsSimulatePost();
-	// Вето настоящего таймера на выходе из стартовой зоны (см. events.cpp): для prac это
-	// «свежая попытка» — часы в 0 и пуск.
-	void OnTimerStartBlocked();
 	// Включение ноуклипа в prac: попытка недействительна, часы в 0 и стоп. Висит на переходе
 	// в MOVETYPE_NOCLIP внутри KZNoclipService::HandleNoclip, а не на команде !nc — иначе
 	// ноуклип из меню/бинда правило бы обошёл.

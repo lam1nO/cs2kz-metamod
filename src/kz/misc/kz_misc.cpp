@@ -68,6 +68,13 @@ SCMD(kz_end, SCFL_MAP | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 
+	// В prac по карте двигаемся только по prac-точкам: !end — такой же телепорт мимо них,
+	// как и !r, просто в другой конец курса.
+	if (player->pracService->RejectMapTeleport("teleport_to_end"))
+	{
+		return MRES_SUPERCEDE;
+	}
+
 	// If the player specify a course name, we first check if it's valid or not.
 	if (V_strlen(args->ArgS()) > 0)
 	{
@@ -153,6 +160,15 @@ SCMD(kz_end, SCFL_MAP | SCFL_HELP)
 
 void KZ::misc::TeleportToCourse(KZPlayer *player, const KZCourseDescriptor *course)
 {
+	// Общая воронка всех рестартов: !r/!restart, !course <имя|номер>, !main, !b/!bonus/!b1..!b9
+	// и выбор пункта в меню !courses. В prac рестарта нет ни одним из этих путей (решение
+	// пользователя 07.08) — гард стоит здесь, а не в каждой команде, чтобы новый вызывающий
+	// не появился мимо запрета. Отказ ДО CheckSafeguardRestart и DropFrozenRun ниже: иначе
+	// запрещённая команда всё равно убила бы замороженный ран.
+	if (player->pracService->RejectMapTeleport("teleport_to_start"))
+	{
+		return;
+	}
 	if (!player->timerService->CheckSafeguardRestart())
 	{
 		return;
@@ -280,6 +296,12 @@ SCMD(kz_lj, SCFL_JUMPSTATS | SCFL_MAP | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 
+	// Тот же запрет: телепорт в jumpstat-зону уводит игрока с отрабатываемого элемента.
+	if (player->pracService->RejectMapTeleport("jumpstat_area"))
+	{
+		return MRES_SUPERCEDE;
+	}
+
 	Vector destPos;
 	QAngle destAngles;
 	if (g_pMappingApi->GetJumpstatArea(destPos, destAngles))
@@ -359,6 +381,20 @@ SCMD(jointeam, SCFL_HIDDEN)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	int newTeam = atoi(args->Arg(1));
+	// Смена играющей команды живым игроком (меню выбора команды) — это CommitSuicide + Respawn +
+	// телепорт на первый валидный спаун (см. JoinTeam ниже), то есть обход запрета рестарта в
+	// prac. Уход в наблюдатели не трогаем: prac его переживает by design, а возврат приходит
+	// через LoadPosition на то же место. Сверка с текущей командой — чтобы повторный выбор своей
+	// же команды (JoinTeam для неё no-op) не давал ложного отказа.
+	if (newTeam == CS_TEAM_CT || newTeam == CS_TEAM_T)
+	{
+		const int currentTeam = player->GetController() ? player->GetController()->GetTeam() : CS_TEAM_NONE;
+		if (player->IsAlive() && newTeam != currentTeam && player->pracService->RejectMapTeleport("team_change"))
+		{
+			CloseTeamMenu(player);
+			return MRES_SUPERCEDE;
+		}
+	}
 	if (newTeam == CS_TEAM_SPECTATOR || newTeam == CS_TEAM_NONE)
 	{
 		if (!player->timerService->GetPaused() && !player->timerService->CanPause())
