@@ -125,12 +125,12 @@ void KZPracService::OnStartZoneEndTouch(const KZCourseDescriptor *course)
 	}
 	// Ровно те же два условия, по которым здесь стартовал бы настоящий ран: флаг «коснулся земли
 	// внутри зоны» (его проверяет KZTimerService::StartZoneEndTouch) и бескурсовой гард TimerStart
-	// (CanStartRunHere: жив, не телепортировался, не в перфе, не наноклипился, валидный movetype,
-	// достаточно постоял на земле, на земле или в валидном прыжке). Один список на два вызывающих —
-	// иначе репетиция старта давала бы время там, где ран бы не завёлся. Сюда же попадают и
-	// «выходы», которых игрок не делал: телепорт на prac-точку из зоны и EndTouchAll от ноуклипа
-	// или смерти (KZTriggerService::UpdateTriggerTouchList) — их снимают JustTeleported и
-	// IsAlive/HasValidMoveType внутри гарда.
+	// (CanStartRunHere: жив, таймер не стартовал только что, не телепортировался, не в перфе, не
+	// наноклипился, валидный movetype, достаточно постоял на земле, на земле или в валидном прыжке).
+	// Один список на два вызывающих — иначе репетиция старта давала бы время там, где ран бы не
+	// завёлся. Сюда же попадают и «выходы», которых игрок не делал: телепорт на prac-точку из зоны
+	// и EndTouchAll от ноуклипа или смерти (KZTriggerService::UpdateTriggerTouchList) — их снимают
+	// JustTeleported и IsAlive/HasValidMoveType внутри гарда.
 	if (!this->player->timerService->GetTouchedGroundInStartZone() || !this->player->timerService->CanStartRunHere())
 	{
 		return;
@@ -547,10 +547,10 @@ void KZPracService::SetPoint()
 
 void KZPracService::CapturePoint()
 {
-	this->CapturePointFrom(this->player, this->pracTime, this->pracTimeRunning);
+	this->CapturePointFrom(this->player, this->pracTime, this->pracTimeRunning, this->pracCourseGUID);
 }
 
-void KZPracService::CapturePointFrom(KZPlayer *source, f64 time, bool timeRunning)
+void KZPracService::CapturePointFrom(KZPlayer *source, f64 time, bool timeRunning, u32 courseGUID)
 {
 	CCSPlayerPawn *pawn = source->GetPlayerPawn();
 
@@ -571,6 +571,9 @@ void KZPracService::CapturePointFrom(KZPlayer *source, f64 time, bool timeRunnin
 	// Для своей точки это свои часы, для забранной — часы наблюдаемого (см. StealPointFromSpectated).
 	pt.pracTime = time;
 	pt.pracTimeRunning = timeRunning;
+	// Курс — часть той же попытки, что и часы, поэтому и хранится в точке (см. PracPoint::courseGUID).
+	// Без часов курса нет — тот же инвариант, что в ResetPracTime.
+	pt.courseGUID = timeRunning ? courseGUID : 0;
 
 	this->points.AddToTail(pt);
 	this->currentIndex = this->points.Count() - 1;
@@ -675,7 +678,9 @@ bool KZPracService::StealPointFromSpectated()
 	std::string courseText =
 		targetCourse ? std::string(targetCourse->name) : this->player->languageService->PrepareMessage("Prac - Course Unknown");
 
-	this->CapturePointFrom(target, stolenTime, stolenRunning);
+	// Курс наблюдаемого едет в точку вместе с его временем: !practp на неё продолжает ЕГО попытку,
+	// значит и финиш должен печататься на ЕГО курсе, а не на том, где забравший был до этого.
+	this->CapturePointFrom(target, stolenTime, stolenRunning, targetCourse ? targetCourse->guid : 0);
 	if (stolenRunning)
 	{
 		char timeText[32];
@@ -733,9 +738,12 @@ void KZPracService::DoTpToPoint(const PracPoint &pt)
 	// рождать время из ничего (см. PracPoint).
 	this->pracTime = pt.pracTime;
 	this->pracTimeRunning = pt.pracTimeRunning;
-	// Курс попытки телепорт не меняет: это та же репетиция, просто с другого места. Отдельной
-	// защиты от «EndTouch стартовой зоны сразу после телепорта отсюда» не нужно — его снимает
-	// JustTeleported внутри CanStartRunHere (см. OnStartZoneEndTouch).
+	// Курс — из точки, вместе с часами: это возврат В ТУ попытку, из которой точка снята. Оставить
+	// прежний GUID нельзя — тогда после прыжка на точку другой попытки (или на забранную у
+	// наблюдаемого) финиш «своего» курса молчал бы, а финиш курса-владельца GUID печатал время
+	// чужого забега. Отдельной защиты от «EndTouch стартовой зоны сразу после телепорта отсюда»
+	// не нужно — его снимает JustTeleported внутри CanStartRunHere (см. OnStartZoneEndTouch).
+	this->pracCourseGUID = pt.courseGUID;
 	this->player->checkpointService->PlayTeleportSound();
 }
 

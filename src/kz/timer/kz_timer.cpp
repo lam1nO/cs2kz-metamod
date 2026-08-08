@@ -273,15 +273,21 @@ void KZTimerService::StageZoneStartTouch(const KZCourseDescriptor *course, i32 s
 // условиям (KZPracService::OnStartZoneEndTouch): один список на два вызывающих не разъедется.
 bool KZTimerService::CanStartRunHere()
 {
+	// Пешки может не быть (спектатор): у TimerStart её проверяли вызывающие, а метод стал публичным.
+	CCSPlayerPawn *pawn = this->player->GetPlayerPawn();
+	if (!pawn)
+	{
+		return false;
+	}
 	// clang-format off
-	return this->player->GetPlayerPawn()->IsAlive()
+	return pawn->IsAlive()
 		&& !this->JustStartedTimer()
 		&& !this->player->JustTeleported()
 		&& !this->player->inPerf
 		&& !this->player->noclipService->JustNoclipped()
 		&& this->HasValidMoveType()
 		&& !this->JustLanded()
-		&& ((this->player->GetPlayerPawn()->m_fFlags & FL_ONGROUND) || this->GetValidJump());
+		&& ((pawn->m_fFlags & FL_ONGROUND) || this->GetValidJump());
 	// clang-format on
 }
 
