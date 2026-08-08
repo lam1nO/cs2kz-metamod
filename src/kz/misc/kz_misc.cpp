@@ -340,12 +340,28 @@ SCMD(kz_playercheck, SCFL_PLAYER)
 
 SCMD_LINK(kz_pc, kz_playercheck);
 
+// Спуф «твоя пешка убита» в листенер ОДНОГО клиента — этим закрывается движковое меню
+// выбора команды. Индекс берём из m_hPawn (GetCurrentPawn): у наблюдателя обсервер-пешка
+// лежит именно там (по нему её читает и KZQuietService::UpdateHideState), а m_hPlayerPawn
+// (GetPlayerPawn) у наблюдателя не пустеет — её ждёт уже Hook_ClientActive, ещё до выбора
+// команды, — так что фолбэк на GetObserverPawn() был бы мёртвым кодом.
+// Через указатель берём ТОЛЬКО entindex(): m_hPawn объявлен CHandle<CCSPlayerPawn>, Get()
+// тип не проверяет, и на обсервер-пешке статический тип врёт.
+// Понял ли клиент событие, сервер не видит: не закрывшееся меню — тихий отказ.
 static_function void CloseTeamMenu(KZPlayer *player)
 {
+	CBasePlayerPawn *pawn = player->GetCurrentPawn();
+	if (!pawn)
+	{
+		// Бывает и ложным: у не спавнившегося игрока пешки нет вовсе, но его команда
+		// станет настоящей и меню закроется само.
+		KZ_LOG_WARN(LogChannel::General, "[cyb] team_menu_close_failed steam_id=%llu reason=no_pawn\n", player->GetSteamId64(false));
+		return;
+	}
 	IGameEvent *event = interfaces::pGameEventManager->CreateEvent("entity_killed");
 	if (event)
 	{
-		event->SetInt("entindex_killed", player->GetPlayerPawn()->entindex());
+		event->SetInt("entindex_killed", pawn->entindex());
 		IGameEventListener2 *listener = g_pKZUtils->GetLegacyGameEventListener(player->GetPlayerSlot());
 		if (listener)
 		{
@@ -363,8 +379,22 @@ SCMD(jointeam, SCFL_HIDDEN)
 	{
 		if (!player->timerService->GetPaused() && !player->timerService->CanPause())
 		{
+			// Апстрим: меню закрыли, в наблюдатели не пустили, игроку ни слова — снаружи
+			// это тоже «нажал, и ничего не произошло».
 			CloseTeamMenu(player);
 			return MRES_SUPERCEDE;
+		}
+		// Меню выбора команды клиент закрывает сам, только когда его команда стала
+		// настоящей (T/CT/спектатор). Невидимка наблюдает из CS_TEAM_NONE, и такой
+		// команды у него не будет: ни в конце перехода (сторож уводит в NONE), ни при
+		// повторном нажатии — там переводить уже некого, и запрос вообще ничего не
+		// меняет. Отсюда репорт 07.08 «кнопка Наблюдатели не жмётся». Гейт IsInvisible,
+		// а не IsObserving: сломан и ПЕРВЫЙ переход, где наблюдение ещё не поднято.
+		// Зовём ДО JoinTeam: сразу после ChangeTeam обсервер-пешки может не быть вовсе
+		// (см. SetObserverTeam).
+		if (player->invisibleService->IsInvisible())
+		{
+			CloseTeamMenu(player);
 		}
 	}
 	else if (player->IsAlive() && !player->timerService->CheckSafeguard())
