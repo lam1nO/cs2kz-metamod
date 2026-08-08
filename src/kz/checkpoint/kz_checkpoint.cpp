@@ -6,6 +6,7 @@
 #include "../language/kz_language.h"
 #include "kz/trigger/kz_trigger.h"
 #include "kz/racing/kz_racing.h"
+#include "kz/prac/kz_prac.h"
 #include "utils/utils.h"
 
 static_global class KZOptionServiceEventListener_Checkpoint : public KZOptionServiceEventListener
@@ -421,6 +422,17 @@ void KZCheckpointService::TpHoldPlayerStill()
 
 void KZCheckpointService::SetStartPosition()
 {
+	// В prac своей стартовой позиции быть не может (решение пользователя 07.08): рестарта в
+	// prac нет вовсе, а зафиксировать её игрок мог бы только из ноуклипа — то есть записать в
+	// префы (и на все будущие сессии этой карты) точку внутри геометрии. Гард стоит в сервисе,
+	// а не в команде: сюда же приходит пункт меню !options (kz_option_menu.cpp).
+	if (this->player->pracService->IsInPrac())
+	{
+		this->player->languageService->PrintChat(true, false, "Prac - No Start Position");
+		this->player->PlayErrorSound();
+		KZ_LOG_WARN(LogChannel::Option, "[cyb] ssp_rejected steam_id=%llu reason=in_prac\n", this->player->GetSteamId64(false));
+		return;
+	}
 	// Fail-closed: !ssp делает read-modify-write ВСЕЙ таблицы startPositions. До загрузки
 	// локальных префов эта таблица — пустой дефолт, и SetPreferenceTable пометил бы
 	// startPositions как user-set навсегда, лишив игрока его реальных стартпозиций

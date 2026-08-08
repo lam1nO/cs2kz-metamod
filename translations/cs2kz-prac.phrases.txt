@@ -85,6 +85,20 @@
 		"en"		"{grey}Undo is not available in practice mode."
 		"ru"		"{grey}Отмена телепорта в режиме отработки недоступна."
 	}
+	"Prac - No Teleport"
+	{
+		// Общий отказ всех рестартов и телепортов в prac: !r/!restart/!course/!main/!b*,
+		// меню !courses, !end, !lj/!ljarea/!jsarea, !goto.
+		"en"		"{grey}Practice mode: {default}no restarts and no teleports{grey}. Move with your practice points: {default}!practp{grey}, {default}!pracprev{grey}, {default}!pracnext{grey}. Leave practice with {default}!prac{grey}."
+		"ru"		"{grey}Режим отработки: {default}рестарты и телепорты запрещены{grey}. Перемещайся по своим prac-точкам: {default}!practp{grey}, {default}!pracprev{grey}, {default}!pracnext{grey}. Выйти из отработки — {default}!prac{grey}."
+	}
+	"Prac - No Start Position"
+	{
+		// !ssp (команда и пункт меню !options): в prac рестарта нет, а поставить её игрок мог бы
+		// только из ноуклипа — и она осталась бы в префах на все будущие заходы на карту.
+		"en"		"{grey}A custom start position cannot be set in practice mode — leave practice with {default}!prac{grey} first."
+		"ru"		"{grey}В режиме отработки нельзя задать свою стартовую позицию — сначала выйди из отработки ({default}!prac{grey})."
+	}
 	"Prac - Finish"
 	{
 		// Финиш в prac (12:34.567): только эта строка и только самому игроку — ран не завершается.
@@ -95,8 +109,9 @@
 	"Prac - Time Void Noclip"
 	{
 		// Ноуклип обнуляет prac-часы: за пролетевший насквозь участок времени не даём.
-		"en"		"{grey}Noclip — practice time is {default}void{grey}. Use {default}!practp{grey} or the start zone to start a new attempt."
-		"ru"		"{grey}Ноуклип — prac-время {default}обнулено{grey}. Новая попытка: {default}!practp{grey} или стартовая зона."
+		// Заводят новую попытку только !practp (время точки) и выход из стартовой зоны (с нуля).
+		"en"		"{grey}Noclip — practice time is {default}void{grey}. Pick it up again with {default}!practp{grey}, or start a fresh attempt by leaving the start zone."
+		"ru"		"{grey}Ноуклип — prac-время {default}обнулено{grey}. Вернуть его — телепортом на точку ({default}!practp{grey}), новую попытку — выходом из стартовой зоны."
 	}
 	"Prac - Point Stolen"
 	{

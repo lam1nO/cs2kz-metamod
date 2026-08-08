@@ -13,6 +13,7 @@
 #include "utils/ctimer.h"
 #include "kz/db/kz_db.h"
 #include "kz/language/kz_language.h"
+#include "kz/prac/kz_prac.h"
 #include "utils/simplecmds.h"
 #include "utils/tables.h"
 #include "UtlSortVector.h"
@@ -1002,6 +1003,13 @@ static_function void OnCoursesMenuSelect(MenuHandle menu, int slot, int item)
 	{
 		return;
 	}
+	// Отказ prac — ДО проверки стартпозиции: иначе на курсе без неё игрок получил бы
+	// «No Start Position For Course» вместо настоящей причины, а в логах не было бы отказа.
+	// Сама воронка TeleportToCourse всё равно закрыта — это только про верное сообщение.
+	if (p->pracService->RejectMapTeleport("teleport_to_start"))
+	{
+		return;
+	}
 	const KZCourseDescriptor *course = KZ::course::GetCourseByCourseID(V_StringToInt32(info, -1));
 	if (!course)
 	{
@@ -1117,6 +1125,11 @@ static_function const KZCourseDescriptor *FindBonusCourse(i32 n)
 static_function META_RES GotoBonus(CCSPlayerController *controller, i32 n)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
+	// Как и в меню !courses: причина отказа должна быть prac, а не «у бонуса нет стартпозиции».
+	if (player->pracService->RejectMapTeleport("teleport_to_start"))
+	{
+		return MRES_SUPERCEDE;
+	}
 	const KZCourseDescriptor *course = (n >= 1) ? FindBonusCourse(n) : nullptr;
 	if (!course)
 	{
@@ -1138,6 +1151,11 @@ static_function META_RES GotoBonus(CCSPlayerController *controller, i32 n)
 SCMD(kz_main, SCFL_MAP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
+	// Как и в !b*/меню !courses: сначала prac, потом уже причина «нет стартпозиции».
+	if (player->pracService->RejectMapTeleport("teleport_to_start"))
+	{
+		return MRES_SUPERCEDE;
+	}
 	const KZCourseDescriptor *course = KZ::course::GetFirstCourse();
 	if (!course || !course->hasStartPosition)
 	{

@@ -158,9 +158,14 @@ bool KZTimerService::UnregisterEventListener(KZTimerServiceEventListener *eventL
 	return eventListeners.FindAndRemove(eventListener);
 }
 
-void KZTimerService::StartZoneStartTouch(const KZCourseDescriptor *course)
+void KZTimerService::ResetStartZoneGroundTouch()
 {
 	this->touchedGroundSinceTouchingStartZone = !!(this->player->GetPlayerPawn()->m_fFlags & FL_ONGROUND);
+}
+
+void KZTimerService::StartZoneStartTouch(const KZCourseDescriptor *course)
+{
+	this->ResetStartZoneGroundTouch();
 	this->TimerStop(false, "start_zone");
 }
 
@@ -264,19 +269,32 @@ void KZTimerService::StageZoneStartTouch(const KZCourseDescriptor *course, i32 s
 	}
 }
 
+// Бескурсовая часть гарда TimerStart. Вынесена, чтобы prac-часы заводились ровно по тем же
+// условиям (KZPracService::OnStartZoneEndTouch): один список на два вызывающих не разъедется.
+bool KZTimerService::CanStartRunHere()
+{
+	// Пешки может не быть (спектатор): у TimerStart её проверяли вызывающие, а метод стал публичным.
+	CCSPlayerPawn *pawn = this->player->GetPlayerPawn();
+	if (!pawn)
+	{
+		return false;
+	}
+	// clang-format off
+	return pawn->IsAlive()
+		&& !this->JustStartedTimer()
+		&& !this->player->JustTeleported()
+		&& !this->player->inPerf
+		&& !this->player->noclipService->JustNoclipped()
+		&& this->HasValidMoveType()
+		&& !this->JustLanded()
+		&& ((pawn->m_fFlags & FL_ONGROUND) || this->GetValidJump());
+	// clang-format on
+}
+
 bool KZTimerService::TimerStart(const KZCourseDescriptor *courseDesc, bool playSound)
 {
-	// clang-format off
-	if (!this->player->GetPlayerPawn()->IsAlive()
-		|| this->JustStartedTimer()
-		|| this->player->JustTeleported()
-		|| this->player->inPerf
-		|| this->player->noclipService->JustNoclipped()
-		|| !this->HasValidMoveType()
-		|| this->JustLanded()
-		|| (this->GetTimerRunning() && courseDesc->guid == this->currentCourseGUID)
-		|| (!(this->player->GetPlayerPawn()->m_fFlags & FL_ONGROUND) && !this->GetValidJump()))
-	// clang-format on
+	// Курсовое условие осталось здесь: prac-часы курса не ведут (см. CanStartRunHere).
+	if (!this->CanStartRunHere() || (this->GetTimerRunning() && courseDesc->guid == this->currentCourseGUID))
 	{
 		return false;
 	}

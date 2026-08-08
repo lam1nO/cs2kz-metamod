@@ -5,6 +5,7 @@
 
 #include "../invisible/kz_invisible.h"
 #include "../language/kz_language.h"
+#include "../prac/kz_prac.h"
 #include "../timer/kz_timer.h"
 
 #include <vendor/mm-cs2menus/src/public/ics2menus.h>
@@ -59,6 +60,13 @@ i32 KZGotoService::CollectGotoCandidates(const char *query, KZPlayer **candidate
 bool KZGotoService::GotoPlayer(KZPlayer *targetPlayer)
 {
 	if (!targetPlayer || !targetPlayer->GetController())
+	{
+		return false;
+	}
+
+	// Второй рубеж запрета телепортов в prac: сюда приходит колбэк меню !goto, а меню могло
+	// висеть с момента ДО входа в prac (в prac оно уже не открывается — гард в перегрузке ниже).
+	if (this->player->pracService->RejectMapTeleport("goto"))
 	{
 		return false;
 	}
@@ -181,6 +189,11 @@ static_function void OpenGotoMenu(KZPlayer *player, KZPlayer **candidates, i32 c
 
 bool KZGotoService::GotoPlayer(const char *playerNamePart)
 {
+	// Запрет prac — до резолва и до меню, по той же причине, что и чек таймера ниже.
+	if (this->player->pracService->RejectMapTeleport("goto"))
+	{
+		return false;
+	}
 	// Чек таймера до резолва — как раньше, чтобы не дразнить меню при беге.
 	if (this->player->timerService->GetTimerRunning())
 	{
