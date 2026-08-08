@@ -40,7 +40,8 @@ CI `cs2kz-build.yml` монорепо собирает и льёт артефа�
 - **Режим KZT** (`src/kz/mode/kz_mode_kzt.*`): порт KZTimer — prestrafe по
   tick-counter velMod, gokz perf-модель (кап 380), перф-окно 1/128, высота
   бхопа через legacy jump. Jumpstats: prespeed-gated lowpre-тиры для
-  BH/MBH/JB/WJ; **LJ wrecker = 284.0 — решение пользователя, не менять**.
+  BH/MBH/JB/WJ; **LJ wrecker = 282.0 — решение пользователя 09.08.2026 (было 284.0),
+  менять только по его слову**.
 - **Эмиттер** (`src/kz/timer/cyb_emitter.*`): `kz.run_finished` в ingest
   платформы по окончании таймера. Конвенция course: 0 = main, N = bonus N.
 - **HUD**: единый `!hud` (Стандартный/MHUD/Выкл, преф `hudType`), per-element тумблеры с
