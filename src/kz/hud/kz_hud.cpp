@@ -577,7 +577,7 @@ bool KZHUDService::GetTimerParts(std::string &outTime, bool &outRunning)
 // вживую. Все в одном месте: иерархия правится одной строкой после живого теста.
 // ВАЖНО: заголовочный кегль правится НЕ здесь, а через kz_hud_panel_headline ниже —
 // KZ_HUD_FS_HEADLINE лишь его нулевой (дефолтный) вариант.
-#define KZ_HUD_FS_HEADLINE  "fontSize-l"  // таймер и скорость — одним кеглем (по фото кибершока)
+#define KZ_HUD_FS_HEADLINE  "fontSize-l"  // нулевой вариант ОБЕИХ заголовочных строк (по фото кибершока); разводит их kz_hud_panel_headline 3
 #define KZ_HUD_FS_SECONDARY "fontSize-sm" // PB/WR, CP/TP, престрейф, Stage, координаты — вторичная инфа
 #define KZ_HUD_FS_KEYS      "fontSize-m"  // клавиши (оба варианта раскладки: 2 ряда / одна строка). Был l — уменьшен на ступень по просьбе тестера; заодно меньше риск обрезки низа панели
 #define KZ_HUD_FS_MINOR     "fontSize-s"  // метка стиля — наименее заметное
@@ -593,13 +593,39 @@ bool KZHUDService::GetTimerParts(std::string &outTime, bool &outRunning)
 // (неизвестный класс = дефолтный кегль панели, а он крупный).
 // Перебирать кегль пересборкой форка — час на итерацию (тот же довод, что у
 // kz_hud_bottom_pad_*), поэтому подбирается по rcon на канарейке.
-// 0 (деф.) — как было; 1 — кегль клавиш (fontSize-m); 2 — кегль вторичной инфы (fontSize-sm).
+// 0 (деф.) — как было; 1 — обе кеглем клавиш (fontSize-m); 2 — обе кеглем вторичной инфы;
+// 3 — ТОЛЬКО таймер мельче (fontSize-m), скорость остаётся крупной. Вариант 3 повторяет кегль
+// ТАЙМЕРА, каким он был до 86b2357 (24.07 14:46, там таймер стал -l). Двух рядов клавиш тогда
+// ещё не было (они появились через 37 минут в b0a9f4e), так что сочетание «таймер -m + два
+// ряда» не существовало никогда и НЕ измерялось: влезет ли — вопрос живого прогона.
 static CConVar<int> kz_hud_panel_headline("kz_hud_panel_headline", FCVAR_NONE,
-										  "Font size class of the HUD panel headline rows (timer/speed): 0 = large, 1 = medium, 2 = small.", 0);
+										  "HUD panel headline rows font: 0 = both large, 1 = both medium, 2 = both small, 3 = timer medium only.", 0);
 
-// Класс кегля заголовочных строк. Таймер и скорость идут одним кеглем by design (см. defines
-// выше); если их когда-нибудь разведут, эту функцию надо разделить на две.
-static_function const char *HeadlineFontClass()
+// Таймер и скорость ОДНОЙ строкой вместо двух. Единственный размен, который не трогает кегли
+// вовсе: убирает целую строку самого дорогого класса. Тот же приём уже применён к показаниям
+// под меню (см. FormatBottomText) и по той же причине. Цена — длинная строка у ЖИВОГО игрока
+// (PRO + время + режим + скорость + престрейф) может не влезть по ширине и перенестись, а
+// перенос съедает ту же строку обратно; у спектатора реплея строка короткая.
+static CConVar<bool> kz_hud_panel_merge_head("kz_hud_panel_merge_head", FCVAR_NONE, "Draw the HUD panel timer and speed on one line instead of two.",
+											 false);
+
+// Класс кегля строки таймера и строки скорости. Разведены (а не одна функция), потому что
+// вариант 3 мельчит только таймер.
+static_function const char *TimerFontClass()
+{
+	switch (kz_hud_panel_headline.Get())
+	{
+		case 1:
+		case 3:
+			return KZ_HUD_FS_KEYS;
+		case 2:
+			return KZ_HUD_FS_SECONDARY;
+		default:
+			return KZ_HUD_FS_HEADLINE;
+	}
+}
+
+static_function const char *SpeedFontClass()
 {
 	switch (kz_hud_panel_headline.Get())
 	{
@@ -607,7 +633,7 @@ static_function const char *HeadlineFontClass()
 			return KZ_HUD_FS_KEYS;
 		case 2:
 			return KZ_HUD_FS_SECONDARY;
-		default:
+		default: // 0 и 3 — скорость остаётся главным акцентом
 			return KZ_HUD_FS_HEADLINE;
 	}
 }
@@ -671,13 +697,18 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 	// такого элемента не рисует, дублировать нечего, поэтому тумблер действует всегда.
 	bool showCpTp = kz_hud_cptp_in_panel.Get() && this->IsMHUDCpTpEnabled();
 
-	// Типографика (иерархия): таймер и скорость — HeadlineFontClass() (cvar kz_hud_panel_headline,
-	// дефолт KZ_HUD_FS_HEADLINE), вторичная инфа (PB/WR, CP/TP, престрейф, Stage, координаты) —
-	// KZ_HUD_FS_SECONDARY, клавиши — KZ_HUD_FS_KEYS, метка стиля — KZ_HUD_FS_MINOR
-	// (значения классов — в #define рядом с палитрой выше).
+	// Типографика (иерархия): таймер — TimerFontClass(), скорость — SpeedFontClass() (оба через
+	// cvar kz_hud_panel_headline, дефолт KZ_HUD_FS_HEADLINE), вторичная инфа (PB/WR, CP/TP,
+	// престрейф, Stage, координаты) — KZ_HUD_FS_SECONDARY, клавиши — KZ_HUD_FS_KEYS, метка стиля —
+	// KZ_HUD_FS_MINOR (значения классов — в #define рядом с палитрой выше).
 	// Классы вкладываем В color-теги: <font class='...'><font color='...'>X</font></font>.
 	// Это прогрессивное улучшение — если движок не подхватит класс, размер молча дефолтный,
 	// но цвета и раскладка остаются корректными (класс лишь меняет кегль, не текст/цвет).
+
+	// Заголовочные строки копим, а не отправляем сразу: при kz_hud_panel_merge_head они уходят
+	// ОДНОЙ строкой (экономит строку самого дорогого класса, не трогая кегли).
+	const bool mergeHead = kz_hud_panel_merge_head.Get();
+	std::string headTimer, headSpeed;
 
 	// --- Строка 1: 00:07.96 CKZ Стиль — время: зелёное когда идёт/пауза, белое 00:00.00
 	//        когда стоп/idle; рядом метка режима и метка стиля MUTED (s, только активный
@@ -787,9 +818,11 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 			// Паддинг в том же кегле, что правая часть (SECONDARY), чтобы ширины сопоставлялись.
 			// PRO/NUB/PRAC — реальный контент слева, поэтому из бюджета паддинга вычитаем его ширину
 			// (leftVisChars): [pad][PRO/NUB/PRAC][ время ][режим][стиль] — метка зеркалит режим вокруг центра времени.
+			// Слитая заголовочная строка центруется целиком (время + скорость), и добивать её
+			// слева под центр ВРЕМЕНИ нечем и незачем — паддинг там только сдвигал бы всё вправо.
 			const int kLeftPadNbspPerChar = 2; // nbsp на 1 «символ» правой части; крутить после теста
 			std::string leftPad;
-			int padBudget = rightVisChars - leftVisChars;
+			int padBudget = (mergeHead && showSpeed) ? 0 : rightVisChars - leftVisChars;
 			if (padBudget > 0)
 			{
 				std::string fs;
@@ -809,8 +842,8 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 			// само по себе читается, скобки только шумели. Симметричные nbsp внутри них ушли
 			// вместе с ними: центровку они не держали (её держит leftPad, посчитанный выше).
 			V_snprintf(buf, sizeof(buf), "%s%s<font class='%s'><font color='%s'>%s</font></font>%s%s", leftPad.c_str(), proNubTag.c_str(),
-					   HeadlineFontClass(), timerColor, tTime.c_str(), modeTag.c_str(), styleTag.c_str());
-			addLine(buf);
+					   TimerFontClass(), timerColor, tTime.c_str(), modeTag.c_str(), styleTag.c_str());
+			headTimer = buf;
 		}
 	}
 
@@ -861,9 +894,29 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 				takeoff += "&#160;<font class='" KZ_HUD_FS_SECONDARY "'><font color='" KZ_HUD_C_CJ "'>C</font></font>";
 			}
 		}
-		V_snprintf(buf, sizeof(buf), "<font class='%s'><font color='" KZ_HUD_C_CYAN "'>%d</font></font>%s", HeadlineFontClass(), speed,
-				   takeoff.c_str());
-		addLine(buf);
+		V_snprintf(buf, sizeof(buf), "<font class='%s'><font color='" KZ_HUD_C_CYAN "'>%d</font></font>%s", SpeedFontClass(), speed, takeoff.c_str());
+		headSpeed = buf;
+	}
+
+	// --- Заголовок панели: две строки (деф.) либо одна слитая (kz_hud_panel_merge_head).
+	//        Слияние — единственный размен, не трогающий кегли: панель ограничена по ВЫСОТЕ, и
+	//        строка самого дорогого класса стоит дороже всего остального. Разделитель — пара nbsp
+	//        (обычные пробелы схлопываются). Слияние осмысленно только когда обе части есть:
+	//        с одной включённой это та же одна строка. ---
+	if (mergeHead && !headTimer.empty() && !headSpeed.empty())
+	{
+		addLine(headTimer + "&#160;&#160;" + headSpeed);
+	}
+	else
+	{
+		if (!headTimer.empty())
+		{
+			addLine(headTimer);
+		}
+		if (!headSpeed.empty())
+		{
+			addLine(headSpeed);
+		}
 	}
 
 	// Активный курс наблюдаемого (в забеге / grace после стопа). Строки 3-4 привязаны к нему:
@@ -1067,8 +1120,91 @@ void KZHUDService::PrintPanelDiagnostics()
 	// что уходит в DrawPanels; текущий hudType/стиль на замер не влияет намеренно, вопрос
 	// «что не влезло» стоит только про неё.
 	std::string html = this->BuildVersionCHud(dataSource, false, false, false, true, this->player->languageService->GetLanguage());
-	utils::PrintConsole(controller, "[KZ] HUD panel: %d lines, %d bytes (kz_hud_panel_headline %d)\n", CountHtmlLines(html), (int)html.size(),
-						kz_hud_panel_headline.Get());
+	utils::PrintConsole(controller, "[KZ] HUD panel: %d lines, %d bytes (headline %d, merge_head %d, cptp_in_panel %d)\n", CountHtmlLines(html),
+						(int)html.size(), kz_hud_panel_headline.Get(), kz_hud_panel_merge_head.Get() ? 1 : 0, kz_hud_cptp_in_panel.Get() ? 1 : 0);
+	// Перечень строк с их кеглем: без него число строк не отвечает на «КАКАЯ строка лишняя».
+	// Кегль строки — САМЫЙ КРУПНЫЙ класс из всех, что в ней встретились, а не первый: высоту
+	// ряда движок берёт по самому большому шрифту в нём. Первый класс врал бы ровно на строке
+	// таймера живого игрока — она начинается с fontSize-sm (leftPad/PRO-NUB), а её высоту
+	// задаёт fontSize-l самого времени.
+	int index = 0;
+	for (size_t pos = 0; !html.empty() && pos <= html.size();)
+	{
+		size_t br = html.find("<br>", pos);
+		std::string line = html.substr(pos, (br == std::string::npos ? html.size() : br) - pos);
+		index++;
+		// Класс строки — максимум по «крупности» среди всех class='...' в ней (см. выше).
+		// Неизвестное имя класса считаем самым крупным: движок откатит его на дефолтный
+		// кегль панели, а он крупный — ошибаться тут надо в сторону «дороже», не «дешевле».
+		static const char *const kRank[] = {KZ_HUD_FS_MINOR, KZ_HUD_FS_SECONDARY, KZ_HUD_FS_KEYS, KZ_HUD_FS_HEADLINE};
+		char cls[32] = "default";
+		int bestRank = -1;
+		for (size_t cp = line.find("class='"); cp != std::string::npos; cp = line.find("class='", cp + 7))
+		{
+			char name[32];
+			size_t end = line.find('\'', cp + 7);
+			// Гейт по размеру ПРИЁМНИКА (name), не cls: буферы одинаковы сегодня, но разъедутся
+			// молча. continue, а не break: бросив разбор на одном подозрительном вхождении, мы
+			// потеряли бы крупный класс дальше по строке и отрапортовали её дешевле, чем есть.
+			if (end == std::string::npos || end - (cp + 7) >= sizeof(name))
+			{
+				continue;
+			}
+			V_strncpy(name, line.c_str() + cp + 7, (int)(end - (cp + 7)) + 1);
+			int rank = (int)KZ_ARRAYSIZE(kRank); // не из таблицы → считаем крупнее всех известных
+			for (int r = 0; r < (int)KZ_ARRAYSIZE(kRank); r++)
+			{
+				if (KZ_STREQ(name, kRank[r]))
+				{
+					rank = r;
+					break;
+				}
+			}
+			if (rank > bestRank)
+			{
+				bestRank = rank;
+				V_strncpy(cls, name, sizeof(cls));
+			}
+		}
+		// «Видимая длина» — ЗНАКИ, не ширина: тег считаем за 0, HTML-сущность за 1. Две
+		// оговорки, без которых число обманет. (1) `&#160;` у́же буквы (≈0.5–0.6, см. leftPad
+		// выше), поэтому у строки с паддингом длина завышена. (2) Порог переноса зависит от
+		// кегля: 35 колонок намерены для fontSize-sm (kHtmlWrapChars в cs2menus), для -l он
+		// заметно меньше. Число годится для сравнения строк ОДНОГО класса между собой, а не
+		// для вывода «влезает / не влезает».
+		int visible = 0;
+		for (size_t i = 0; i < line.size(); i++)
+		{
+			if (line[i] == '<')
+			{
+				i = line.find('>', i);
+				if (i == std::string::npos)
+				{
+					break;
+				}
+			}
+			else if (line[i] == '&')
+			{
+				size_t semi = line.find(';', i);
+				if (semi == std::string::npos)
+				{
+					break;
+				}
+				i = semi;
+				visible++;
+			}
+			else
+			{
+				visible++;
+			}
+		}
+		utils::PrintConsole(controller, "[KZ]   line %d: %-12s %d visible chars\n", index, cls, visible);
+		if (br == std::string::npos)
+		{
+			break;
+		}
+		pos = br + 4;
+	}
 }
 
 // Можно ли ПРЯМО СЕЙЧАС звать метод cs2menus 005 (SetSlotStatus): указатель есть И получен он

@@ -1666,7 +1666,7 @@ void KZHUDService::OpenHUDMenu()
 //   kz_hud speed / prespeed / timer / keys / cptp / outline → toggle per-element
 //   kz_hud <element> offset|scale|color|...  → тонкая настройка
 //   kz_hud font <lato|verdana>               → шрифт particle-MHUD
-//   kz_hud panel                             → диагностика: строк/байт в HTML-панели
+//   kz_hud panel                             → диагностика панели: строки, кегли, байты
 //
 //   kz_mhud                                  → алиас kz_hud (обратная совместимость)
 
