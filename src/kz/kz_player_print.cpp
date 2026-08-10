@@ -136,7 +136,12 @@ void KZPlayer::PrintHTMLCentre(bool addPrefix, bool includeSpectators, const cha
 
 	if (!includeSpectators)
 	{
-		utils::PrintHTMLCentre(this->GetController(), buffer.Get());
+		// "%s", а не buffer форматом: текст здесь уже собран (FormatV выше), а
+		// utils::PrintHTMLCentre — тоже вариадик и прогнал бы его через FormatV ВТОРОЙ раз
+		// без аргументов. Любой `%` в собранном тексте (переводимая фраза, имя стиля, ник)
+		// съел бы хвост панели, а `%s` прочитал бы мусорный указатель. Ветка ниже
+		// (includeSpectators) второго прохода не делает — расхождение убрано.
+		utils::PrintHTMLCentre(this->GetController(), "%s", buffer.Get());
 		return;
 	}
 

@@ -10,6 +10,7 @@
 #include "kz/language/kz_language.h"
 #include "kz/checkpoint/kz_checkpoint.h"
 #include "kz/prac/kz_prac.h"
+#include "kz/spec/kz_spec.h"
 #include "kz/replays/kz_replaysystem.h"
 #include "kz/style/kz_style.h"            // GetStyleName для лейбла стиля (деф. Normal) в строке 1
 #include "kz/mode/kz_mode.h"              // KZModeService::GetModeShortName для метки режима в строке 1
@@ -569,15 +570,46 @@ bool KZHUDService::GetTimerParts(std::string &outTime, bool &outRunning)
 // #define KZ_HUD_BRACKET_* и вариант с уголковыми ⌈ ⌋ удалены вместе с ними.
 
 // Размеры шрифта строк стандартного HTML-худа (класс движка внутри color-тега, см. ниже).
-// Явная иерархия по важности: скорость > таймер > вторичная инфа > клавиши/стиль. ВНИМАНИЕ:
-// имена классов — гипотезы (движок кибершока вероятно знает fontSize-l/m/sm/s); если класс
-// неизвестен, размер молча откатится на дефолт — проверить вживую. Все четыре в одном месте:
-// иерархия правится одной строкой после живого теста.
-#define KZ_HUD_FS_SPEED     "fontSize-l"  // скорость — главный акцент
-#define KZ_HUD_FS_TIMER     "fontSize-l"  // таймер — крупный, одного кегля со скоростью (по фото кибершока)
+// Явная иерархия по важности: заголовочные строки (таймер и скорость) > вторичная инфа >
+// клавиши/метка стиля. ВНИМАНИЕ: имена классов — гипотезы (движок кибершока вероятно знает
+// fontSize-l/m/sm/s); если класс неизвестен, размер молча откатится на дефолт — проверить
+// вживую. Все в одном месте: иерархия правится одной строкой после живого теста.
+// ВАЖНО: заголовочный кегль правится НЕ здесь, а через kz_hud_panel_headline ниже —
+// KZ_HUD_FS_HEADLINE лишь его нулевой (дефолтный) вариант.
+#define KZ_HUD_FS_HEADLINE  "fontSize-l"  // таймер и скорость — одним кеглем (по фото кибершока)
 #define KZ_HUD_FS_SECONDARY "fontSize-sm" // PB/WR, CP/TP, престрейф, Stage, координаты — вторичная инфа
 #define KZ_HUD_FS_KEYS      "fontSize-m"  // клавиши (оба варианта раскладки: 2 ряда / одна строка). Был l — уменьшен на ступень по просьбе тестера; заодно меньше риск обрезки низа панели
 #define KZ_HUD_FS_MINOR     "fontSize-s"  // метка стиля — наименее заметное
+
+// Кегль ДВУХ ЗАГОЛОВОЧНЫХ строк панели (таймер и скорость) — cvar, а не константа.
+// Причина: ёмкость центральной HTML-панели задана клиентом в ПИКСЕЛЯХ, а не в строках, и
+// хвост, не поместившийся в рамку, движок молча не рисует. Замеры той же панели живьём:
+// 9 строк кеглем fontSize-sm (vendor/mm-cs2menus .../menu_manager.cpp, kHtmlPanelLineBudget) и
+// «≈9 экранных строк» у GG1 (gameops/plugins/CLAUDE.md) — причём GG1 рисует пункты кеглем
+// fontSize-m и число влезающих строк ему пришлось пересчитывать: бюджет тратится КЕГЛЕМ.
+// Эти две строки — самые дорогие в панели, и класс fontSize-l вдобавок под вопросом: cs2menus
+// пользуется только s/sm/m, знает ли Panorama клиента класс -l, из наших исходников не следует
+// (неизвестный класс = дефолтный кегль панели, а он крупный).
+// Перебирать кегль пересборкой форка — час на итерацию (тот же довод, что у
+// kz_hud_bottom_pad_*), поэтому подбирается по rcon на канарейке.
+// 0 (деф.) — как было; 1 — кегль клавиш (fontSize-m); 2 — кегль вторичной инфы (fontSize-sm).
+static CConVar<int> kz_hud_panel_headline("kz_hud_panel_headline", FCVAR_NONE,
+										  "Font size class of the HUD panel headline rows (timer/speed): 0 = large, 1 = medium, 2 = small.", 0);
+
+// Класс кегля заголовочных строк. Таймер и скорость идут одним кеглем by design (см. defines
+// выше); если их когда-нибудь разведут, эту функцию надо разделить на две.
+static_function const char *HeadlineFontClass()
+{
+	switch (kz_hud_panel_headline.Get())
+	{
+		case 1:
+			return KZ_HUD_FS_KEYS;
+		case 2:
+			return KZ_HUD_FS_SECONDARY;
+		default:
+			return KZ_HUD_FS_HEADLINE;
+	}
+}
 
 // Метка режима наблюдаемого ЗАГЛАВНЫМИ (CKZ/KZT/VNL): короткое имя через
 // CybReplayCommon::MapMode (тот же маппинг/вайтлист, что у PB/WR-фетча в kz_timer.cpp).
@@ -630,8 +662,7 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 	bool showSpeed = masterMode ? (this->IsMHUDSpeedEnabled() && !suppressSpeed) : !suppressSpeed;
 	bool showKeys = compact ? false : (masterMode ? (this->IsMHUDKeysEnabled() && !suppressKeys) : !suppressKeys);
 	bool showExtra = !compact;
-	// showpos — тумблер получателя (this->player), данные наблюдаемого. Считаем заранее: нужен
-	// и для координат, и для решения о зазоре нижней группы (клавиши/CP-TP/showpos).
+	// showpos — тумблер получателя (this->player), данные наблюдаемого.
 	bool showPos = !compact && this->player->optionService->GetPreferenceBool("showPos", false);
 	// CP/TP — нижняя строка панели (гейт hudCpTp получателя). Компакт её НЕ убирает: у элемента
 	// свой тумблер, и в прежней нижней панели он тоже переживал компакт. Без ветки masterMode
@@ -639,9 +670,10 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 	// такого элемента не рисует, дублировать нечего, поэтому тумблер действует всегда.
 	bool showCpTp = kz_hud_cptp_in_panel.Get() && this->IsMHUDCpTpEnabled();
 
-	// Типографика (иерархия): скорость — KZ_HUD_FS_SPEED, таймер — KZ_HUD_FS_TIMER, вторичная инфа
-	// (PB/WR, CP/TP, престрейф, Stage, координаты) — KZ_HUD_FS_SECONDARY, клавиши и метка стиля —
-	// KZ_HUD_FS_MINOR (значения классов — в #define рядом с палитрой выше, правятся одной строкой).
+	// Типографика (иерархия): таймер и скорость — HeadlineFontClass() (cvar kz_hud_panel_headline,
+	// дефолт KZ_HUD_FS_HEADLINE), вторичная инфа (PB/WR, CP/TP, престрейф, Stage, координаты) —
+	// KZ_HUD_FS_SECONDARY, клавиши — KZ_HUD_FS_KEYS, метка стиля — KZ_HUD_FS_MINOR
+	// (значения классов — в #define рядом с палитрой выше).
 	// Классы вкладываем В color-теги: <font class='...'><font color='...'>X</font></font>.
 	// Это прогрессивное улучшение — если движок не подхватит класс, размер молча дефолтный,
 	// но цвета и раскладка остаются корректными (класс лишь меняет кегль, не текст/цвет).
@@ -775,8 +807,8 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 			// Квадратные скобки вокруг времени убраны (решение пользователя 25.07) — время
 			// само по себе читается, скобки только шумели. Симметричные nbsp внутри них ушли
 			// вместе с ними: центровку они не держали (её держит leftPad, посчитанный выше).
-			V_snprintf(buf, sizeof(buf), "%s%s<font class='" KZ_HUD_FS_TIMER "'><font color='%s'>%s</font></font>%s%s", leftPad.c_str(),
-					   proNubTag.c_str(), timerColor, tTime.c_str(), modeTag.c_str(), styleTag.c_str());
+			V_snprintf(buf, sizeof(buf), "%s%s<font class='%s'><font color='%s'>%s</font></font>%s%s", leftPad.c_str(), proNubTag.c_str(),
+					   HeadlineFontClass(), timerColor, tTime.c_str(), modeTag.c_str(), styleTag.c_str());
 			addLine(buf);
 		}
 	}
@@ -828,7 +860,8 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 				takeoff += "&#160;<font class='" KZ_HUD_FS_SECONDARY "'><font color='" KZ_HUD_C_CJ "'>C</font></font>";
 			}
 		}
-		V_snprintf(buf, sizeof(buf), "<font class='" KZ_HUD_FS_SPEED "'><font color='" KZ_HUD_C_CYAN "'>%d</font></font>%s", speed, takeoff.c_str());
+		V_snprintf(buf, sizeof(buf), "<font class='%s'><font color='" KZ_HUD_C_CYAN "'>%d</font></font>%s", HeadlineFontClass(), speed,
+				   takeoff.c_str());
 		addLine(buf);
 	}
 
@@ -916,17 +949,12 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		addLine(buf);
 	}
 
-	// --- Зазор между верхней группой (таймер/скорость/Stage/PB-WR) и нижней (клавиши/
-	//        showpos): маленькая пустая строка в мелком кегле (FS_MINOR), а не полная строка —
-	//        органичный отступ, не зияние; экономит высоту под крупные клавиши (l). Только если
-	//        обе группы непусты (иначе висячий <br>). Высота center-HTML ограничена (обрезка низа). ---
-	bool lowerGroup = showKeys || showPos || showCpTp;
-	if (lowerGroup && !html.empty())
-	{
-		// <br> закрывает строку PB/WR; nbsp мелким кеглем = невысокая строка-зазор; addLine ниже
-		// добавит свой <br> перед клавишами. Класс не подхватится → откат на полную строку (не хуже).
-		html += "<br><font class='" KZ_HUD_FS_MINOR "'>&#160;</font>";
-	}
+	// --- Зазора между верхней группой (таймер/скорость/Stage/PB-WR) и нижней (клавиши/CP-TP/
+	//        showpos) БОЛЬШЕ НЕТ (10.08). Панель ограничена по ВЫСОТЕ, и хвост за рамкой движок
+	//        молча не рисует (репорт: на реплее видно «C W J», а «A S D» и CP/TP нет). Зазор был
+	//        пустой строкой: она занимала строку целиком — пусть и мелкого кегля, то есть
+	//        дешевле строки клавиш, но платить пикселями за пустоту в переполненной панели
+	//        нельзя. Вернуть его можно только когда будет чем платить (kz_hud_panel_headline). ---
 
 	// --- Клавиши. Раскладка — по тумблеру hudKeysTwoRows (Элементы → «Клавиши в 2 строки»):
 	//        ВКЛ (деф.) — 2 ряда клавиатурой, каждый ряд отдельным addLine (движок центрирует
@@ -1009,6 +1037,37 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 	}
 
 	return html;
+}
+
+// `kz_hud panel` / `!hud panel` — см. объявление в kz_hud.h. Живёт здесь, а не рядом с
+// PrintHUDSummary: тут и сборщик панели, и CountHtmlLines (второй счётчик строк разъехался бы
+// с реальным при смене разделителя — диагностика, которая врёт, хуже её отсутствия).
+void KZHUDService::PrintPanelDiagnostics()
+{
+	auto *controller = this->player->GetController();
+	if (!controller)
+	{
+		return;
+	}
+	// Источник данных — как в DrawPanels: наблюдаемый при спектейте, иначе сам игрок.
+	KZPlayer *dataSource = this->player->specService->GetSpectatedPlayer();
+	if (!dataSource)
+	{
+		dataSource = this->player;
+	}
+	// Пешка обязательна: сборщик читает её флаги/скорость напрямую. Команду, в отличие от
+	// тактового пути, можно позвать мёртвым и без цели наблюдения — там пешки нет.
+	if (!dataSource->GetPlayerPawn())
+	{
+		utils::PrintConsole(controller, "[KZ] HUD panel: no data source (dead and not spectating)\n");
+		return;
+	}
+	// Меряем ИМЕННО кибершоковскую панель (Обновлённый стиль) и с мастер-тумблерами — ровно то,
+	// что уходит в DrawPanels; текущий hudType/стиль на замер не влияет намеренно, вопрос
+	// «что не влезло» стоит только про неё.
+	std::string html = this->BuildVersionCHud(dataSource, false, false, false, true, this->player->languageService->GetLanguage());
+	utils::PrintConsole(controller, "[KZ] HUD panel: %d lines, %d bytes (kz_hud_panel_headline %d)\n", CountHtmlLines(html), (int)html.size(),
+						kz_hud_panel_headline.Get());
 }
 
 // Можно ли ПРЯМО СЕЙЧАС звать метод cs2menus 005 (SetSlotStatus): указатель есть И получен он
@@ -1612,7 +1671,11 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 
 	if (!htmlText.empty())
 	{
-		target->PrintHTMLCentre(false, false, htmlText.c_str());
+		// "%s", а не текст форматом: KZPlayer::PrintHTMLCentre прогоняет аргумент через
+		// FormatV, а utils::PrintHTMLCentre — ВТОРОЙ раз. Первый же `%` в переводимой фразе
+		// (CP/TP, showpos) или в имени стиля съел бы хвост панели — тот самый симптом,
+		// который тут и чинят. UpdateMinimalHud так и делал, этот путь — нет.
+		target->PrintHTMLCentre(false, false, "%s", htmlText.c_str());
 	}
 
 	// --- Нижняя панель (обычный centre-канал): строка CP/TP — ТОЛЬКО при kz_hud_cptp_in_panel 0.

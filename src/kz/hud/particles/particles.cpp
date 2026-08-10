@@ -1665,6 +1665,8 @@ void KZHUDService::OpenHUDMenu()
 //   kz_hud                                   → интерактивное меню (фолбэк: сводка)
 //   kz_hud speed / prespeed / timer / keys / cptp / outline → toggle per-element
 //   kz_hud <element> offset|scale|color|...  → тонкая настройка
+//   kz_hud font <lato|verdana>               → шрифт particle-MHUD
+//   kz_hud panel                             → диагностика: строк/байт в HTML-панели
 //
 //   kz_mhud                                  → алиас kz_hud (обратная совместимость)
 
@@ -1907,6 +1909,13 @@ static META_RES HandleHUDSubcmd(KZPlayer *player, const CCommand *args)
 		// Смена шрифта меняет .vpcf-пути → пересоздать particle'ы.
 		player->hudService->DestroyAllParticles();
 		player->languageService->PrintChat(true, false, "MHUD - Font Set", requested);
+	}
+	else if (KZ_STREQI(element, "panel"))
+	{
+		// Диагностика вместимости центральной HTML-панели, см. KZHUDService::PrintPanelDiagnostics.
+		// Отдельной субкомандой, а не в сводке: сводка печатается ТОЛЬКО когда cs2menus не
+		// загружен (OpenHUDMenu), то есть на живом сервере она недостижима.
+		player->hudService->PrintPanelDiagnostics();
 	}
 	else
 	{
