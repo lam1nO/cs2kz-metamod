@@ -651,7 +651,7 @@ static_function const char *SpeedFontClass()
 // Метка режима наблюдаемого ЗАГЛАВНЫМИ (CKZ/KZT/VNL): короткое имя через
 // CybReplayCommon::MapMode (тот же маппинг/вайтлист, что у PB/WR-фетча в kz_timer.cpp).
 // Пустая строка = кастомный режим сверх этих трёх (метку не показываем) или нет modeService.
-// Используется строкой 1 кибершоковского худа; реплей-бот отсеивается вызывающим.
+// Используется строкой 1 кибершоковского худа, В ТОМ ЧИСЛЕ для реплей-бота (см. вызывающего).
 static_function void GetModeTagUpper(KZPlayer *dataSource, char *out, i32 size)
 {
 	out[0] = '\0';
@@ -764,13 +764,23 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 				}
 			}
 			// Метка режима — рядом с временем, ЗАГЛАВНЫМИ (CKZ/KZT/VNL), как на кибершоке «[..] CKZ»
-			// (GetModeTagUpper; пусто = кастомный режим → метки нет). Реплей-бот пропускаем
-			// (своего режима как у игрока нет).
+			// (GetModeTagUpper; пусто = кастомный режим → метки нет).
+			// РЕПЛЕЙ-БОТ ТОЖЕ ПОКАЗЫВАЕТ РЕЖИМ (10.08). Прежний гейт `!isReplay` стоял на
+			// предположении «своего режима у бота нет» — оно неверно: плейбек применяет боту
+			// ЗАПИСАННЫЙ режим забега (`RPEVENT_MODE_CHANGE` → `SwitchToMode`, replays/events.cpp),
+			// то есть `modeService` у него ровно от того рана, который смотрят. Без метки зритель
+			// реплея не видел, в каком режиме забег, — это была потеря информации, а не экономия.
+			// Метка есть С ПЕРВОГО ТИКА: рекордер всегда кладёт базовое событие режима на
+			// serverTick 0 (recording/recorders.cpp, синтез из earliestMode), а перемотка назад
+			// переигрывает события с нуля. Краевой случай: если записанный режим на этом сервере
+			// не загружен, SwitchToMode тихо возвращает false и бот остаётся на режиме сервера —
+			// метка тогда покажет режим СЕРВЕРА, а не забега.
+			// PRO/NUB и метка стиля у реплея намеренно остаются под `!isReplay`: данные для них
+			// у бота тоже есть, но это отдельное решение о составе худа, а не часть этого фикса.
 			// Видимая ширина правой части («&#160;&#160;режим» + «&#160;&#160;стиль») в «символах» —
 			// нужна для левого паддинга, чтобы ВРЕМЯ встало по центру экрана (см. leftPad ниже).
 			int rightVisChars = 0;
 			std::string modeTag;
-			if (!isReplay)
 			{
 				char up[8];
 				GetModeTagUpper(dataSource, up, sizeof(up));
@@ -1128,10 +1138,16 @@ static_function void DumpPanel(CBaseEntity *controller, const char *tag, const s
 		std::string line = html.substr(pos, (br == std::string::npos ? html.size() : br) - pos);
 		index++;
 
-		// Кегль строки — САМЫЙ КРУПНЫЙ класс из встретившихся, а не первый: высоту ряда движок
-		// берёт по самому большому шрифту в нём, а строка таймера живого игрока НАЧИНАЕТСЯ с
-		// fontSize-sm (leftPad/PRO-NUB) при fontSize-l самого времени.
+		// Печатаем ОБА кегля: ПЕРВЫЙ класс в строке и МАКСИМАЛЬНЫЙ. Это не избыточность —
+		// разбор 10.08 показал, что различает случаи именно ПЕРВЫЙ (строка таймера живого
+		// игрока начинается с fontSize-sm от leftPad/PRO-NUB, а у реплей-бота сразу с
+		// fontSize-l), а печать одного лишь максимума этот механизм и скрывала: по максимуму
+		// обе строки одинаковы. «По первому» — единственная из рассмотренных моделей,
+		// совместимая со всеми живыми точками; физический механизм не установлен, поэтому в
+		// дампе должны быть ОБА числа, а не выбранное нами.
 		char cls[32] = "default";
+		char firstCls[32] = "default";
+		bool haveFirst = false;
 		int bestRank = -1;
 		for (size_t cp = line.find("class='"); cp != std::string::npos; cp = line.find("class='", cp + 7))
 		{
@@ -1142,9 +1158,22 @@ static_function void DumpPanel(CBaseEntity *controller, const char *tag, const s
 			// потеряли бы крупный класс дальше по строке и отрапортовали её дешевле, чем есть.
 			if (end == std::string::npos || end - (cp + 7) >= sizeof(name))
 			{
+				// Битое/переросшее вхождение. Помечаем его В ДАМПЕ, а не пропускаем молча:
+				// «первый класс» — сейчас главная улика, и подменить его вторым значило бы
+				// соврать ровно в том случае, ради которого дамп и писался.
+				if (!haveFirst)
+				{
+					haveFirst = true;
+					V_strncpy(firstCls, "<битый>", sizeof(firstCls));
+				}
 				continue;
 			}
 			V_strncpy(name, line.c_str() + cp + 7, (int)(end - (cp + 7)) + 1);
+			if (!haveFirst)
+			{
+				haveFirst = true;
+				V_strncpy(firstCls, name, sizeof(firstCls));
+			}
 			int rank = (int)KZ_ARRAYSIZE(kRank);
 			for (int r = 0; r < (int)KZ_ARRAYSIZE(kRank); r++)
 			{
@@ -1213,8 +1242,8 @@ static_function void DumpPanel(CBaseEntity *controller, const char *tag, const s
 		// Длина в БАЙТАХ — самый дешёвый дискриминатор при побайтовом сравнении двух дампов:
 		// хвостовые пробелы в консоли не видны, а «строка кончилась» от «кусок кончился» без
 		// счётчика не отличить.
-		utils::PrintConsole(controller, "[KZ]   line %d: %-12s %d bytes, %d visible chars, <font>=%d </font>=%d%s\n", index, cls, (int)line.size(),
-							visible, opened, closed, opened == closed ? "" : "  <<< НЕБАЛАНС");
+		utils::PrintConsole(controller, "[KZ]   line %d: first=%-12s max=%-12s %d bytes, %d visible chars, <font>=%d </font>=%d%s\n", index, firstCls,
+							cls, (int)line.size(), visible, opened, closed, opened == closed ? "" : "  <<< НЕБАЛАНС");
 
 		// Сырой текст кусками: буфер PrintConsole невелик, а нужны именно байты. Границу куска
 		// подрезаем назад с продолжающих байтов UTF-8 (0b10xxxxxx) — рвать кодовую точку нельзя:
