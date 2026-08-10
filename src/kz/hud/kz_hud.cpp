@@ -12,6 +12,7 @@
 #include "kz/prac/kz_prac.h"
 #include "kz/spec/kz_spec.h"
 #include "kz/replays/kz_replaysystem.h"
+#include "kz/replays/menu.h"              // IsReplayControlsMenuOpen — показания под меню только для !rpmenu
 #include "kz/style/kz_style.h"            // GetStyleName для лейбла стиля (деф. Normal) в строке 1
 #include "kz/mode/kz_mode.h"              // KZModeService::GetModeShortName для метки режима в строке 1
 #include "kz/replays/cyb_replay_common.h" // MapMode — тот же маппинг режима, что у PB/WR-фетча
@@ -1613,21 +1614,27 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	}
 
 	// Yield the center channel while a cs2menus HTML menu is open.
-	// Живому игроку (player == target) худ молчит целиком, как раньше. Спектатору вместо
-	// глушения шлём plain-text худ наблюдаемого (скорость/время/клавиши) машинерией нижней
-	// панели — дедуп/heartbeat штатные, закрытие меню меняет слепок (menuOpen) и низ
-	// перерисовывается/стирается сам. Высоту меню больше не измеряем: отступ под меню
-	// отключён (см. ComputeBottomState), а GetItemCount/GetActiveMenu брали мьютекс cs2menus
-	// каждый тик на каждого спектатора.
+	// ГЛУШЕНИЕ центр-канала — под ЛЮБЫМ Html-меню и для всех: HTML-панель одна на игрока, и
+	// пока она принадлежит меню, худ обязан уступить (иначе тексты лезут друг на друга).
+	// ПОКАЗАНИЯ (время/скорость/клавиши строкой в панели меню) — только спектатору и только
+	// под !rpmenu (решение пользователя 10.08): под !options/!maps/!mhud/!style они игроку не
+	// нужны, а строка отнимает пункт у самого меню. Под прочими меню поведение как до 5d6d02c —
+	// низ просто гасится. Признак — ХЭНДЛ нашего меню (IsReplayControlsMenuOpen), не заголовок:
+	// заголовок переводится и правится, сравнение по нему сломалось бы молча.
+	// GetActiveMenu берёт мьютекс cs2menus, поэтому зовётся ТОЛЬКО внутри этой ветки, то есть
+	// лишь когда меню реально открыто, — тактовой цены на каждого спектатора он не добавляет.
+	// Высоту меню не измеряем: отступ под меню отключён (см. ComputeBottomState).
 	if (g_pMenus && g_pMenus->GetActiveMenuType(target->GetPlayerSlot().Get()) == MenuType::Html)
 	{
 		cfg->ClearMinimalHud();
-		if (player != target)
+		if (player != target && KZ::replaysystem::menu::IsReplayControlsMenuOpen(target->GetPlayerSlot().Get()))
 		{
 			cfg->UpdateBottomPanel(player, /*menuOpen=*/true);
 		}
 		else
 		{
+			// В т.ч. переход «был !rpmenu → открыли другое меню»: клир гасит ИМЕННО тот приёмник,
+			// в который писали (строку меню), иначе показания остались бы висеть в чужой панели.
 			cfg->ClearBottomPanel();
 		}
 		return;

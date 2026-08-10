@@ -39,6 +39,18 @@ namespace
 		const char *lang = player->languageService->GetLanguage();
 		return KZLanguageService::PrepareMessageWithLang(lang, "Replay Menu - Seek", step);
 	}
+
+	// Хэндл нашего !rpmenu на слот — один на слот, пересоздаётся при повторном открытии
+	// (паттерн kz_option_menu). Живёт в области файла, а не внутри функции: по нему худ
+	// отличает !rpmenu от любого другого cs2menus-меню (см. IsReplayControlsMenuOpen).
+	// Сравнение по хэндлу корректно и на устаревшем значении: cs2menus раздаёт хэндлы
+	// монотонным счётчиком (`m_nextHandle++`, menu_manager.cpp) и НЕ переиспользует
+	// освобождённые id — чужое меню не может получить наш номер, а закрытое/уничтоженное
+	// наше просто перестаёт быть активным. Оговорка: счётчик живёт в объекте менеджера, и
+	// `meta unload/load` cs2menus начинает нумерацию заново, а этот массив её переживает.
+	// Практически это перекрыто тем, что после выгрузки cs2menus висячим становится сам
+	// `g_pMenus` (общая проблема форка, не этого места).
+	MenuHandle s_rpMenu[MAXPLAYERS + 1] = {};
 } // namespace
 
 // A/D по регулируемой строке перемотки: знак delta задаёт направление (D = +шаг
@@ -113,7 +125,6 @@ void KZ::replaysystem::menu::OpenReplayControlsMenu(KZPlayer *player)
 	}
 
 	// Один хэндл на слот — пересоздаём при повторном вызове (паттерн kz_option_menu).
-	static MenuHandle s_rpMenu[MAXPLAYERS + 1] = {};
 	if (s_rpMenu[slot] != kInvalidMenuHandle)
 	{
 		g_pMenus->DestroyMenu(s_rpMenu[slot]);
@@ -150,6 +161,20 @@ void KZ::replaysystem::menu::OpenReplayControlsMenu(KZPlayer *player)
 
 	s_rpMenu[slot] = m;
 	g_pMenus->DisplayMenu(m, slot, 0);
+}
+
+bool KZ::replaysystem::menu::IsReplayControlsMenuOpen(int slot)
+{
+	if (g_pMenus == nullptr || slot < 0 || slot > MAXPLAYERS)
+	{
+		return false;
+	}
+	MenuHandle mine = s_rpMenu[slot];
+	if (mine == kInvalidMenuHandle)
+	{
+		return false;
+	}
+	return g_pMenus->GetActiveMenu(slot) == mine;
 }
 
 SCMD(kz_rpmenu, SCFL_REPLAY | SCFL_HELP)
