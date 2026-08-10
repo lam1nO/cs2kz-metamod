@@ -162,6 +162,10 @@ void KZHUDService::Reset()
 	this->minimalCentreActive = false;
 	// Кэши отправки нижней панели и минимал-худа (слепки/тексты/heartbeat).
 	this->ResetBottomPanelCache();
+	// Слепок отправленной панели — улика конкретного игрока: новому в этом слоте она чужая,
+	// а `kz_hud panel` показал бы её как свою.
+	this->lastPanelSent.clear();
+	this->lastPanelSentTime = {};
 	this->DestroyAllParticles();
 }
 
@@ -608,6 +612,12 @@ static CConVar<int> kz_hud_panel_headline("kz_hud_panel_headline", FCVAR_NONE,
 // перенос съедает ту же строку обратно; у спектатора реплея строка короткая.
 static CConVar<bool> kz_hud_panel_merge_head("kz_hud_panel_merge_head", FCVAR_NONE, "Draw the HUD panel timer and speed on one line instead of two.",
 											 false);
+
+// Запоминать текст панели, РЕАЛЬНО ушедший каждому получателю (см. lastPanelSent в kz_hud.h).
+// Только под этим cvar'ом: иначе это копия строки на каждого получателя каждый такт. Включается
+// по rcon на время разбора, `kz_hud panel` тогда печатает и отправленное, и пересобранное.
+static CConVar<bool> kz_hud_panel_trace("kz_hud_panel_trace", FCVAR_NONE, "Remember the last HUD panel text actually sent, for `kz_hud panel`.",
+										false);
 
 // Класс кегля строки таймера и строки скорости. Разведены (а не одна функция), потому что
 // вариант 3 мельчит только таймер.
@@ -1096,47 +1106,31 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 // `kz_hud panel` / `!hud panel` — см. объявление в kz_hud.h. Живёт здесь, а не рядом с
 // PrintHUDSummary: тут и сборщик панели, и CountHtmlLines (второй счётчик строк разъехался бы
 // с реальным при смене разделителя — диагностика, которая врёт, хуже её отсутствия).
-void KZHUDService::PrintPanelDiagnostics()
+// Разбор ОДНОЙ панели в консоль получателя: построчно кегль, видимая длина, длина в байтах,
+// баланс тегов и сырой текст кусками. Отдельная функция, потому что печатать надо ДВЕ панели —
+// реально отправленную (kz_hud_panel_trace) и пересобранную сейчас: расхождение между ними
+// делит пространство поиска пополам («на проводе было другое» против «клиент не нарисовал»).
+static_function void DumpPanel(CBaseEntity *controller, const char *tag, const std::string &html)
 {
-	auto *controller = this->player->GetController();
-	if (!controller)
+	utils::PrintConsole(controller, "[KZ]  --- %s: %d lines, %d bytes\n", tag, CountHtmlLines(html), (int)html.size());
+	if (html.empty())
 	{
 		return;
 	}
-	// Источник данных — как в DrawPanels: наблюдаемый при спектейте, иначе сам игрок.
-	KZPlayer *dataSource = this->player->specService->GetSpectatedPlayer();
-	if (!dataSource)
-	{
-		dataSource = this->player;
-	}
-	// Пешка обязательна: сборщик читает её флаги/скорость напрямую. Команду, в отличие от
-	// тактового пути, можно позвать мёртвым и без цели наблюдения — там пешки нет.
-	if (!dataSource->GetPlayerPawn())
-	{
-		utils::PrintConsole(controller, "[KZ] HUD panel: no data source (dead and not spectating)\n");
-		return;
-	}
-	// Меряем ИМЕННО кибершоковскую панель (Обновлённый стиль) и с мастер-тумблерами — ровно то,
-	// что уходит в DrawPanels; текущий hudType/стиль на замер не влияет намеренно, вопрос
-	// «что не влезло» стоит только про неё.
-	std::string html = this->BuildVersionCHud(dataSource, false, false, false, true, this->player->languageService->GetLanguage());
-	utils::PrintConsole(controller, "[KZ] HUD panel: %d lines, %d bytes (headline %d, merge_head %d, cptp_in_panel %d)\n", CountHtmlLines(html),
-						(int)html.size(), kz_hud_panel_headline.Get(), kz_hud_panel_merge_head.Get() ? 1 : 0, kz_hud_cptp_in_panel.Get() ? 1 : 0);
-	// Перечень строк с их кеглем: без него число строк не отвечает на «КАКАЯ строка лишняя».
-	// Кегль строки — САМЫЙ КРУПНЫЙ класс из всех, что в ней встретились, а не первый: высоту
-	// ряда движок берёт по самому большому шрифту в нём. Первый класс врал бы ровно на строке
-	// таймера живого игрока — она начинается с fontSize-sm (leftPad/PRO-NUB), а её высоту
-	// задаёт fontSize-l самого времени.
+	// Порядок «крупности» классов; неизвестное имя считаем крупнее всех известных — движок
+	// откатит его на дефолтный кегль панели, а он крупный, и ошибаться тут надо в сторону
+	// «дороже», не «дешевле».
+	static const char *const kRank[] = {KZ_HUD_FS_MINOR, KZ_HUD_FS_SECONDARY, KZ_HUD_FS_KEYS, KZ_HUD_FS_HEADLINE};
 	int index = 0;
-	for (size_t pos = 0; !html.empty() && pos <= html.size();)
+	for (size_t pos = 0; pos <= html.size();)
 	{
 		size_t br = html.find("<br>", pos);
 		std::string line = html.substr(pos, (br == std::string::npos ? html.size() : br) - pos);
 		index++;
-		// Класс строки — максимум по «крупности» среди всех class='...' в ней (см. выше).
-		// Неизвестное имя класса считаем самым крупным: движок откатит его на дефолтный
-		// кегль панели, а он крупный — ошибаться тут надо в сторону «дороже», не «дешевле».
-		static const char *const kRank[] = {KZ_HUD_FS_MINOR, KZ_HUD_FS_SECONDARY, KZ_HUD_FS_KEYS, KZ_HUD_FS_HEADLINE};
+
+		// Кегль строки — САМЫЙ КРУПНЫЙ класс из встретившихся, а не первый: высоту ряда движок
+		// берёт по самому большому шрифту в нём, а строка таймера живого игрока НАЧИНАЕТСЯ с
+		// fontSize-sm (leftPad/PRO-NUB) при fontSize-l самого времени.
 		char cls[32] = "default";
 		int bestRank = -1;
 		for (size_t cp = line.find("class='"); cp != std::string::npos; cp = line.find("class='", cp + 7))
@@ -1151,7 +1145,7 @@ void KZHUDService::PrintPanelDiagnostics()
 				continue;
 			}
 			V_strncpy(name, line.c_str() + cp + 7, (int)(end - (cp + 7)) + 1);
-			int rank = (int)KZ_ARRAYSIZE(kRank); // не из таблицы → считаем крупнее всех известных
+			int rank = (int)KZ_ARRAYSIZE(kRank);
 			for (int r = 0; r < (int)KZ_ARRAYSIZE(kRank); r++)
 			{
 				if (KZ_STREQ(name, kRank[r]))
@@ -1166,6 +1160,7 @@ void KZHUDService::PrintPanelDiagnostics()
 				V_strncpy(cls, name, sizeof(cls));
 			}
 		}
+
 		// «Видимая длина» — ЗНАКИ, не ширина: тег считаем за 0, HTML-сущность за 1. Две
 		// оговорки, без которых число обманет. (1) `&#160;` у́же буквы (≈0.5–0.6, см. leftPad
 		// выше), поэтому у строки с паддингом длина завышена. (2) Порог переноса зависит от
@@ -1193,18 +1188,118 @@ void KZHUDService::PrintPanelDiagnostics()
 				i = semi;
 				visible++;
 			}
-			else
+			else if (((unsigned char)line[i] & 0xC0) != 0x80)
 			{
+				// Продолжающие байты UTF-8 (0b10xxxxxx) — не отдельные знаки. Без этой
+				// проверки китайский перевод CP/TP считался бы втрое длиннее, чем есть,
+				// а на этом числе строится рассуждение про порог переноса.
 				visible++;
 			}
 		}
-		utils::PrintConsole(controller, "[KZ]   line %d: %-12s %d visible chars\n", index, cls, visible);
+
+		// Баланс тегов строки: незакрытый <font> проглатывает всё, что идёт дальше, и симптом
+		// «пропал хвост» неотличим от нехватки высоты. Считаем вхождения буквально —
+		// '</font>' не содержит подстроки '<font', так что счётчики независимы. Баланс ПО
+		// СТРОКЕ, а не по всей панели: каждый addLine самодостаточен, теги через <br> не тянутся.
+		int opened = 0, closed = 0;
+		for (size_t t = line.find("<font"); t != std::string::npos; t = line.find("<font", t + 5))
+		{
+			opened++;
+		}
+		for (size_t t = line.find("</font>"); t != std::string::npos; t = line.find("</font>", t + 7))
+		{
+			closed++;
+		}
+		// Длина в БАЙТАХ — самый дешёвый дискриминатор при побайтовом сравнении двух дампов:
+		// хвостовые пробелы в консоли не видны, а «строка кончилась» от «кусок кончился» без
+		// счётчика не отличить.
+		utils::PrintConsole(controller, "[KZ]   line %d: %-12s %d bytes, %d visible chars, <font>=%d </font>=%d%s\n", index, cls, (int)line.size(),
+							visible, opened, closed, opened == closed ? "" : "  <<< НЕБАЛАНС");
+
+		// Сырой текст кусками: буфер PrintConsole невелик, а нужны именно байты. Границу куска
+		// подрезаем назад с продолжающих байтов UTF-8 (0b10xxxxxx) — рвать кодовую точку нельзя:
+		// битая последовательность уедет в protobuf-поле и испортит улику ровно в локализованном
+		// случае (CP/TP есть и в китайском переводе).
+		const size_t kChunk = 160;
+		for (size_t off = 0, part = 1; off < line.size(); part++)
+		{
+			size_t len = (std::min)(kChunk, line.size() - off);
+			while (len > 1 && ((unsigned char)line[off + len] & 0xC0) == 0x80)
+			{
+				len--;
+			}
+			utils::PrintConsole(controller, "[KZ]   raw %d.%d: %s\n", index, (int)part, line.substr(off, len).c_str());
+			off += len;
+		}
+
 		if (br == std::string::npos)
 		{
 			break;
 		}
 		pos = br + 4;
 	}
+}
+
+void KZHUDService::PrintPanelDiagnostics()
+{
+	auto *controller = this->player->GetController();
+	if (!controller)
+	{
+		return;
+	}
+	// Источник данных — как в DrawPanels: наблюдаемый при спектейте, иначе сам игрок.
+	KZPlayer *dataSource = this->player->specService->GetSpectatedPlayer();
+	if (!dataSource)
+	{
+		dataSource = this->player;
+	}
+	// Вид цели печатаем явно: за живым игроком и за реплей-ботом панель ведёт себя по-разному
+	// (репорт 10.08), и без метки цели два дампа не сопоставить. Обычный фейк-клиент (не
+	// реплей-бот) попадёт в «live player» — для этой задачи безразлично.
+	const char *kind = (dataSource == this->player) ? "self" : (KZ::replaysystem::IsReplayBot(dataSource) ? "replay bot" : "live player");
+	// Состояние ВСЕХ тумблеров, влияющих на состав панели: без него числа строк из разных
+	// прогонов несопоставимы (в одном showpos включён, в другом нет — и «пропавшая последняя
+	// строка» это разные строки).
+	utils::PrintConsole(controller,
+						"[KZ] HUD panel: target=%s | cvars headline=%d merge_head=%d cptp_in_panel=%d trace=%d | prefs hudTimer=%d hudSpeed=%d "
+						"hudKeys=%d twoRows=%d hudPbWr=%d hudCpTp=%d showPos=%d compact=%d\n",
+						kind, kz_hud_panel_headline.Get(), kz_hud_panel_merge_head.Get() ? 1 : 0, kz_hud_cptp_in_panel.Get() ? 1 : 0,
+						kz_hud_panel_trace.Get() ? 1 : 0, this->IsMHUDTimerEnabled() ? 1 : 0, this->IsMHUDSpeedEnabled() ? 1 : 0,
+						this->IsMHUDKeysEnabled() ? 1 : 0, this->IsMHUDKeysTwoRowsEnabled() ? 1 : 0, this->IsMHUDPbWrEnabled() ? 1 : 0,
+						this->IsMHUDCpTpEnabled() ? 1 : 0, this->player->optionService->GetPreferenceBool("showPos", false) ? 1 : 0,
+						this->IsCompactPanel() ? 1 : 0);
+
+	// Отправленное: то, что реально ушло в канал последним. Доступно только при включённом
+	// kz_hud_panel_trace — иначе поле пусто, и об этом надо сказать, а не молчать.
+	if (!this->lastPanelSent.empty())
+	{
+		f64 age = g_pKZUtils->GetServerGlobals()->curtime - this->lastPanelSentTime;
+		utils::PrintConsole(controller, "[KZ]  (отправлено %.2f с назад)\n", age);
+		DumpPanel(controller, "SENT", this->lastPanelSent);
+	}
+	else if (!kz_hud_panel_trace.Get())
+	{
+		utils::PrintConsole(controller, "[KZ]  SENT: слепок не собирается — включите kz_hud_panel_trace 1 и повторите\n");
+	}
+	else
+	{
+		// Трейс включён, а слепка нет — панель этому получателю сейчас не отправляется вовсе.
+		// Штатных причин четыре, все с ранним return в DrawPanels: hudType Off, минимал-стиль,
+		// открытое Html-меню, particle-путь живого владельца. Валить это на cvar — врать.
+		utils::PrintConsole(controller, "[KZ]  SENT: пусто — панель не отправляется (hudType Off / минимал / открытое меню / particle-MHUD)\n");
+	}
+
+	// Пересобранное сейчас. Пешка обязательна: сборщик читает её флаги/скорость напрямую, а
+	// команду, в отличие от тактового пути, можно позвать мёртвым и без цели наблюдения.
+	// Меряем ИМЕННО кибершоковскую панель (Обновлённый стиль) с мастер-тумблерами — ровно то,
+	// что собирает DrawPanels; текущий hudType/стиль на замер намеренно не влияет.
+	if (!dataSource->GetPlayerPawn())
+	{
+		utils::PrintConsole(controller, "[KZ]  BUILT: нет источника данных (мёртв и никого не спектит)\n");
+		return;
+	}
+	std::string html = this->BuildVersionCHud(dataSource, false, false, false, true, this->player->languageService->GetLanguage());
+	DumpPanel(controller, "BUILT", html);
 }
 
 // Можно ли ПРЯМО СЕЙЧАС звать метод cs2menus 005 (SetSlotStatus): указатель есть И получен он
@@ -1819,6 +1914,13 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 		// (CP/TP, showpos) или в имени стиля съел бы хвост панели — тот самый симптом,
 		// который тут и чинят. UpdateMinimalHud так и делал, этот путь — нет.
 		target->PrintHTMLCentre(false, false, "%s", htmlText.c_str());
+		// Слепок отправленного — под cvar'ом, см. kz_hud_panel_trace. Пишем ПОСЛЕ отправки и
+		// ровно ту строку, что ушла (после трима выше), иначе улика не про провод.
+		if (kz_hud_panel_trace.Get())
+		{
+			cfg->lastPanelSent = htmlText;
+			cfg->lastPanelSentTime = g_pKZUtils->GetServerGlobals()->curtime;
+		}
 	}
 
 	// --- Нижняя панель (обычный centre-канал): строка CP/TP — ТОЛЬКО при kz_hud_cptp_in_panel 0.
