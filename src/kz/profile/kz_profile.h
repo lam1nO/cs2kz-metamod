@@ -21,6 +21,7 @@ public:
 		desiredMode[0] = '\0';
 		timeToNextRatingRefresh = 0.0f;
 		currentPoints = -1;
+		clantagOverrideApplied = false;
 	}
 
 	char clanTag[32] {};
@@ -30,6 +31,10 @@ public:
 	f32 timeToNextRatingRefresh = 0.0f;
 	// Платформенные NUB-очки текущего режима; -1 = не загружено (тэг без звания).
 	i32 currentPoints = -1;
+	// Персональный тег уже проставлен в этой жизни игрока. Нужен, потому что штатно тег
+	// перерисовывается только по ответу платформы об очках, а он у такого игрока не
+	// обязателен (сеть легла, включены стили — запрос очков вообще не уходит).
+	bool clantagOverrideApplied = false;
 
 	void RequestRating();
 	bool CanDisplayRank();

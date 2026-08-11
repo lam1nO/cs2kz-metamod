@@ -93,6 +93,34 @@ CConVar<bool> kz_profile_rating_badge_enabled("kz_profile_rating_badge_enabled",
 // эмит тогда молча пропускается по FindConCommand (см. EmitGG1Bridge).
 CConVar<bool> kz_gg1_bridge("kz_gg1_bridge", FCVAR_NONE, "Whether to broadcast player mode to GG1 via cyb_gg1_mode server command.", true);
 
+// Персональные клан-теги: steam_id64 → фиксированная строка вместо рангового «[РЕЖИМ Ранг]».
+// Таблица в коде, а не в конфиге, сознательно: на платформе нет ни ручки, ни поля под
+// персональный тег, а ради пары строк заводить их дороже, чем пересобрать форк.
+// Появится третий-четвёртый — переносить в конфиг профиля, не расширять таблицу бесконечно.
+static_global const struct
+{
+	u64 steamID64;
+	const char *tag;
+} s_clantagOverrides[] = {
+	{76561199702618240ull, "KZ Boss"}, // lam1n
+};
+
+static_function const char *CybClantagOverride(u64 steamID64)
+{
+	if (steamID64 == 0)
+	{
+		return nullptr;
+	}
+	for (const auto &entry : s_clantagOverrides)
+	{
+		if (entry.steamID64 == steamID64)
+		{
+			return entry.tag;
+		}
+	}
+	return nullptr;
+}
+
 // Есть ли неразосланное «цифры рангов изменились». Взводится ТОЛЬКО реальной записью в
 // контроллер (UpdateCompetitiveRank), гасится рассылкой.
 static_global bool s_rankRevealPending = false;
@@ -413,6 +441,16 @@ void KZProfileService::UpdateClantag()
 		}
 		return;
 	}
+	// Персональный тег перекрывает ранговый: он не зависит ни от очков, ни от режима, ни от
+	// стилей — то есть переживает все три события, по которым тег перерисовывается.
+	// Проверка стоит ДО GetCurrentRankIndex: иначе очередной ответ платформы затирал бы тег.
+	const char *personal = CybClantagOverride(this->player->GetSteamId64());
+	if (personal)
+	{
+		V_snprintf(this->clanTag, sizeof(this->clanTag), "%s", personal);
+		this->SetClantag(this->clanTag);
+		return;
+	}
 	i32 rank = this->GetCurrentRankIndex();
 	if (rank >= 0)
 	{
@@ -433,6 +471,13 @@ void KZProfileService::UpdateClantag()
 
 void KZProfileService::OnPhysicsSimulatePost()
 {
+	// Персональный тег не ждёт очков: ставим, как только контроллер игрока готов его принять
+	// (UpdateClantag сам отсеет ещё не подключённого — тогда пробуем на следующем тике).
+	if (!this->clantagOverrideApplied && CybClantagOverride(this->player->GetSteamId64()))
+	{
+		this->UpdateClantag();
+		this->clantagOverrideApplied = this->clanTag[0] != '\0';
+	}
 	if (g_pKZUtils->GetServerGlobals()->realtime >= this->timeToNextRatingRefresh)
 	{
 		this->RequestRating();
