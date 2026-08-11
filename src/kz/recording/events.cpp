@@ -320,17 +320,15 @@ void KZRecordingService::OnJumpFinish(Jump *jump)
 	}
 	KZ_LOG_DEBUG(LogChannel::Recording, "Jump finish\n");
 	this->EnsureCircularRecorderInitialized();
-	RpJumpStats rpJump;
+	RpJumpStats rpJump = {};
 	RpJumpStats::FromJump(rpJump, jump);
 	this->circularRecording->jumps.push_back(rpJump);
 
-	// Only write the jump if it's ownage or better to save storage for run replays.
-	if (jump->IsValid() && jump->GetJumpPlayer()->modeService->GetDistanceTier(jump->jumpType, jump->GetDistance(), jump->GetTakeoffSpeed()) >= DistanceTier_Ownage)
-	{
-		this->PushToRecorders(rpJump, RecorderType::Run);
-	}
-	// Add to all active jump recorders.
-	this->PushToRecorders(rpJump, RecorderType::Jump);
+	// Add to all active run and jump recorders. Порог тира и слим-формат — внутри
+	// Recorder::PushData: у каждого рекордера свои, зафиксированные при его создании.
+	// У jump-рекордеров порог DistanceTier_None и полный формат, то есть для них ничего
+	// не изменилось.
+	this->PushToRecorders(rpJump, RecorderType::Both);
 	// Create a new jump recorder if the jump is good enough.
 	if (jump->IsValid() && jump->GetOffset() >= -JS_EPSILON
 		&& jump->GetJumpPlayer()->modeService->GetDistanceTier(jump->jumpType, jump->GetDistance(), jump->GetTakeoffSpeed()) >= kz_replay_recording_min_jump_tier.Get())

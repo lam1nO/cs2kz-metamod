@@ -88,6 +88,14 @@ struct Recorder
 	std::vector<std::pair<i32, EconInfo>> weaponTable;
 
 	std::vector<RpJumpStats> jumps;
+	// Как этот рекордер принимает прыжки. Оба поля фиксируются в конструкторе, единственный
+	// источник решения — PushData: один реплей пишется по одному порогу, даже если серверный
+	// конфиг перечитают посреди рана.
+	// minJumpTier: прыжки ниже этого тира не пишем (DistanceTier_None = без фильтра).
+	// slimJumps: писать прыжок без aaCalls (см. PushData).
+	DistanceTier minJumpTier = DistanceTier_None;
+	bool slimJumps = false;
+
 	std::vector<CmdData> cmdData;
 
 	std::vector<u8> cmdSubtickCounts;
@@ -145,6 +153,22 @@ struct Recorder
 		}
 		else if constexpr (std::is_same<T, RpJumpStats>::value)
 		{
+			if (data.overall.distanceTier < minJumpTier)
+			{
+				return;
+			}
+			if (slimJumps)
+			{
+				// Слим-формат: aaCalls — самая толстая часть прыжка (~10 КБ), а для показа
+				// джампстата наблюдателю бота хватает overall + strafes. Собираем на месте,
+				// без копии всего прыжка. Пропадает только ASCII-график клавиш/мыши, и он
+				// опускается сам: BuildConsoleStrafeMouseGraph вернёт false на нуле вызовов.
+				jumps.emplace_back();
+				RpJumpStats &slim = jumps.back();
+				slim.overall = data.overall;
+				slim.strafes = data.strafes;
+				return;
+			}
 			jumps.push_back(data);
 		}
 		else if constexpr (std::is_same<T, CmdData>::value)
@@ -252,6 +276,14 @@ struct RunRecorder : public Recorder
 {
 	RunRecorder(KZPlayer *player);
 	void End(f32 time, i32 numTeleports);
+
+	// Порог тира прыжка для записи в реплей рана — серверная опция runReplayMinJumpTier.
+	// Дефолт 0 (DistanceTier_None) = без фильтра по тиру: наблюдатель бота видит те же
+	// джампстаты, что при спектейте живого игрока (раньше порог был Ownage, то есть видно
+	// было только Ownage+). Значения >= 1 отсекают прыжки по тиру, а тир завязан на дистанцию:
+	// падения и Other дают None, короткий LJ в ckz тоже, — такие прыжки в файл не попадут.
+	// Мусор отсеян до этого места в OnJumpFinish (невалидные, failstat, стили, airtime < 0.5).
+	static DistanceTier GetMinJumpTier();
 };
 
 struct JumpRecorder : public Recorder

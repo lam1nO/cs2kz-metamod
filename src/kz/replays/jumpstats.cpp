@@ -120,6 +120,10 @@ void RpJumpStats::ToJump(Jump &out, RpJumpStats *js)
 	out.adjustedLandingOrigin.y = js->overall.adjustedLandingOrigin[1];
 	out.adjustedLandingOrigin.z = js->overall.adjustedLandingOrigin[2];
 	out.jumpType = static_cast<JumpType>(js->overall.jumpType);
+	// originalJumpType в реплее не хранится, но GetReportJumpType() его читает (ветки failstat/
+	// jsAlways) — без присваивания это чтение неинициализированной памяти и индекс за границей
+	// jumpTypeStr. Реплеи невалидных прыжков не пишем, так что копия jumpType здесь корректна.
+	out.originalJumpType = out.jumpType;
 	out.totalDistance = js->overall.totalDistance;
 	out.currentMaxSpeed = js->overall.maxSpeed;
 	out.currentMaxHeight = js->overall.maxHeight;
@@ -129,6 +133,9 @@ void RpJumpStats::ToJump(Jump &out, RpJumpStats *js)
 	out.release = js->overall.release;
 	out.block = js->overall.block;
 	out.edge = js->overall.edge;
+	// landingEdge пишется в файл, но раньше не восстанавливался — у наблюдателя бота
+	// в консоли не было строки Landing Edge, хотя данные в реплее есть.
+	out.landingEdge = js->overall.landingEdge;
 	V_strncpy(out.invalidateReason, js->overall.invalidateReason, sizeof(out.invalidateReason));
 
 	// Clear existing strafes just in case

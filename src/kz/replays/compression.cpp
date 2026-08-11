@@ -820,14 +820,25 @@ bool KZ::replaysystem::compression::ReadJumpsCompressed(const char *&cursor, con
 		memcpy(&numStrafes, readPtr, sizeof(numStrafes));
 		readPtr += sizeof(numStrafes);
 
-		jump.strafes.resize(numStrafes);
-		memcpy(jump.strafes.data(), readPtr, sizeof(RpJumpStats::StrafeData) * numStrafes);
-		readPtr += sizeof(RpJumpStats::StrafeData) * numStrafes;
+		if (numStrafes > 0)
+		{
+			jump.strafes.resize(numStrafes);
+			memcpy(jump.strafes.data(), readPtr, sizeof(RpJumpStats::StrafeData) * numStrafes);
+			readPtr += sizeof(RpJumpStats::StrafeData) * numStrafes;
+		}
 
 		// Read AA calls
 		i32 numAACalls;
 		memcpy(&numAACalls, readPtr, sizeof(numAACalls));
 		readPtr += sizeof(numAACalls);
+
+		// Прыжки из реплеев рана пишутся без aaCalls (слим-формат) — это не битый файл,
+		// раскладка секции та же, просто нулевой счётчик.
+		if (numAACalls <= 0)
+		{
+			outJumps.push_back(std::move(jump));
+			continue;
+		}
 
 		jump.aaCalls.resize(numAACalls);
 		if (replayVersion >= 5)
@@ -904,14 +915,21 @@ i32 KZ::replaysystem::compression::WriteJumpsCompressed(std::vector<char> &outBu
 		AppendToBuffer(buffer, &jump.overall, sizeof(jump.overall));
 
 		// Write strafes
-		i32 numStrafes = jump.strafes.size();
+		i32 numStrafes = (i32)jump.strafes.size();
 		AppendToBuffer(buffer, &numStrafes, sizeof(numStrafes));
-		AppendToBuffer(buffer, jump.strafes.data(), sizeof(RpJumpStats::StrafeData) * numStrafes);
+		if (numStrafes > 0)
+		{
+			AppendToBuffer(buffer, jump.strafes.data(), sizeof(RpJumpStats::StrafeData) * numStrafes);
+		}
 
-		// Write AA calls
-		i32 numAACalls = jump.aaCalls.size();
+		// Write AA calls. Для реплеев рана вектор пуст (слим-формат): пишем только счётчик 0,
+		// раскладка секции не меняется — старый читатель разберёт такой прыжок как обычный.
+		i32 numAACalls = (i32)jump.aaCalls.size();
 		AppendToBuffer(buffer, &numAACalls, sizeof(numAACalls));
-		AppendToBuffer(buffer, jump.aaCalls.data(), sizeof(RpJumpStats::AAData) * numAACalls);
+		if (numAACalls > 0)
+		{
+			AppendToBuffer(buffer, jump.aaCalls.data(), sizeof(RpJumpStats::AAData) * numAACalls);
+		}
 	}
 
 	// Compress

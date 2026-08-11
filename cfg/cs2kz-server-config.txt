@@ -33,6 +33,12 @@
 	// Minimum jumpstat tier for broadcasting sound effect.
 	"defaultJSBroadcastSoundMinTier"	"5"
 
+	// Minimum jump tier stored in run replays (0 = no tier filter, default).
+	// Jumps stored here are what spectators of a replay bot get printed in chat/console, so 0
+	// mirrors what a spectator of a live player sees. Values >= 1 drop jumps by tier, and tier
+	// depends on distance: falls, JumpType_Other and short jumps are tier None and get dropped.
+	"runReplayMinJumpTier"				"0"
+
 	// Default chat prefix.
 	"chatPrefix"						"{lime}KZ {grey}|{default}"
 

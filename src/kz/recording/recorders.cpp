@@ -10,6 +10,7 @@
 #include "sdk/cskeletoninstance.h"
 #include "sdk/usercmd.h"
 #include "kz/replays/compression.h"
+#include "kz/option/kz_option.h"
 
 ManualRecorder::ManualRecorder(KZPlayer *player, f32 duration, KZPlayer *savedBy) : Recorder(player, duration, RP_MANUAL, true, DistanceTier_None)
 {
@@ -55,7 +56,14 @@ JumpRecorder::JumpRecorder(Jump *jump) : Recorder(jump->player, 5.0f, RP_JUMPSTA
 }
 
 // RunRecorder Implementation
-RunRecorder::RunRecorder(KZPlayer *player) : Recorder(player, 5.0f, RP_RUN, true, DistanceTier_Ownage)
+DistanceTier RunRecorder::GetMinJumpTier()
+{
+	i64 tier = KZOptionService::GetOptionInt("runReplayMinJumpTier", DistanceTier_None);
+	tier = MAX((i64)DistanceTier_None, MIN(tier, (i64)DISTANCETIER_COUNT - 1));
+	return (DistanceTier)tier;
+}
+
+RunRecorder::RunRecorder(KZPlayer *player) : Recorder(player, 5.0f, RP_RUN, true, RunRecorder::GetMinJumpTier())
 {
 	auto *runProto = replayHeader.mutable_run();
 	runProto->set_course_name(player->timerService->GetCourse()->GetName().Get());
@@ -84,6 +92,13 @@ void RunRecorder::End(f32 time, i32 numTeleports)
 // Recorder Implementation
 Recorder::Recorder(KZPlayer *player, f32 numSeconds, ReplayType type, bool copyTimerEvents, DistanceTier copyJumps)
 {
+	// Правила приёма прыжков фиксируем до первого PushData: и добор из кольцевого буфера ниже,
+	// и живые прыжки во время записи идут через один фильтр.
+	this->minJumpTier = copyJumps;
+	// Слим-формат — только для реплеев рана: там прыжков много и файл пухнет. В одиночном
+	// jump-реплее прыжок один, полноту не урезаем.
+	this->slimJumps = (type == RP_RUN);
+
 	Recorder::Init(replayHeader, player, type);
 
 	CircularRecorder *circular = player->recordingService->circularRecording;
@@ -216,13 +231,8 @@ Recorder::Recorder(KZPlayer *player, f32 numSeconds, ReplayType type, bool copyT
 	{
 		for (i32 i = first; i < circular->jumps.size(); i++)
 		{
-			const RpJumpStats &jump = circular->jumps[i];
-
-			if (jump.overall.distanceTier < copyJumps)
-			{
-				continue;
-			}
-			this->jumps.push_back(jump);
+			// Фильтр по тиру и слим-формат — внутри PushData (minJumpTier/slimJumps выше).
+			this->PushData(circular->jumps[i]);
 		}
 	}
 

@@ -56,7 +56,8 @@ struct RpStyleChangeInfo : public RpModeStyleInfo
 
 class Jump;
 
-// This struct is really big, so we don't store them in run replays.
+// This struct is really big; run replays therefore store a slim variant of it, without aaCalls
+// (see Recorder::PushData).
 struct RpJumpStats
 {
 	struct GeneralData
