@@ -1851,9 +1851,24 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	// KZPlayer::OnPhysicsSimulatePost.
 	bool useParticles = available && cfg->GetHudType() == HUD_TYPE_MHUD && player == target && target->IsAlive();
 
+	// Исключение из «спектатор — всегда HTML» (cyb.116, канарейка): просмотр РЕПЛЕЙ-БОТА
+	// от первого лица. В отличие от cyb.34, партиклы тут СВОИ у спектатора (kz_quiet
+	// пропускает их как владельцу, транзит не трогаем), со СВОИМИ настройками; данные
+	// бота едут через mhudSource (задел cyb.36). Позицию оверлея каждый клиент считает
+	// сам (C_OP_SetControlPointToPlayer в .vpcf): in-eye это глаза бота — ровно куда
+	// смотрит камера зрителя. Вне in-eye оверлей повис бы в мире — гейт режет. Риск
+	// «уезжает при поворотах» (cyb.36) остаётся открытым вопросом канарейки: у реплея
+	// повороты — плавное воспроизведение записи, ждём вердикта живого теста.
+	if (!useParticles && available && cfg->GetHudType() == HUD_TYPE_MHUD && player != target && KZ::replaysystem::IsReplayBot(player)
+		&& target->specService->IsSpectatingInEye(player))
+	{
+		useParticles = true;
+	}
+
 	if (useParticles)
 	{
-		// player == target здесь всегда (см. гейт выше) — источник данных — сам владелец.
+		// Владелец (player == target) или спектатор реплей-бота: во втором случае
+		// UpdateParticles сам выставит mhudSource=player (бот) на время апдейта.
 		target->hudService->UpdateParticles(player);
 	}
 	else

@@ -2,6 +2,7 @@
 #include "kz/option/kz_option.h"
 #include "kz/language/kz_language.h"
 #include "kz/checkpoint/kz_checkpoint.h"
+#include "kz/replays/kz_replaysystem.h"
 #include "sdk/entity/cparticlesystem.h"
 #include "entitykeyvalues.h"
 #include "utils/utils.h"
@@ -189,6 +190,10 @@ static_function void DestroyHandle(CHandle<CParticleSystem> &handle)
 
 void KZHUDService::DestroyAllParticles()
 {
+	// Вместе с партиклами гасим и чужой источник данных: указатель на слот бота не должен
+	// переживать деактивацию particle-пути (иначе устаревший слот молча прочитал бы любой
+	// будущий вызов MHUDDataSource вне UpdateParticles).
+	this->mhudSource = nullptr;
 	for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(this->upstreamSpeedParticles); i++)
 	{
 		DestroyHandle(this->upstreamSpeedParticles[i]);
@@ -564,10 +569,28 @@ void KZHUDService::UpdateMHUDTimer()
 		return;
 	}
 
-	KZPlayer *src      = this->MHUDDataSource();
-	bool timerRunning  = src->timerService->GetTimerRunning();
-	bool showAfterStop = src->hudService->ShouldShowTimerAfterStop();
-	if (!timerRunning && !showAfterStop)
+	KZPlayer *src = this->MHUDDataSource();
+	// Реплей-бот: его timerService не тикает — время/пауза/финиш из replaysystem,
+	// зеркально HTML-пути (GetTimerParts). «Показывать» = ран уже идёт (time>0) или
+	// финишировал (EndTime>0, держим финальный тайм — как HTML).
+	const bool isReplay = KZ::replaysystem::IsReplayBot(src);
+	bool timerRunning, paused, showTimer;
+	f64 time;
+	if (isReplay)
+	{
+		timerRunning = KZ::replaysystem::GetEndTime() == 0.0f;
+		paused = KZ::replaysystem::GetPaused();
+		time = timerRunning ? KZ::replaysystem::GetTime() : KZ::replaysystem::GetEndTime();
+		showTimer = !(KZ::replaysystem::GetTime() == 0.0f && KZ::replaysystem::GetEndTime() == 0.0f);
+	}
+	else
+	{
+		timerRunning = src->timerService->GetTimerRunning();
+		paused = src->timerService->GetPaused();
+		time = timerRunning ? src->timerService->GetTime() : src->hudService->currentTimeWhenTimerStopped;
+		showTimer = timerRunning || src->hudService->ShouldShowTimerAfterStop();
+	}
+	if (!showTimer)
 	{
 		for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(this->timerTextParticles); i++)
 		{
@@ -582,11 +605,9 @@ void KZHUDService::UpdateMHUDTimer()
 		return;
 	}
 
-	f64 time = timerRunning ? src->timerService->GetTime() : src->hudService->currentTimeWhenTimerStopped;
 	if (time < 0.0) time = 0.0;
 
 	bool detailed = this->IsMHUDTimerDetailed();
-	bool paused   = src->timerService->GetPaused();
 
 	i32 totalSeconds = (i32)time;
 	i32 hours   = totalSeconds / 3600;
@@ -699,7 +720,7 @@ void KZHUDService::UpdateMHUDTimer()
 	{
 		color = this->GetMHUDColorPref("mhudTimerPausedColor", MHUD_DEF_TIMER_PAUSED_COLOR);
 	}
-	else if (src->checkpointService->GetTeleportCount() > 0)
+	else if ((isReplay ? KZ::replaysystem::GetTeleportCount() : (i32)src->checkpointService->GetTeleportCount()) > 0)
 	{
 		color = this->GetMHUDColorPref("mhudTimerTpColor", MHUD_DEF_TIMER_TP_COLOR);
 	}
@@ -790,10 +811,10 @@ void KZHUDService::UpdateMHUDKeys()
 void KZHUDService::UpdateParticles(KZPlayer *source)
 {
 	// Данные — из mhudSource (source, если это не сам игрок), настройки — всегда из
-	// this->player. После cyb.36 DrawPanels вызывает это ТОЛЬКО при player == target
-	// (живой владелец), т.е. source == this->player и mhudSource остаётся nullptr;
-	// spectator-ветка сохранена как generic-задел и вызывающей стороной не используется
-	// (спектатор всегда идёт HTML-путём, см. гейт useParticles в DrawPanels).
+	// this->player. Два вызывающих случая (гейт useParticles в DrawPanels): живой
+	// владелец (source == this->player, mhudSource = nullptr) и — с cyb.116 — спектатор
+	// реплей-бота in-eye (source = бот, mhudSource = бот). Для обычных игроков
+	// spectator-путь по-прежнему закрыт (регрессия cyb.34/36).
 	this->mhudSource = (source && source != this->player) ? source : nullptr;
 	this->UpdateMHUDSpeed();
 	this->UpdateMHUDTimer();

@@ -204,6 +204,22 @@ void KZSpecService::GetSpectatorList(CUtlVector<CUtlString> &spectatorList, KZPl
 	}
 }
 
+bool KZSpecService::IsSpectatingInEye(KZPlayer *target)
+{
+	if (!target || this->GetSpectatedPlayer() != target)
+	{
+		return false;
+	}
+	// GetSpectatedPlayer выше уже гарантирует контроллер/обсервер-pawn/сервис — но на
+	// переходных кадрах между его вызовом ничего не гарантировано, перепроверяем.
+	if (!this->player->GetController() || !this->player->GetController()->m_hObserverPawn())
+	{
+		return false;
+	}
+	CPlayer_ObserverServices *obsService = this->player->GetController()->m_hObserverPawn()->m_pObserverServices;
+	return obsService && obsService->m_iObserverMode() == OBS_MODE_IN_EYE;
+}
+
 KZPlayer *KZSpecService::GetSpectatedPlayer()
 {
 	if (!player || player->IsAlive())

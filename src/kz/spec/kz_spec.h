@@ -20,6 +20,10 @@ public:
 	void ResetSavedPosition();
 
 	bool IsSpectating(KZPlayer *target);
+	// Наблюдает ли this->player за target ОТ ПЕРВОГО ЛИЦА. Отличие от IsSpectating —
+	// режим камеры: particle-MHUD спектатора имеет смысл только in-eye (позицию оверлея
+	// клиент считает от глаз наблюдаемого, в chase/roaming он повис бы в мире).
+	bool IsSpectatingInEye(KZPlayer *target);
 	bool SpectatePlayer(const char *playerName);
 	bool SpectatePlayer(KZPlayer *target);
 	bool CanSpectate();
