@@ -444,10 +444,13 @@ void KZProfileService::UpdateClantag()
 	// Персональный тег перекрывает ранговый: он не зависит ни от очков, ни от режима, ни от
 	// стилей — то есть переживает все три события, по которым тег перерисовывается.
 	// Проверка стоит ДО GetCurrentRankIndex: иначе очередной ответ платформы затирал бы тег.
+	// Скобки добавляются здесь, а не хранятся в s_clantagOverrides: штатные теги форка всегда
+	// в квадратных скобках, и новую запись таблицы физически нельзя завести «голой» —
+	// формат один на всех, а не дублируется в каждой строке.
 	const char *personal = CybClantagOverride(this->player->GetSteamId64());
 	if (personal)
 	{
-		V_snprintf(this->clanTag, sizeof(this->clanTag), "%s", personal);
+		V_snprintf(this->clanTag, sizeof(this->clanTag), "[%s]", personal);
 		this->SetClantag(this->clanTag);
 		return;
 	}
@@ -515,6 +518,17 @@ std::string KZProfileService::GetPrefix(bool colors)
 	if (this->clanTag[0] == '\0')
 	{
 		this->UpdateClantag();
+	}
+	// Персональный тег и в чате должен быть персональным, не ранговым — единственный вызыватель
+	// (say-хук в kz_misc.cpp) собирает именно чат-строку; !rank/PrintRank в GetPrefix не ходят,
+	// им ранговые цвета/имя нужны напрямую, так что раскраска рангов там не затронута.
+	// {yellow} — единственный токен из rankColors/gokz-палитры, который нигде не занят ни одним
+	// званием (в отличие от {gold} — он уже подсвечивает Legend), поэтому персональный тег не
+	// путается с топовым рангом на глаз.
+	const char *personal = CybClantagOverride(this->player->GetSteamId64());
+	if (personal)
+	{
+		return std::string(colors ? "{yellow}[" : "[") + personal + (colors ? "]{default}" : "]");
 	}
 	i32 rank = this->GetCurrentRankIndex();
 	if (rank >= 0)
