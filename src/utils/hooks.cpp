@@ -27,6 +27,7 @@
 #include "kz/trigger/kz_trigger.h"
 #include "kz/db/kz_db.h"
 #include "kz/mappingapi/kz_mappingapi.h"
+#include "kz/zones/kz_zones.h"
 #include "kz/global/kz_global.h"
 #include "kz/hud/kz_hud.h"
 #include "kz/profile/kz_profile.h"
@@ -651,6 +652,7 @@ static_function void Hook_StartupServer(const GameSessionConfiguration_t &config
 	// Смена карты доехала. Закрывает две вещи: «сервер завис на смене карты»
 	// (строки нет — значит загрузка не завершилась) и «на какой версии это было».
 	KZ_LOG_INFO(LogChannel::General, "[cyb] map_loaded map=%s cs2kz=%s\n", g_pKZUtils->GetCurrentMapName().Get(), PLUGIN_FULL_VERSION);
+	KZ::zones::OnMapLoaded();
 	RETURN_META(MRES_IGNORED);
 }
 
@@ -673,6 +675,8 @@ static_function bool Hook_FireEvent(IGameEvent *event, bool bDontBroadcast)
 		{
 			hooks::HookEntities();
 			KZ::mapapi::OnRoundPreStart();
+			// После очистки вектора триггеров и открытия окна — ставим зоны платформы заново.
+			KZ::zones::OnRoundPreStart();
 		}
 		else if (KZ_STREQI(event->GetName(), "round_start"))
 		{

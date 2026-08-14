@@ -193,6 +193,24 @@ namespace KZ::mapapi
 	void OnRoundPreStart();
 	void OnRoundStart();
 
+	// Окно регистрации триггеров открыто только между round_prestart и round_start
+	// (см. гейт в Mapi_OnTriggerMultipleSpawn). Зонам платформы этого мало: поставленная
+	// админом зона обязана ожить сразу, а рестарт раунда срубил бы раны всем на сервере.
+	// Флаг поднимается ТОЛЬКО на время своего DispatchSpawn и тут же снимается.
+	void BeginExternalTriggerSpawn();
+	void EndExternalTriggerSpawn();
+
+	// Сколько триггеров зарегистрировано сейчас. Вектор фиксированный (2048) и AddToTail
+	// не проверяет ёмкость, поэтому все, кто спавнит триггеры вне разбора карты, обязаны
+	// смотреть на потолок сами.
+	i32 RegisteredTriggerCount();
+	i32 MaxRegisteredTriggers();
+
+	// Версия Mapping API текущей карты. KZ_NO_MAPAPI_VERSION означает, что курсов у карты нет
+	// и форк завёл дефолтный курс сам — только на таких картах чужая зона start/end может
+	// сослаться на KZ_NO_MAPAPI_COURSE_DESCRIPTOR.
+	i32 MapApiVersion();
+
 	void CheckEndTimerTrigger(CBaseTrigger *trigger);
 	// This is const, unlike the trigger returned from Mapi_FindKzTrigger.
 	const KzTrigger *GetKzTrigger(CBaseTrigger *trigger);

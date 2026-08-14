@@ -54,6 +54,8 @@ static_global struct
 
 	CUtlVectorFixed<KzTrigger, 2048> triggers;
 	bool roundIsStarting;
+	// Зоны платформы ставятся и вне окна раунда — см. KZ::mapapi::BeginExternalTriggerSpawn.
+	bool externalSpawnAllowed;
 	i32 errorFlags;
 	i32 errorCount;
 	char errors[32][256];
@@ -183,7 +185,7 @@ static_function void Mapi_OnTriggerMultipleSpawn(const EntitySpawnInfo_t *info)
 
 	KzTriggerType type = (KzTriggerType)ekv->GetInt(KEY_TRIGGER_TYPE, KZTRIGGER_DISABLED);
 
-	if (!g_mappingApi.roundIsStarting)
+	if (!g_mappingApi.roundIsStarting && !g_mappingApi.externalSpawnAllowed)
 	{
 		// Only allow triggers and zones that were spawned during the round start phase.
 		return;
@@ -630,6 +632,31 @@ void KZ::mapapi::OnSpawn(int count, const EntitySpawnInfo_t *info)
 		g_mappingApi.triggers.RemoveAll();
 		g_mappingApi.courseDescriptors.RemoveAll();
 	}
+}
+
+void KZ::mapapi::BeginExternalTriggerSpawn()
+{
+	g_mappingApi.externalSpawnAllowed = true;
+}
+
+void KZ::mapapi::EndExternalTriggerSpawn()
+{
+	g_mappingApi.externalSpawnAllowed = false;
+}
+
+i32 KZ::mapapi::RegisteredTriggerCount()
+{
+	return g_mappingApi.triggers.Count();
+}
+
+i32 KZ::mapapi::MaxRegisteredTriggers()
+{
+	return g_mappingApi.triggers.NumAllocated();
+}
+
+i32 KZ::mapapi::MapApiVersion()
+{
+	return g_mappingApi.mapApiVersion;
 }
 
 void KZ::mapapi::OnRoundPreStart()

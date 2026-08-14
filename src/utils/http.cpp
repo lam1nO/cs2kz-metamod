@@ -48,6 +48,9 @@ namespace HTTP
 			case Method::GET:
 				volvoMethod = k_EHTTPMethodGET;
 				break;
+			case Method::DELETE_:
+				volvoMethod = k_EHTTPMethodDELETE;
+				break;
 			case Method::POST:
 				volvoMethod = k_EHTTPMethodPOST;
 				break;
@@ -107,6 +110,9 @@ namespace HTTP
 			{
 				case Method::GET:
 					methodStr = "GET";
+					break;
+				case Method::DELETE_:
+					methodStr = "DELETE";
 					break;
 				case Method::POST:
 					methodStr = "POST";

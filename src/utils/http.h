@@ -27,6 +27,11 @@ namespace HTTP
 	enum class Method
 	{
 		GET,
+		// DELETE_ с подчёркиванием: в winnt.h DELETE — макрос (право доступа), и член с таким
+		// именем ломает сборку под Windows. Стоит ПЕРЕД POST намеренно: сравнения вида
+		// `method >= Method::POST` ниже управляют телом запроса и Content-Type, а DELETE у нас
+		// идёт без тела (актор уезжает query-параметром — контракт это допускает явно).
+		DELETE_,
 		POST,
 		PUT,
 		PATCH,

@@ -10,6 +10,7 @@
 #include "jumpstats/kz_jumpstats.h"
 #include "language/kz_language.h"
 #include "measure/kz_measure.h"
+#include "zones/kz_zones.h"
 #include "mode/kz_mode.h"
 #include "noclip/kz_noclip.h"
 #include "option/kz_option.h"
@@ -69,6 +70,7 @@ void KZPlayer::Init()
 	delete this->savedRunService;
 	delete this->globalService;
 	delete this->measureService;
+	delete this->zonesService;
 	delete this->profileService;
 	delete this->pistolService;
 	delete this->fovService;
@@ -98,6 +100,7 @@ void KZPlayer::Init()
 	this->savedRunService = new KZSavedRunService(this);
 	this->globalService = new KZGlobalService(this);
 	this->measureService = new KZMeasureService(this);
+	this->zonesService = new KZZonesService(this);
 	this->profileService = new KZProfileService(this);
 	this->pistolService = new KZPistolService(this);
 	this->fovService = new KZFOVService(this);
@@ -127,6 +130,7 @@ void KZPlayer::Reset()
 	this->specService->Reset();
 	this->triggerService->Reset();
 	this->measureService->Reset();
+	this->zonesService->Reset();
 	this->beamService->Reset();
 	this->telemetryService->Reset();
 	this->recordingService->Reset();
