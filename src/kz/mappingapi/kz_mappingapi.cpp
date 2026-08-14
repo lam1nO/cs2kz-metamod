@@ -419,7 +419,8 @@ static_function void Mapi_OnInfoTargetSpawn(const CEntityKeyValues *ekv)
 // никуда не переезжает, поэтому «висячего указателя» в смысле обращения к освобождённой памяти
 // тут нет. Ломается другое: FastRemove (utlvector.h) делает memcpy последнего элемента в дырку
 // и уменьшает счётчик, ничего не освобождая, так что
-//   - указатель на освободившийся слот начинает читать данные бывшего ПОСЛЕДНЕГО курса (дубль),
+//   - указатель на освободившийся слот начинает читать данные бывшего ПОСЛЕДНЕГО курса (дубль;
+//     при удалении САМОГО последнего memcpy пропускается, и тогда дубля нет — только фантом),
 //   - указатель на бывший последний слот читает его же копию уже за Count() (фантом),
 //   - и рушится инвариант сортировки CUtlSortVector, по которому Insert ищет позицию бинарным
 //     поиском (FindLessOrEqual), — следующая вставка садится не туда.
@@ -653,6 +654,11 @@ void KZ::mapapi::OnSpawn(int count, const EntitySpawnInfo_t *info)
 	{
 		g_mappingApi.triggers.RemoveAll();
 		g_mappingApi.courseDescriptors.RemoveAll();
+		// Тот же инвариант, что и после FastRemove в валидации: g_sortedCourses держит указатели
+		// внутрь courseDescriptors. Без этой строки на всю карту оставались бы фантомы —
+		// GetCourseCount()/!courses/GetCourse* показывали бы курсы, которых уже нет, а
+		// Mapi_FindCourse их уже не находит. Сбрасывалось только следующим Hook_StartupServer.
+		Mapi_RebuildSortedCourses();
 	}
 }
 
@@ -799,9 +805,10 @@ void KZ::mapapi::OnRoundStart()
 		courseDescriptor->stageCount = stageCount;
 	}
 
-	// Обязательно ПОСЛЕ цикла: во время него g_sortedCourses указывает на переставленные слоты,
-	// но внутри цикла его никто не читает. Подробности, что именно ломает FastRemove, — в
-	// комментарии к Mapi_RebuildSortedCourses.
+	// Обязательно ПОСЛЕ цикла (внутри него g_sortedCourses никто не читает) и обязательно ЗДЕСЬ,
+	// а не позже: следом в том же событии идёт KZ::zones::OnRoundStart (hooks.cpp), а он через
+	// CreateExternalCourse делает Insert в этот же вектор — бинарным поиском по сломанному
+	// порядку. Подробности, что именно ломает FastRemove, — у Mapi_RebuildSortedCourses.
 	if (coursesRemoved)
 	{
 		Mapi_RebuildSortedCourses();
@@ -1296,7 +1303,11 @@ static_function void OpenCoursesMenu(KZPlayer *player)
 	}
 
 	// Сортировка вставками по cyber-номеру (0 = main, 1..99 = бонусы, 100+ = прочие);
-	// дубликаты номеров сохраняют исходный порядок по id (g_sortedCourses).
+	// дубликаты номеров сохраняют порядок g_sortedCourses. Опираться на него как на «исходный»
+	// нельзя: ключ сортировки (id) не уникален — Mapi_CreateCourse дедуплицирует по hammerId и
+	// targetname, но не по id, — а перестроение вектора после дропа курса валидацией не обязано
+	// воспроизвести прежний относительный порядок равных ключей. Порядок детерминирован в
+	// пределах одного состояния вектора, и только на это тут и рассчитываем.
 	const KZCourseDescriptor *ordered[KZ_MAX_COURSE_COUNT];
 	i32 count = 0;
 	FOR_EACH_VEC(g_sortedCourses, i)
