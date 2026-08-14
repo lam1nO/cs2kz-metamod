@@ -36,6 +36,17 @@
 #define KZ_ZONE_MIN_SIZE      8.0f  // как KZ_ZONE_MIN_SIZE в контракте
 #define KZ_ZONE_WORLD_LIMIT   16384.0f
 
+// Потолок ОТРИСОВКИ (не набора): сколько зон максимум обводим контуром. Ребро — отдельный
+// сетевой info_particle_system, то есть зона стоит двенадцати энтити; при потолке набора в 64
+// зоны без этого ограничения вышло бы под тысячу сущностей, которые вдобавок перебирает
+// KZ::quiet::OnCheckTransmit на КАЖДЫЙ CheckTransmit для КАЖДОГО получателя.
+// Потолок общий для постоянной подсветки и для !zone show.
+#define KZ_ZONE_HIGHLIGHT_MAX_ZONES 20
+
+// Рёбер в контуре AABB. Именованная константа, потому что размер массивов хендлов и граница
+// цикла отрисовки обязаны совпадать.
+#define KZ_ZONE_BOX_EDGES 12
+
 // Сколько ждём round_start после ответа api, прежде чем признать, что мир так и не доделан.
 #define KZ_ZONES_WORLD_READY_TIMEOUT 60.0f
 
@@ -121,6 +132,32 @@ namespace KZ::zones
 	void ResetEditors();
 
 	i32 Revision();
+
+	// Цвет зоны по типу. Совпадает с палитрой отладочного kz_showtriggers (kz_misc.cpp):
+	// два разных языка цветов для одних и тех же типов зон в одном плагине читались бы неверно.
+	Color ZoneColor(KzCyberZoneType type);
+
+	// Контур AABB двенадцатью беам-частицами. Штатный kz_showtriggers наши зоны не рисует: он
+	// берёт форму из VPhysX-меша энтити, а у зоны геометрия задана bbox'ом и меша нет вовсе.
+	//
+	// ownerOnly=true помечает частицы плагинной командой (CUSTOM_PARTICLE_SYSTEM_TEAM): такие
+	// KZ::quiet::OnCheckTransmit вычёркивает из трансмита ВСЕМ, кроме тех, кто назван в его белом
+	// списке. То есть метка — это «видит только владелец, и только если он в белом списке»,
+	// а не просто «наша частица». Для видимого всем контура метку ставить НЕЛЬЗЯ.
+	//
+	// targetname — по нему снятие отличает свои частицы от чужих info_particle_system (их в форке
+	// хватает: kz_beam, kz_measure, ztopwatch, худ). У каждого слоя он СВОЙ, чтобы код гашения
+	// одного слоя не мог дотянуться до другого.
+	// out принимает KZ_ZONE_BOX_EDGES хендлов; на месте несозданных остаётся пустой хендл.
+	// Возвращает число созданных рёбер: ноль значит «движок не отдал энтити», и вызывающий не
+	// вправе считать зону нарисованной.
+	i32 DrawBoxEdges(const Vector &mins, const Vector &maxs, const Color &color, const char *targetname, bool ownerOnly, CEntityHandle *out);
+
+	// Снять рёбра, созданные DrawBoxEdges, и занулить хендлы. Удаляет только энтити с ЭТИМ
+	// targetname: чужое (и рёбра соседнего слоя) не трогает никогда.
+	// keepEntities=true — только занулить хендлы: на смене карты мир перестраивается, прежние
+	// энтити уже не наши, и RemoveEntity по ним лез бы в перестраивающийся мир.
+	void RemoveBoxEdges(CEntityHandle *handles, i32 count, const char *targetname, bool keepEntities = false);
 } // namespace KZ::zones
 
 // Состояние редактора — на игрока. В хуках движения не участвует: только команды и рисование.
@@ -145,14 +182,29 @@ public:
 	KzCyberZoneType pendingType {};
 	f32 pendingJumpFactor {};
 	Vector pendingCorner {};
-	CEntityHandle previewBeams[12] {};
+	CEntityHandle previewBeams[KZ_ZONE_BOX_EDGES] {};
+	// Есть ли сейчас превью. Отдельный флаг, а не «посмотреть в массив»: он гейтит скан хендлов
+	// в белом списке kz_quiet, который крутится на каждый CheckTransmit для каждого получателя.
+	bool previewActive {};
 	// Растёт на каждое новое превью: таймер снятия гасит только своё поколение, иначе таймер
 	// от первой зоны стирал бы превью второй, поставленной в те же 15 секунд.
 	u32 previewGeneration {};
 
+	// !zone show — временный показ ВСЕХ зон, видимый только вызвавшему.
+	//
+	// Хранилище СВОЁ и отдельное от постоянной подсветки старта с финишем (та живёт в
+	// kz_zones.cpp, видна всем и переживает эту команду). Разведение структурное: разные списки
+	// хендлов И разные targetname, поэтому код гашения показа не может дотянуться до постоянного
+	// слоя даже ошибкой. Повторный !zone show гасит показ — и только его.
+	std::vector<CEntityHandle> showBeams;
+	// Своё поколение у показа: за 12 секунд игрок может выключить и включить показ снова, и
+	// таймер от прошлого не должен гасить новый.
+	u32 showGeneration {};
+
 	virtual void Reset() override
 	{
 		this->ClearPreview();
+		this->ClearShow();
 		this->perm = PERM_UNKNOWN;
 		this->hasPendingCorner = false;
 		this->pendingType = {};
@@ -170,10 +222,24 @@ public:
 	void ListZones();
 	void RemoveZone(i32 humanIndex);
 
+	// Показать все зоны карты этому игроку на KZ_ZONE_SHOW_SECONDS. Повторный вызов гасит показ.
+	void ShowAllZones();
+
 	// Рисование AABB беамом: штатный kz_showtriggers наши зоны не покажет — он берёт форму
 	// из VPhysX-меша энтити, а у наших её нет (объём задан bbox'ом).
 	void DrawBox(const Vector &mins, const Vector &maxs, Color color, f32 duration);
 	// keepEntities=true — только занулить хендлы, не трогая мир: на смене карты энтити уже
 	// не наши, и RemoveEntity по ним лез бы в перестраивающийся мир.
 	void ClearPreview(bool keepEntities = false);
+	void ClearShow(bool keepEntities = false);
+
+	// Белый список KZ::quiet::OnCheckTransmit: частицы этого игрока, которые ему показываем.
+	// Дешёвый гейт вынесен отдельно и зовётся ПЕРВЫМ: цикл трансмита перебирает все частицы для
+	// каждого получателя, и у игрока без превью и без показа не должно быть ни одного сравнения.
+	bool HasOwnedParticles() const
+	{
+		return this->previewActive || !this->showBeams.empty();
+	}
+
+	bool OwnsParticle(const CEntityHandle &handle) const;
 };

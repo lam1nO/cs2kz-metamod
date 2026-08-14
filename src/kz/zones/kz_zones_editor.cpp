@@ -1,5 +1,5 @@
 /*
-	Редактор зон в игре: !zone start|end|booster <множитель>|cancel|list|remove <N>.
+	Редактор зон в игре: !zone start|end|booster <множитель>|cancel|list|show|remove <N>.
 
 	Координаты берутся из позиции игрока — числа руками не вводятся нигде. Первый вызов
 	пишет угол A, второй закрывает бокс и отправляет зону в api.
@@ -16,8 +16,8 @@
 #include "utils/http.h"
 #include "utils/ctimer.h"
 
-#include "sdk/entity/cparticlesystem.h"
-#include "entity2/entitykeyvalues.h"
+// Энтити рёбер создаёт KZ::zones::DrawBoxEdges (kz_zones.cpp) — здесь только вызовы, поэтому
+// cparticlesystem.h и entitykeyvalues.h больше не нужны. Из SDK остаётся разбор ответов api.
 #include "tier1/keyvalues3.h"
 
 #include <string>
@@ -28,8 +28,15 @@
 
 #define KZ_ZONE_PERMISSION      "game.kz_zones_edit"
 #define KZ_ZONE_PREVIEW_SECONDS 15.0f
-#define KZ_ZONE_BEAM_EFFECT     "particles/ui/annotation/ui_annotation_line_segment.vpcf"
 #define KZ_ZONE_PREVIEW_NAME    "cyb_zone_preview"
+
+// !zone show — временный показ всех зон вызвавшему.
+#define KZ_ZONE_SHOW_SECONDS 12.0f
+#define KZ_ZONE_SHOW_NAME    "cyb_zone_show"
+// Раздутие бокса показа. У старта и финиша поверх лежит постоянный контур; ровно совпадающие
+// рёбра давали бы z-fighting, а половины юнита хватает, чтобы линии разошлись, и мало, чтобы
+// соврать про границу зоны.
+#define KZ_ZONE_SHOW_INFLATE 0.5f
 
 static_function std::string ApiBaseUrl()
 {
@@ -91,6 +98,7 @@ void KZZonesService::OnMapChanged()
 	// Право — свойство игрока, не карты: перепрашивать не нужно. А вот незакрытый угол A
 	// привязан к геометрии прошлой карты, и его надо забыть.
 	this->ClearPreview(true);
+	this->ClearShow(true);
 	this->hasPendingCorner = false;
 	this->pendingType = {};
 	this->pendingJumpFactor = {};
@@ -198,58 +206,143 @@ bool KZZonesService::EnsureAllowed()
 
 void KZZonesService::ClearPreview(bool keepEntities)
 {
-	for (CEntityHandle &handle : this->previewBeams)
+	// На смене карты мир перестраивается и прежние энтити уже не наши: лезть туда с
+	// RemoveEntity незачем и небезопасно, достаточно забыть хендлы (keepEntities).
+	KZ::zones::RemoveBoxEdges(this->previewBeams, KZ_ZONE_BOX_EDGES, KZ_ZONE_PREVIEW_NAME, keepEntities);
+	this->previewActive = false;
+}
+
+bool KZZonesService::OwnsParticle(const CEntityHandle &handle) const
+{
+	// Порядок проверок ценой наружу: этот метод зовёт KZ::quiet::OnCheckTransmit на каждый
+	// CheckTransmit для каждого получателя. Дешёвый гейт HasOwnedParticles() стоит ПЕРЕД
+	// вызовом (там же), а здесь сканы гейтятся своими флагами по отдельности.
+	if (this->previewActive)
 	{
-		// На смене карты мир перестраивается и прежние энтити уже не наши: лезть туда с
-		// RemoveEntity незачем и небезопасно, достаточно забыть хендлы.
-		if (!keepEntities)
+		for (const CEntityHandle &beam : this->previewBeams)
 		{
-			CEntityInstance *inst = GameEntitySystem() ? GameEntitySystem()->GetEntityInstance(handle) : nullptr;
-			if (inst && inst->m_pEntity && inst->m_pEntity->NameMatches(KZ_ZONE_PREVIEW_NAME))
+			if (beam == handle)
 			{
-				g_pKZUtils->RemoveEntity(inst);
+				return true;
 			}
 		}
-		handle = {};
+	}
+	for (const CEntityHandle &beam : this->showBeams)
+	{
+		if (beam == handle)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void KZZonesService::ClearShow(bool keepEntities)
+{
+	if (this->showBeams.empty())
+	{
+		return;
+	}
+	// Снимаем СТРОГО свои хендлы и строго со своим targetname. Постоянная подсветка старта и
+	// финиша живёт в другом хранилище (kz_zones.cpp) и под другим именем — этот код физически не
+	// может её погасить, и это главное требование к паре слоёв.
+	KZ::zones::RemoveBoxEdges(this->showBeams.data(), (i32)this->showBeams.size(), KZ_ZONE_SHOW_NAME, keepEntities);
+	this->showBeams.clear();
+}
+
+void KZZonesService::ShowAllZones()
+{
+	// Повторный вызов — выключатель. Гасит ТОЛЬКО показ: постоянный контур старта и финиша не
+	// его, он остаётся на месте.
+	if (!this->showBeams.empty())
+	{
+		this->ClearShow();
+		this->player->PrintChat(true, false, "{grey}Зоны:{default} показ выключен.");
+		return;
+	}
+	if (!KZ::zones::IsReady())
+	{
+		this->player->PrintChat(true, false, "{grey}Зоны:{default} набор карты ещё не загружен из api.");
+		return;
+	}
+	const std::vector<KzCyberZone> &zones = KZ::zones::Loaded();
+	if (zones.empty())
+	{
+		this->player->PrintChat(true, false, "{grey}Зоны:{default} на этой карте наших зон нет.");
+		return;
+	}
+
+	i32 drawn = 0;
+	i32 skipped = 0;
+	for (const KzCyberZone &zone : zones)
+	{
+		if (drawn >= KZ_ZONE_HIGHLIGHT_MAX_ZONES)
+		{
+			skipped++;
+			continue;
+		}
+		// Бокс раздут на пол-юнита: у старта и финиша поверх лежит постоянный контур, и
+		// точно совпадающие рёбра мерцали бы z-fighting'ом. «Показать всё» показывает и то, что
+		// уже подсвечено, — иначе команда врала бы своим названием.
+		const Vector mins(zone.mins.x - KZ_ZONE_SHOW_INFLATE, zone.mins.y - KZ_ZONE_SHOW_INFLATE, zone.mins.z - KZ_ZONE_SHOW_INFLATE);
+		const Vector maxs(zone.maxs.x + KZ_ZONE_SHOW_INFLATE, zone.maxs.y + KZ_ZONE_SHOW_INFLATE, zone.maxs.z + KZ_ZONE_SHOW_INFLATE);
+		CEntityHandle edges[KZ_ZONE_BOX_EDGES] {};
+		// ownerOnly=true: показ адресный, его видит только тот, кто позвал.
+		KZ::zones::DrawBoxEdges(mins, maxs, KZ::zones::ZoneColor(zone.type), KZ_ZONE_SHOW_NAME, true, edges);
+		for (CEntityHandle &edge : edges)
+		{
+			// Get() != nullptr — тот же способ проверки живого ребра, что у ztopwatch: ребро,
+			// которое движок не отдал, в список не кладём, иначе показ считался бы удавшимся.
+			if (edge.Get())
+			{
+				this->showBeams.push_back(edge);
+			}
+		}
+		drawn++;
+	}
+
+	if (this->showBeams.empty())
+	{
+		// Ни одного ребра — движок не отдал энтити. Молчать здесь нельзя: игрок ждёт картинку.
+		this->player->PrintChat(true, false, "{grey}Зоны:{default} не удалось нарисовать зоны.");
+		return;
+	}
+
+	// Своё поколение: таймер от прошлого показа не должен гасить новый.
+	const u32 generation = ++this->showGeneration;
+	StartTimer<CPlayerSlot, u64, u32>(
+		[](CPlayerSlot slot, u64 steamId, u32 generation) -> f64
+		{
+			KZPlayer *player = PlayerBySlotIfSame(slot, steamId);
+			if (player && player->zonesService && player->zonesService->showGeneration == generation)
+			{
+				player->zonesService->ClearShow();
+			}
+			return -1.0;
+		},
+		this->player->GetPlayerSlot(), this->player->GetSteamId64(false), generation, KZ_ZONE_SHOW_SECONDS, false);
+
+	if (skipped > 0)
+	{
+		this->player->PrintChat(true, false, "{grey}Зоны:{default} показываю {yellow}%d{default} зон(ы) на %.0f сек, ещё %d не влезло в потолок.",
+								drawn, KZ_ZONE_SHOW_SECONDS, skipped);
+	}
+	else
+	{
+		this->player->PrintChat(true, false,
+								"{grey}Зоны:{default} показываю {yellow}%d{default} зон(ы) на %.0f секунд. Повтори команду, чтобы убрать.", drawn,
+								KZ_ZONE_SHOW_SECONDS);
 	}
 }
 
-// AABB двенадцатью отрезками. Штатный kz_showtriggers наши зоны не рисует: он берёт форму
-// из VPhysX-меша энтити, а у зоны геометрия задана bbox'ом и меша нет вовсе.
+// Превью автора: рёбра помечены как плагинные (ownerOnly), поэтому их видит только он — и только
+// потому, что KZZonesService::OwnsParticle назван в белом списке KZ::quiet::OnCheckTransmit. Без
+// этой записи метка означала бы «не видит никто», включая самого редактора.
 void KZZonesService::DrawBox(const Vector &mins, const Vector &maxs, Color color, f32 duration)
 {
 	this->ClearPreview();
-
-	const Vector c[8] = {
-		Vector(mins.x, mins.y, mins.z), Vector(maxs.x, mins.y, mins.z), Vector(maxs.x, maxs.y, mins.z), Vector(mins.x, maxs.y, mins.z),
-		Vector(mins.x, mins.y, maxs.z), Vector(maxs.x, mins.y, maxs.z), Vector(maxs.x, maxs.y, maxs.z), Vector(mins.x, maxs.y, maxs.z),
-	};
-	static const int edges[12][2] = {{0, 1}, {1, 2}, {2, 3}, {3, 0}, {4, 5}, {5, 6}, {6, 7}, {7, 4}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
-
-	for (int i = 0; i < 12; i++)
-	{
-		CParticleSystem *beam = utils::CreateEntityByName<CParticleSystem>("info_particle_system");
-		if (!beam)
-		{
-			return;
-		}
-		CEntityKeyValues *kv = new CEntityKeyValues();
-		// Свой targetname обязателен: по нему ClearPreview отличает НАШИ беамы от чужих
-		// info_particle_system (их в форке хватает — kz_beam, kz_measure, частицы худа).
-		// Через classname их не различить: NameMatches сверяет m_name (targetname), а не
-		// m_designerName, поэтому без этой строки условие снятия было бы ложным всегда.
-		kv->SetString("targetname", KZ_ZONE_PREVIEW_NAME);
-		kv->SetString("effect_name", KZ_ZONE_BEAM_EFFECT);
-		kv->SetVector("origin", c[edges[i][0]]);
-		kv->SetInt("tint_cp", 16);
-		kv->SetColor("tint_cp_color", color);
-		kv->SetInt("data_cp", 1);
-		kv->SetVector("data_cp_value", c[edges[i][1]]);
-		kv->SetBool("start_active", true);
-		beam->m_iTeamNum(CUSTOM_PARTICLE_SYSTEM_TEAM);
-		beam->DispatchSpawn(kv);
-		this->previewBeams[i] = beam->GetRefEHandle();
-	}
+	KZ::zones::DrawBoxEdges(mins, maxs, color, KZ_ZONE_PREVIEW_NAME, true, this->previewBeams);
+	this->previewActive = true;
 
 	// Превью живёт ограниченное время: беамы висят до ручного снятия, а игрок про них забудет.
 	// CTimer::Fn — сырой указатель на функцию, захватывающая лямбда в него не приводится.
@@ -661,12 +754,18 @@ void KZZonesService::RemoveZone(i32 humanIndex)
 
 static_function void PrintUsage(KZPlayer *player)
 {
-	player->PrintChat(true, false, "{grey}Зоны:{default} !zone start | end | booster <множитель> | cancel | list | remove <номер>");
+	player->PrintChat(true, false, "{grey}Зоны:{default} !zone start | end | booster <множитель> | cancel | list | show | remove <номер>");
 }
 
-// Без SCFL_HELP: флаг требует ключ перевода "Command Description - kz_zone", которого нет в
-// translations/, и !help показал бы сырой ключ. Подсказку печатает сама команда без аргументов.
-SCMD(kz_zone, SCFL_MAP)
+// SCFL_HIDDEN (то есть флагов нет вовсе) — команда не попадает НИ В ОДНУ таблицу !help:
+// PrintCategoryCommands отбирает строки по `flags & (1 << категория)`, а нулевые флаги не
+// совпадут ни с одной. Прежний SCFL_MAP выводил её в консольную таблицу категории «Map», причём
+// сырым ключом вместо описания: ключа "Command Description - kz_zone" в translations/ нет, и
+// игрок видел непонятную строку под командой, которой всё равно не может пользоваться.
+// На вызываемость это не влияет: scmd::OnClientCommand матчит команду ТОЛЬКО по имени
+// (simplecmds.cpp), флаги там не смотрят вовсе. Прецедент — SCMD(jointeam, SCFL_HIDDEN).
+// Подсказку по подкомандам печатает сама команда без аргументов.
+SCMD(kz_zone, SCFL_HIDDEN)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player->zonesService)
@@ -705,6 +804,12 @@ SCMD(kz_zone, SCFL_MAP)
 	else if (KZ_STREQI(sub, "list"))
 	{
 		player->zonesService->ListZones();
+	}
+	else if (KZ_STREQI(sub, "show"))
+	{
+		// Права НЕ спрашиваем: команда только смотрит. Проверка стоила бы запроса в api и кэша,
+		// а прятать нечего — контур старта и финиша и так видно всем без всякой команды.
+		player->zonesService->ShowAllZones();
 	}
 	else if (KZ_STREQI(sub, "remove"))
 	{

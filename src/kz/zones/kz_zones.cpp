@@ -18,23 +18,37 @@
 
 #include "sdk/entity/cbasetrigger.h"
 #include "sdk/entity/cbasemodelentity.h"
+#include "sdk/entity/cparticlesystem.h" // рёбра подсветки — info_particle_system
 #include "sdk/ccollisionproperty.h"
 #include "entity2/entitykeyvalues.h"
 #include "entity2/entitysystem.h"
 #include "tier1/keyvalues3.h"
 
-#include <optional> // resp.Body() отдаёт std::optional (приезжает и из utils/http.h, но явно надёжнее)
+#include <algorithm> // std::stable_sort — отбор зон под потолок подсветки
+#include <optional>  // resp.Body() отдаёт std::optional (приезжает и из utils/http.h, но явно надёжнее)
 #include <string>
 #include <vector>
 
 // Имя, по которому свои зоны отличаются от родных триггеров карты (снятие, отладка).
 #define KZ_CYBER_ZONE_NAME "cyb_map_zone"
 
+// Постоянная подсветка старта и финиша. targetname свой — им снятие отличает рёбра ОТ ЭТОГО слоя
+// от рёбер !zone show и превью редактора: те живут у игрока, этот у карты.
+#define KZ_ZONE_HIGHLIGHT_NAME "cyb_zone_hl"
+#define KZ_ZONE_BEAM_EFFECT    "particles/ui/annotation/ui_annotation_line_segment.vpcf"
+
 // Поставленная зона: что стоит в мире и из какой записи оно поставлено.
 struct KzSpawnedZone
 {
 	CEntityHandle handle;
 	KzCyberZone zone;
+	// Контур постоянной подсветки (только start и end; у остальных типов пусто). Хендлы лежат
+	// ЗДЕСЬ, внутри записи, а не в отдельной коллекции: diff переносит выжившие записи целиком,
+	// поэтому у неизменившейся зоны рёбра не пересоздаются, а у снимаемой уходят вместе с ней.
+	// Две параллельные коллекции пришлось бы согласовывать руками — ровно там и живут баги вида
+	// «зона снята, а контур висит».
+	CEntityHandle highlight[KZ_ZONE_BOX_EDGES] {};
+	bool highlighted {};
 };
 
 static_global struct
@@ -149,6 +163,123 @@ bool KZ::zones::ParseZoneType(const char *raw, KzCyberZoneType &out)
 const char *KZ::zones::ZoneTypeToString(KzCyberZoneType type)
 {
 	return ZoneTypeName(type);
+}
+
+Color KZ::zones::ZoneColor(KzCyberZoneType type)
+{
+	// Значения взяты из дефолтов kz_trigger_mappingapi_*_color (kz_misc.cpp): у отладочного
+	// kz_showtriggers и у нашей подсветки должен быть ОДИН язык цветов, иначе привыкший к
+	// отладочному просмотру человек прочитает наши зоны неверно. Альфа своя: там полупрозрачные
+	// заливки объёма, здесь беам-линии, и они рисуются непрозрачными (как у ztopwatch).
+	switch (type)
+	{
+		case KZ_CYBER_ZONE_START:
+			return Color(0, 255, 0, 255);
+		case KZ_CYBER_ZONE_END:
+			return Color(255, 0, 0, 255);
+		case KZ_CYBER_ZONE_MODIFIER:
+			return Color(255, 255, 128, 255);
+		case KZ_CYBER_ZONE_STAGE:
+			return Color(255, 157, 0, 255);
+		case KZ_CYBER_ZONE_CHECKPOINT:
+			return Color(219, 255, 0, 255);
+		default:
+			// Тип, который мы не рисуем осознанно (split): серый вместо молчаливого чёрного.
+			return Color(160, 160, 160, 255);
+	}
+}
+
+i32 KZ::zones::DrawBoxEdges(const Vector &mins, const Vector &maxs, const Color &color, const char *targetname, bool ownerOnly, CEntityHandle *out)
+{
+	const Vector c[8] = {
+		Vector(mins.x, mins.y, mins.z), Vector(maxs.x, mins.y, mins.z), Vector(maxs.x, maxs.y, mins.z), Vector(mins.x, maxs.y, mins.z),
+		Vector(mins.x, mins.y, maxs.z), Vector(maxs.x, mins.y, maxs.z), Vector(maxs.x, maxs.y, maxs.z), Vector(mins.x, maxs.y, maxs.z),
+	};
+	static const int edges[KZ_ZONE_BOX_EDGES][2] = {{0, 1}, {1, 2}, {2, 3}, {3, 0}, {4, 5}, {5, 6}, {6, 7}, {7, 4}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
+
+	for (int i = 0; i < KZ_ZONE_BOX_EDGES; i++)
+	{
+		out[i] = {};
+		CParticleSystem *beam = utils::CreateEntityByName<CParticleSystem>("info_particle_system");
+		if (!beam)
+		{
+			// Дальше пробовать незачем: движок не отдаёт энтити. Уже созданные рёбра остаются в
+			// out — их снимет вызывающий, у него на руках весь массив.
+			return i;
+		}
+		CEntityKeyValues *kv = new CEntityKeyValues();
+		// Свой targetname обязателен: по нему снятие отличает НАШИ рёбра от чужих
+		// info_particle_system (их в форке хватает — kz_beam, kz_measure, частицы худа).
+		// Через classname их не различить: NameMatches сверяет m_name (targetname), а не
+		// m_designerName, поэтому без этой строки условие снятия было бы ложным всегда.
+		kv->SetString("targetname", targetname);
+		kv->SetString("effect_name", KZ_ZONE_BEAM_EFFECT);
+		kv->SetVector("origin", c[edges[i][0]]);
+		kv->SetInt("tint_cp", 16);
+		kv->SetColor("tint_cp_color", color);
+		kv->SetInt("data_cp", 1);
+		kv->SetVector("data_cp_value", c[edges[i][1]]);
+		kv->SetBool("start_active", true);
+		if (ownerOnly)
+		{
+			// Метка «плагинная частица»: KZ::quiet::OnCheckTransmit вычёркивает такие из трансмита
+			// ВСЕМ получателям, кроме названных в его белом списке. Без метки частица уходит всем
+			// штатно — именно так и рисуется общий для сервера контур.
+			beam->m_iTeamNum(CUSTOM_PARTICLE_SYSTEM_TEAM);
+		}
+		beam->DispatchSpawn(kv);
+		out[i] = beam->GetRefEHandle();
+	}
+	return KZ_ZONE_BOX_EDGES;
+}
+
+void KZ::zones::RemoveBoxEdges(CEntityHandle *handles, i32 count, const char *targetname, bool keepEntities)
+{
+	for (i32 i = 0; i < count; i++)
+	{
+		if (!keepEntities)
+		{
+			CEntityInstance *inst = GameEntitySystem() ? GameEntitySystem()->GetEntityInstance(handles[i]) : nullptr;
+			if (inst && inst->m_pEntity && inst->m_pEntity->NameMatches(targetname))
+			{
+				g_pKZUtils->RemoveEntity(inst);
+			}
+		}
+		handles[i] = {};
+	}
+}
+
+// Снять контур подсветки одной поставленной зоны.
+static_function void RemoveHighlight(KzSpawnedZone &spawned)
+{
+	if (!spawned.highlighted)
+	{
+		return;
+	}
+	KZ::zones::RemoveBoxEdges(spawned.highlight, KZ_ZONE_BOX_EDGES, KZ_ZONE_HIGHLIGHT_NAME);
+	spawned.highlighted = false;
+}
+
+// Привести подсветку зоны к нужному состоянию. Идемпотентна: если зона уже подсвечена и должна
+// быть — не трогаем ничего, иначе неизменившаяся зона пересоздавала бы двенадцать энтити на
+// каждое применение набора (а их на карте до десятка).
+static_function void SyncHighlight(KzSpawnedZone &spawned, bool wanted)
+{
+	if (wanted == spawned.highlighted)
+	{
+		return;
+	}
+	if (!wanted)
+	{
+		RemoveHighlight(spawned);
+		return;
+	}
+	// ownerOnly=false: контур обязан быть виден ВСЕМ на сервере без всякой команды.
+	const i32 created = KZ::zones::DrawBoxEdges(spawned.zone.mins, spawned.zone.maxs, KZ::zones::ZoneColor(spawned.zone.type), KZ_ZONE_HIGHLIGHT_NAME,
+												false, spawned.highlight);
+	// Флаг по ФАКТУ отрисовки: если движок не отдал ни одной энтити, зона не подсвечена, и
+	// счётчик highlight= в zones_applied не должен утверждать обратное.
+	spawned.highlighted = created > 0;
 }
 
 // Спавн одной зоны. Возвращает false, если зону отбил гейт, движок не отдал энтити или снёс её
@@ -489,6 +620,30 @@ static_function bool ZoneRecordEqual(const KzCyberZone &a, const KzCyberZone &b)
 		   && a.stageNumber == b.stageNumber && KZ_STREQ(a.courseDescriptor, b.courseDescriptor);
 }
 
+// Ключ сортировки зон под потолок подсветки: номер курса, которому зона принадлежит.
+// Зона без дескриптора — наш дефолтный курс, то есть главный (0), это прежнее поведение первой
+// итерации. Курс, которого нет в наборе платформы, уходит в самый хвост: подсвечивать его в
+// ущерб известным курсам не за что.
+// Сравнение имён БЕЗ учёта регистра — как везде, где дескриптор ищут по имени: канонизация
+// делается на спавне, а сюда запись приезжает ровно такой, какой её отдал api.
+static_function i32 HighlightCourseRank(const KzCyberZone &zone)
+{
+	if (!zone.courseDescriptor[0])
+	{
+		return 0;
+	}
+	for (const KzCyberCourse &course : g_cybZones.courses)
+	{
+		if (!V_stricmp(course.descriptor, zone.courseDescriptor))
+		{
+			// Отрицательный номер курса api не отдаёт, но подстраховка дешевле разбирательства:
+			// такой курс не должен обгонять главный.
+			return course.courseNumber > 0 ? course.courseNumber : 0;
+		}
+	}
+	return 0x7FFFFFFF;
+}
+
 static_function bool SlotListContains(const CUtlVector<CPlayerSlot> &list, CPlayerSlot slot)
 {
 	FOR_EACH_VEC(list, i)
@@ -600,8 +755,11 @@ static_function void SyncCoursesAfterApply()
 
 static_function void DespawnAll()
 {
-	for (const KzSpawnedZone &spawned : g_cybZones.spawned)
+	for (KzSpawnedZone &spawned : g_cybZones.spawned)
 	{
+		// Контур снимаем ВСЕГДА, даже когда сама зона уже не жива: рёбра — отдельные энтити, и
+		// их судьба с триггером не связана. Мёртвый хендл просто занулится.
+		RemoveHighlight(spawned);
 		CEntityInstance *inst = GameEntitySystem() ? GameEntitySystem()->GetEntityInstance(spawned.handle) : nullptr;
 		if (inst && inst->m_pEntity && inst->m_pEntity->NameMatches(KZ_CYBER_ZONE_NAME))
 		{
@@ -609,6 +767,64 @@ static_function void DespawnAll()
 		}
 	}
 	g_cybZones.spawned.clear();
+}
+
+// Рёбра подсветки, которых нет ни в одной поставленной зоне. Появляются только там, где учёт
+// потерян целиком: перезагрузка плагина посреди карты (g_cybZones заводится заново, а энтити
+// остаются в мире) или выживание частиц в движковой очистке при мёртвом триггере. Зовётся раз в
+// раунд, не в такте.
+static_function void SweepOrphanHighlights()
+{
+	if (!GameEntitySystem())
+	{
+		return;
+	}
+	// Собираем сначала, удаляем потом: RemoveEntity посреди обхода списка энтити менял бы его
+	// под итератором.
+	// Обход и приведение — ровно как в KZ::quiet::OnCheckTransmit, единственном другом месте
+	// форка, которое перебирает info_particle_system.
+	CUtlVector<CParticleSystem *> orphans;
+	EntityInstanceByClassIter_t iter(NULL, "info_particle_system");
+	for (CParticleSystem *inst = static_cast<CParticleSystem *>(iter.First()); inst; inst = static_cast<CParticleSystem *>(iter.Next()))
+	{
+		if (!inst->m_pEntity || !inst->m_pEntity->NameMatches(KZ_ZONE_HIGHLIGHT_NAME))
+		{
+			continue;
+		}
+		const CEntityHandle handle = inst->GetRefEHandle();
+		bool known = false;
+		for (const KzSpawnedZone &spawned : g_cybZones.spawned)
+		{
+			if (!spawned.highlighted)
+			{
+				continue;
+			}
+			for (i32 i = 0; i < KZ_ZONE_BOX_EDGES; i++)
+			{
+				if (spawned.highlight[i] == handle)
+				{
+					known = true;
+					break;
+				}
+			}
+			if (known)
+			{
+				break;
+			}
+		}
+		if (!known)
+		{
+			orphans.AddToTail(inst);
+		}
+	}
+	FOR_EACH_VEC(orphans, i)
+	{
+		g_pKZUtils->RemoveEntity(orphans[i]);
+	}
+	if (orphans.Count() > 0)
+	{
+		KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] zones_highlight_orphans map=%s removed=%d\n", g_cybZones.mapName.c_str(), orphans.Count());
+	}
 }
 
 // focusZoneId/outFocusReason — только чтобы редактор мог сказать автору, почему ИМЕННО его зона
@@ -972,6 +1188,47 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 		}
 	}
 
+	// ШАГ 5.5. Кого подсвечиваем постоянным контуром. Только start и end: игроку надо видеть, где
+	// начинать и где финиш, а не разноцветную ёлку из бустеров и чекпойнтов (те показывает
+	// !zone show по требованию).
+	//
+	// Отбор ПРИОРИТЕТНЫЙ, а не «первые попавшиеся»: сначала главный курс, затем бонусы по
+	// возрастанию номера. При срабатывании потолка пропасть должна подсветка дальнего бонуса, а
+	// не главного курса — обратный порядок дал бы ровно худший для игрока исход.
+	std::vector<size_t> highlightOrder;
+	for (size_t i = 0; i < g_cybZones.zones.size(); i++)
+	{
+		const KzCyberZoneType type = g_cybZones.zones[i].type;
+		if (type == KZ_CYBER_ZONE_START || type == KZ_CYBER_ZONE_END)
+		{
+			highlightOrder.push_back(i);
+		}
+	}
+	// stable_sort, а не sort: внутри одного курса порядок обязан остаться тем, в котором зоны
+	// приехали из api, иначе состав подсветки менялся бы от применения к применению без причины.
+	std::stable_sort(highlightOrder.begin(), highlightOrder.end(),
+					 [](size_t a, size_t b) { return HighlightCourseRank(g_cybZones.zones[a]) < HighlightCourseRank(g_cybZones.zones[b]); });
+	std::vector<bool> highlightWanted(g_cybZones.zones.size(), false);
+	i32 highlightSkipped = 0;
+	for (size_t i = 0; i < highlightOrder.size(); i++)
+	{
+		if (i < (size_t)KZ_ZONE_HIGHLIGHT_MAX_ZONES)
+		{
+			highlightWanted[highlightOrder[i]] = true;
+		}
+		else
+		{
+			highlightSkipped++;
+		}
+	}
+	if (highlightSkipped > 0)
+	{
+		// selected — сколько зон вошло в состав подсветки, skipped — сколько осталось без неё.
+		// Второе число и есть причина, по которой строку читают: «почему на бонусе не видно старт».
+		KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] zones_highlight_capped map=%s selected=%d skipped=%d limit=%d\n", g_cybZones.mapName.c_str(),
+					(i32)highlightOrder.size() - highlightSkipped, highlightSkipped, KZ_ZONE_HIGHLIGHT_MAX_ZONES);
+	}
+
 	// ШАГ 6. Diff: оставляем на месте зоны, чья запись не изменилась и чья энтити жива. Снос и
 	// переспавн неизменившейся зоны доигрывает EndTouch/StartTouch каждому, кто в ней стоит, —
 	// у игрока стираются чекпоинты и дёргается таймер, а он ничего не делал.
@@ -981,7 +1238,7 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 	std::vector<KzSpawnedZone> kept;
 	CUtlVector<CPlayerSlot> disturbed;
 	CUtlVector<CPlayerSlot> disturbedPrac;
-	for (const KzSpawnedZone &spawned : g_cybZones.spawned)
+	for (KzSpawnedZone &spawned : g_cybZones.spawned)
 	{
 		CEntityInstance *inst = GameEntitySystem() ? GameEntitySystem()->GetEntityInstance(spawned.handle) : nullptr;
 		const bool alive = inst && inst->m_pEntity && inst->m_pEntity->NameMatches(KZ_CYBER_ZONE_NAME);
@@ -1001,8 +1258,16 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 		{
 			matched[match] = true;
 			kept.push_back(spawned);
+			// Контур переезжает с записью и НЕ перерисовывается: у неизменившейся зоны рёбра уже
+			// стоят там, где надо. Трогаем его, только если состав подсветки поменялся (зона
+			// вышла из потолка или вошла в него).
+			SyncHighlight(kept.back(), highlightWanted[match]);
 			continue;
 		}
+		// Запись уходит из набора — контур уходит вместе с ней, независимо от того, жива ли ещё
+		// сама зона: рёбра это отдельные энтити, движковая очистка могла снести триггер и
+		// оставить их.
+		RemoveHighlight(spawned);
 		if (alive)
 		{
 			// Живую старт-зону сносим — значит кому-то сейчас сотрёт чекпоинты. Собираем ИМЕННО
@@ -1051,6 +1316,12 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 		{
 			ok++;
 			respawned++;
+			// Зона только что встала в мир — рисуем её контур, если она в составе подсветки.
+			// SpawnZone кладёт запись в хвост spawned, поэтому берём именно его.
+			if (highlightWanted[zoneIndex] && !g_cybZones.spawned.empty())
+			{
+				SyncHighlight(g_cybZones.spawned.back(), true);
+			}
 		}
 		if (focusZoneId && outFocusReason && KZ_STREQ(zone.id, focusZoneId))
 		{
@@ -1069,11 +1340,22 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 							   : KZ::mapapi::IsPlatformOwnedCourse(KZ_NO_MAPAPI_COURSE_DESCRIPTOR) ? "fallback"
 							   : KZ::mapapi::HasCourseDescriptor(KZ_NO_MAPAPI_COURSE_DESCRIPTOR)   ? "foreign"
 																								   : "none";
+	// highlight= — сколько зон реально обведено контуром. Считаем по МИРУ (записям с рёбрами), а
+	// не по отобранным выше: зона могла не заспавниться, и «хотели подсветить» разошлось бы с
+	// «подсвечено» ровно в том случае, ради которого лог и читают.
+	i32 highlighted = 0;
+	for (const KzSpawnedZone &spawned : g_cybZones.spawned)
+	{
+		if (spawned.highlighted)
+		{
+			highlighted++;
+		}
+	}
 	KZ_LOG_INFO(LogChannel::MappingAPI,
 				"[cyb] zones_applied map=%s count=%d of=%d kept=%d respawned=%d revision=%d course=%s courses=%d courses_unknown=%d "
-				"native_disabled=%d restored=%d reason=%s\n",
+				"native_disabled=%d restored=%d highlight=%d reason=%s\n",
 				g_cybZones.mapName.c_str(), ok, (i32)g_cybZones.zones.size(), (i32)kept.size(), respawned, g_cybZones.revision, courseSource,
-				(i32)g_cybZones.courses.size(), unknownCourses, nativeDisabled, restored, reason);
+				(i32)g_cybZones.courses.size(), unknownCourses, nativeDisabled, restored, highlighted, reason);
 
 	// Предупреждаем ТЕХ, КОГО ЗАДЕЛО, и только их. Молчаливый сброс чекпоинтов выглядит как
 	// «сервер съел прогресс» и диагностируется потом часами.
@@ -1228,6 +1510,11 @@ void KZ::zones::OnRoundStart()
 	KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] zones_audit stage=round_start map=%s alive=%d of=%d\n", g_cybZones.mapName.c_str(), alive,
 				g_cybZones.preRoundSpawned.Count());
 	g_cybZones.preRoundSpawned.RemoveAll();
+
+	// Рёбра подсветки, потерявшие учёт, — ДО применения: пока spawned ещё держит прошлые записи,
+	// «чужим» окажется только то, что действительно ничьё. После ApplyLoadedZones список уже
+	// перестроен, и та же проверка снесла бы рёбра, которые diff законно оставил стоять.
+	SweepOrphanHighlights();
 
 	// Мир доделан — теперь спавн доживает до игрока.
 	g_cybZones.worldReady = true;

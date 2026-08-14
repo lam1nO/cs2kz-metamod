@@ -14,6 +14,7 @@
 #include "kz/hud/kz_hud.h"
 #include "kz/option/kz_option.h"
 #include "kz/paint/kz_paint.h"
+#include "kz/zones/kz_zones.h" // разыменовываем zonesService (белый список рёбер зон)
 #include "kz/language/kz_language.h"
 
 #include "utils/utils.h"
@@ -84,6 +85,19 @@ void KZ::quiet::OnCheckTransmit(CCheckTransmitInfo **pInfo, int infoCount)
 			}
 
 			if (targetPlayer->hudService->OwnsParticle(particleSystem->GetRefEHandle()))
+			{
+				continue;
+			}
+
+			// Рёбра зон, адресованные ЭТОМУ игроку: превью редактора (!zone start/end) и показ
+			// !zone show. Без этой ветки метка CUSTOM_PARTICLE_SYSTEM_TEAM означает «не видит
+			// никто, включая владельца» — именно так превью редактора и было невидимым.
+			// Постоянного контура старта и финиша здесь нет намеренно: он метку не ставит вовсе,
+			// уходит всем штатно и до этого места не доходит (отсев по m_iTeamNum выше).
+			// HasOwnedParticles() первым: цикл крутится на каждый CheckTransmit для каждого
+			// получателя, и у игрока без превью и без показа сравнений быть не должно.
+			if (targetPlayer->zonesService && targetPlayer->zonesService->HasOwnedParticles()
+				&& targetPlayer->zonesService->OwnsParticle(particleSystem->GetRefEHandle()))
 			{
 				continue;
 			}
