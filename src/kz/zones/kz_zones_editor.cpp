@@ -454,11 +454,26 @@ void KZZonesService::SubmitZone(const KzCyberZone &zone)
 				}
 			}
 			stored.createdBy = steamId;
-			KZ::zones::AddAndSpawn(stored, revision);
+			const char *inactiveReason = KZ::zones::AddAndSpawn(stored, revision);
 			if (player)
 			{
-				player->PrintChat(true, false, "{grey}Зоны:{default} зона {yellow}%s{default} поставлена и уже действует.",
-								  KZ::zones::ZoneTypeToString(stored.type));
+				if (!inactiveReason)
+				{
+					player->PrintChat(true, false, "{grey}Зоны:{default} зона {yellow}%s{default} поставлена и уже действует.",
+									  KZ::zones::ZoneTypeToString(stored.type));
+				}
+				else if (KZ_STREQ(inactiveReason, "world_not_ready"))
+				{
+					player->PrintChat(true, false, "{grey}Зоны:{default} зона {yellow}%s{default} сохранена, включится в начале раунда.",
+									  KZ::zones::ZoneTypeToString(stored.type));
+				}
+				else
+				{
+					// «Сохранено в api» и «работает на сервере» — разные вещи. Молчать об этом
+					// нельзя: игрок пробежит через мёртвую зону и решит, что сломан таймер.
+					player->PrintChat(true, false, "{grey}Зоны:{default} зона {yellow}%s{default} сохранена, но НЕ действует: {darkred}%s{default}.",
+									  KZ::zones::ZoneTypeToString(stored.type), inactiveReason);
+				}
 			}
 		},
 		[slot, steamId]()

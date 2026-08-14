@@ -676,15 +676,63 @@ i32 KZ::mapapi::MaxRegisteredTriggers()
 	return g_mappingApi.triggers.NumAllocated();
 }
 
-i32 KZ::mapapi::MapApiVersion()
-{
-	return g_mappingApi.mapApiVersion;
-}
-
 void KZ::mapapi::OnRoundPreStart()
 {
 	g_mappingApi.triggers.RemoveAll();
 	g_mappingApi.roundIsStarting = true;
+}
+
+// Счётчики зон одного курса по ТЕКУЩЕЙ таблице триггеров.
+// Find the number of split/checkpoint/stage zones that a course has
+//  and make sure that they all start from 1 and are consecutive by
+//  XORing the values with a consecutive 1...n sequence.
+//  https://florian.github.io/xor-trick/
+struct MapiCourseZoneCounts
+{
+	i32 splitCount;
+	i32 cpCount;
+	i32 stageCount;
+	bool splitConsecutive;
+	bool cpConsecutive;
+	bool stageConsecutive;
+};
+
+static_function MapiCourseZoneCounts Mapi_CountCourseZones(const KZCourseDescriptor *courseDescriptor)
+{
+	i32 splitXor = 0;
+	i32 cpXor = 0;
+	i32 stageXor = 0;
+	MapiCourseZoneCounts counts {};
+	FOR_EACH_VEC(g_mappingApi.triggers, i)
+	{
+		KzTrigger *trigger = &g_mappingApi.triggers[i];
+		if (!KZ::mapapi::IsTimerTrigger(trigger->type))
+		{
+			continue;
+		}
+
+		if (!KZ_STREQ(trigger->zone.courseDescriptor, courseDescriptor->entityTargetname))
+		{
+			continue;
+		}
+
+		switch (trigger->type)
+		{
+			case KZTRIGGER_ZONE_SPLIT:
+				splitXor ^= (++counts.splitCount) ^ trigger->zone.number;
+				break;
+			case KZTRIGGER_ZONE_CHECKPOINT:
+				cpXor ^= (++counts.cpCount) ^ trigger->zone.number;
+				break;
+			case KZTRIGGER_ZONE_STAGE:
+				stageXor ^= (++counts.stageCount) ^ trigger->zone.number;
+				break;
+		}
+	}
+	counts.splitConsecutive = splitXor == 0;
+	counts.cpConsecutive = cpXor == 0;
+	counts.stageConsecutive = stageXor == 0;
+	return counts;
 }
 
 void KZ::mapapi::OnRoundStart()
@@ -693,58 +741,26 @@ void KZ::mapapi::OnRoundStart()
 	bool coursesRemoved = false;
 	FOR_EACH_VEC(g_mappingApi.courseDescriptors, courseInd)
 	{
-		// Find the number of split/checkpoint/stage zones that a course has
-		//  and make sure that they all start from 1 and are consecutive by
-		//  XORing the values with a consecutive 1...n sequence.
-		//  https://florian.github.io/xor-trick/
-		i32 splitXor = 0;
-		i32 cpXor = 0;
-		i32 stageXor = 0;
-		i32 splitCount = 0;
-		i32 cpCount = 0;
-		i32 stageCount = 0;
 		KZCourseDescriptor *courseDescriptor = &g_mappingApi.courseDescriptors[courseInd];
-		FOR_EACH_VEC(g_mappingApi.triggers, i)
-		{
-			KzTrigger *trigger = &g_mappingApi.triggers[i];
-			if (!KZ::mapapi::IsTimerTrigger(trigger->type))
-			{
-				continue;
-			}
-
-			if (!KZ_STREQ(trigger->zone.courseDescriptor, courseDescriptor->entityTargetname))
-			{
-				continue;
-			}
-
-			switch (trigger->type)
-			{
-				case KZTRIGGER_ZONE_SPLIT:
-					splitXor ^= (++splitCount) ^ trigger->zone.number;
-					break;
-				case KZTRIGGER_ZONE_CHECKPOINT:
-					cpXor ^= (++cpCount) ^ trigger->zone.number;
-					break;
-				case KZTRIGGER_ZONE_STAGE:
-					stageXor ^= (++stageCount) ^ trigger->zone.number;
-					break;
-			}
-		}
+		const MapiCourseZoneCounts counts = Mapi_CountCourseZones(courseDescriptor);
+		const i32 splitCount = counts.splitCount;
+		const i32 cpCount = counts.cpCount;
+		const i32 stageCount = counts.stageCount;
 
 		bool invalid = false;
-		if (splitXor != 0)
+		if (!counts.splitConsecutive)
 		{
 			Mapi_Error("Course \"%s\" Split zones aren't consecutive or don't start at 1!", courseDescriptor->name);
 			invalid = true;
 		}
 
-		if (cpXor != 0)
+		if (!counts.cpConsecutive)
 		{
 			Mapi_Error("Course \"%s\" Checkpoint zones aren't consecutive or don't start at 1!", courseDescriptor->name);
 			invalid = true;
 		}
 
-		if (stageXor != 0)
+		if (!counts.stageConsecutive)
 		{
 			Mapi_Error("Course \"%s\" Stage zones aren't consecutive or don't start at 1!", courseDescriptor->name);
 			invalid = true;
@@ -790,6 +806,168 @@ void KZ::mapapi::OnRoundStart()
 	{
 		Mapi_RebuildSortedCourses();
 	}
+}
+
+void KZ::mapapi::RecountCourseZones()
+{
+	// Пустая таблица триггеров означает не «у курсов нет зон», а «окно регистрации открыто»:
+	// OnRoundPreStart делает triggers.RemoveAll(), и до round_start карта заполняет её заново.
+	// Пересчёт в этот момент обнулил бы счётчики ВСЕХ курсов карты, включая родные, — то есть
+	// сорвал бы финиш каждого забега (TimerEnd сверяет currentStage со stageCount). Сегодня
+	// сюда так не приходят (единственный вызывающий спавнит зоны только при готовом мире), но
+	// цена ошибки будущего вызывающего слишком велика, чтобы полагаться на это.
+	if (g_mappingApi.triggers.Count() == 0)
+	{
+		KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] course_recount_skipped reason=trigger_table_empty\n");
+		return;
+	}
+
+	FOR_EACH_VEC(g_mappingApi.courseDescriptors, courseInd)
+	{
+		KZCourseDescriptor *course = &g_mappingApi.courseDescriptors[courseInd];
+		const MapiCourseZoneCounts counts = Mapi_CountCourseZones(course);
+
+		// Молча НЕ трогаем счётчики курса, чью нумерацию сломали: значение, выставленное
+		// валидацией на round_start, детерминировано, а половинчатое — нет. Дропать курс здесь
+		// нельзя тем более: это путь FastRemove, и вызывают нас вне окна раунда.
+		const char *reason = nullptr;
+		if (!counts.splitConsecutive)
+		{
+			reason = "split_numbers_not_consecutive";
+		}
+		else if (!counts.cpConsecutive)
+		{
+			reason = "checkpoint_numbers_not_consecutive";
+		}
+		else if (!counts.stageConsecutive)
+		{
+			reason = "stage_numbers_not_consecutive";
+		}
+		else if (counts.splitCount > KZ_MAX_SPLIT_ZONES || counts.cpCount > KZ_MAX_CHECKPOINT_ZONES || counts.stageCount > KZ_MAX_STAGE_ZONES)
+		{
+			reason = "too_many_zones";
+		}
+		if (reason)
+		{
+			// В лог сервера, а НЕ через Mapi_Error: тот копит строки и раз в минуту высыпает их
+			// в общий чат всем игрокам, а нас зовут после каждого применения набора зон.
+			KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] course_recount_skipped course=%s reason=%s split=%i cp=%i stage=%i\n", course->name, reason,
+						counts.splitCount, counts.cpCount, counts.stageCount);
+			continue;
+		}
+
+		if (course->splitCount == counts.splitCount && course->checkpointCount == counts.cpCount && course->stageCount == counts.stageCount)
+		{
+			continue;
+		}
+		KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] course_recounted course=%s split=%i->%i cp=%i->%i stage=%i->%i\n", course->name,
+					course->splitCount, counts.splitCount, course->checkpointCount, counts.cpCount, course->stageCount, counts.stageCount);
+		course->splitCount = counts.splitCount;
+		course->checkpointCount = counts.cpCount;
+		course->stageCount = counts.stageCount;
+	}
+}
+
+bool KZ::mapapi::HasCourseDescriptor(const char *targetname)
+{
+	return Mapi_FindCourse(targetname) != nullptr;
+}
+
+const char *KZ::mapapi::CreateExternalCourse(i32 platformNumber, const char *courseName, const char *descriptorName)
+{
+	if (g_mappingApi.fatalFailure)
+	{
+		return "map_api_fatal";
+	}
+	if (platformNumber < 0 || platformNumber > KZ_PLATFORM_COURSE_MAX_NUMBER)
+	{
+		return "course_number_out_of_range";
+	}
+	if (!courseName || !courseName[0])
+	{
+		return "course_name_empty";
+	}
+	if (V_strlen(courseName) >= KZ_MAX_COURSE_NAME_LENGTH)
+	{
+		return "course_name_too_long";
+	}
+	if (!descriptorName || !descriptorName[0])
+	{
+		return "descriptor_empty";
+	}
+	if (g_mappingApi.courseDescriptors.Count() >= KZ_MAX_COURSE_COUNT)
+	{
+		return "too_many_courses";
+	}
+
+	const i32 courseId = KZ_PLATFORM_COURSE_ID_BASE + platformNumber;
+	const i32 hammerId = KZ_PLATFORM_COURSE_HAMMER_ID_BASE - platformNumber;
+	// guid, который выдаст Mapi_CreateCourse: он выводит его из Count() + 1. Count() уменьшается,
+	// когда валидация дропает курс, поэтому позже созданный курс МОЖЕТ получить guid живого — а
+	// KZTimerService опознаёт курс забега именно по guid (currentCourseGUID), то есть таймер
+	// приписал бы ран чужому курсу. Формулу guid не трогаем (апстрим), но столкновение ловим.
+	const u32 plannedGuid = (u32)g_mappingApi.courseDescriptors.Count() + 1;
+
+	FOR_EACH_VEC(g_mappingApi.courseDescriptors, i)
+	{
+		const KZCourseDescriptor &existing = g_mappingApi.courseDescriptors[i];
+		if (existing.guid == plannedGuid)
+		{
+			return "guid_taken";
+		}
+		// Самое опасное столкновение во всей затее. Локальная таблица MapCourses уникальна по
+		// (MapID, StageID), где StageID — именно этот id, а вставка идёт
+		// `ON CONFLICT(MapID, StageID) DO UPDATE SET Name` (kz/db/queries/courses.h). Совпадение
+		// id с родным курсом ПЕРЕИМЕНОВАЛО БЫ родной курс в БД и пришило к нему наши рекорды.
+		// Одного «мы берём с 1000» мало: id родного курса задаёт маппер, ничто не мешает ему
+		// поставить 1000.
+		if (existing.id == courseId)
+		{
+			return "course_id_taken";
+		}
+		// Mapi_CreateCourse дедуплицирует по hammerId и на совпадении молча возвращает false
+		// (это его штатный путь для backwards-compat зон). Молчание нам не годится — свой reason.
+		if (existing.hammerId == hammerId)
+		{
+			return "hammer_id_taken";
+		}
+		// UQ_MapCourses_MapIDName: совпадение имени уронило бы транзакцию сетапа курсов целиком.
+		if (KZ_STREQI(existing.name, courseName))
+		{
+			return "course_name_taken";
+		}
+		if (KZ_STREQI(existing.entityTargetname, descriptorName))
+		{
+			return "descriptor_taken";
+		}
+	}
+
+	if (!Mapi_CreateCourse(courseId, courseName, hammerId, descriptorName, false))
+	{
+		return "create_failed";
+	}
+	return nullptr;
+}
+
+bool KZ::mapapi::SetCourseStartPositionFromTrigger(const char *descriptorName, CBaseTrigger *trigger, bool overwrite)
+{
+	KZCourseDescriptor *desc = Mapi_FindCourse(descriptorName);
+	if (!desc || !trigger)
+	{
+		return false;
+	}
+	if (desc->hasStartPosition && !overwrite)
+	{
+		return true; // позиция уже есть и перебивать её не просили — это успех, а не отказ
+	}
+	Vector origin;
+	QAngle angles;
+	if (!utils::FindValidPositionForTrigger(trigger, origin, angles))
+	{
+		return false;
+	}
+	desc->SetStartPosition(origin, angles);
+	return true;
 }
 
 void KZ::mapapi::CheckEndTimerTrigger(CBaseTrigger *trigger)

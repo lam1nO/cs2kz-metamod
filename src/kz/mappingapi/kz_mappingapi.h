@@ -15,6 +15,14 @@
 #define KZ_MAX_COURSE_COUNT       128
 #define KZ_MAX_COURSE_NAME_LENGTH 65
 
+// Диапазоны идентификаторов под курсы платформы (KZ::mapapi::CreateExternalCourse). Родной
+// курс маппера нумеруется с 1 и получает hammerId энтити-дескриптора (>= 0), дефолтный курс
+// карты без Mapping API — hammerId -1. Мы уезжаем заведомо в сторону от обоих; совпадение всё
+// равно проверяется явно, потому что id родного курса задаёт маппер и запретить ему 1000 нечем.
+#define KZ_PLATFORM_COURSE_ID_BASE        1000
+#define KZ_PLATFORM_COURSE_HAMMER_ID_BASE (-1000)
+#define KZ_PLATFORM_COURSE_MAX_NUMBER     99
+
 #define INVALID_SPLIT_NUMBER      0
 #define INVALID_CHECKPOINT_NUMBER 0
 #define INVALID_STAGE_NUMBER      0
@@ -206,10 +214,35 @@ namespace KZ::mapapi
 	i32 RegisteredTriggerCount();
 	i32 MaxRegisteredTriggers();
 
-	// Версия Mapping API текущей карты. KZ_NO_MAPAPI_VERSION означает, что курсов у карты нет
-	// и форк завёл дефолтный курс сам — только на таких картах чужая зона start/end может
-	// сослаться на KZ_NO_MAPAPI_COURSE_DESCRIPTOR.
-	i32 MapApiVersion();
+	// Есть ли на карте дескриптор курса с таким targetname. Зона start/end платформы обязана
+	// ссылаться на существующий дескриптор: иначе КАЖДОЕ касание бьёт Mapi_Error, а тот раз в
+	// минуту высыпает накопленное в ОБЩИЙ ЧАТ всем игрокам.
+	bool HasCourseDescriptor(const char *targetname);
+
+	// Завести курс платформы в рантайме. Штатного пути нет: дескрипторы создаются только из
+	// Mapi_OnInfoTargetSpawn, а тот зовётся исключительно из хука загрузки spawn-группы карты и
+	// один раз за карту. Отсюда эта обёртка — по образцу BeginExternalTriggerSpawn.
+	//
+	// platformNumber (0..KZ_PLATFORM_COURSE_MAX_NUMBER) задаёт id и hammerId курса из
+	// платформенных диапазонов выше; 0 — главный курс.
+	// Возвращает nullptr при успехе, иначе машинно-читаемую причину для reason= в логе.
+	// Проверяет столкновения по id/hammerId/имени/дескриптору — см. комментарии в реализации,
+	// совпадение id с родным курсом переименовало бы родной курс в локальной БД.
+	const char *CreateExternalCourse(i32 platformNumber, const char *courseName, const char *descriptorName);
+
+	// Стартовая позиция курса из объёма триггера (та же utils::FindValidPositionForTrigger, что
+	// у конечной позиции). Нужна там, где родного info_teleport_destination "timer_start" нет:
+	// без неё !main / меню !courses / рестарт не знают, куда телепортить.
+	// overwrite=false не трогает уже заданную позицию — на карте без Mapping API её задаёт маппер
+	// через info_teleport_destination "timer_start", и молча перебивать её мы не вправе.
+	bool SetCourseStartPositionFromTrigger(const char *descriptorName, CBaseTrigger *trigger, bool overwrite);
+
+	// Пересчитать split/checkpoint/stage-счётчики всех курсов по текущей таблице триггеров.
+	// Валидация в OnRoundStart считает их ОДИН раз и до того, как платформа поставит свои зоны
+	// (порядок в hooks.cpp), а счётчики гейтят финиш: KZTimerService::TimerEnd отбивает ран,
+	// если currentStage != courseDesc->stageCount. Зовётся после каждого применения набора.
+	// Ошибки пишет в лог сервера, а не через Mapi_Error (тот идёт в общий чат) и курсы не дропает.
+	void RecountCourseZones();
 
 	void CheckEndTimerTrigger(CBaseTrigger *trigger);
 	// This is const, unlike the trigger returned from Mapi_FindKzTrigger.
