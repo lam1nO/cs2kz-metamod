@@ -21,6 +21,7 @@
 #include "tier1/keyvalues3.h"
 
 #include <string>
+#include <optional> // ParseApiReason принимает std::optional (приезжает и из utils/http.h, но явно надёжнее)
 #include <stdlib.h>
 #include <math.h>
 
@@ -51,6 +52,25 @@ static_function void AuthorizeRequest(HTTP::Request &req)
 	{
 		req.SetHeader("Authorization", std::string("Bearer ") + token);
 	}
+}
+
+// Причина отказа из тела ответа api ({"reason": "..."}). Пустая строка, если тела нет, оно не
+// разобралось или поля нет.
+static_function std::string ParseApiReason(const std::optional<std::string> &body)
+{
+	if (!body.has_value())
+	{
+		return "";
+	}
+	KeyValues3 kv(KV3_TYPEEX_TABLE, KV3_SUBTYPE_UNSPECIFIED);
+	CUtlString error = "";
+	LoadKV3FromJSON(&kv, &error, body->c_str(), "");
+	if (!error.IsEmpty())
+	{
+		return "";
+	}
+	KeyValues3 *reason = kv.FindMember("reason");
+	return reason ? reason->GetString("") : "";
 }
 
 // Слот игрока, а не указатель: пока запрос летит, игрок может отключиться, и держать
@@ -382,17 +402,10 @@ void KZZonesService::SubmitZone(const KzCyberZone &zone)
 			if (resp.status < 200 || resp.status >= 300)
 			{
 				// Отказ api приезжает как {"reason": "..."} — показываем причину, а не «не вышло».
-				std::string reason = "http_error";
-				if (body.has_value())
+				std::string reason = ParseApiReason(body);
+				if (reason.empty())
 				{
-					KeyValues3 kv(KV3_TYPEEX_TABLE, KV3_SUBTYPE_UNSPECIFIED);
-					CUtlString error = "";
-					LoadKV3FromJSON(&kv, &error, body->c_str(), "");
-					KeyValues3 *r = error.IsEmpty() ? kv.FindMember("reason") : nullptr;
-					if (r)
-					{
-						reason = r->GetString("http_error");
-					}
+					reason = "http_error";
 				}
 				KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] zone_add_rejected steam_id=%llu reason=%s http=%u\n", steamId, reason.c_str(),
 							(unsigned)resp.status);
@@ -526,34 +539,29 @@ void KZZonesService::ListZones()
 	this->player->PrintChat(true, false, "{grey}Удалить: {default}!zone remove <номер>");
 }
 
-void KZZonesService::RemoveZone(i32 humanIndex)
-{
-	if (!this->EnsureAllowed())
-	{
-		return;
-	}
-	const std::vector<KzCyberZone> &zones = KZ::zones::Loaded();
-	if (humanIndex < 1 || (size_t)humanIndex > zones.size())
-	{
-		this->player->PrintChat(true, false, "{grey}Зоны:{default} нет зоны с номером {yellow}%d{default}. Смотри {grey}!zone list.", humanIndex);
-		return;
-	}
-	const KzCyberZone target = zones[humanIndex - 1];
-	if (target.id[0] == '\0')
-	{
-		this->player->PrintChat(true, false, "{grey}Зоны:{default} у зоны нет id — удалить через api нельзя.");
-		return;
-	}
+// Сколько ВСЕГО попыток делаем на операцию с зоной. Два — то есть один повтор.
+//
+// 409 zone_moved это не отказ, а «состояние уехало между чтением и записью»: зону в момент
+// операции перенесли в другой курс. Семантика отличается от соседей — 400 «так нельзя»,
+// 404 «нет такой», а 409 «повтори». Без повтора редкая параллельная правка молча не применялась
+// бы, и админ видел бы «ничего не произошло».
+// Одного повтора достаточно: гонка требует одновременного редактирования ОДНОЙ зоны двумя
+// людьми, и второй заход уже читает уехавшее состояние. Больше повторов означало бы цикл на
+// сетевой ручке из игрового потока.
+#define KZ_ZONE_API_ATTEMPTS 2
 
+static_function void SendZoneDelete(CPlayerSlot slot, u64 steamId, std::string zoneId, i32 attempt);
+
+static_function void SendZoneDelete(CPlayerSlot slot, u64 steamId, std::string zoneId, i32 attempt)
+{
 	const std::string base = ApiBaseUrl();
 	if (base.empty())
 	{
 		return;
 	}
-	const u64 steamId = this->player->GetSteamId64(false);
 
 	char url[512];
-	V_snprintf(url, sizeof(url), "%s/ingest/v1/kz/zones/%s", base.c_str(), target.id);
+	V_snprintf(url, sizeof(url), "%s/ingest/v1/kz/zones/%s", base.c_str(), zoneId.c_str());
 
 	HTTP::Request req(HTTP::Method::DELETE_, url);
 	AuthorizeRequest(req);
@@ -562,18 +570,26 @@ void KZZonesService::RemoveZone(i32 humanIndex)
 	V_snprintf(steamIdStr, sizeof(steamIdStr), "%llu", steamId);
 	req.SetQuery("steamId64", steamIdStr);
 
-	const CPlayerSlot slot = this->player->GetPlayerSlot();
-	std::string zoneId = target.id;
-
 	// clang-format off
 	req.Send(
-		[slot, steamId, zoneId](HTTP::Response resp)
+		[slot, steamId, zoneId, attempt](HTTP::Response resp)
 		{
 			KZPlayer *player = PlayerBySlotIfSame(slot, steamId);
+			std::optional<std::string> delBody = resp.Body();
+
+			if (resp.status == 409 && ParseApiReason(delBody) == "zone_moved" && attempt < KZ_ZONE_API_ATTEMPTS)
+			{
+				KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] zone_remove_retry steam_id=%llu id=%s attempt=%d reason=zone_moved\n", steamId,
+							zoneId.c_str(), attempt);
+				SendZoneDelete(slot, steamId, zoneId, attempt + 1);
+				return;
+			}
+
 			if (resp.status < 200 || resp.status >= 300)
 			{
-				KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] zone_remove_rejected steam_id=%llu id=%s http=%u\n", steamId, zoneId.c_str(),
-							(unsigned)resp.status);
+				const std::string reason = ParseApiReason(delBody);
+				KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] zone_remove_rejected steam_id=%llu id=%s http=%u reason=%s attempt=%d\n", steamId,
+							zoneId.c_str(), (unsigned)resp.status, reason.empty() ? "http_error" : reason.c_str(), attempt);
 				if (player)
 				{
 					player->PrintChat(true, false, "{grey}Зоны:{default} api отказал в удалении (HTTP %u).", (unsigned)resp.status);
@@ -581,7 +597,6 @@ void KZZonesService::RemoveZone(i32 humanIndex)
 				return;
 			}
 			i32 revision = 0;
-			std::optional<std::string> delBody = resp.Body();
 			if (delBody.has_value())
 			{
 				KeyValues3 kv(KV3_TYPEEX_TABLE, KV3_SUBTYPE_UNSPECIFIED);
@@ -609,6 +624,28 @@ void KZZonesService::RemoveZone(i32 humanIndex)
 			}
 		});
 	// clang-format on
+}
+
+void KZZonesService::RemoveZone(i32 humanIndex)
+{
+	if (!this->EnsureAllowed())
+	{
+		return;
+	}
+	const std::vector<KzCyberZone> &zones = KZ::zones::Loaded();
+	if (humanIndex < 1 || (size_t)humanIndex > zones.size())
+	{
+		this->player->PrintChat(true, false, "{grey}Зоны:{default} нет зоны с номером {yellow}%d{default}. Смотри {grey}!zone list.", humanIndex);
+		return;
+	}
+	const KzCyberZone target = zones[humanIndex - 1];
+	if (target.id[0] == '\0')
+	{
+		this->player->PrintChat(true, false, "{grey}Зоны:{default} у зоны нет id — удалить через api нельзя.");
+		return;
+	}
+
+	SendZoneDelete(this->player->GetPlayerSlot(), this->player->GetSteamId64(false), target.id, 1);
 }
 
 static_function void PrintUsage(KZPlayer *player)
