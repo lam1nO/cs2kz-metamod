@@ -23,6 +23,7 @@
 #include "entity2/entitysystem.h"
 #include "tier1/keyvalues3.h"
 
+#include <optional> // resp.Body() отдаёт std::optional (приезжает и из utils/http.h, но явно надёжнее)
 #include <string>
 #include <vector>
 

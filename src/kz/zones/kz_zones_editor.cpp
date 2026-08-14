@@ -557,6 +557,13 @@ static_function void SendZoneDelete(CPlayerSlot slot, u64 steamId, std::string z
 	const std::string base = ApiBaseUrl();
 	if (base.empty())
 	{
+		// Молчаливый выход неотличим от сломанной команды. На постановке зоны про это говорят —
+		// здесь было унаследованное расхождение.
+		KZPlayer *player = PlayerBySlotIfSame(slot, steamId);
+		if (player)
+		{
+			player->PrintChat(true, false, "{grey}Зоны:{default} платформенный источник выключен.");
+		}
 		return;
 	}
 
@@ -592,7 +599,10 @@ static_function void SendZoneDelete(CPlayerSlot slot, u64 steamId, std::string z
 							zoneId.c_str(), (unsigned)resp.status, reason.empty() ? "http_error" : reason.c_str(), attempt);
 				if (player)
 				{
-					player->PrintChat(true, false, "{grey}Зоны:{default} api отказал в удалении (HTTP %u).", (unsigned)resp.status);
+					// Причина, а не код: reason уже разобран, а «409» админу ничего не говорит.
+					// На постановке зоны причина показывается — здесь было расхождение.
+					player->PrintChat(true, false, "{grey}Зоны:{default} api отказал в удалении: {darkred}%s{default}.",
+									  reason.empty() ? "http_error" : reason.c_str());
 				}
 				return;
 			}
