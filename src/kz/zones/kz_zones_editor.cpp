@@ -302,6 +302,27 @@ void KZZonesService::ShowAllZones()
 		return;
 	}
 
+	// Бюджет: свой на игрока и общий на сервер. Оба в рёбрах — считаем то, что реально встанет в
+	// мир. Серверный меряем ДО отрисовки: команда прав не спрашивает, и при полном сервере без
+	// этого потолка упёрлись бы в лимит энтити, из-за чего перестали бы спавниться сами зоны.
+	//
+	// И проверяем его ДО сортировки ниже, хотя от неё он не зависит: отказ по бюджету кулдаун не
+	// ставит (игрок ничего не получил и ждать не должен), а значит в состоянии «показ занят»
+	// команду можно звать без ограничений. Сортировка стоит O(N log N) вызовов CourseRank, а
+	// каждый линейно обходит курсы со строковым сравнением — платить это за отказ незачем.
+	const i32 activeEdges = ActiveShowEdges();
+	const i32 budgetServer = KZ_ZONE_SHOW_MAX_EDGES_SERVER - activeEdges;
+	if (budgetServer < KZ_ZONE_BOX_EDGES)
+	{
+		this->player->PrintChat(true, false, "{grey}Зоны:{default} показ сейчас занят другими игроками, повтори через несколько секунд.");
+		// Отказали пользователю — значит warn с машинно-читаемой причиной: упор ВСЕГО СЕРВЕРА в
+		// бюджет рёбер эксплуатации интересен, а из чата его не видно.
+		KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] zone_show_rejected steam_id=%llu map=%s reason=server_budget active=%d limit=%d\n",
+					this->player->GetSteamId64(false), KZ::zones::CurrentMapName(), activeEdges, KZ_ZONE_SHOW_MAX_EDGES_SERVER);
+		return;
+	}
+	const i32 budgetEdges = MIN(KZ_ZONE_SHOW_MAX_EDGES_PLAYER, budgetServer);
+
 	// Порядок отбора — ТОТ ЖЕ, что у постоянного слоя (KZ::zones::CourseRank): главный курс,
 	// потом бонусы по номеру. Иначе на карте с большим набором показ выбрасывал бы из потолка
 	// именно главный курс — исход, который для постоянного слоя признан худшим и исключён.
@@ -313,19 +334,9 @@ void KZZonesService::ShowAllZones()
 	std::stable_sort(order.begin(), order.end(),
 					 [&zones](size_t a, size_t b) { return KZ::zones::CourseRank(zones[a]) < KZ::zones::CourseRank(zones[b]); });
 
-	// Бюджет: свой на игрока и общий на сервер. Оба в рёбрах — считаем то, что реально встанет в
-	// мир. Серверный меряем ДО отрисовки: команда прав не спрашивает, и при полном сервере без
-	// этого потолка упёрлись бы в лимит энтити, из-за чего перестали бы спавниться сами зоны.
-	const i32 budgetServer = KZ_ZONE_SHOW_MAX_EDGES_SERVER - ActiveShowEdges();
-	if (budgetServer < KZ_ZONE_BOX_EDGES)
-	{
-		this->player->PrintChat(true, false, "{grey}Зоны:{default} показ сейчас занят другими игроками, повтори через несколько секунд.");
-		return;
-	}
-	const i32 budgetEdges = MIN(KZ_ZONE_SHOW_MAX_EDGES_PLAYER, budgetServer);
-
 	i32 drawn = 0;
 	i32 skipped = 0;
+	i32 failed = 0;
 	for (size_t index : order)
 	{
 		const KzCyberZone &zone = zones[index];
@@ -357,6 +368,19 @@ void KZZonesService::ShowAllZones()
 		{
 			drawn++;
 		}
+		else
+		{
+			failed++;
+		}
+	}
+
+	// Движок не отдал энтити под часть зон. Тот же класс отказа, что zone_highlight_failed у
+	// постоянного слоя, и молчать о нём нельзя: в чате игрок увидит заниженное число и решит,
+	// что зон на карте меньше.
+	if (failed > 0)
+	{
+		KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] zone_show_failed steam_id=%llu map=%s drawn=%d failed=%d reason=entity_create_failed\n",
+					this->player->GetSteamId64(false), KZ::zones::CurrentMapName(), drawn, failed);
 	}
 
 	if (this->showBeams.empty())
@@ -387,10 +411,11 @@ void KZZonesService::ShowAllZones()
 
 	if (skipped > 0)
 	{
+		// Упор в СВОЙ потолок в лог не пишем: игрок видит его в чате этой же строкой, а по
+		// правилу проекта логируется отказ, а не штатная работа. Отказы показа — выше:
+		// zone_show_rejected (серверный бюджет) и zone_show_failed (движок не отдал энтити).
 		this->player->PrintChat(true, false, "{grey}Зоны:{default} показываю {yellow}%d{default} зон(ы) на %.0f сек, ещё %d не влезло в потолок.",
 								drawn, KZ_ZONE_SHOW_SECONDS, skipped);
-		KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] zone_show_capped steam_id=%llu map=%s drawn=%d skipped=%d edges=%d\n",
-					this->player->GetSteamId64(false), KZ::zones::CurrentMapName(), drawn, skipped, (i32)this->showBeams.size());
 	}
 	else
 	{
