@@ -412,6 +412,28 @@ static_function void Mapi_OnInfoTargetSpawn(const CEntityKeyValues *ekv)
 	Mapi_CreateCourse(courseNumber, courseName, hammerId, targetName, ekv->GetBool("timer_course_disable_checkpoint"));
 }
 
+// Перестроить g_sortedCourses по актуальному courseDescriptors.
+//
+// Зачем: g_sortedCourses хранит УКАЗАТЕЛИ внутрь courseDescriptors, а валидация на round_start
+// удаляет курс через FastRemove. courseDescriptors — CUtlVectorFixed, память инлайновая и
+// никуда не переезжает, поэтому «висячего указателя» в смысле обращения к освобождённой памяти
+// тут нет. Ломается другое: FastRemove (utlvector.h) делает memcpy последнего элемента в дырку
+// и уменьшает счётчик, ничего не освобождая, так что
+//   - указатель на освободившийся слот начинает читать данные бывшего ПОСЛЕДНЕГО курса (дубль),
+//   - указатель на бывший последний слот читает его же копию уже за Count() (фантом),
+//   - и рушится инвариант сортировки CUtlSortVector, по которому Insert ищет позицию бинарным
+//     поиском (FindLessOrEqual), — следующая вставка садится не туда.
+// Наружу это вылезло бы дублем курса в !courses/лидерборде и лукапами KZ::course::GetCourse*,
+// возвращающими фантом.
+static_function void Mapi_RebuildSortedCourses()
+{
+	g_sortedCourses.RemoveAll();
+	FOR_EACH_VEC(g_mappingApi.courseDescriptors, i)
+	{
+		g_sortedCourses.Insert(&g_mappingApi.courseDescriptors[i]);
+	}
+}
+
 static_function KzTrigger *Mapi_FindKzTrigger(CBaseTrigger *trigger)
 {
 	if (!trigger->m_pEntity)
@@ -668,6 +690,7 @@ void KZ::mapapi::OnRoundPreStart()
 void KZ::mapapi::OnRoundStart()
 {
 	g_mappingApi.roundIsStarting = false;
+	bool coursesRemoved = false;
 	FOR_EACH_VEC(g_mappingApi.courseDescriptors, courseInd)
 	{
 		// Find the number of split/checkpoint/stage zones that a course has
@@ -748,12 +771,21 @@ void KZ::mapapi::OnRoundStart()
 		if (invalid)
 		{
 			g_mappingApi.courseDescriptors.FastRemove(courseInd);
+			coursesRemoved = true;
 			courseInd--;
 			break;
 		}
 		courseDescriptor->splitCount = splitCount;
 		courseDescriptor->checkpointCount = cpCount;
 		courseDescriptor->stageCount = stageCount;
+	}
+
+	// Обязательно ПОСЛЕ цикла: во время него g_sortedCourses указывает на переставленные слоты,
+	// но внутри цикла его никто не читает. Подробности, что именно ломает FastRemove, — в
+	// комментарии к Mapi_RebuildSortedCourses.
+	if (coursesRemoved)
+	{
+		Mapi_RebuildSortedCourses();
 	}
 }
 
