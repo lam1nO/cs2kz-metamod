@@ -353,26 +353,34 @@ void KZZonesService::ShowAllZones()
 		CEntityHandle edges[KZ_ZONE_BOX_EDGES] {};
 		// ownerOnly=true: показ адресный, его видит только тот, кто позвал.
 		const i32 created = KZ::zones::DrawBoxEdges(mins, maxs, KZ::zones::ZoneColor(zone.type), KZ_ZONE_SHOW_NAME, true, edges);
+		// Ящик либо целый, либо его нет — ровно как у постоянного контура (SyncHighlight).
+		// Недорисованный читается как сломанная зона, а «created > 0 значит нарисовали» прятало
+		// бы отказ движка: кончись энтити на ПОСЛЕДНЕЙ зоне отбора, счётчик failed остался бы
+		// нулевым, warn не написался бы вовсе, а в чате число зон выглядело бы честным.
+		if (created < KZ_ZONE_BOX_EDGES)
+		{
+			KZ::zones::RemoveBoxEdges(edges, KZ_ZONE_BOX_EDGES, KZ_ZONE_SHOW_NAME);
+			failed++;
+			continue;
+		}
 		for (CEntityHandle &edge : edges)
 		{
 			// Get() != nullptr — тот же способ проверки живого ребра, что у ztopwatch: ребро,
-			// которое движок не отдал, в список не кладём, иначе показ считался бы удавшимся.
+			// которое движок снёс прямо на спавне, в список не кладём.
 			if (edge.Get())
 			{
 				this->showBeams.push_back(edge);
 			}
 		}
-		// Считаем по ФАКТУ отрисовки: иначе «показываю N зон» завысило бы N ровно тогда, когда
-		// движок перестал отдавать энтити, то есть когда точность нужнее всего.
-		if (created > 0)
-		{
-			drawn++;
-		}
-		else
-		{
-			failed++;
-		}
+		drawn++;
 	}
+
+	// Кулдаун ставим ЗДЕСЬ, а не только на успехе: к этой точке команда уже заплатила полную
+	// цену — обход всех слотов, сортировку с CourseRank и попытки создания энтити. Повторять её
+	// биндом при отказе движка должно быть так же нельзя, как и при успехе, иначе исчерпание
+	// энтити превращает !zone show в бесплатный способ грузить сервер и WARN-канал.
+	// Отказ по серверному бюджету — другое дело: тот путь выходит раньше и сделан дешёвым.
+	this->lastShowTime = g_pKZUtils->GetServerGlobals()->curtime;
 
 	// Движок не отдал энтити под часть зон. Тот же класс отказа, что zone_highlight_failed у
 	// постоянного слоя, и молчать о нём нельзя: в чате игрок увидит заниженное число и решит,
@@ -393,7 +401,6 @@ void KZZonesService::ShowAllZones()
 	// Порядок в списке — контракт с OwnsParticle: он ищет двоичным поиском в горячем пути
 	// CheckTransmit. Сортируем один раз здесь, а не поддерживаем вставками.
 	std::sort(this->showBeams.begin(), this->showBeams.end(), [](const CEntityHandle &a, const CEntityHandle &b) { return a < b; });
-	this->lastShowTime = g_pKZUtils->GetServerGlobals()->curtime;
 
 	// Своё поколение: таймер от прошлого показа не должен гасить новый.
 	const u32 generation = ++this->showGeneration;
