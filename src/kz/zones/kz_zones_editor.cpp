@@ -22,6 +22,7 @@
 
 #include <string>
 #include <optional> // ParseApiReason принимает std::optional (приезжает и из utils/http.h, но явно надёжнее)
+#include <vector>   // KZ::zones::Loaded() отдаёт std::vector
 #include <stdlib.h>
 #include <math.h>
 

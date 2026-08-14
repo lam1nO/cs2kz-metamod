@@ -489,8 +489,6 @@ static_function bool ZoneRecordEqual(const KzCyberZone &a, const KzCyberZone &b)
 		   && a.stageNumber == b.stageNumber && KZ_STREQ(a.courseDescriptor, b.courseDescriptor);
 }
 
-// Кто из игроков сейчас касается этой энтити. Спрашиваем РЕАЛЬНЫЕ трекеры касания, а не считаем
-// по координатам: предупреждение, которое врёт, хуже отсутствующего.
 static_function bool SlotListContains(const CUtlVector<CPlayerSlot> &list, CPlayerSlot slot)
 {
 	FOR_EACH_VEC(list, i)

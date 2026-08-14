@@ -24,6 +24,11 @@
 
 #include <vendor/mm-cs2menus/src/public/ics2menus.h>
 
+// isdigit/atoi в GetCyberCourseNumber и командах бонусов. Приезжали транзитивно — было до нас,
+// но правило одно для всего файла.
+#include <cctype>
+#include <cstdlib>
+
 #include "tier0/memdbgon.h"
 
 // Меню-движок cs2menus (определён в cs2kz.cpp); может быть nullptr, если плагин не загружен.
@@ -1264,6 +1269,11 @@ void KZ::mapapi::CheckEndTimerTrigger(CBaseTrigger *trigger)
 		{
 			return;
 		}
+		// АСИММЕТРИЯ СО СТАРТОВОЙ ПОЗИЦИЕЙ, и она осознанная. Стартовую SetCourseStartPositionFromTrigger
+		// перебивает только у СВОЕГО курса (параметр overwrite): она задаёт точку рестарта всей
+		// карты, и смещать её на чужом курсе мы не вправе. Конечная позиция такой цены не имеет —
+		// это апстримный путь, он пересчитывается от любой энд-зоны, включая нашу, и означает лишь
+		// «где закончился курс». Проверки владения здесь нет намеренно.
 		desc->hasEndPosition = utils::FindValidPositionForTrigger(trigger, desc->endPosition, desc->endAngles);
 	}
 }
