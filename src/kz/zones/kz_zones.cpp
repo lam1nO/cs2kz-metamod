@@ -32,10 +32,9 @@
 // Имя, по которому свои зоны отличаются от родных триггеров карты (снятие, отладка).
 #define KZ_CYBER_ZONE_NAME "cyb_map_zone"
 
-// Постоянная подсветка старта и финиша. targetname свой — им снятие отличает рёбра ОТ ЭТОГО слоя
-// от рёбер !zone show и превью редактора: те живут у игрока, этот у карты.
-#define KZ_ZONE_HIGHLIGHT_NAME "cyb_zone_hl"
-#define KZ_ZONE_BEAM_EFFECT    "particles/ui/annotation/ui_annotation_line_segment.vpcf"
+// Партикл-линия для рёбер. Тот же ассет, что у ztopwatch (KZ_ZONE_SW_LINE_PARTICLE) —
+// стоковый, прекеша не требует. targetname слоёв — в kz_zones.h, рядом друг с другом.
+#define KZ_ZONE_BEAM_EFFECT "particles/ui/annotation/ui_annotation_line_segment.vpcf"
 
 // Поставленная зона: что стоит в мире и из какой записи оно поставлено.
 struct KzSpawnedZone
@@ -197,9 +196,16 @@ i32 KZ::zones::DrawBoxEdges(const Vector &mins, const Vector &maxs, const Color 
 	};
 	static const int edges[KZ_ZONE_BOX_EDGES][2] = {{0, 1}, {1, 2}, {2, 3}, {3, 0}, {4, 5}, {5, 6}, {6, 7}, {7, 4}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
 
+	// Зануляем ВЕСЬ массив сразу, а не по ходу: при раннем выходе хвост иначе остался бы с
+	// прежним содержимым, и обещание шапки («на месте несозданных — пустой хендл») держалось бы
+	// только на том, что все нынешние вызывающие передают чистый массив.
 	for (int i = 0; i < KZ_ZONE_BOX_EDGES; i++)
 	{
 		out[i] = {};
+	}
+
+	for (int i = 0; i < KZ_ZONE_BOX_EDGES; i++)
+	{
 		CParticleSystem *beam = utils::CreateEntityByName<CParticleSystem>("info_particle_system");
 		if (!beam)
 		{
@@ -277,9 +283,19 @@ static_function void SyncHighlight(KzSpawnedZone &spawned, bool wanted)
 	// ownerOnly=false: контур обязан быть виден ВСЕМ на сервере без всякой команды.
 	const i32 created = KZ::zones::DrawBoxEdges(spawned.zone.mins, spawned.zone.maxs, KZ::zones::ZoneColor(spawned.zone.type), KZ_ZONE_HIGHLIGHT_NAME,
 												false, spawned.highlight);
-	// Флаг по ФАКТУ отрисовки: если движок не отдал ни одной энтити, зона не подсвечена, и
-	// счётчик highlight= в zones_applied не должен утверждать обратное.
-	spawned.highlighted = created > 0;
+	// Контур либо целый, либо его нет. Частичный оставлять нельзя дважды: он выглядит как
+	// сломанная зона, а флаг «подсвечена» закрыл бы ей дорогу к дорисовке навсегда —
+	// идемпотентность по флагу больше никогда не вернулась бы к этой зоне. Снимаем созданное и
+	// пробуем на следующем применении набора (round_start, правка зоны).
+	if (created < KZ_ZONE_BOX_EDGES)
+	{
+		KZ::zones::RemoveBoxEdges(spawned.highlight, KZ_ZONE_BOX_EDGES, KZ_ZONE_HIGHLIGHT_NAME);
+		spawned.highlighted = false;
+		KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] zone_highlight_failed id=%s type=%s created=%d of=%d reason=entity_create_failed\n",
+					spawned.zone.id, ZoneTypeName(spawned.zone.type), created, KZ_ZONE_BOX_EDGES);
+		return;
+	}
+	spawned.highlighted = true;
 }
 
 // Спавн одной зоны. Возвращает false, если зону отбил гейт, движок не отдал энтити или снёс её
@@ -620,13 +636,15 @@ static_function bool ZoneRecordEqual(const KzCyberZone &a, const KzCyberZone &b)
 		   && a.stageNumber == b.stageNumber && KZ_STREQ(a.courseDescriptor, b.courseDescriptor);
 }
 
-// Ключ сортировки зон под потолок подсветки: номер курса, которому зона принадлежит.
+// Ключ сортировки зон под потолок отрисовки: номер курса, которому зона принадлежит.
 // Зона без дескриптора — наш дефолтный курс, то есть главный (0), это прежнее поведение первой
 // итерации. Курс, которого нет в наборе платформы, уходит в самый хвост: подсвечивать его в
 // ущерб известным курсам не за что.
 // Сравнение имён БЕЗ учёта регистра — как везде, где дескриптор ищут по имени: канонизация
 // делается на спавне, а сюда запись приезжает ровно такой, какой её отдал api.
-static_function i32 HighlightCourseRank(const KzCyberZone &zone)
+// Не static: тем же ключом обрезает хвост !zone show (kz_zones_editor.cpp), и два порядка
+// отбора для одной пары слоёв разъехались бы молча.
+i32 KZ::zones::CourseRank(const KzCyberZone &zone)
 {
 	if (!zone.courseDescriptor[0])
 	{
@@ -634,7 +652,7 @@ static_function i32 HighlightCourseRank(const KzCyberZone &zone)
 	}
 	for (const KzCyberCourse &course : g_cybZones.courses)
 	{
-		if (!V_stricmp(course.descriptor, zone.courseDescriptor))
+		if (KZ_STREQI(course.descriptor, zone.courseDescriptor))
 		{
 			// Отрицательный номер курса api не отдаёт, но подстраховка дешевле разбирательства:
 			// такой курс не должен обгонять главный.
@@ -769,11 +787,48 @@ static_function void DespawnAll()
 	g_cybZones.spawned.clear();
 }
 
-// Рёбра подсветки, которых нет ни в одной поставленной зоне. Появляются только там, где учёт
-// потерян целиком: перезагрузка плагина посреди карты (g_cybZones заводится заново, а энтити
-// остаются в мире) или выживание частиц в движковой очистке при мёртвом триггере. Зовётся раз в
-// раунд, не в такте.
-static_function void SweepOrphanHighlights()
+// Числится ли ребро постоянного слоя за какой-нибудь поставленной зоной.
+static_function bool IsKnownHighlightEdge(const CEntityHandle &handle)
+{
+	for (const KzSpawnedZone &spawned : g_cybZones.spawned)
+	{
+		if (!spawned.highlighted)
+		{
+			continue;
+		}
+		for (i32 i = 0; i < KZ_ZONE_BOX_EDGES; i++)
+		{
+			if (spawned.highlight[i] == handle)
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+// Числится ли адресное ребро (превью редактора или !zone show) хоть за одним игроком.
+static_function bool IsKnownPlayerEdge(const CEntityHandle &handle)
+{
+	// Граница цикла и оверлоад ToPlayer связаны — обоснование в KZ::zones::ResetEditors.
+	for (i32 i = 0; i < MAXPLAYERS; i++)
+	{
+		KZPlayer *player = g_pKZPlayerManager->ToPlayer(CPlayerSlot(i));
+		if (player && player->zonesService && player->zonesService->OwnsParticle(handle))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+// Рёбра ЛЮБОГО из трёх слоёв, потерявшие учёт. Появляются там, где учёт исчез целиком:
+// перезагрузка плагина посреди карты (и g_cybZones, и сервисы игроков заводятся заново, а
+// энтити остаются в мире), либо выживание частиц в движковой очистке при мёртвом триггере.
+// Адресные рёбра (показ, превью) в этом состоянии ещё и невидимы: метка на них есть, а в белом
+// списке уже никого — то есть занимают лимит энтити, ничего не показывая.
+// Зовётся раз в раунд, не в такте.
+static_function void SweepOrphanZoneEdges()
 {
 	if (!GameEntitySystem())
 	{
@@ -787,31 +842,18 @@ static_function void SweepOrphanHighlights()
 	EntityInstanceByClassIter_t iter(NULL, "info_particle_system");
 	for (CParticleSystem *inst = static_cast<CParticleSystem *>(iter.First()); inst; inst = static_cast<CParticleSystem *>(iter.Next()))
 	{
-		if (!inst->m_pEntity || !inst->m_pEntity->NameMatches(KZ_ZONE_HIGHLIGHT_NAME))
+		if (!inst->m_pEntity)
+		{
+			continue;
+		}
+		const bool ours = inst->m_pEntity->NameMatches(KZ_ZONE_HIGHLIGHT_NAME);
+		const bool addressed = inst->m_pEntity->NameMatches(KZ_ZONE_SHOW_NAME) || inst->m_pEntity->NameMatches(KZ_ZONE_PREVIEW_NAME);
+		if (!ours && !addressed)
 		{
 			continue;
 		}
 		const CEntityHandle handle = inst->GetRefEHandle();
-		bool known = false;
-		for (const KzSpawnedZone &spawned : g_cybZones.spawned)
-		{
-			if (!spawned.highlighted)
-			{
-				continue;
-			}
-			for (i32 i = 0; i < KZ_ZONE_BOX_EDGES; i++)
-			{
-				if (spawned.highlight[i] == handle)
-				{
-					known = true;
-					break;
-				}
-			}
-			if (known)
-			{
-				break;
-			}
-		}
+		const bool known = ours ? IsKnownHighlightEdge(handle) : IsKnownPlayerEdge(handle);
 		if (!known)
 		{
 			orphans.AddToTail(inst);
@@ -823,7 +865,7 @@ static_function void SweepOrphanHighlights()
 	}
 	if (orphans.Count() > 0)
 	{
-		KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] zones_highlight_orphans map=%s removed=%d\n", g_cybZones.mapName.c_str(), orphans.Count());
+		KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] zone_edge_orphans map=%s removed=%d\n", g_cybZones.mapName.c_str(), orphans.Count());
 	}
 }
 
@@ -1207,7 +1249,7 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 	// stable_sort, а не sort: внутри одного курса порядок обязан остаться тем, в котором зоны
 	// приехали из api, иначе состав подсветки менялся бы от применения к применению без причины.
 	std::stable_sort(highlightOrder.begin(), highlightOrder.end(),
-					 [](size_t a, size_t b) { return HighlightCourseRank(g_cybZones.zones[a]) < HighlightCourseRank(g_cybZones.zones[b]); });
+					 [](size_t a, size_t b) { return KZ::zones::CourseRank(g_cybZones.zones[a]) < KZ::zones::CourseRank(g_cybZones.zones[b]); });
 	std::vector<bool> highlightWanted(g_cybZones.zones.size(), false);
 	i32 highlightSkipped = 0;
 	for (size_t i = 0; i < highlightOrder.size(); i++)
@@ -1511,10 +1553,10 @@ void KZ::zones::OnRoundStart()
 				g_cybZones.preRoundSpawned.Count());
 	g_cybZones.preRoundSpawned.RemoveAll();
 
-	// Рёбра подсветки, потерявшие учёт, — ДО применения: пока spawned ещё держит прошлые записи,
-	// «чужим» окажется только то, что действительно ничьё. После ApplyLoadedZones список уже
-	// перестроен, и та же проверка снесла бы рёбра, которые diff законно оставил стоять.
-	SweepOrphanHighlights();
+	// Рёбра, потерявшие учёт, — ДО применения: пока spawned ещё держит прошлые записи, «ничьим»
+	// окажется только то, что действительно ничьё. После ApplyLoadedZones список уже перестроен,
+	// и та же проверка снесла бы рёбра, которые diff законно оставил стоять.
+	SweepOrphanZoneEdges();
 
 	// Мир доделан — теперь спавн доживает до игрока.
 	g_cybZones.worldReady = true;

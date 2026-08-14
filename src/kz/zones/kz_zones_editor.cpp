@@ -20,6 +20,7 @@
 // cparticlesystem.h и entitykeyvalues.h больше не нужны. Из SDK остаётся разбор ответов api.
 #include "tier1/keyvalues3.h"
 
+#include <algorithm> // stable_sort/sort/binary_search: приоритет показа и поиск в горячем пути
 #include <string>
 #include <optional> // ParseApiReason принимает std::optional (приезжает и из utils/http.h, но явно надёжнее)
 #include <vector>   // KZ::zones::Loaded() отдаёт std::vector
@@ -28,11 +29,9 @@
 
 #define KZ_ZONE_PERMISSION      "game.kz_zones_edit"
 #define KZ_ZONE_PREVIEW_SECONDS 15.0f
-#define KZ_ZONE_PREVIEW_NAME    "cyb_zone_preview"
 
-// !zone show — временный показ всех зон вызвавшему.
+// !zone show — временный показ всех зон вызвавшему. targetname слоёв — в kz_zones.h.
 #define KZ_ZONE_SHOW_SECONDS 12.0f
-#define KZ_ZONE_SHOW_NAME    "cyb_zone_show"
 // Раздутие бокса показа. У старта и финиша поверх лежит постоянный контур; ровно совпадающие
 // рёбра давали бы z-fighting, а половины юнита хватает, чтобы линии разошлись, и мало, чтобы
 // соврать про границу зоны.
@@ -99,6 +98,9 @@ void KZZonesService::OnMapChanged()
 	// привязан к геометрии прошлой карты, и его надо забыть.
 	this->ClearPreview(true);
 	this->ClearShow(true);
+	// curtime отсчитывается от загрузки карты, то есть на новой карте он МЕНЬШЕ прошлого
+	// замера. Забываем замер здесь, а не полагаемся на арифметику отрицательной разницы.
+	this->lastShowTime = {};
 	this->hasPendingCorner = false;
 	this->pendingType = {};
 	this->pendingJumpFactor = {};
@@ -214,9 +216,13 @@ void KZZonesService::ClearPreview(bool keepEntities)
 
 bool KZZonesService::OwnsParticle(const CEntityHandle &handle) const
 {
-	// Порядок проверок ценой наружу: этот метод зовёт KZ::quiet::OnCheckTransmit на каждый
-	// CheckTransmit для каждого получателя. Дешёвый гейт HasOwnedParticles() стоит ПЕРЕД
-	// вызовом (там же), а здесь сканы гейтятся своими флагами по отдельности.
+	// Этот метод зовёт KZ::quiet::OnCheckTransmit — на каждую помеченную частицу, на каждого
+	// получателя, каждый CheckTransmit. Отсюда две вещи в его устройстве:
+	//   * превью гейтится флагом previewActive и стоит первым: двенадцать сравнений и только
+	//     когда превью реально есть;
+	//   * showBeams ищется ДВОИЧНО (список держится отсортированным, см. ShowAllZones): линейный
+	//     скан десятков рёбер множился бы на число частиц и получателей и давал бы десятки тысяч
+	//     сравнений за тик на одного показывающего.
 	if (this->previewActive)
 	{
 		for (const CEntityHandle &beam : this->previewBeams)
@@ -227,14 +233,26 @@ bool KZZonesService::OwnsParticle(const CEntityHandle &handle) const
 			}
 		}
 	}
-	for (const CEntityHandle &beam : this->showBeams)
+	return std::binary_search(this->showBeams.begin(), this->showBeams.end(), handle,
+							  [](const CEntityHandle &a, const CEntityHandle &b) { return a < b; });
+}
+
+// Сколько рёбер показа стоит в мире СЕЙЧАС, по всем игрокам. Считается по факту, а не отдельным
+// счётчиком: счётчик разошёлся бы с миром на первом же необычном пути снятия (дисконнект посреди
+// показа, смена карты, отказ движка), и бюджет начал бы врать в сторону отказа.
+static_function i32 ActiveShowEdges()
+{
+	i32 total = 0;
+	// Граница цикла и оверлоад ToPlayer связаны — обоснование в KZ::zones::ResetEditors.
+	for (i32 i = 0; i < MAXPLAYERS; i++)
 	{
-		if (beam == handle)
+		KZPlayer *player = g_pKZPlayerManager->ToPlayer(CPlayerSlot(i));
+		if (player && player->zonesService)
 		{
-			return true;
+			total += (i32)player->zonesService->showBeams.size();
 		}
 	}
-	return false;
+	return total;
 }
 
 void KZZonesService::ClearShow(bool keepEntities)
@@ -253,11 +271,23 @@ void KZZonesService::ClearShow(bool keepEntities)
 void KZZonesService::ShowAllZones()
 {
 	// Повторный вызов — выключатель. Гасит ТОЛЬКО показ: постоянный контур старта и финиша не
-	// его, он остаётся на месте.
+	// его, он остаётся на месте. Выключение кулдауном НЕ гейтится: снять с экрана лишнее игрок
+	// должен мочь сразу, а снятие энтити не создаёт.
 	if (!this->showBeams.empty())
 	{
 		this->ClearShow();
 		this->player->PrintChat(true, false, "{grey}Зоны:{default} показ выключен.");
+		return;
+	}
+	// Кулдаун — на ВКЛЮЧЕНИЕ: каждое создаёт и через 12 секунд сносит десятки энтити, а прав
+	// команда не спрашивает.
+	const f32 now = g_pKZUtils->GetServerGlobals()->curtime;
+	// now < lastShowTime — карта сменилась (curtime отсчитывается от её загрузки), это не
+	// «кулдаун из будущего», а повод его забыть.
+	const f32 sinceLast = now - this->lastShowTime;
+	if (this->lastShowTime > 0.0f && sinceLast >= 0.0f && sinceLast < KZ_ZONE_SHOW_COOLDOWN)
+	{
+		this->player->PrintChat(true, false, "{grey}Зоны:{default} подожди {yellow}%.1f{default} сек.", KZ_ZONE_SHOW_COOLDOWN - sinceLast);
 		return;
 	}
 	if (!KZ::zones::IsReady())
@@ -272,11 +302,34 @@ void KZZonesService::ShowAllZones()
 		return;
 	}
 
+	// Порядок отбора — ТОТ ЖЕ, что у постоянного слоя (KZ::zones::CourseRank): главный курс,
+	// потом бонусы по номеру. Иначе на карте с большим набором показ выбрасывал бы из потолка
+	// именно главный курс — исход, который для постоянного слоя признан худшим и исключён.
+	std::vector<size_t> order(zones.size());
+	for (size_t i = 0; i < zones.size(); i++)
+	{
+		order[i] = i;
+	}
+	std::stable_sort(order.begin(), order.end(),
+					 [&zones](size_t a, size_t b) { return KZ::zones::CourseRank(zones[a]) < KZ::zones::CourseRank(zones[b]); });
+
+	// Бюджет: свой на игрока и общий на сервер. Оба в рёбрах — считаем то, что реально встанет в
+	// мир. Серверный меряем ДО отрисовки: команда прав не спрашивает, и при полном сервере без
+	// этого потолка упёрлись бы в лимит энтити, из-за чего перестали бы спавниться сами зоны.
+	const i32 budgetServer = KZ_ZONE_SHOW_MAX_EDGES_SERVER - ActiveShowEdges();
+	if (budgetServer < KZ_ZONE_BOX_EDGES)
+	{
+		this->player->PrintChat(true, false, "{grey}Зоны:{default} показ сейчас занят другими игроками, повтори через несколько секунд.");
+		return;
+	}
+	const i32 budgetEdges = MIN(KZ_ZONE_SHOW_MAX_EDGES_PLAYER, budgetServer);
+
 	i32 drawn = 0;
 	i32 skipped = 0;
-	for (const KzCyberZone &zone : zones)
+	for (size_t index : order)
 	{
-		if (drawn >= KZ_ZONE_HIGHLIGHT_MAX_ZONES)
+		const KzCyberZone &zone = zones[index];
+		if ((i32)this->showBeams.size() + KZ_ZONE_BOX_EDGES > budgetEdges)
 		{
 			skipped++;
 			continue;
@@ -288,7 +341,7 @@ void KZZonesService::ShowAllZones()
 		const Vector maxs(zone.maxs.x + KZ_ZONE_SHOW_INFLATE, zone.maxs.y + KZ_ZONE_SHOW_INFLATE, zone.maxs.z + KZ_ZONE_SHOW_INFLATE);
 		CEntityHandle edges[KZ_ZONE_BOX_EDGES] {};
 		// ownerOnly=true: показ адресный, его видит только тот, кто позвал.
-		KZ::zones::DrawBoxEdges(mins, maxs, KZ::zones::ZoneColor(zone.type), KZ_ZONE_SHOW_NAME, true, edges);
+		const i32 created = KZ::zones::DrawBoxEdges(mins, maxs, KZ::zones::ZoneColor(zone.type), KZ_ZONE_SHOW_NAME, true, edges);
 		for (CEntityHandle &edge : edges)
 		{
 			// Get() != nullptr — тот же способ проверки живого ребра, что у ztopwatch: ребро,
@@ -298,7 +351,12 @@ void KZZonesService::ShowAllZones()
 				this->showBeams.push_back(edge);
 			}
 		}
-		drawn++;
+		// Считаем по ФАКТУ отрисовки: иначе «показываю N зон» завысило бы N ровно тогда, когда
+		// движок перестал отдавать энтити, то есть когда точность нужнее всего.
+		if (created > 0)
+		{
+			drawn++;
+		}
 	}
 
 	if (this->showBeams.empty())
@@ -307,6 +365,11 @@ void KZZonesService::ShowAllZones()
 		this->player->PrintChat(true, false, "{grey}Зоны:{default} не удалось нарисовать зоны.");
 		return;
 	}
+
+	// Порядок в списке — контракт с OwnsParticle: он ищет двоичным поиском в горячем пути
+	// CheckTransmit. Сортируем один раз здесь, а не поддерживаем вставками.
+	std::sort(this->showBeams.begin(), this->showBeams.end(), [](const CEntityHandle &a, const CEntityHandle &b) { return a < b; });
+	this->lastShowTime = g_pKZUtils->GetServerGlobals()->curtime;
 
 	// Своё поколение: таймер от прошлого показа не должен гасить новый.
 	const u32 generation = ++this->showGeneration;
@@ -326,6 +389,8 @@ void KZZonesService::ShowAllZones()
 	{
 		this->player->PrintChat(true, false, "{grey}Зоны:{default} показываю {yellow}%d{default} зон(ы) на %.0f сек, ещё %d не влезло в потолок.",
 								drawn, KZ_ZONE_SHOW_SECONDS, skipped);
+		KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] zone_show_capped steam_id=%llu map=%s drawn=%d skipped=%d edges=%d\n",
+					this->player->GetSteamId64(false), KZ::zones::CurrentMapName(), drawn, skipped, (i32)this->showBeams.size());
 	}
 	else
 	{
@@ -341,8 +406,12 @@ void KZZonesService::ShowAllZones()
 void KZZonesService::DrawBox(const Vector &mins, const Vector &maxs, Color color, f32 duration)
 {
 	this->ClearPreview();
-	KZ::zones::DrawBoxEdges(mins, maxs, color, KZ_ZONE_PREVIEW_NAME, true, this->previewBeams);
-	this->previewActive = true;
+	// Флаг по ФАКТУ отрисовки: он гейтит скан в белом списке kz_quiet, и при отказе движка
+	// впустую гонял бы двенадцать сравнений на каждую частицу все пятнадцать секунд.
+	// Здесь достаточно «хотя бы одно ребро», в отличие от постоянного контура, где частичный
+	// снимается целиком: превью и так живёт 15 секунд и снимается по таймеру, а вот у
+	// постоянного слоя флаг «подсвечена» закрыл бы зоне дорогу к дорисовке навсегда.
+	this->previewActive = KZ::zones::DrawBoxEdges(mins, maxs, color, KZ_ZONE_PREVIEW_NAME, true, this->previewBeams) > 0;
 
 	// Превью живёт ограниченное время: беамы висят до ручного снятия, а игрок про них забудет.
 	// CTimer::Fn — сырой указатель на функцию, захватывающая лямбда в него не приводится.
