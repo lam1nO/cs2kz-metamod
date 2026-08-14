@@ -5,6 +5,11 @@
 		"en"		"{grey}Map zones were re-applied — your checkpoints have been reset."
 		"ru"		"{grey}Зоны карты переприменены — чекпоинты сброшены."
 	}
+	"Zones Reapplied - Prac Attempt Reset"
+	{
+		"en"		"{grey}Map zones were re-applied — your practice attempt timer restarted."
+		"ru"		"{grey}Зоны карты переприменены — отсчёт попытки в отработке начался заново."
+	}
 	"Course Disabled - Run Stopped"
 	{
 		"#format"	"course:s"

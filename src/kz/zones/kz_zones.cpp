@@ -61,9 +61,6 @@ static_global struct
 	// RemoveNonPersistentTimers() объявлена и определена, но ниоткуда не вызывается
 	// (то же предупреждение — в src/kz/invisible/kz_invisible.cpp:295).
 	u32 mapGeneration;
-	// Курс платформы на этой карте завели мы (а не форк на карте без Mapping API). Его нет в
-	// локальной БД: SetupCourses отработал на старте карты, до нашего создания.
-	bool courseCreated;
 	// Дескрипторы курсов, которые завели ИМЕННО МЫ на этой карте. Нужны поимённо, а не флагом:
 	// досетап в локальной БД обязан подтверждаться по КАЖДОМУ нашему курсу. Проверка по одному
 	// захардкоженному дескриптору давала два тихих отказа сразу — курс с другим именем не гасил
@@ -320,6 +317,19 @@ static_function bool SpawnZone(const KzCyberZone &zone, const char **outReason =
 		return fail("removed_on_spawn");
 	}
 
+	// Живой энтити МАЛО: Mapi_OnTriggerMultipleSpawn выходит без регистрации на своих ошибочных
+	// ветках (пустой дескриптор, номер зоны <= 0, закрытое окно регистрации). Незарегистрированная
+	// энтити — это зона, которую видно и в которую можно войти, но для таймера её нет.
+	// Раньше цена такой зоны была один раунд, теперь — до смены карты: diff увидит её живой,
+	// сочтёт совпавшей и оставит стоять навсегда. Поэтому предпосылка «энтити жива ⇒ регистрация
+	// жива» здесь ПРОВЕРЯЕТСЯ, а не предполагается.
+	if (!KZ::mapapi::GetKzTrigger(trigger))
+	{
+		KZ_LOG_ERROR(LogChannel::MappingAPI, "[cyb] zone_spawn_failed id=%s type=%s reason=not_registered\n", zone.id, ZoneTypeName(zone.type));
+		g_pKZUtils->RemoveEntity(inst);
+		return fail("not_registered");
+	}
+
 	// Стартовая позиция курса — из объёма нашей старт-зоны. Родного info_teleport_destination
 	// "timer_start" на этих картах нет, а без позиции !main и меню !courses показывают курс серым
 	// «No Start Position For Course» и никуда не телепортируют.
@@ -375,7 +385,6 @@ static_function void EnsurePlatformCourse()
 					 KZ_NO_MAPAPI_COURSE_DESCRIPTOR, reason);
 		return;
 	}
-	g_cybZones.courseCreated = true;
 	g_cybZones.localCoursesPending = true;
 	g_cybZones.createdCourses.push_back(KZ_NO_MAPAPI_COURSE_DESCRIPTOR);
 	KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] course_created map=%s descriptor=%s name=%s number=0\n", g_cybZones.mapName.c_str(),
@@ -481,8 +490,35 @@ static_function bool ZoneRecordEqual(const KzCyberZone &a, const KzCyberZone &b)
 
 // Кто из игроков сейчас касается этой энтити. Спрашиваем РЕАЛЬНЫЕ трекеры касания, а не считаем
 // по координатам: предупреждение, которое врёт, хуже отсутствующего.
-static_function void CollectTouchingPlayers(CEntityHandle handle, CUtlVector<CPlayerSlot> &out)
+static_function bool SlotListContains(const CUtlVector<CPlayerSlot> &list, CPlayerSlot slot)
 {
+	FOR_EACH_VEC(list, i)
+	{
+		if (list[i] == slot)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+// Кто из игроков сейчас касается этой энтити. Спрашиваем РЕАЛЬНЫЕ трекеры касания через
+// публичный GetTriggerTracker, а не считаем по координатам: предупреждение, которое врёт, хуже
+// отсутствующего.
+//
+// Списка два, потому что задевает по-разному и врать нельзя ни тем, ни другим:
+//   outNormal — обычный игрок: StartTouch делает ResetCheckpoints, чекпоинты стираются;
+//   outPrac   — игрок в prac: чекпоинты и таймер закрыты гардом, НО EndTouch старт-зоны уходит в
+//               KZPracService::OnStartZoneEndTouch, а тот обнуляет и перезапускает часы попытки.
+//               То есть репетиция сбрасывается — маленькая версия ровно той жалобы, ради которой
+//               diff и делался.
+static_function void CollectTouchingPlayers(CEntityHandle handle, CUtlVector<CPlayerSlot> &outNormal, CUtlVector<CPlayerSlot> &outPrac)
+{
+	CBaseTrigger *trigger = dynamic_cast<CBaseTrigger *>(GameEntitySystem() ? GameEntitySystem()->GetEntityInstance(handle) : nullptr);
+	if (!trigger)
+	{
+		return;
+	}
 	// Граница цикла — см. развёрнутое обоснование в KZ::zones::ResetEditors.
 	for (i32 i = 0; i < MAXPLAYERS; i++)
 	{
@@ -491,20 +527,16 @@ static_function void CollectTouchingPlayers(CEntityHandle handle, CUtlVector<CPl
 		{
 			continue;
 		}
-		// В prac обе ветки касания старт-зоны закрыты гардом (kz/trigger/callbacks.cpp): ни
-		// чекпоинты не чистятся, ни таймер не трогается. Такого игрока переприменение не задевает,
-		// и предупреждать его значило бы врать.
-		if (player->pracService->IsInPrac())
+		if (!player->triggerService->GetTriggerTracker(trigger))
 		{
 			continue;
 		}
-		FOR_EACH_VEC(player->triggerService->triggerTrackers, t)
+		const CPlayerSlot slot = player->GetPlayerSlot();
+		CUtlVector<CPlayerSlot> &out = player->pracService->IsInPrac() ? outPrac : outNormal;
+		// Игрок может стоять сразу в двух снимаемых зонах — двух строк в чат он не заслужил.
+		if (!SlotListContains(out, slot))
 		{
-			if (player->triggerService->triggerTrackers[t].triggerHandle == handle)
-			{
-				out.AddToTail(player->GetPlayerSlot());
-				break;
-			}
+			out.AddToTail(slot);
 		}
 	}
 }
@@ -832,7 +864,6 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 						 course.descriptor, course.courseNumber, createReason);
 			continue;
 		}
-		g_cybZones.courseCreated = true;
 		g_cybZones.localCoursesPending = true;
 		g_cybZones.createdCourses.push_back(course.descriptor);
 		KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] course_created map=%s descriptor=%s name=%s number=%d\n", g_cybZones.mapName.c_str(),
@@ -950,6 +981,7 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 	std::vector<bool> matched(g_cybZones.zones.size(), false);
 	std::vector<KzSpawnedZone> kept;
 	CUtlVector<CPlayerSlot> disturbed;
+	CUtlVector<CPlayerSlot> disturbedPrac;
 	for (const KzSpawnedZone &spawned : g_cybZones.spawned)
 	{
 		CEntityInstance *inst = GameEntitySystem() ? GameEntitySystem()->GetEntityInstance(spawned.handle) : nullptr;
@@ -979,7 +1011,7 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 			// alive, и это условие само исключает шумное предупреждение при смене раунда.
 			if (spawned.zone.type == KZ_CYBER_ZONE_START)
 			{
-				CollectTouchingPlayers(spawned.handle, disturbed);
+				CollectTouchingPlayers(spawned.handle, disturbed, disturbedPrac);
 			}
 			g_pKZUtils->RemoveEntity(inst);
 		}
@@ -1054,10 +1086,18 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 			player->languageService->PrintChat(true, false, "Zones Reapplied - Checkpoints Reset");
 		}
 	}
-	if (disturbed.Count() > 0)
+	FOR_EACH_VEC(disturbedPrac, i)
 	{
-		KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] zones_reapply_disturbed map=%s players=%d reason=%s\n", g_cybZones.mapName.c_str(),
-					disturbed.Count(), reason);
+		KZPlayer *player = g_pKZPlayerManager->ToPlayer(disturbedPrac[i]);
+		if (player && player->languageService)
+		{
+			player->languageService->PrintChat(true, false, "Zones Reapplied - Prac Attempt Reset");
+		}
+	}
+	if (disturbed.Count() > 0 || disturbedPrac.Count() > 0)
+	{
+		KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] zones_reapply_disturbed map=%s players=%d prac=%d reason=%s\n", g_cybZones.mapName.c_str(),
+					disturbed.Count(), disturbedPrac.Count(), reason);
 	}
 
 	SyncCoursesAfterApply();
@@ -1096,7 +1136,6 @@ void KZ::zones::OnMapLoaded()
 	g_cybZones.loaded = false;
 	// Дескрипторы курсов живут ровно одну карту: Hook_StartupServer зовёт KZ::mapapi::Init(),
 	// а тот обнуляет весь courseDescriptors. Значит и наша память о заведённом курсе обнуляется.
-	g_cybZones.courseCreated = false;
 	g_cybZones.localCoursesPending = false;
 	g_cybZones.createdCourses.clear();
 	g_cybZones.mapName = g_pKZUtils->GetCurrentMapName().Get();

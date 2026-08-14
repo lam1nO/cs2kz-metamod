@@ -13,6 +13,9 @@
 #include "sdk/entity/cbasetrigger.h"
 #include "utils/ctimer.h"
 #include "kz/db/kz_db.h"
+// Полный тип таймера: разыменовываем player->timerService. Приезжал транзитивно (kz_db.h,
+// kz_prac.h) — явный инклюд, чтобы правка чужих инклюдов не ломала этот файл.
+#include "kz/timer/kz_timer.h"
 #include "kz/language/kz_language.h"
 #include "kz/prac/kz_prac.h"
 #include "utils/simplecmds.h"
@@ -204,6 +207,9 @@ static_function void Mapi_OnTriggerMultipleSpawn(const EntitySpawnInfo_t *info)
 	trigger.type = type;
 	trigger.hammerId = hammerId;
 	trigger.entity = info->m_pEntity->GetRefEHandle();
+	// Единственный момент, когда наши зоны отличимы от родных: окно externalSpawnAllowed
+	// открывается ровно вокруг нашего DispatchSpawn. Позже этот признак не восстановить.
+	trigger.platformSpawned = g_mappingApi.externalSpawnAllowed;
 
 	switch (type)
 	{
@@ -992,6 +998,16 @@ i32 KZ::mapapi::DisableCourseZones(const char *descriptorName, KzTriggerType typ
 	{
 		KzTrigger *trigger = &g_mappingApi.triggers[i];
 		if (trigger->type != type)
+		{
+			continue;
+		}
+		// НАШИ зоны не гасим никогда. Фильтр идёт по паре (курс, тип), а у зоны платформы,
+		// переопределяющей родную, курс и тип совпадают с родными НАМЕРЕННО — иначе
+		// переопределение не работало бы вовсе. Без этой проверки второе применение набора в
+		// пределах раунда гасило бы собственные живые зоны: они остались бы стоять в мире с
+		// типом DISABLED, то есть таймер по ним не стартовал бы и не финишировал, а
+		// zones_applied рапортовал бы здоровое kept=N.
+		if (trigger->platformSpawned)
 		{
 			continue;
 		}
