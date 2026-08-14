@@ -770,10 +770,13 @@ void KZ::mapapi::OnRoundStart()
 
 		if (invalid)
 		{
+			// continue, а не break: невалидный курс дропается, остальные обязаны быть
+			// провалидированы и получить свои счётчики. courseInd-- возвращает индекс на слот,
+			// куда FastRemove переставил бывший последний курс, — его ещё предстоит проверить.
 			g_mappingApi.courseDescriptors.FastRemove(courseInd);
 			coursesRemoved = true;
 			courseInd--;
-			break;
+			continue;
 		}
 		courseDescriptor->splitCount = splitCount;
 		courseDescriptor->checkpointCount = cpCount;
