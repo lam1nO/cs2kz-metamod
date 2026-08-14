@@ -49,9 +49,18 @@ static_global struct
 	// Курс платформы на этой карте завели мы (а не форк на карте без Mapping API). Его нет в
 	// локальной БД: SetupCourses отработал на старте карты, до нашего создания.
 	bool courseCreated;
+	// Дескрипторы курсов, которые завели ИМЕННО МЫ на этой карте. Нужны поимённо, а не флагом:
+	// досетап в локальной БД обязан подтверждаться по КАЖДОМУ нашему курсу. Проверка по одному
+	// захардкоженному дескриптору давала два тихих отказа сразу — курс с другим именем не гасил
+	// флаг никогда, а чужой "Default" с ненулевым id гасил его за наш курс, оставляя тому
+	// localDatabaseID = 0, то есть раны в никуда.
+	std::vector<std::string> createdCourses;
 	// Ждём момента, когда карта будет заведена в БД, чтобы досетапить курс.
 	bool localCoursesPending;
 } g_cybZones;
+
+// Завели ли МЫ курс с таким дескриптором на этой карте (определение ниже — им пользуется SpawnZone).
+static_function bool WeCreatedCourse(const char *descriptorName);
 
 static_function const char *ZoneTypeName(KzCyberZoneType type)
 {
@@ -299,11 +308,8 @@ static_function bool SpawnZone(const KzCyberZone &zone, const char **outReason =
 	// Стартовая позиция курса — из объёма нашей старт-зоны. Родного info_teleport_destination
 	// "timer_start" на этих картах нет, а без позиции !main и меню !courses показывают курс серым
 	// «No Start Position For Course» и никуда не телепортируют.
-	// Перебиваем только курс, который завели МЫ. На карте без Mapping API дескриптор чужой, и
-	// позицию там задаёт маппер через info_teleport_destination "timer_start" — молча смещать
-	// точку рестарта всей карте мы не вправе; если маппер её не задал, overwrite и не нужен.
-	// Перебиваем позицию ТОЛЬКО у курса, который завели мы сами и на который зона идёт по
-	// умолчанию. У чужого курса (родного или выбранного админом явно) позицию задаёт маппер через
+	// Перебиваем позицию ТОЛЬКО у курса, который завели мы сами.
+	// У чужого курса (родного или выбранного админом явно) позицию задаёт маппер через
 	// info_teleport_destination "timer_start" — молча смещать точку рестарта всей карте мы не
 	// вправе. Если её там нет, overwrite=false всё равно заполнит пустое место, то есть хуже не
 	// станет никогда.
@@ -311,7 +317,11 @@ static_function bool SpawnZone(const KzCyberZone &zone, const char **outReason =
 	// на СТАРУЮ точку, даже если старт-зону переставили. Отдельная операция, её никто не заказывал.
 	if (zone.type == KZ_CYBER_ZONE_START)
 	{
-		const bool overwrite = !zone.courseDescriptor[0] && g_cybZones.courseCreated;
+		// Владение проверяем по КОНКРЕТНОМУ курсу. Глобальный флаг «мы что-то завели» здесь врал:
+		// на карте без Mapping API один own-курс из api взводил бы его, и безкурсовая старт-зона
+		// перебила бы мапперский info_teleport_destination "timer_start" — то самое, что запрещает
+		// комментарий выше.
+		const bool overwrite = WeCreatedCourse(courseDescriptor);
 		if (!KZ::mapapi::SetCourseStartPositionFromTrigger(courseDescriptor, trigger, overwrite))
 		{
 			// Не отказ спавна: зона работает, страдает только телепорт на старт.
@@ -352,14 +362,75 @@ static_function void EnsurePlatformCourse()
 	}
 	g_cybZones.courseCreated = true;
 	g_cybZones.localCoursesPending = true;
+	g_cybZones.createdCourses.push_back(KZ_NO_MAPAPI_COURSE_DESCRIPTOR);
 	KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] course_created map=%s descriptor=%s name=%s number=0\n", g_cybZones.mapName.c_str(),
 				KZ_NO_MAPAPI_COURSE_DESCRIPTOR, KZ_NO_MAPAPI_COURSE_NAME);
 }
 
-// Хвост применения набора: оба пути, которые реально что-то ставят (полное переприменение и
-// точечный спавн одной зоны редактором), обязаны его звать — иначе один из них тихо разъедется
-// с миром. Ранние выходы ApplyLoadedZones (набор пуст, мир не готов) сюда намеренно не заходят:
-// пересчитывать нечего, а localCoursesPending доживёт до следующего применения.
+// Это НЕ то же, что «курс платформы»: IsPlatformOwnedCourse на карте без Mapping API истинен для
+// ЛЮБОГО дескриптора, потому что там единственный курс форковый.
+static_function bool WeCreatedCourse(const char *descriptorName)
+{
+	if (!descriptorName || !descriptorName[0])
+	{
+		return false;
+	}
+	for (const std::string &created : g_cybZones.createdCourses)
+	{
+		if (KZ_STREQI(created.c_str(), descriptorName))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+// Полон ли набор нумерованных зон (stage/checkpoint) для курса: номера обязаны образовывать
+// 1..N без дыр и повторов.
+//
+// Зачем предохранитель. Погашение родных зон идёт по паре (курс, тип), то есть сносит ВСЕ родные
+// стейджи курса разом. Если наш набор при этом неполон — например, api прислал стейджи 1 и 3, или
+// одна зона отвалилась на разборе, — валидация консекутивности не сойдётся, RecountCourseZones
+// пропустит курс с warn'ом и оставит СТАРЫЙ stageCount, а TimerEnd после этого перестанет
+// засчитывать финиш на всём курсе. Это единственное место, где одна кривая зона стоит курса
+// целиком, поэтому проверяем сами, а не полагаемся на инвариант чужой стороны.
+static_function bool HasCompleteNumberedSet(const char *descriptorName, KzCyberZoneType type)
+{
+	i32 count = 0;
+	i32 seenXor = 0;
+	for (const KzCyberZone &zone : g_cybZones.zones)
+	{
+		if (zone.type != type || !KZ_STREQI(zone.courseDescriptor, descriptorName))
+		{
+			continue;
+		}
+		if (zone.stageNumber <= 0)
+		{
+			return false;
+		}
+		// Тот же XOR-трюк, что у валидации Mapping API: 1..N в любом порядке даёт 0.
+		seenXor ^= (++count) ^ zone.stageNumber;
+	}
+	return count > 0 && seenXor == 0;
+}
+
+static_function bool IsRejectedCourse(const std::vector<const char *> &rejected, const char *descriptorName)
+{
+	if (!descriptorName || !descriptorName[0])
+	{
+		return false;
+	}
+	for (const char *entry : rejected)
+	{
+		if (KZ_STREQI(entry, descriptorName))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+// Хвост применения набора. Зовётся, когда применение реально дошло до спавна.
 static_function void SyncCoursesAfterApply()
 {
 	// Курс, заведённый нами, в локальной БД отсутствует: KZDatabaseService::SetupCourses отработал
@@ -377,11 +448,29 @@ static_function void SyncCoursesAfterApply()
 		// в порядке сортировки по id, а наш id — самый большой. При любом сожительстве двух
 		// «Main» мы прочитали бы ЧУЖОЙ id, погасили флаг и оставили свой курс с нулём — ровно тот
 		// тихий отказ, который этот блок и лечит.
-		u32 localId = 0;
-		if (KZ::mapapi::GetCourseLocalDatabaseId(KZ_NO_MAPAPI_COURSE_DESCRIPTOR, localId) && localId != 0)
+		// И проверяем КАЖДЫЙ заведённый нами курс, а не один захардкоженный дескриптор: иначе
+		// курс с другим именем не гасил бы флаг никогда, а чужой "Default" с ненулевым id гасил
+		// бы его за наш курс, оставляя тому localDatabaseID = 0.
+		i32 registered = 0;
+		for (const std::string &descriptor : g_cybZones.createdCourses)
 		{
+			u32 localId = 0;
+			if (KZ::mapapi::GetCourseLocalDatabaseId(descriptor.c_str(), localId) && localId != 0)
+			{
+				registered++;
+			}
+		}
+		if (!g_cybZones.createdCourses.empty() && registered == (i32)g_cybZones.createdCourses.size())
+		{
+			// Печатаем ровно один раз — сразу после того, как флаг погас.
+			for (const std::string &descriptor : g_cybZones.createdCourses)
+			{
+				u32 localId = 0;
+				KZ::mapapi::GetCourseLocalDatabaseId(descriptor.c_str(), localId);
+				KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] course_local_setup map=%s descriptor=%s local_id=%u\n", g_cybZones.mapName.c_str(),
+							descriptor.c_str(), localId);
+			}
 			g_cybZones.localCoursesPending = false;
-			KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] course_local_setup map=%s local_id=%u\n", g_cybZones.mapName.c_str(), localId);
 		}
 		else
 		{
@@ -392,10 +481,10 @@ static_function void SyncCoursesAfterApply()
 	// Счётчики зон курса гейтят финиш: KZTimerService::TimerEnd отбивает ран, если
 	// currentStage != courseDesc->stageCount. Валидация Mapping API считает их один раз на
 	// round_start и ДО того, как мы поставим свои зоны (порядок в hooks.cpp).
-	// ЧЕСТНО: сегодня этот вызов — строгий no-op. Платформа ставит только start/end/бустер, а
-	// считаются split/checkpoint/stage, так что менять нечего ни у наших курсов, ни у родных.
-	// Он стоит здесь как защита под задачу B, где в наборе появятся стейджи и чекпойнты: там
-	// отсутствие пересчёта дало бы ран, отбитый как «missed stage», без единой строки в логе.
+	// Теперь это не формальность: в наборе бывают stage и checkpoint, а погашение родных зон
+	// меняет состав курса. Без пересчёта финиш отбивался бы как «missed stage» без единой строки
+	// в логе — валидация Mapping API считает счётчики один раз на round_start и ДО того, как мы
+	// тронем зоны.
 	KZ::mapapi::RecountCourseZones();
 }
 
@@ -560,8 +649,8 @@ static_function void IngestZones(const char *body, const std::string &mapName)
 	}
 
 	g_cybZones.loaded = true;
-	KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] zones_loaded map=%s count=%d skipped=%d revision=%d\n", mapName.c_str(), (i32)g_cybZones.zones.size(),
-				skipped, g_cybZones.revision);
+	KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] zones_loaded map=%s count=%d skipped=%d courses=%d courses_skipped=%d revision=%d\n", mapName.c_str(),
+				(i32)g_cybZones.zones.size(), skipped, (i32)g_cybZones.courses.size(), coursesSkipped, g_cybZones.revision);
 
 	// Спавним по конъюнкции «набор загружен И мир готов», порядок произвольный: события раунда
 	// на kz-инстансе случаются один раз за карту и в те же кадры, что ответ api. Решение
@@ -598,18 +687,14 @@ static_function void IngestZones(const char *body, const std::string &mapName)
 static_function void ApplyLoadedZones(const char *reason, const char *focusZoneId, const char **outFocusReason)
 {
 	DespawnAll();
-	if (!g_cybZones.loaded || g_cybZones.zones.empty())
+	if (!g_cybZones.loaded)
 	{
-		return;
+		return; // набор ещё не получен — нечего применять и не о чем судить
 	}
-	// Единственная точка спавна, и она же единственная, кто знает про готовность мира: в
-	// неготовый мир энтити создавать бессмысленно — движковая очистка их снесёт.
-	if (!g_cybZones.worldReady)
-	{
-		KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] zones_deferred map=%s count=%d reason=world_not_ready caller=%s\n", g_cybZones.mapName.c_str(),
-					(i32)g_cybZones.zones.size(), reason);
-		return;
-	}
+	// ПУСТОЙ НАБОР ЗОН — НЕ ПОВОД ВЫЙТИ. Состояние курсов живёт отдельно от зон: «админ отключил
+	// курс, своих зон на карте нет» это ровно courses=[{disabled:true}] при zones=[]. Ранний выход
+	// здесь делал бы отключение курса неработающим в самой естественной его конфигурации, а
+	// удаление последней своей зоны оставляло бы родные зоны погашенными до конца раунда.
 	// ШАГ 1. Возвращаем исходный тип всем родным зонам, которые гасили в прошлый раз. Набор мог
 	// измениться (админ снял подмену), и без этого родная зона осталась бы погашенной до смены
 	// карты. Так применение становится идемпотентным: «восстановить всё, затем погасить по
@@ -618,10 +703,27 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 
 	// ШАГ 2. Заводим курсы платформы (kind=own), которых на карте ещё нет. Обязательно ДО спавна:
 	// зона ссылается на курс дескриптором, и гейт в SpawnZone спрашивает уже готовый.
+	// Дескрипторы курсов kind=own, которые оказались ЧУЖИМИ. Зоны на них не спавним и родные зоны
+	// не гасим: иначе через kind=own вернулась бы ровно та дыра, которую закрыл прошлый круг
+	// ревью, — курс платформы захватил бы мапперский курс и убил его старт с финишем.
+	std::vector<const char *> rejectedCourses;
 	for (const KzCyberCourse &course : g_cybZones.courses)
 	{
-		if (!course.own || KZ::mapapi::HasCourseDescriptor(course.descriptor))
+		if (!course.own)
 		{
+			continue;
+		}
+		if (KZ::mapapi::HasCourseDescriptor(course.descriptor))
+		{
+			// Дескриптор занят. Наш ли он? На карте без Mapping API форковый курс тоже «наш», и
+			// это нормально; а вот мапперский курс с тем же именем — нет. Наш KZ_NO_MAPAPI_COURSE_
+			// DESCRIPTOR это буквально "Default", и занять его карта вправе.
+			if (!KZ::mapapi::IsPlatformOwnedCourse(course.descriptor))
+			{
+				KZ_LOG_ERROR(LogChannel::MappingAPI, "[cyb] course_rejected map=%s descriptor=%s number=%d reason=own_course_is_native\n",
+							 g_cybZones.mapName.c_str(), course.descriptor, course.courseNumber);
+				rejectedCourses.push_back(course.descriptor);
+			}
 			continue;
 		}
 		// Имя курса выводим из его номера, а не выдумываем: GetCyberCourseNumber резолвит бонусы
@@ -645,6 +747,7 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 		}
 		g_cybZones.courseCreated = true;
 		g_cybZones.localCoursesPending = true;
+		g_cybZones.createdCourses.push_back(course.descriptor);
 		KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] course_created map=%s descriptor=%s name=%s number=%d\n", g_cybZones.mapName.c_str(),
 					course.descriptor, courseName, course.courseNumber);
 	}
@@ -670,9 +773,28 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 	// SetCourseDisabled сам ничего не делает, если курс уже в нужном состоянии.
 	// Зоны отключённого курса api не отдаёт вовсе, поэтому сверять каждую зону со списком курсов
 	// не нужно — этот класс тихого отказа убран на стороне контракта.
+	i32 unknownCourses = 0;
 	for (const KzCyberCourse &course : g_cybZones.courses)
 	{
+		// Курса из набора может не быть на карте (карта обновилась в Workshop). Это состояние
+		// набора, а не отказ на каждом применении: считаем и печатаем числом в zones_applied,
+		// иначе строка ошибки повторялась бы на каждый round_start и каждую постановку зоны.
+		if (!KZ::mapapi::HasCourseDescriptor(course.descriptor))
+		{
+			unknownCourses++;
+			continue;
+		}
 		KZ::mapapi::SetCourseDisabled(course.descriptor, course.disabled);
+	}
+
+	// Дальше — работа с миром: погашение родных зон и спавн своих. В неготовый мир соваться
+	// бессмысленно (движковая очистка снесёт энтити), а таблица триггеров в этот момент ещё пуста.
+	// Состояние курсов выше от готовности мира не зависит и уже применено.
+	if (!g_cybZones.worldReady)
+	{
+		KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] zones_deferred map=%s count=%d courses=%d reason=world_not_ready caller=%s\n",
+					g_cybZones.mapName.c_str(), (i32)g_cybZones.zones.size(), (i32)g_cybZones.courses.size(), reason);
+		return;
 	}
 
 	// ШАГ 5. Гасим родные зоны тех курсов и типов, которые переопределяем своими. Строго ДО
@@ -680,10 +802,30 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 	// бы свои же. Модификаторы сюда попасть не могут — DisableCourseZones их отбивает, и это
 	// намеренно (у них парная бухгалтерия Start/EndTouch, счётчики залипли бы навсегда).
 	i32 nativeDisabled = 0;
+	// Курсы, у которых набор нумерованных зон неполон: их stage/checkpoint-зоны не спавним и
+	// родные не гасим. Отдельный список от rejectedCourses — причина отказа другая.
+	std::vector<const char *> incompleteCourses;
 	for (const KzCyberZone &zone : g_cybZones.zones)
 	{
 		if (!zone.courseDescriptor[0] || zone.type == KZ_CYBER_ZONE_MODIFIER)
 		{
+			continue;
+		}
+		if (IsRejectedCourse(rejectedCourses, zone.courseDescriptor))
+		{
+			continue; // курс отвергнут выше — не трогаем чужие зоны
+		}
+		// Неполный набор нумерованных зон — не переопределяем ВООБЩЕ: ни гасим родные, ни ставим
+		// свои. Курс остаётся таким, каким его сделал маппер, и продолжает засчитывать финиш.
+		// Половинчатое переопределение убило бы курс целиком, а не одну зону.
+		if ((zone.type == KZ_CYBER_ZONE_STAGE || zone.type == KZ_CYBER_ZONE_CHECKPOINT) && !HasCompleteNumberedSet(zone.courseDescriptor, zone.type))
+		{
+			if (!IsRejectedCourse(incompleteCourses, zone.courseDescriptor))
+			{
+				KZ_LOG_ERROR(LogChannel::MappingAPI, "[cyb] course_override_refused map=%s course=%s type=%s reason=incomplete_numbered_set\n",
+							 g_cybZones.mapName.c_str(), zone.courseDescriptor, ZoneTypeName(zone.type));
+				incompleteCourses.push_back(zone.courseDescriptor);
+			}
 			continue;
 		}
 		KzTriggerType nativeType = KZTRIGGER_ZONE_START;
@@ -713,7 +855,21 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 	for (const KzCyberZone &zone : g_cybZones.zones)
 	{
 		const char *zoneReason = nullptr;
-		if (SpawnZone(zone, &zoneReason))
+		const bool numbered = zone.type == KZ_CYBER_ZONE_STAGE || zone.type == KZ_CYBER_ZONE_CHECKPOINT;
+		if (IsRejectedCourse(rejectedCourses, zone.courseDescriptor))
+		{
+			zoneReason = "own_course_is_native";
+			KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] zone_spawn_skipped id=%s type=%s course=%s reason=own_course_is_native\n", zone.id,
+						ZoneTypeName(zone.type), zone.courseDescriptor);
+		}
+		else if (numbered && IsRejectedCourse(incompleteCourses, zone.courseDescriptor))
+		{
+			// Родные зоны этого курса мы не гасили — курс остаётся мапперским и рабочим.
+			zoneReason = "incomplete_numbered_set";
+			KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] zone_spawn_skipped id=%s type=%s course=%s reason=incomplete_numbered_set\n", zone.id,
+						ZoneTypeName(zone.type), zone.courseDescriptor);
+		}
+		else if (SpawnZone(zone, &zoneReason))
 		{
 			ok++;
 		}
@@ -735,9 +891,10 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 							   : KZ::mapapi::HasCourseDescriptor(KZ_NO_MAPAPI_COURSE_DESCRIPTOR)   ? "foreign"
 																								   : "none";
 	KZ_LOG_INFO(LogChannel::MappingAPI,
-				"[cyb] zones_applied map=%s count=%d of=%d revision=%d course=%s courses=%d native_disabled=%d restored=%d reason=%s\n",
+				"[cyb] zones_applied map=%s count=%d of=%d revision=%d course=%s courses=%d courses_unknown=%d native_disabled=%d restored=%d "
+				"reason=%s\n",
 				g_cybZones.mapName.c_str(), ok, (i32)g_cybZones.zones.size(), g_cybZones.revision, courseSource, (i32)g_cybZones.courses.size(),
-				nativeDisabled, restored, reason);
+				unknownCourses, nativeDisabled, restored, reason);
 
 	SyncCoursesAfterApply();
 }
@@ -777,6 +934,7 @@ void KZ::zones::OnMapLoaded()
 	// а тот обнуляет весь courseDescriptors. Значит и наша память о заведённом курсе обнуляется.
 	g_cybZones.courseCreated = false;
 	g_cybZones.localCoursesPending = false;
+	g_cybZones.createdCourses.clear();
 	g_cybZones.mapName = g_pKZUtils->GetCurrentMapName().Get();
 
 	const char *url = KZOptionService::GetOptionStr("cybEmitUrl", "");
@@ -905,8 +1063,8 @@ const char *KZ::zones::AddAndSpawn(const KzCyberZone &zone, i32 apiRevision)
 	// revision — версия набора у api; свой счётчик только фолбэк, иначе !zone list врёт.
 	g_cybZones.revision = apiRevision > 0 ? apiRevision : g_cybZones.revision + 1;
 
-	// Поставленная зона обязана ожить без рестарта раунда: рестарт срубил бы раны всем на
-	// сервере. Поэтому точечно открываем окно регистрации ровно на свой DispatchSpawn.
+	// Поставленная зона обязана ожить без рестарта раунда: рестарт срубил бы раны всем на сервере.
+	// Окно регистрации открывает ApplyLoadedZones вокруг всего набора.
 	// В неготовый мир не спавним: движковая очистка всё равно снесёт энтити, а игрок увидел бы
 	// «зона поставлена» и не почувствовал её. Такую зону поставит round_start.
 	// Только через общий путь. Отдельного быстрого пути больше нет: применение набора это пять
@@ -914,12 +1072,19 @@ const char *KZ::zones::AddAndSpawn(const KzCyberZone &zone, i32 apiRevision)
 	// disabled, погасить родные — и лишь затем спавн), и второй путь неизбежно с ними разъедется.
 	// Ровно так уже была получена зона, которая «поставлена», но не работает.
 	// Переспавн всего набора здесь дёшев (потолок 64 зоны) и уже штатно происходит при удалении.
+	// Причину неактивности определяем ДО применения по тем же ранним выходам, что есть у
+	// ApplyLoadedZones: иначе на его ранней ветке reason остался бы nullptr, а редактор сказал бы
+	// автору «поставлена и уже действует», не заспавнив ничего.
 	const char *reason = nullptr;
-	if (!g_cybZones.worldReady)
+	if (!g_cybZones.loaded)
+	{
+		reason = "set_not_loaded";
+	}
+	else if (!g_cybZones.worldReady)
 	{
 		reason = "world_not_ready";
 	}
-	ApplyLoadedZones("zone_added", g_cybZones.zones.back().id, g_cybZones.worldReady ? &reason : nullptr);
+	ApplyLoadedZones("zone_added", g_cybZones.zones.back().id, reason ? nullptr : &reason);
 
 	KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] zone_added steam_id=%llu map=%s id=%s type=%s spawned=%d reason=%s revision=%d\n",
 				g_cybZones.zones.back().createdBy, g_cybZones.mapName.c_str(), g_cybZones.zones.back().id, ZoneTypeName(g_cybZones.zones.back().type),
