@@ -675,7 +675,8 @@ static_function bool Hook_FireEvent(IGameEvent *event, bool bDontBroadcast)
 		{
 			hooks::HookEntities();
 			KZ::mapapi::OnRoundPreStart();
-			// После очистки вектора триггеров и открытия окна — ставим зоны платформы заново.
+			// Зоны платформы здесь НЕ спавнятся: движковая очистка мира идёт после этого события
+			// и снесла бы их (баг cyb.118). Только помечаем мир «не готов».
 			KZ::zones::OnRoundPreStart();
 		}
 		else if (KZ_STREQI(event->GetName(), "round_start"))
@@ -686,6 +687,8 @@ static_function bool Hook_FireEvent(IGameEvent *event, bool bDontBroadcast)
 			KZProfileService::OnRoundStart();
 			KZ::misc::OnRoundStart();
 			KZ::mapapi::OnRoundStart();
+			// Мир доделан движком — теперь ставим зоны платформы и считаем аудит выживаемости.
+			KZ::zones::OnRoundStart();
 			KZ::replaysystem::OnRoundStart();
 		}
 		else if (KZ_STREQI(event->GetName(), "player_team"))

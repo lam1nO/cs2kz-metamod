@@ -8,6 +8,7 @@
 #include "kz/option/kz_option.h"
 #include "utils/utils.h"
 #include "utils/http.h"
+#include "utils/ctimer.h"
 
 #include "sdk/entity/cbasetrigger.h"
 #include "sdk/entity/cbasemodelentity.h"
@@ -29,6 +30,18 @@ static_global struct
 	CUtlVector<CEntityHandle> spawned;
 	i32 revision;
 	bool loaded;
+	// Мир доделан движком (прошёл round_start). До этого спавнить бесполезно: движковая
+	// очистка на рестарте раунда идёт ПОСЛЕ события round_prestart и сносит наши энтити.
+	bool worldReady;
+	// Снимок хендлов на round_prestart. Отдельное поле, а не spawned: тот обнуляет DespawnAll
+	// внутри ApplyLoadedZones, и аудит выживаемости молчал бы ровно в интересующем случае —
+	// ответ api приходит в те же кадры, что события раунда.
+	CUtlVector<CEntityHandle> preRoundSpawned;
+	// Растёт на каждой загрузке карты. Отложенные таймеры сверяются с ним и молча выходят,
+	// если карта уже сменилась: флаг preserveMapChange=false в этом форке НИЧЕГО не гарантирует —
+	// RemoveNonPersistentTimers() объявлена и определена, но ниоткуда не вызывается
+	// (то же предупреждение — в src/kz/invisible/kz_invisible.cpp:295).
+	u32 mapGeneration;
 } g_cybZones;
 
 static_function const char *ZoneTypeName(KzCyberZoneType type)
@@ -293,12 +306,35 @@ static_function void IngestZones(const char *body, const std::string &mapName)
 	KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] zones_loaded map=%s count=%d skipped=%d revision=%d\n", mapName.c_str(), (i32)g_cybZones.zones.size(),
 				skipped, g_cybZones.revision);
 
-	// Ответ api приходит асинхронно и почти наверняка ПОСЛЕ round_prestart: на kz-инстансе
-	// mp_roundtime прибит к mp_timelimit, поэтому round_prestart за карту случается один раз, в
-	// первые кадры. Ждать следующего раунда значило бы не применить зоны всю карту, и отказ был
-	// бы тихим — zones_loaded в логе есть, zones_applied нет, а отсутствующую строку никто не
-	// ищет. Поэтому применяем набор сразу, тем же путём, ради которого и снимался гейт.
-	ApplyLoadedZones("map_load");
+	// Спавним по конъюнкции «набор загружен И мир готов», порядок произвольный: события раунда
+	// на kz-инстансе случаются один раз за карту и в те же кадры, что ответ api. Решение
+	// принимает ApplyLoadedZones — она одна знает про готовность мира; вторая проверка здесь
+	// была бы вторым местом, где правило может разъехаться.
+	ApplyLoadedZones("api_response");
+
+	// Сторож на «round_start не пришёл». Единственный путь спавна висит на одном событии, и
+	// его неприход дал бы ровно тот тихий отказ, который чинит этот коммит: зоны не работают,
+	// а признак — ОТСУТСТВИЕ строки в логе. Ищем не отсутствие, а явный warn с reason.
+	// Поколение карты — параметром таймера: preserveMapChange=false защиты НЕ даёт
+	// (RemoveNonPersistentTimers() в форке ниоткуда не зовётся), поэтому сторож, вооружённый на
+	// карте A, доживёт до карты B. Без сверки он стрелял бы на здоровой карте в окне «ответ api
+	// пришёл, round_start ещё нет» — а сторож, кричащий на исправной карте, обесценивает себя
+	// ровно как молчащая диагностика. Идиома та же, что previewGeneration в редакторе.
+	StartTimer<u32>(
+		[](u32 generation) -> f64
+		{
+			if (generation != g_cybZones.mapGeneration)
+			{
+				return -1.0; // карта сменилась — это сторож от прошлой
+			}
+			if (g_cybZones.loaded && !g_cybZones.zones.empty() && !g_cybZones.worldReady)
+			{
+				KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] zones_not_applied map=%s count=%d reason=world_never_ready\n", g_cybZones.mapName.c_str(),
+							(i32)g_cybZones.zones.size());
+			}
+			return -1.0;
+		},
+		g_cybZones.mapGeneration, KZ_ZONES_WORLD_READY_TIMEOUT, false);
 }
 
 // Снять всё своё и поставить набор заново. reason — только для лога.
@@ -307,6 +343,14 @@ static_function void ApplyLoadedZones(const char *reason)
 	DespawnAll();
 	if (!g_cybZones.loaded || g_cybZones.zones.empty())
 	{
+		return;
+	}
+	// Единственная точка спавна, и она же единственная, кто знает про готовность мира: в
+	// неготовый мир энтити создавать бессмысленно — движковая очистка их снесёт.
+	if (!g_cybZones.worldReady)
+	{
+		KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] zones_deferred map=%s count=%d reason=world_not_ready caller=%s\n", g_cybZones.mapName.c_str(),
+					(i32)g_cybZones.zones.size(), reason);
 		return;
 	}
 	KZ::mapapi::BeginExternalTriggerSpawn();
@@ -347,6 +391,8 @@ void KZ::zones::ResetEditors()
 void KZ::zones::OnMapLoaded()
 {
 	KZ::zones::ResetEditors();
+	g_cybZones.mapGeneration++;
+	g_cybZones.worldReady = false;
 	DespawnAll();
 	g_cybZones.zones.clear();
 	g_cybZones.revision = 0;
@@ -407,12 +453,45 @@ void KZ::zones::OnMapLoaded()
 
 void KZ::zones::OnRoundPreStart()
 {
-	// Mapping API только что очистил вектор триггеров и открыл окно регистрации. Свои энтити
-	// снимаем ЯВНО внутри ApplyLoadedZones, а не полагаемся на очистку мира движком: порядок
-	// «событие round_prestart -> CleanUpMap()» замером не проверялся, и ставка проигрывает в обе
-	// стороны — либо движок сметёт только что созданные зоны, либо старые останутся и будут
-	// копиться каждый раунд. Снятие своих энтити корректно в обоих случаях.
-	ApplyLoadedZones("round_prestart");
+	// ЗДЕСЬ НЕ СПАВНИМ — и это главный урок бага cyb.118. Окно регистрации Mapping API
+	// (round_prestart -> round_start) рассчитано на энтити, которые пересоздаёт САМ движок:
+	// его очистка мира идёт ПОСЛЕ события round_prestart, поэтому всё, что мы успели создать
+	// в обработчике, она сносит. Симптом был коварным: SpawnZone проверяет энтити сразу после
+	// DispatchSpawn и честно рапортует zones_applied, а через мгновение энтити уже нет;
+	// !zone list при этом показывает зону, потому что читает ДАННЫЕ, а не мир.
+	// Снимаем копию хендлов: по ней на round_start считается аудит выживаемости. Держать её
+	// отдельно обязательно — сам spawned к тому моменту может быть уже обнулён переспавном.
+	g_cybZones.preRoundSpawned.RemoveAll();
+	FOR_EACH_VEC(g_cybZones.spawned, i)
+	{
+		g_cybZones.preRoundSpawned.AddToTail(g_cybZones.spawned[i]);
+	}
+	g_cybZones.worldReady = false;
+}
+
+void KZ::zones::OnRoundStart()
+{
+	// Аудит ДО любого вмешательства: сколько наших энтити пережило движковую очистку мира.
+	// Пишется всегда, а не только при расхождении — именно отсутствие такой проверки стоило
+	// нам бага «применил, но не работает»: мы верили строке лога, а не состоянию мира.
+	i32 alive = 0;
+	FOR_EACH_VEC(g_cybZones.preRoundSpawned, i)
+	{
+		CEntityInstance *inst = GameEntitySystem() ? GameEntitySystem()->GetEntityInstance(g_cybZones.preRoundSpawned[i]) : nullptr;
+		if (inst && inst->m_pEntity && inst->m_pEntity->NameMatches(KZ_CYBER_ZONE_NAME))
+		{
+			alive++;
+		}
+	}
+	// Печатается ВСЕГДА, включая of=0: «строки нет» — худший вид диагностики, именно на нём мы
+	// и потеряли время с багом cyb.118.
+	KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] zones_audit stage=round_start map=%s alive=%d of=%d\n", g_cybZones.mapName.c_str(), alive,
+				g_cybZones.preRoundSpawned.Count());
+	g_cybZones.preRoundSpawned.RemoveAll();
+
+	// Мир доделан — теперь спавн доживает до игрока.
+	g_cybZones.worldReady = true;
+	ApplyLoadedZones("round_start");
 }
 
 bool KZ::zones::IsReady()
@@ -448,9 +527,21 @@ void KZ::zones::AddAndSpawn(const KzCyberZone &zone, i32 apiRevision)
 
 	// Поставленная зона обязана ожить без рестарта раунда: рестарт срубил бы раны всем на
 	// сервере. Поэтому точечно открываем окно регистрации ровно на свой DispatchSpawn.
-	KZ::mapapi::BeginExternalTriggerSpawn();
-	const bool spawned = SpawnZone(g_cybZones.zones.back());
-	KZ::mapapi::EndExternalTriggerSpawn();
+	// В неготовый мир не спавним: движковая очистка всё равно снесёт энтити, а игрок увидел бы
+	// «зона поставлена» и не почувствовал её. Такую зону поставит round_start.
+	bool spawned = false;
+	if (g_cybZones.worldReady)
+	{
+		KZ::mapapi::BeginExternalTriggerSpawn();
+		spawned = SpawnZone(g_cybZones.zones.back());
+		KZ::mapapi::EndExternalTriggerSpawn();
+	}
+	else
+	{
+		// Через общий путь: он сам напишет reason=world_not_ready, и «решение принимает одна
+		// точка» становится буквальным, а не почти-буквальным.
+		ApplyLoadedZones("zone_added");
+	}
 
 	KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] zone_added steam_id=%llu map=%s id=%s type=%s spawned=%d revision=%d\n",
 				g_cybZones.zones.back().createdBy, g_cybZones.mapName.c_str(), g_cybZones.zones.back().id, ZoneTypeName(g_cybZones.zones.back().type),
@@ -471,13 +562,8 @@ bool KZ::zones::RemoveById(const char *id, i32 apiRevision)
 		// Энтити снимаем разом и ставим набор заново: попадание «зона ↔ энтити» один-в-один
 		// не гарантировано (движок мог снести энтити на спавне), а держать вторую таблицу
 		// соответствий ради удаления одной зоны дороже, чем переспавнить набор.
-		DespawnAll();
-		KZ::mapapi::BeginExternalTriggerSpawn();
-		for (const KzCyberZone &zone : g_cybZones.zones)
-		{
-			SpawnZone(zone);
-		}
-		KZ::mapapi::EndExternalTriggerSpawn();
+		// Через общий путь — он один знает про готовность мира.
+		ApplyLoadedZones("zone_removed");
 		KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] zone_removed map=%s id=%s revision=%d\n", g_cybZones.mapName.c_str(), id, g_cybZones.revision);
 		return true;
 	}

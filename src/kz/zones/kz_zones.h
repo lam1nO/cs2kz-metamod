@@ -31,6 +31,9 @@
 #define KZ_ZONE_MIN_SIZE      8.0f  // как KZ_ZONE_MIN_SIZE в контракте
 #define KZ_ZONE_WORLD_LIMIT   16384.0f
 
+// Сколько ждём round_start после ответа api, прежде чем признать, что мир так и не доделан.
+#define KZ_ZONES_WORLD_READY_TIMEOUT 60.0f
+
 enum KzCyberZoneType
 {
 	KZ_CYBER_ZONE_START = 0,
@@ -61,9 +64,13 @@ namespace KZ::zones
 	// триггерах карты: один warn с reason, без ретраев до следующей загрузки.
 	void OnMapLoaded();
 
-	// round_prestart: Mapping API только что очистил вектор триггеров, окно регистрации открыто —
-	// спавним свои зоны заново. Каждый раунд, потому что triggers.RemoveAll() снимает регистрации.
+	// round_prestart: только помечаем мир «не готов». Спавнить здесь НЕЛЬЗЯ — движковая очистка
+	// мира идёт после этого события и сносит созданные энтити (баг cyb.118).
 	void OnRoundPreStart();
+
+	// round_start: мир доделан. Считаем аудит выживаемости прошлых зон и ставим набор заново
+	// (Mapping API чистит вектор триггеров на round_prestart, поэтому регистрация нужна снова).
+	void OnRoundStart();
 
 	// Разрешено ли редактору ставить зоны прямо сейчас (набор загружен и карта известна).
 	bool IsReady();
