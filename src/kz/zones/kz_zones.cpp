@@ -136,17 +136,20 @@ static_function bool SpawnZone(const KzCyberZone &zone, const char **outReason =
 		return fail("trigger_table_full");
 	}
 
-	// Зона start/end обязана ссылаться на СУЩЕСТВУЮЩИЙ дескриптор курса: иначе каждое касание
-	// бьёт Mapi_Error, а тот раз в минуту высыпает накопленное в общий чат всем игрокам.
-	// Проверяем наличие дескриптора, а НЕ версию Mapping API: целевые карты (kz_variety_fix,
-	// kz_j2s_westbl0ck_go) Mapping API объявляют, но курсов не имеют — !courses там пуст, и
-	// проверка по версии выкидывала ровно те зоны, ради которых всё делается. Дескриптор к этому
-	// моменту либо завёл форк (карта без Mapping API), либо мы сами (EnsurePlatformCourse).
+	// Зона start/end обязана ссылаться на курс, который принадлежит НАМ. Двух вещей сразу:
+	// дескриптор должен существовать (иначе каждое касание бьёт Mapi_Error, а тот раз в минуту
+	// высыпает накопленное в общий чат всем игрокам) и он должен быть наш или форковый —
+	// см. KZ::mapapi::IsPlatformOwnedCourse, имя "Default" маппер вправе занять сам.
+	// Версию Mapping API здесь не спрашиваем: целевые карты (kz_variety_fix, kz_j2s_westbl0ck_go)
+	// её объявляют, но курсов не имеют — !courses там пуст, и гейт по версии выкидывал ровно те
+	// зоны, ради которых всё делается.
+	// Тот же критерий, что у EnsurePlatformCourse ниже: расхождение этих двух гейтов уже один раз
+	// открыло дыру, через которую наша зона вставала в чужой курс.
 	// Проверяем ДО создания энтити и keyvalues: иначе выход из середины функции оставлял бы их течь.
-	if ((zone.type == KZ_CYBER_ZONE_START || zone.type == KZ_CYBER_ZONE_END) && !KZ::mapapi::HasCourseDescriptor(KZ_NO_MAPAPI_COURSE_DESCRIPTOR))
+	if ((zone.type == KZ_CYBER_ZONE_START || zone.type == KZ_CYBER_ZONE_END) && !KZ::mapapi::IsPlatformOwnedCourse(KZ_NO_MAPAPI_COURSE_DESCRIPTOR))
 	{
-		KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] zone_spawn_skipped id=%s type=%s reason=no_course_descriptor\n", zone.id, ZoneTypeName(zone.type));
-		return fail("no_course_descriptor");
+		KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] zone_spawn_skipped id=%s type=%s reason=no_platform_course\n", zone.id, ZoneTypeName(zone.type));
+		return fail("no_platform_course");
 	}
 
 	CBaseTrigger *trigger = utils::CreateEntityByName<CBaseTrigger>("trigger_multiple");
@@ -244,13 +247,16 @@ static_function bool SpawnZone(const KzCyberZone &zone, const char **outReason =
 // API объявляют, а курсов не имеют — там дескриптор приходится заводить нам.
 static_function void EnsurePlatformCourse()
 {
-	if (KZ::mapapi::HasCourseDescriptor(KZ_NO_MAPAPI_COURSE_DESCRIPTOR))
+	// Тот же критерий, что у гейта в SpawnZone: курс уже есть и он наш (или форковый на карте
+	// без Mapping API). Спрашивать здесь просто «есть ли дескриптор с таким именем» нельзя —
+	// мапперский курс, названный "Default", тогда считался бы нашим.
+	if (KZ::mapapi::IsPlatformOwnedCourse(KZ_NO_MAPAPI_COURSE_DESCRIPTOR))
 	{
-		return; // уже есть: либо форк на карте без Mapping API, либо мы на этой же карте
+		return;
 	}
 	// У карты есть свои курсы — свой главный курс поверх них не заводим: зона должна вставать
 	// в выбранный админом курс карты, а выбор курса — задача B. Тихо выходим, а зону отобьёт
-	// гейт в SpawnZone с reason=no_course_descriptor.
+	// гейт в SpawnZone с reason=no_platform_course.
 	if (KZ::course::GetCourseCount() > 0)
 	{
 		return;
@@ -268,8 +274,10 @@ static_function void EnsurePlatformCourse()
 				KZ_NO_MAPAPI_COURSE_DESCRIPTOR, KZ_NO_MAPAPI_COURSE_NAME);
 }
 
-// Хвост ЛЮБОГО применения набора. Оба пути постановки зон (полное переприменение и точечный
-// спавн одной зоны редактором) обязаны его звать — иначе один из них тихо разъедется с миром.
+// Хвост применения набора: оба пути, которые реально что-то ставят (полное переприменение и
+// точечный спавн одной зоны редактором), обязаны его звать — иначе один из них тихо разъедется
+// с миром. Ранние выходы ApplyLoadedZones (набор пуст, мир не готов) сюда намеренно не заходят:
+// пересчитывать нечего, а localCoursesPending доживёт до следующего применения.
 static_function void SyncCoursesAfterApply()
 {
 	// Курс, заведённый нами, в локальной БД отсутствует: KZDatabaseService::SetupCourses отработал
@@ -279,9 +287,20 @@ static_function void SyncCoursesAfterApply()
 	// g_sortedCourses, где курс уже лежит.
 	if (g_cybZones.localCoursesPending && KZDatabaseService::IsMapSetUp())
 	{
-		KZ::course::SetupLocalCourses();
-		g_cybZones.localCoursesPending = false;
-		KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] course_local_setup map=%s\n", g_cybZones.mapName.c_str());
+		// Флаг гасим по РЕЗУЛЬТАТУ, а не по факту вызова: SetupLocalCourses асинхронна, и при
+		// отказе транзакции (OnGenericTxnFailure) повтора бы не было — курс молча остался бы с
+		// localDatabaseID = 0, то есть раны на нём легли бы в никуда. Проверяем, что id реально
+		// приехал; пока нет — пробуем снова на следующем применении набора.
+		const KZCourseDescriptor *course = KZ::course::GetCourse(KZ_NO_MAPAPI_COURSE_NAME);
+		if (course && course->localDatabaseID != 0)
+		{
+			g_cybZones.localCoursesPending = false;
+			KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] course_local_setup map=%s local_id=%u\n", g_cybZones.mapName.c_str(), course->localDatabaseID);
+		}
+		else
+		{
+			KZ::course::SetupLocalCourses();
+		}
 	}
 
 	// Счётчики зон курса гейтят финиш: KZTimerService::TimerEnd отбивает ран, если
@@ -468,9 +487,17 @@ static_function void ApplyLoadedZones(const char *reason)
 		}
 	}
 	KZ::mapapi::EndExternalTriggerSpawn();
-	// course= объясняет пропуск start/end, не заставляя лезть в соседние строки: own — курс завели
-	// мы, map — дескриптор пришёл с картой, none — дескриптора нет и start/end отбиты.
-	const char *courseSource = g_cybZones.courseCreated ? "own" : (KZ::mapapi::HasCourseDescriptor(KZ_NO_MAPAPI_COURSE_DESCRIPTOR) ? "map" : "none");
+	// course= объясняет пропуск start/end, не заставляя лезть в соседние строки:
+	//   own      — курс завели мы;
+	//   fallback — дефолтный курс форка на карте без Mapping API;
+	//   foreign  — дескриптор с таким именем есть, но он МАППЕРСКИЙ (карта заняла имя "Default");
+	//   none     — дескриптора нет вовсе.
+	// Различать foreign и none обязательно: в обоих случаях start/end отбиты, но причины разные,
+	// и «карта заняла наше имя» иначе выглядела бы как загадка.
+	const char *courseSource = g_cybZones.courseCreated                                            ? "own"
+							   : KZ::mapapi::IsPlatformOwnedCourse(KZ_NO_MAPAPI_COURSE_DESCRIPTOR) ? "fallback"
+							   : KZ::mapapi::HasCourseDescriptor(KZ_NO_MAPAPI_COURSE_DESCRIPTOR)   ? "foreign"
+																								   : "none";
 	KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] zones_applied map=%s count=%d of=%d revision=%d course=%s reason=%s\n", g_cybZones.mapName.c_str(), ok,
 				(i32)g_cybZones.zones.size(), g_cybZones.revision, courseSource, reason);
 

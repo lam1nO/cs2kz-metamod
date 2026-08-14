@@ -9,6 +9,7 @@
 #include "movement/movement.h"
 #include "kz_mappingapi.h"
 #include "entity2/entitykeyvalues.h"
+#include "entity2/entitysystem.h" // GameEntitySystem() — проверка живости триггера в пересчёте
 #include "sdk/entity/cbasetrigger.h"
 #include "utils/ctimer.h"
 #include "kz/db/kz_db.h"
@@ -703,7 +704,12 @@ struct MapiCourseZoneCounts
 	bool stageConsecutive;
 };
 
-static_function MapiCourseZoneCounts Mapi_CountCourseZones(const KZCourseDescriptor *courseDescriptor)
+// liveOnly=true считает только те триггеры, чья энтити ещё жива. Нужно пересчёту после
+// применения набора зон платформы: DespawnAll снимает энтити, но записи в g_mappingApi.triggers
+// живут до round_prestart, и повторное применение иначе удвоило бы счётчики курса. Валидация на
+// round_start зовёт с false — там все триггеры только что зарегистрированы, и поведение
+// апстрима остаётся байт-в-байт прежним.
+static_function MapiCourseZoneCounts Mapi_CountCourseZones(const KZCourseDescriptor *courseDescriptor, bool liveOnly)
 {
 	i32 splitXor = 0;
 	i32 cpXor = 0;
@@ -713,6 +719,11 @@ static_function MapiCourseZoneCounts Mapi_CountCourseZones(const KZCourseDescrip
 	{
 		KzTrigger *trigger = &g_mappingApi.triggers[i];
 		if (!KZ::mapapi::IsTimerTrigger(trigger->type))
+		{
+			continue;
+		}
+
+		if (liveOnly && (!GameEntitySystem() || !GameEntitySystem()->GetEntityInstance(trigger->entity)))
 		{
 			continue;
 		}
@@ -748,7 +759,7 @@ void KZ::mapapi::OnRoundStart()
 	FOR_EACH_VEC(g_mappingApi.courseDescriptors, courseInd)
 	{
 		KZCourseDescriptor *courseDescriptor = &g_mappingApi.courseDescriptors[courseInd];
-		const MapiCourseZoneCounts counts = Mapi_CountCourseZones(courseDescriptor);
+		const MapiCourseZoneCounts counts = Mapi_CountCourseZones(courseDescriptor, false);
 		const i32 splitCount = counts.splitCount;
 		const i32 cpCount = counts.cpCount;
 		const i32 stageCount = counts.stageCount;
@@ -817,22 +828,28 @@ void KZ::mapapi::OnRoundStart()
 
 void KZ::mapapi::RecountCourseZones()
 {
-	// Пустая таблица триггеров означает не «у курсов нет зон», а «окно регистрации открыто»:
-	// OnRoundPreStart делает triggers.RemoveAll(), и до round_start карта заполняет её заново.
-	// Пересчёт в этот момент обнулил бы счётчики ВСЕХ курсов карты, включая родные, — то есть
-	// сорвал бы финиш каждого забега (TimerEnd сверяет currentStage со stageCount). Сегодня
-	// сюда так не приходят (единственный вызывающий спавнит зоны только при готовом мире), но
-	// цена ошибки будущего вызывающего слишком велика, чтобы полагаться на это.
+	// Пустая таблица триггеров означает не «у курсов нет зон», а «мир ещё не отдал их нам».
+	// Таких окон ДВА, и оба реальны:
+	//   1) от загрузки карты до первого round_prestart — дескрипторы курсов уже созданы хуком
+	//      spawn-группы, а Mapi_OnTriggerMultipleSpawn ещё выходит по !roundIsStarting;
+	//   2) между round_prestart (там triggers.RemoveAll()) и round_start.
+	// Пересчёт в любом из них обнулил бы счётчики ВСЕХ курсов карты, включая родные, то есть
+	// сорвал бы финиш каждого забега (TimerEnd сверяет currentStage со stageCount). Сегодня сюда
+	// так не приходят — единственный вызывающий спавнит зоны только при готовом мире, — но цена
+	// ошибки будущего вызывающего слишком велика, чтобы полагаться на порядок вызовов.
+	// Обратная сторона гарда узкая: «на карте правда ноль триггеров» означает нулевые счётчики у
+	// всех курсов, то есть пересчёт и так был бы пустой операцией.
 	if (g_mappingApi.triggers.Count() == 0)
 	{
-		KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] course_recount_skipped reason=trigger_table_empty\n");
+		KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] course_recount_skipped map=%s reason=trigger_table_empty\n",
+					g_pKZUtils->GetCurrentMapName().Get());
 		return;
 	}
 
 	FOR_EACH_VEC(g_mappingApi.courseDescriptors, courseInd)
 	{
 		KZCourseDescriptor *course = &g_mappingApi.courseDescriptors[courseInd];
-		const MapiCourseZoneCounts counts = Mapi_CountCourseZones(course);
+		const MapiCourseZoneCounts counts = Mapi_CountCourseZones(course, true);
 
 		// Молча НЕ трогаем счётчики курса, чью нумерацию сломали: значение, выставленное
 		// валидацией на round_start, детерминировано, а половинчатое — нет. Дропать курс здесь
@@ -878,6 +895,24 @@ void KZ::mapapi::RecountCourseZones()
 bool KZ::mapapi::HasCourseDescriptor(const char *targetname)
 {
 	return Mapi_FindCourse(targetname) != nullptr;
+}
+
+bool KZ::mapapi::IsPlatformOwnedCourse(const char *descriptorName)
+{
+	const KZCourseDescriptor *desc = Mapi_FindCourse(descriptorName);
+	if (!desc)
+	{
+		return false;
+	}
+	// Курс, заведённый нами через CreateExternalCourse.
+	if (desc->id >= KZ_PLATFORM_COURSE_ID_BASE && desc->id <= KZ_PLATFORM_COURSE_ID_BASE + KZ_PLATFORM_COURSE_MAX_NUMBER)
+	{
+		return true;
+	}
+	// Дефолтный курс карты без Mapping API: его заводит сам форк в OnCreateLoadingSpawnGroupHook,
+	// и других курсов на такой карте быть не может — второй проход по info_target_server_only
+	// там не выполняется вовсе. Значит любой дескриптор на такой карте — форковый.
+	return g_mappingApi.mapApiVersion == KZ_NO_MAPAPI_VERSION;
 }
 
 const char *KZ::mapapi::CreateExternalCourse(i32 platformNumber, const char *courseName, const char *descriptorName)
@@ -952,6 +987,27 @@ const char *KZ::mapapi::CreateExternalCourse(i32 platformNumber, const char *cou
 	if (!Mapi_CreateCourse(courseId, courseName, hammerId, descriptorName, false))
 	{
 		return "create_failed";
+	}
+
+	// Проверка ПОСТФАКТУМ, потому что plannedGuid выше повторяет формулу апстрима: поменяется она
+	// в Mapi_CreateCourse — предсказание разойдётся молча, и защита перестанет работать, ничем
+	// себя не выдав. Откатить создание нечем (безопасного удаления курса в форке нет — ровно
+	// поэтому мы и не ходим через FastRemove), так что здесь только громкая запись в лог: курс с
+	// чужим guid означает, что таймер может приписать ран другому курсу.
+	const KZCourseDescriptor *created = Mapi_FindCourse(descriptorName);
+	if (created)
+	{
+		FOR_EACH_VEC(g_mappingApi.courseDescriptors, i)
+		{
+			const KZCourseDescriptor &other = g_mappingApi.courseDescriptors[i];
+			if (&other != created && other.guid == created->guid)
+			{
+				KZ_LOG_ERROR(LogChannel::MappingAPI,
+							 "[cyb] course_guid_collision descriptor=%s guid=%u other=%s reason=upstream_guid_formula_changed\n", descriptorName,
+							 created->guid, other.name);
+				break;
+			}
+		}
 	}
 	return nullptr;
 }
