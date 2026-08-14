@@ -392,6 +392,16 @@ void KZTriggerService::StartTouch(CBaseTrigger *trigger)
 		return;
 	}
 
+	// СПАЙК LAM-20 (выбрасываемое): факт касания зоны, заспавненной в рантайме.
+	// SpikeIsActive() первым условием — чтобы без спайк-зон не звать NameMatches на каждое касание.
+	if (KZ::mapapi::SpikeIsActive() && trigger->m_pEntity && trigger->m_pEntity->NameMatches("cyb_spike_zone"))
+	{
+		const KzTrigger *spikeKzTrigger = KZ::mapapi::GetKzTrigger(trigger);
+		KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] spike_zone_touch steam_id=%llu ent=%d registered=%d jump_factor=%.2f filter_pass=%d\n",
+					this->player->GetSteamId64(false), trigger->entindex(), spikeKzTrigger ? 1 : 0,
+					spikeKzTrigger ? spikeKzTrigger->modifier.jumpFactor : -1.0f, trigger->PassesTriggerFilters(pawn) ? 1 : 0);
+	}
+
 	TriggerTouchTracker *tracker = this->GetTriggerTracker(trigger);
 	bool shouldStartTouch = (!tracker || tracker->CanStartTouch()) && this->OnTriggerStartTouchPre(trigger);
 

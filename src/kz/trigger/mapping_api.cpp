@@ -333,4 +333,12 @@ void KZTriggerService::ApplyJumpFactor(bool replicate)
 	const CVValue_t *jumpCostValue = player->GetCvarValueFromModeStyles(MODECVAR_SV_STAMINAJUMPCOST);
 	const CVValue_t newJumpCostValue = (jumpCostValue->m_fl32Value / this->modifiers.jumpFactor);
 	utils::SetConVarValue(player->GetPlayerSlot(), "sv_staminajumpcost", &newJumpCostValue, replicate);
+
+	// СПАЙК LAM-20 (выбрасываемое): только смена фактора и только когда на карте есть
+	// спайк-зона — иначе строка сыпалась бы у всех игроков на штатных modifier-зонах карт.
+	if (replicate && KZ::mapapi::SpikeIsActive())
+	{
+		KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] spike_jump_factor_applied steam_id=%llu factor=%.2f base_impulse=%.1f new_impulse=%.1f\n",
+					this->player->GetSteamId64(false), this->modifiers.jumpFactor, impulseModeValue->m_fl32Value, newImpulseValue.m_fl32Value);
+	}
 }

@@ -204,6 +204,10 @@ def configure_main(sdk_target, sdk, cxx):
     os.path.join(builder.sourcePath, 'src', 'kz', 'trigger', 'callbacks.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'trigger', 'kz_trigger.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'trigger', 'mapping_api.cpp'),
+
+    # СПАЙК LAM-20 — выбрасываемый код. Откат = git revert коммита спайка целиком:
+    # он трогает ещё kz_mappingapi.{h,cpp}, kz_trigger.cpp и trigger/mapping_api.cpp.
+    os.path.join(builder.sourcePath, 'src', 'kz', 'zones', 'kz_zones_spike.cpp'),
   ]
 
   if binary.compiler.target.platform == 'linux':

@@ -54,6 +54,10 @@ static_global struct
 
 	CUtlVectorFixed<KzTrigger, 2048> triggers;
 	bool roundIsStarting;
+	// СПАЙК LAM-20 (выбрасываемое): снимает окно round_prestart→round_start для наших спавнов.
+	bool spikeAllowSpawnAnytime;
+	// Спайк-зону хоть раз ставили на этой карте — гейт для спайк-логов в горячем коде.
+	bool spikeActive;
 	i32 errorFlags;
 	i32 errorCount;
 	char errors[32][256];
@@ -183,7 +187,7 @@ static_function void Mapi_OnTriggerMultipleSpawn(const EntitySpawnInfo_t *info)
 
 	KzTriggerType type = (KzTriggerType)ekv->GetInt(KEY_TRIGGER_TYPE, KZTRIGGER_DISABLED);
 
-	if (!g_mappingApi.roundIsStarting)
+	if (!g_mappingApi.roundIsStarting && !g_mappingApi.spikeAllowSpawnAnytime)
 	{
 		// Only allow triggers and zones that were spawned during the round start phase.
 		return;
@@ -632,10 +636,33 @@ void KZ::mapapi::OnSpawn(int count, const EntitySpawnInfo_t *info)
 	}
 }
 
+// СПАЙК LAM-20 (выбрасываемое).
+void KZ::mapapi::SpikeSetAllowSpawnAnytime(bool allow)
+{
+	g_mappingApi.spikeAllowSpawnAnytime = allow;
+}
+
+i32 KZ::mapapi::SpikeTriggerCount()
+{
+	return g_mappingApi.triggers.Count();
+}
+
+void KZ::mapapi::SpikeSetActive(bool active)
+{
+	g_mappingApi.spikeActive = active;
+}
+
+bool KZ::mapapi::SpikeIsActive()
+{
+	return g_mappingApi.spikeActive;
+}
+
 void KZ::mapapi::OnRoundPreStart()
 {
 	g_mappingApi.triggers.RemoveAll();
 	g_mappingApi.roundIsStarting = true;
+	// СПАЙК LAM-20 (выбрасываемое): регистрации спайк-зон снесены вместе с вектором.
+	g_mappingApi.spikeActive = false;
 }
 
 void KZ::mapapi::OnRoundStart()

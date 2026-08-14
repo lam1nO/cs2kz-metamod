@@ -193,6 +193,15 @@ namespace KZ::mapapi
 	void OnRoundPreStart();
 	void OnRoundStart();
 
+	// СПАЙК LAM-20 (выбрасываемое, откат = git revert коммита спайка целиком):
+	// временно разрешить регистрацию триггеров вне окна round_prestart→round_start,
+	// подсмотреть размер вектора триггеров и признак «спайк-зоны на карте есть»
+	// (по нему гейтятся спайк-логи в горячем коде касаний).
+	void SpikeSetAllowSpawnAnytime(bool allow);
+	i32 SpikeTriggerCount();
+	void SpikeSetActive(bool active);
+	bool SpikeIsActive();
+
 	void CheckEndTimerTrigger(CBaseTrigger *trigger);
 	// This is const, unlike the trigger returned from Mapi_FindKzTrigger.
 	const KzTrigger *GetKzTrigger(CBaseTrigger *trigger);
