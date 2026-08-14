@@ -25,6 +25,11 @@
 // (CUtlVectorFixed<KzTrigger, 2048>) общий с картой, и полагаться на чужую проверку нельзя.
 #define KZ_ZONES_PER_MAP_LIMIT 64
 
+// Потолок курсов платформы на карту. Согласован с api (он не отдаст больше) и взят с запасом
+// относительно KZ_MAX_COURSE_COUNT = 128 слотов вектора дескрипторов: остаток нужен родным
+// курсам карты, которые мы не создаём, но которые занимают те же слоты.
+#define KZ_COURSES_PER_MAP_LIMIT 64
+
 // Геометрия. Оба угла редактор берёт с позиции игрока, то есть с пола: без добавленной
 // высоты вышел бы триггер нулевой высоты, а api отбил бы его как degenerate_box.
 #define KZ_ZONE_EDITOR_HEIGHT 72.0f // рост стоящего игрока
@@ -39,7 +44,23 @@ enum KzCyberZoneType
 	KZ_CYBER_ZONE_START = 0,
 	KZ_CYBER_ZONE_END,
 	KZ_CYBER_ZONE_MODIFIER,
+	KZ_CYBER_ZONE_STAGE,
+	KZ_CYBER_ZONE_CHECKPOINT,
+	// В enum есть, но НЕ разбирается ParseZoneType и не выставляется редактором: api отбивает
+	// split четырёхсотым. Заведён, чтобы номера типов не поехали, когда его включат.
+	KZ_CYBER_ZONE_SPLIT,
 	KZ_CYBER_ZONE_TYPE_COUNT,
+};
+
+// Курс карты, как его видит платформа. Приходит тем же ответом, что и зоны: курс обязан
+// существовать раньше зоны, которая на него ссылается, а два асинхронных запроса порядок не
+// гарантируют.
+struct KzCyberCourse
+{
+	char descriptor[128] {}; // entityTargetname; у own — наш, у override — родной курс карты
+	bool own {};             // курс завели мы (kind=own), а не переопределяем родной
+	bool disabled {};        // курс «удалён» с нашего сервера
+	i32 courseNumber {};     // 0 = main, 1..99 = бонус
 };
 
 // Зона, как её отдал api. Живёт в памяти процесса до следующей загрузки карты.
@@ -51,6 +72,10 @@ struct KzCyberZone
 	Vector maxs {};
 	f32 jumpFactor {}; // только у modifier
 	u64 createdBy {};  // steam_id64 автора, 0 = не отдан api
+	// Дескриптор курса, которому принадлежит зона. Пустая строка = зона вне курсов (бустеры и
+	// одиночные start/end на картах без курсов) — прежнее поведение первой итерации.
+	char courseDescriptor[128] {};
+	i32 stageNumber {}; // только у stage/checkpoint; нумерация приходит от api готовой
 };
 
 namespace KZ::zones
