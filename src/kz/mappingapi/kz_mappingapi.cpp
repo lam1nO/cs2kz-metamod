@@ -904,8 +904,14 @@ bool KZ::mapapi::IsPlatformOwnedCourse(const char *descriptorName)
 	{
 		return false;
 	}
-	// Курс, заведённый нами через CreateExternalCourse.
-	if (desc->id >= KZ_PLATFORM_COURSE_ID_BASE && desc->id <= KZ_PLATFORM_COURSE_ID_BASE + KZ_PLATFORM_COURSE_MAX_NUMBER)
+	// Курс, заведённый нами через CreateExternalCourse. Требуем ОБА признака сразу: по одному
+	// только id критерий остался бы эвристикой — маппер вправе дать своему курсу номер 1000 и
+	// назвать дескриптор "Default", и мы снова сочли бы чужой курс своим. Совпасть же ещё и
+	// hammerId'ом из отрицательного диапазона компилятор карт не может.
+	const bool platformId = desc->id >= KZ_PLATFORM_COURSE_ID_BASE && desc->id <= KZ_PLATFORM_COURSE_ID_BASE + KZ_PLATFORM_COURSE_MAX_NUMBER;
+	const bool platformHammerId =
+		desc->hammerId <= KZ_PLATFORM_COURSE_HAMMER_ID_BASE && desc->hammerId >= KZ_PLATFORM_COURSE_HAMMER_ID_BASE - KZ_PLATFORM_COURSE_MAX_NUMBER;
+	if (platformId && platformHammerId)
 	{
 		return true;
 	}
@@ -913,6 +919,21 @@ bool KZ::mapapi::IsPlatformOwnedCourse(const char *descriptorName)
 	// и других курсов на такой карте быть не может — второй проход по info_target_server_only
 	// там не выполняется вовсе. Значит любой дескриптор на такой карте — форковый.
 	return g_mappingApi.mapApiVersion == KZ_NO_MAPAPI_VERSION;
+}
+
+bool KZ::mapapi::GetCourseLocalDatabaseId(const char *descriptorName, u32 &out)
+{
+	// Пишем out ВСЕГДА, включая ветку отказа: контракт «на false out не трогаем» держался бы на
+	// том, что вызывающий сам инициализировал переменную. Он инициализирует, но именно на таких
+	// неявных договорённостях мы сегодня уже спотыкались трижды.
+	out = 0;
+	const KZCourseDescriptor *desc = Mapi_FindCourse(descriptorName);
+	if (!desc)
+	{
+		return false;
+	}
+	out = desc->localDatabaseID;
+	return true;
 }
 
 const char *KZ::mapapi::CreateExternalCourse(i32 platformNumber, const char *courseName, const char *descriptorName)
@@ -944,19 +965,9 @@ const char *KZ::mapapi::CreateExternalCourse(i32 platformNumber, const char *cou
 
 	const i32 courseId = KZ_PLATFORM_COURSE_ID_BASE + platformNumber;
 	const i32 hammerId = KZ_PLATFORM_COURSE_HAMMER_ID_BASE - platformNumber;
-	// guid, который выдаст Mapi_CreateCourse: он выводит его из Count() + 1. Count() уменьшается,
-	// когда валидация дропает курс, поэтому позже созданный курс МОЖЕТ получить guid живого — а
-	// KZTimerService опознаёт курс забега именно по guid (currentCourseGUID), то есть таймер
-	// приписал бы ран чужому курсу. Формулу guid не трогаем (апстрим), но столкновение ловим.
-	const u32 plannedGuid = (u32)g_mappingApi.courseDescriptors.Count() + 1;
-
 	FOR_EACH_VEC(g_mappingApi.courseDescriptors, i)
 	{
 		const KZCourseDescriptor &existing = g_mappingApi.courseDescriptors[i];
-		if (existing.guid == plannedGuid)
-		{
-			return "guid_taken";
-		}
 		// Самое опасное столкновение во всей затее. Локальная таблица MapCourses уникальна по
 		// (MapID, StageID), где StageID — именно этот id, а вставка идёт
 		// `ON CONFLICT(MapID, StageID) DO UPDATE SET Name` (kz/db/queries/courses.h). Совпадение
@@ -989,24 +1000,34 @@ const char *KZ::mapapi::CreateExternalCourse(i32 platformNumber, const char *cou
 		return "create_failed";
 	}
 
-	// Проверка ПОСТФАКТУМ, потому что plannedGuid выше повторяет формулу апстрима: поменяется она
-	// в Mapi_CreateCourse — предсказание разойдётся молча, и защита перестанет работать, ничем
-	// себя не выдав. Откатить создание нечем (безопасного удаления курса в форке нет — ровно
-	// поэтому мы и не ходим через FastRemove), так что здесь только громкая запись в лог: курс с
-	// чужим guid означает, что таймер может приписать ран другому курсу.
-	const KZCourseDescriptor *created = Mapi_FindCourse(descriptorName);
+	// guid нового курса. Mapi_CreateCourse выводит его из Count() + 1, а Count() проседает, когда
+	// валидация дропает курс, — значит новый курс МОЖЕТ получить guid живого. Цена: KZTimerService
+	// опознаёт курс забега именно по guid (currentCourseGUID), то есть таймер приписал бы ран
+	// чужому курсу.
+	//
+	// Чиним по ФАКТУ, а не предсказанием формулы апстрима: предсказание разошлось бы молча, если
+	// формулу однажды поменяют. Присвоение безопасно именно здесь и только здесь — курс создан
+	// мгновение назад, его не держит ни один забег и не кэширует ни один рекорд, а порядок
+	// g_sortedCourses ключуется по id, не по guid, поэтому вектор не разъедется.
+	KZCourseDescriptor *created = Mapi_FindCourse(descriptorName);
 	if (created)
 	{
+		bool guidTaken = false;
+		u32 maxGuid = 0;
 		FOR_EACH_VEC(g_mappingApi.courseDescriptors, i)
 		{
 			const KZCourseDescriptor &other = g_mappingApi.courseDescriptors[i];
+			maxGuid = MAX(maxGuid, other.guid);
 			if (&other != created && other.guid == created->guid)
 			{
-				KZ_LOG_ERROR(LogChannel::MappingAPI,
-							 "[cyb] course_guid_collision descriptor=%s guid=%u other=%s reason=upstream_guid_formula_changed\n", descriptorName,
-							 created->guid, other.name);
-				break;
+				guidTaken = true;
 			}
+		}
+		if (guidTaken)
+		{
+			KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] course_guid_reassigned descriptor=%s from=%u to=%u reason=guid_taken\n", descriptorName,
+						created->guid, maxGuid + 1);
+			created->guid = maxGuid + 1;
 		}
 	}
 	return nullptr;

@@ -291,11 +291,15 @@ static_function void SyncCoursesAfterApply()
 		// отказе транзакции (OnGenericTxnFailure) повтора бы не было — курс молча остался бы с
 		// localDatabaseID = 0, то есть раны на нём легли бы в никуда. Проверяем, что id реально
 		// приехал; пока нет — пробуем снова на следующем применении набора.
-		const KZCourseDescriptor *course = KZ::course::GetCourse(KZ_NO_MAPAPI_COURSE_NAME);
-		if (course && course->localDatabaseID != 0)
+		// Спрашиваем по ДЕСКРИПТОРУ, а не по имени курса: лукап по имени отдаёт первое совпадение
+		// в порядке сортировки по id, а наш id — самый большой. При любом сожительстве двух
+		// «Main» мы прочитали бы ЧУЖОЙ id, погасили флаг и оставили свой курс с нулём — ровно тот
+		// тихий отказ, который этот блок и лечит.
+		u32 localId = 0;
+		if (KZ::mapapi::GetCourseLocalDatabaseId(KZ_NO_MAPAPI_COURSE_DESCRIPTOR, localId) && localId != 0)
 		{
 			g_cybZones.localCoursesPending = false;
-			KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] course_local_setup map=%s local_id=%u\n", g_cybZones.mapName.c_str(), course->localDatabaseID);
+			KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] course_local_setup map=%s local_id=%u\n", g_cybZones.mapName.c_str(), localId);
 		}
 		else
 		{
@@ -305,9 +309,11 @@ static_function void SyncCoursesAfterApply()
 
 	// Счётчики зон курса гейтят финиш: KZTimerService::TimerEnd отбивает ран, если
 	// currentStage != courseDesc->stageCount. Валидация Mapping API считает их один раз на
-	// round_start и ДО того, как мы поставим свои зоны (порядок в hooks.cpp), поэтому пересчёт
-	// после применения обязателен — иначе получили бы ровно тот тихий отказ, из-за которого ран
-	// не засчитывается, а в логе ничего.
+	// round_start и ДО того, как мы поставим свои зоны (порядок в hooks.cpp).
+	// ЧЕСТНО: сегодня этот вызов — строгий no-op. Платформа ставит только start/end/бустер, а
+	// считаются split/checkpoint/stage, так что менять нечего ни у наших курсов, ни у родных.
+	// Он стоит здесь как защита под задачу B, где в наборе появятся стейджи и чекпойнты: там
+	// отсутствие пересчёта дало бы ран, отбитый как «missed stage», без единой строки в логе.
 	KZ::mapapi::RecountCourseZones();
 }
 
