@@ -1,5 +1,11 @@
 "Phrases"
 {
+	"Course Disabled - Run Stopped"
+	{
+		"#format"	"course:s"
+		"en"		"{grey}Course {default}{course}{grey} was disabled by an admin — your run has been stopped."
+		"ru"		"{grey}Маршрут {default}{course}{grey} отключён администратором — забег остановлен."
+	}
 	"No Current Course"
 	{
 		"en"		"{grey}You have no current course. Check console for list of available courses!"

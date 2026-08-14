@@ -443,6 +443,23 @@ static_function void Mapi_RebuildSortedCourses()
 	}
 }
 
+// Курс с наименьшим mapper-id по ПОЛНОМУ списку, включая отключённые платформой. Именно он
+// считается «главным» (cyber-номер 0), и это обязано не зависеть от того, что кто-то отключил
+// курс: cyber-номер — ключ лидерборда, кэшей PB/WR и сейва рана.
+static_function const KZCourseDescriptor *Mapi_FirstCourseIncludingDisabled()
+{
+	const KZCourseDescriptor *first = nullptr;
+	FOR_EACH_VEC(g_mappingApi.courseDescriptors, i)
+	{
+		const KZCourseDescriptor *course = &g_mappingApi.courseDescriptors[i];
+		if (!first || course->id < first->id)
+		{
+			first = course;
+		}
+	}
+	return first;
+}
+
 static_function KzTrigger *Mapi_FindKzTrigger(CBaseTrigger *trigger)
 {
 	if (!trigger->m_pEntity)
@@ -953,6 +970,15 @@ i32 KZ::mapapi::DisableCourseZones(const char *descriptorName, KzTriggerType typ
 	}
 	if (!descriptorName || !descriptorName[0])
 	{
+		KZ_LOG_ERROR(LogChannel::MappingAPI, "[cyb] course_zones_disable_refused type=%i reason=empty_descriptor\n", (i32)type);
+		return -1;
+	}
+	// Несуществующий дескриптор (опечатка в наборе api) обязан отличаться от «зон такого типа
+	// нет»: иначе оба случая дают 0 и молчание.
+	if (!Mapi_FindCourse(descriptorName))
+	{
+		KZ_LOG_ERROR(LogChannel::MappingAPI, "[cyb] course_zones_disable_refused descriptor=%s type=%i reason=unknown_course\n", descriptorName,
+					 (i32)type);
 		return -1;
 	}
 
@@ -971,18 +997,49 @@ i32 KZ::mapapi::DisableCourseZones(const char *descriptorName, KzTriggerType typ
 		{
 			continue;
 		}
+		// Считаем только ЖИВЫЕ зоны: записи переживают DespawnAll и живут до round_prestart, а
+		// возвращаемое число уходит в лог как «сколько родных зон погашено». Красим при этом и
+		// мёртвые — они безвредны, но врать счётчиком нельзя.
+		const bool alive = GameEntitySystem() && GameEntitySystem()->GetEntityInstance(trigger->entity);
+		trigger->platformDisabledFrom = trigger->type;
+		trigger->platformDisabled = true;
 		trigger->type = KZTRIGGER_DISABLED;
-		disabled++;
+		disabled += alive ? 1 : 0;
 	}
 	return disabled;
+}
+
+i32 KZ::mapapi::RestorePlatformDisabledZones()
+{
+	i32 restored = 0;
+	FOR_EACH_VEC(g_mappingApi.triggers, i)
+	{
+		KzTrigger *trigger = &g_mappingApi.triggers[i];
+		if (!trigger->platformDisabled)
+		{
+			continue;
+		}
+		trigger->type = trigger->platformDisabledFrom;
+		trigger->platformDisabled = false;
+		restored++;
+	}
+	return restored;
 }
 
 bool KZ::mapapi::SetCourseDisabled(const char *descriptorName, bool disabled)
 {
 	KZCourseDescriptor *desc = Mapi_FindCourse(descriptorName);
-	if (!desc || desc->disabled == disabled)
+	if (!desc)
 	{
+		// Отличается от «уже в этом состоянии»: это ошибка конфигурации платформы (курс из набора
+		// api не существует на карте), и молчать о ней нельзя.
+		KZ_LOG_ERROR(LogChannel::MappingAPI, "[cyb] course_toggle_refused descriptor=%s disabled=%d reason=unknown_course\n",
+					 descriptorName ? descriptorName : "(null)", disabled ? 1 : 0);
 		return false;
+	}
+	if (desc->disabled == disabled)
+	{
+		return false; // штатный no-op, набор применяется повторно каждый раунд
 	}
 
 	// Таймеры останавливаем ДО перестроения витрины и строго в этом порядке: GetCourse() ищет
@@ -997,19 +1054,42 @@ bool KZ::mapapi::SetCourseDisabled(const char *descriptorName, bool disabled)
 		for (i32 i = 0; i < MAXPLAYERS; i++)
 		{
 			KZPlayer *player = g_pKZPlayerManager->ToPlayer(CPlayerSlot(i));
-			if (!player || !player->timerService || !player->timerService->GetTimerRunning())
+			if (!player)
 			{
 				continue;
 			}
-			if (player->timerService->GetCourse() != desc)
+
+			// Живой таймер на этом курсе.
+			const bool runningHere = player->timerService && player->timerService->GetTimerRunning() && player->timerService->GetCourse() == desc;
+
+			// ЗАМОРОЖЕННЫЙ ран в prac — отдельный случай, и пропустить его нельзя. В prac
+			// timerRunning == false, поэтому проверка выше такого игрока не увидит, а на выходе
+			// из prac ExitPrac поднимет таймер снапшотом на курсе, которого в витрине уже нет:
+			// финиш через родную энд-зону отдаст course == nullptr, TimerEnd не позовётся вовсе,
+			// и ран пойдёт вечно, умерев молча. Ровно тот класс отказа, ради которого здесь
+			// вообще стоит явная остановка.
+			const bool frozenHere =
+				player->pracService && player->pracService->HasActiveFrozenRun() && player->pracService->GetFrozenRun().courseGUID == desc->guid;
+
+			if (!runningHere && !frozenHere)
 			{
 				continue;
 			}
-			KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] timer_stopped_course_disabled steam_id=%llu course=%s\n", player->GetSteamId64(false),
-						desc->name);
-			player->timerService->TimerStop(true, "course_disabled");
+
+			KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] timer_stopped_course_disabled steam_id=%llu course=%s frozen=%d\n",
+						player->GetSteamId64(false), desc->name, frozenHere ? 1 : 0);
+			if (frozenHere)
+			{
+				// nullptr вместо ключа фразы: свою причину печатаем ниже одной строкой, иначе
+				// игрок получил бы два разных объяснения одного события.
+				player->pracService->DropFrozenRun("course_disabled", nullptr);
+			}
+			if (runningHere)
+			{
+				player->timerService->TimerStop(true, "course_disabled");
+			}
 			// Молчаливый срыв рана неотличим от съеденного времени — говорим причину.
-			player->PrintChat(true, false, "{grey}Зоны:{default} курс {yellow}%s{default} отключён администратором — забег остановлен.", desc->name);
+			player->languageService->PrintChat(true, false, "Course Disabled - Run Stopped", desc->name);
 		}
 	}
 
@@ -1384,7 +1464,13 @@ i32 KZ::course::GetCyberCourseNumber(const KZCourseDescriptor *course)
 			}
 		}
 	}
-	const KZCourseDescriptor *first = KZ::course::GetFirstCourse();
+	// «Главный» курс определяем по ПОЛНОМУ списку курсов карты, включая отключённые платформой.
+	// GetFirstCourse() смотрит в g_sortedCourses, откуда отключённый курс убран, — и отключение
+	// первого курса молча передало бы cyber-номер 0 следующему. А это ключ лидерборда платформы
+	// (submission.cpp, course.number), кэшей PB/WR и сейва рана: рекорды другого курса начали бы
+	// писаться и читаться вместе с рекордами настоящего main. Бонусы уцелели бы (их номер из
+	// имени), а карты вида Main/Second — нет.
+	const KZCourseDescriptor *first = Mapi_FirstCourseIncludingDisabled();
 	if (first && first->guid == course->guid)
 	{
 		return 0;
