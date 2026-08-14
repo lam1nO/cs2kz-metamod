@@ -7,6 +7,11 @@
 #include "kz/mappingapi/kz_mappingapi.h"
 #include "kz/db/kz_db.h"
 #include "kz/option/kz_option.h"
+// Полные типы сервисов игрока: kz.h объявляет их только указателями, а нам нужно читать
+// triggerTrackers и спрашивать IsInPrac при поиске задетых переприменением.
+#include "kz/trigger/kz_trigger.h"
+#include "kz/prac/kz_prac.h"
+#include "kz/language/kz_language.h"
 #include "utils/utils.h"
 #include "utils/http.h"
 #include "utils/ctimer.h"
@@ -24,6 +29,13 @@
 // Имя, по которому свои зоны отличаются от родных триггеров карты (снятие, отладка).
 #define KZ_CYBER_ZONE_NAME "cyb_map_zone"
 
+// Поставленная зона: что стоит в мире и из какой записи оно поставлено.
+struct KzSpawnedZone
+{
+	CEntityHandle handle;
+	KzCyberZone zone;
+};
+
 static_global struct
 {
 	std::string mapName;
@@ -31,7 +43,10 @@ static_global struct
 	// Курсы карты по версии платформы. Приезжают тем же ответом, что и зоны, поэтому курс
 	// гарантированно известен раньше зоны, которая на него ссылается.
 	std::vector<KzCyberCourse> courses;
-	CUtlVector<CEntityHandle> spawned;
+	// Хендл + ЗАПИСЬ, из которой зона поставлена. Запись нужна для diff-применения: без неё
+	// пришлось бы сносить и ставить заново весь набор на каждую правку, а это доигрывает
+	// EndTouch/StartTouch всем, кто стоит в зоне (стёртые чекпоинты и дёрганый таймер).
+	std::vector<KzSpawnedZone> spawned;
 	i32 revision;
 	bool loaded;
 	// Мир доделан движком (прошёл round_start). До этого спавнить бесполезно: движковая
@@ -330,7 +345,7 @@ static_function bool SpawnZone(const KzCyberZone &zone, const char **outReason =
 		}
 	}
 
-	g_cybZones.spawned.AddToTail(handle);
+	g_cybZones.spawned.push_back({handle, zone});
 	return true;
 }
 
@@ -430,6 +445,70 @@ static_function bool IsRejectedCourse(const std::vector<const char *> &rejected,
 	return false;
 }
 
+// Отказ от переопределения ключуется ПАРОЙ (курс, тип), а не одним курсом: неполнота проверяется
+// именно по паре. Курс, где стейджи неполны, а чекпойнты полны, при ключе-курсе терял бы и
+// чекпойнты — родные погасили бы, свои отбили, — и отказ в логе врал бы про тип.
+struct KzOverrideRefusal
+{
+	const char *descriptor;
+	KzCyberZoneType type;
+};
+
+static_function bool IsRefusedOverride(const std::vector<KzOverrideRefusal> &refused, const char *descriptorName, KzCyberZoneType type)
+{
+	if (!descriptorName || !descriptorName[0])
+	{
+		return false;
+	}
+	for (const KzOverrideRefusal &entry : refused)
+	{
+		if (entry.type == type && KZ_STREQI(entry.descriptor, descriptorName))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+// Совпадают ли записи ПОЛНОСТЬЮ. Сравнивать по одному id нельзя: дескриптор курса и номер
+// стейджа запекаются в keyvalues на спавне, поэтому зона, у которой сменился курс или номер,
+// обязана переспавниться — иначе она молча осталась бы в старом курсе.
+static_function bool ZoneRecordEqual(const KzCyberZone &a, const KzCyberZone &b)
+{
+	return KZ_STREQ(a.id, b.id) && a.type == b.type && a.mins == b.mins && a.maxs == b.maxs && a.jumpFactor == b.jumpFactor
+		   && a.stageNumber == b.stageNumber && KZ_STREQ(a.courseDescriptor, b.courseDescriptor);
+}
+
+// Кто из игроков сейчас касается этой энтити. Спрашиваем РЕАЛЬНЫЕ трекеры касания, а не считаем
+// по координатам: предупреждение, которое врёт, хуже отсутствующего.
+static_function void CollectTouchingPlayers(CEntityHandle handle, CUtlVector<CPlayerSlot> &out)
+{
+	// Граница цикла — см. развёрнутое обоснование в KZ::zones::ResetEditors.
+	for (i32 i = 0; i < MAXPLAYERS; i++)
+	{
+		KZPlayer *player = g_pKZPlayerManager->ToPlayer(CPlayerSlot(i));
+		if (!player || !player->triggerService || !player->pracService)
+		{
+			continue;
+		}
+		// В prac обе ветки касания старт-зоны закрыты гардом (kz/trigger/callbacks.cpp): ни
+		// чекпоинты не чистятся, ни таймер не трогается. Такого игрока переприменение не задевает,
+		// и предупреждать его значило бы врать.
+		if (player->pracService->IsInPrac())
+		{
+			continue;
+		}
+		FOR_EACH_VEC(player->triggerService->triggerTrackers, t)
+		{
+			if (player->triggerService->triggerTrackers[t].triggerHandle == handle)
+			{
+				out.AddToTail(player->GetPlayerSlot());
+				break;
+			}
+		}
+	}
+}
+
 // Хвост применения набора. Зовётся, когда применение реально дошло до спавна.
 static_function void SyncCoursesAfterApply()
 {
@@ -490,15 +569,15 @@ static_function void SyncCoursesAfterApply()
 
 static_function void DespawnAll()
 {
-	FOR_EACH_VEC(g_cybZones.spawned, i)
+	for (const KzSpawnedZone &spawned : g_cybZones.spawned)
 	{
-		CEntityInstance *inst = GameEntitySystem() ? GameEntitySystem()->GetEntityInstance(g_cybZones.spawned[i]) : nullptr;
+		CEntityInstance *inst = GameEntitySystem() ? GameEntitySystem()->GetEntityInstance(spawned.handle) : nullptr;
 		if (inst && inst->m_pEntity && inst->m_pEntity->NameMatches(KZ_CYBER_ZONE_NAME))
 		{
 			g_pKZUtils->RemoveEntity(inst);
 		}
 	}
-	g_cybZones.spawned.RemoveAll();
+	g_cybZones.spawned.clear();
 }
 
 // focusZoneId/outFocusReason — только чтобы редактор мог сказать автору, почему ИМЕННО его зона
@@ -686,9 +765,9 @@ static_function void IngestZones(const char *body, const std::string &mapName)
 // Снять всё своё и поставить набор заново. reason — только для лога.
 static_function void ApplyLoadedZones(const char *reason, const char *focusZoneId, const char **outFocusReason)
 {
-	DespawnAll();
 	if (!g_cybZones.loaded)
 	{
+		DespawnAll();
 		return; // набор ещё не получен — нечего применять и не о чем судить
 	}
 	// ПУСТОЙ НАБОР ЗОН — НЕ ПОВОД ВЫЙТИ. Состояние курсов живёт отдельно от зон: «админ отключил
@@ -701,6 +780,14 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 	// текущему набору», а не накоплением состояния между применениями.
 	const i32 restored = KZ::mapapi::RestorePlatformDisabledZones();
 
+	// ШАГИ 2-3 требуют, чтобы карта уже разобрала СВОИ дескрипторы курсов. Раньше это неявно
+	// гарантировал round_start, но с выносом состояния курсов из-под worldReady осталась бы одна
+	// лишь удача тайминга HTTP-колбэка. Цена ошибки высокая и громкая: до разбора
+	// GetCourseCount() == 0 не значит «курсов нет», мы завели бы лишний главный курс на карте С
+	// курсами, а занятый нами дескриптор заставил бы карту бить Mapi_Error — то есть спам в
+	// ОБЩИЙ ЧАТ всем игрокам раз в минуту.
+	const bool mapParsed = KZ::mapapi::IsMapParsed();
+
 	// ШАГ 2. Заводим курсы платформы (kind=own), которых на карте ещё нет. Обязательно ДО спавна:
 	// зона ссылается на курс дескриптором, и гейт в SpawnZone спрашивает уже готовый.
 	// Дескрипторы курсов kind=own, которые оказались ЧУЖИМИ. Зоны на них не спавним и родные зоны
@@ -709,7 +796,7 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 	std::vector<const char *> rejectedCourses;
 	for (const KzCyberCourse &course : g_cybZones.courses)
 	{
-		if (!course.own)
+		if (!course.own || !mapParsed)
 		{
 			continue;
 		}
@@ -764,7 +851,7 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 			break;
 		}
 	}
-	if (needsDefaultCourse)
+	if (needsDefaultCourse && mapParsed)
 	{
 		EnsurePlatformCourse();
 	}
@@ -790,8 +877,13 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 	// Дальше — работа с миром: погашение родных зон и спавн своих. В неготовый мир соваться
 	// бессмысленно (движковая очистка снесёт энтити), а таблица триггеров в этот момент ещё пуста.
 	// Состояние курсов выше от готовности мира не зависит и уже применено.
+	// Про шаг 1 в этом окне: погашенных записей здесь физически НЕТ, и это доказуемо, а не
+	// «вероятно». worldReady сбрасывается в OnRoundPreStart сразу после triggers.RemoveAll(),
+	// поэтому пока он false, таблица триггеров пуста и восстанавливать нечего.
 	if (!g_cybZones.worldReady)
 	{
+		// Энтити в этом окне уже снесены движковой очисткой — чистим только свой учёт.
+		DespawnAll();
 		KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] zones_deferred map=%s count=%d courses=%d reason=world_not_ready caller=%s\n",
 					g_cybZones.mapName.c_str(), (i32)g_cybZones.zones.size(), (i32)g_cybZones.courses.size(), reason);
 		return;
@@ -804,7 +896,7 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 	i32 nativeDisabled = 0;
 	// Курсы, у которых набор нумерованных зон неполон: их stage/checkpoint-зоны не спавним и
 	// родные не гасим. Отдельный список от rejectedCourses — причина отказа другая.
-	std::vector<const char *> incompleteCourses;
+	std::vector<KzOverrideRefusal> incompleteOverrides;
 	for (const KzCyberZone &zone : g_cybZones.zones)
 	{
 		if (!zone.courseDescriptor[0] || zone.type == KZ_CYBER_ZONE_MODIFIER)
@@ -820,11 +912,11 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 		// Половинчатое переопределение убило бы курс целиком, а не одну зону.
 		if ((zone.type == KZ_CYBER_ZONE_STAGE || zone.type == KZ_CYBER_ZONE_CHECKPOINT) && !HasCompleteNumberedSet(zone.courseDescriptor, zone.type))
 		{
-			if (!IsRejectedCourse(incompleteCourses, zone.courseDescriptor))
+			if (!IsRefusedOverride(incompleteOverrides, zone.courseDescriptor, zone.type))
 			{
 				KZ_LOG_ERROR(LogChannel::MappingAPI, "[cyb] course_override_refused map=%s course=%s type=%s reason=incomplete_numbered_set\n",
 							 g_cybZones.mapName.c_str(), zone.courseDescriptor, ZoneTypeName(zone.type));
-				incompleteCourses.push_back(zone.courseDescriptor);
+				incompleteOverrides.push_back({zone.courseDescriptor, zone.type});
 			}
 			continue;
 		}
@@ -850,10 +942,65 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 		}
 	}
 
-	KZ::mapapi::BeginExternalTriggerSpawn();
-	i32 ok = 0;
-	for (const KzCyberZone &zone : g_cybZones.zones)
+	// ШАГ 6. Diff: оставляем на месте зоны, чья запись не изменилась и чья энтити жива. Снос и
+	// переспавн неизменившейся зоны доигрывает EndTouch/StartTouch каждому, кто в ней стоит, —
+	// у игрока стираются чекпоинты и дёргается таймер, а он ничего не делал.
+	// Сопоставление строго один-к-одному (флаг matched), иначе одинаковые записи в наборе
+	// «съели» бы друг друга и часть зон осталась бы неспавненной.
+	std::vector<bool> matched(g_cybZones.zones.size(), false);
+	std::vector<KzSpawnedZone> kept;
+	CUtlVector<CPlayerSlot> disturbed;
+	for (const KzSpawnedZone &spawned : g_cybZones.spawned)
 	{
+		CEntityInstance *inst = GameEntitySystem() ? GameEntitySystem()->GetEntityInstance(spawned.handle) : nullptr;
+		const bool alive = inst && inst->m_pEntity && inst->m_pEntity->NameMatches(KZ_CYBER_ZONE_NAME);
+		i32 match = -1;
+		if (alive)
+		{
+			for (size_t i = 0; i < g_cybZones.zones.size(); i++)
+			{
+				if (!matched[i] && ZoneRecordEqual(spawned.zone, g_cybZones.zones[i]))
+				{
+					match = (i32)i;
+					break;
+				}
+			}
+		}
+		if (match >= 0)
+		{
+			matched[match] = true;
+			kept.push_back(spawned);
+			continue;
+		}
+		if (alive)
+		{
+			// Живую старт-зону сносим — значит кому-то сейчас сотрёт чекпоинты. Собираем ИМЕННО
+			// таких: на round_start предыдущие энтити уже уничтожены движковой очисткой, они не
+			// alive, и это условие само исключает шумное предупреждение при смене раунда.
+			if (spawned.zone.type == KZ_CYBER_ZONE_START)
+			{
+				CollectTouchingPlayers(spawned.handle, disturbed);
+			}
+			g_pKZUtils->RemoveEntity(inst);
+		}
+	}
+	g_cybZones.spawned = kept;
+
+	KZ::mapapi::BeginExternalTriggerSpawn();
+	i32 ok = (i32)kept.size();
+	i32 respawned = 0;
+	for (size_t zoneIndex = 0; zoneIndex < g_cybZones.zones.size(); zoneIndex++)
+	{
+		const KzCyberZone &zone = g_cybZones.zones[zoneIndex];
+		if (matched[zoneIndex])
+		{
+			// Уже стоит и не изменилась. Для редактора это успех: зона в мире и работает.
+			if (focusZoneId && outFocusReason && KZ_STREQ(zone.id, focusZoneId))
+			{
+				*outFocusReason = nullptr;
+			}
+			continue;
+		}
 		const char *zoneReason = nullptr;
 		const bool numbered = zone.type == KZ_CYBER_ZONE_STAGE || zone.type == KZ_CYBER_ZONE_CHECKPOINT;
 		if (IsRejectedCourse(rejectedCourses, zone.courseDescriptor))
@@ -862,7 +1009,7 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 			KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] zone_spawn_skipped id=%s type=%s course=%s reason=own_course_is_native\n", zone.id,
 						ZoneTypeName(zone.type), zone.courseDescriptor);
 		}
-		else if (numbered && IsRejectedCourse(incompleteCourses, zone.courseDescriptor))
+		else if (numbered && IsRefusedOverride(incompleteOverrides, zone.courseDescriptor, zone.type))
 		{
 			// Родные зоны этого курса мы не гасили — курс остаётся мапперским и рабочим.
 			zoneReason = "incomplete_numbered_set";
@@ -872,6 +1019,7 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 		else if (SpawnZone(zone, &zoneReason))
 		{
 			ok++;
+			respawned++;
 		}
 		if (focusZoneId && outFocusReason && KZ_STREQ(zone.id, focusZoneId))
 		{
@@ -886,15 +1034,31 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 	//   none     — дескриптора нет вовсе.
 	// Различать foreign и none обязательно: в обоих случаях start/end отбиты, но причины разные,
 	// и «карта заняла наше имя» иначе выглядела бы как загадка.
-	const char *courseSource = g_cybZones.courseCreated                                            ? "own"
+	const char *courseSource = WeCreatedCourse(KZ_NO_MAPAPI_COURSE_DESCRIPTOR)                     ? "own"
 							   : KZ::mapapi::IsPlatformOwnedCourse(KZ_NO_MAPAPI_COURSE_DESCRIPTOR) ? "fallback"
 							   : KZ::mapapi::HasCourseDescriptor(KZ_NO_MAPAPI_COURSE_DESCRIPTOR)   ? "foreign"
 																								   : "none";
 	KZ_LOG_INFO(LogChannel::MappingAPI,
-				"[cyb] zones_applied map=%s count=%d of=%d revision=%d course=%s courses=%d courses_unknown=%d native_disabled=%d restored=%d "
-				"reason=%s\n",
-				g_cybZones.mapName.c_str(), ok, (i32)g_cybZones.zones.size(), g_cybZones.revision, courseSource, (i32)g_cybZones.courses.size(),
-				unknownCourses, nativeDisabled, restored, reason);
+				"[cyb] zones_applied map=%s count=%d of=%d kept=%d respawned=%d revision=%d course=%s courses=%d courses_unknown=%d "
+				"native_disabled=%d restored=%d reason=%s\n",
+				g_cybZones.mapName.c_str(), ok, (i32)g_cybZones.zones.size(), (i32)kept.size(), respawned, g_cybZones.revision, courseSource,
+				(i32)g_cybZones.courses.size(), unknownCourses, nativeDisabled, restored, reason);
+
+	// Предупреждаем ТЕХ, КОГО ЗАДЕЛО, и только их. Молчаливый сброс чекпоинтов выглядит как
+	// «сервер съел прогресс» и диагностируется потом часами.
+	FOR_EACH_VEC(disturbed, i)
+	{
+		KZPlayer *player = g_pKZPlayerManager->ToPlayer(disturbed[i]);
+		if (player && player->languageService)
+		{
+			player->languageService->PrintChat(true, false, "Zones Reapplied - Checkpoints Reset");
+		}
+	}
+	if (disturbed.Count() > 0)
+	{
+		KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] zones_reapply_disturbed map=%s players=%d reason=%s\n", g_cybZones.mapName.c_str(),
+					disturbed.Count(), reason);
+	}
 
 	SyncCoursesAfterApply();
 }
@@ -1000,9 +1164,9 @@ void KZ::zones::OnRoundPreStart()
 	// Снимаем копию хендлов: по ней на round_start считается аудит выживаемости. Держать её
 	// отдельно обязательно — сам spawned к тому моменту может быть уже обнулён переспавном.
 	g_cybZones.preRoundSpawned.RemoveAll();
-	FOR_EACH_VEC(g_cybZones.spawned, i)
+	for (const KzSpawnedZone &spawned : g_cybZones.spawned)
 	{
-		g_cybZones.preRoundSpawned.AddToTail(g_cybZones.spawned[i]);
+		g_cybZones.preRoundSpawned.AddToTail(spawned.handle);
 	}
 	g_cybZones.worldReady = false;
 }

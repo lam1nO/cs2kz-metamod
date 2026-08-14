@@ -1,5 +1,10 @@
 "Phrases"
 {
+	"Zones Reapplied - Checkpoints Reset"
+	{
+		"en"		"{grey}Map zones were re-applied — your checkpoints have been reset."
+		"ru"		"{grey}Зоны карты переприменены — чекпоинты сброшены."
+	}
 	"Course Disabled - Run Stopped"
 	{
 		"#format"	"course:s"

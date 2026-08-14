@@ -916,6 +916,11 @@ void KZ::mapapi::RecountCourseZones()
 	}
 }
 
+bool KZ::mapapi::IsMapParsed()
+{
+	return g_mappingApi.apiVersionLoaded;
+}
+
 bool KZ::mapapi::HasCourseDescriptor(const char *targetname)
 {
 	return Mapi_FindCourse(targetname) != nullptr;
