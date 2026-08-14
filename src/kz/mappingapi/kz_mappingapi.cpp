@@ -432,6 +432,13 @@ static_function void Mapi_RebuildSortedCourses()
 	g_sortedCourses.RemoveAll();
 	FOR_EACH_VEC(g_mappingApi.courseDescriptors, i)
 	{
+		// Отключённый платформой курс в витрину не попадает — этим он и «удаляется» для игрока:
+		// весь остальной код (!courses, !main, !b*, HUD, SetupLocalCourses, лукапы KZ::course::*)
+		// читает именно g_sortedCourses.
+		if (g_mappingApi.courseDescriptors[i].disabled)
+		{
+			continue;
+		}
 		g_sortedCourses.Insert(&g_mappingApi.courseDescriptors[i]);
 	}
 }
@@ -921,6 +928,98 @@ bool KZ::mapapi::IsPlatformOwnedCourse(const char *descriptorName)
 	return g_mappingApi.mapApiVersion == KZ_NO_MAPAPI_VERSION;
 }
 
+const char *KZ::mapapi::GetCanonicalCourseDescriptor(const char *descriptorName)
+{
+	const KZCourseDescriptor *desc = Mapi_FindCourse(descriptorName);
+	return desc ? desc->entityTargetname : nullptr;
+}
+
+i32 KZ::mapapi::DisableCourseZones(const char *descriptorName, KzTriggerType type)
+{
+	// ЖЁСТКИЙ ЗАПРЕТ, не оптимизация: отключать разрешено ТОЛЬКО зоны таймера.
+	// Причина — трекер касания (kz/trigger/kz_trigger.h, TriggerTouchTracker::kzTrigger) держит
+	// живой указатель на KzTrigger, а OnMappingApiTriggerStartTouchPost и
+	// OnMappingApiTriggerEndTouchPost оба ветвятся по ТЕКУЩЕМУ type. Смена типа между входом и
+	// выходом рвёт пару: у модификатора StartTouch уже увеличил счётчики (disableJumpstatsCount,
+	// enableSlideCount и соседи), а EndTouch по новому типу их не уменьшит — они залипнут
+	// НАВСЕГДА, до смены карты. Неотключённый чужой бустер несравнимо дешевле.
+	// У зон таймера цена ограничена и приемлема: игрок, стоящий внутри в момент отключения, не
+	// получит StartZoneEndTouch, то есть таймер не стартует — чего мы и добиваемся.
+	if (!KZ::mapapi::IsTimerTrigger(type))
+	{
+		KZ_LOG_ERROR(LogChannel::MappingAPI, "[cyb] course_zones_disable_refused descriptor=%s type=%i reason=not_a_timer_zone\n",
+					 descriptorName ? descriptorName : "(null)", (i32)type);
+		return -1;
+	}
+	if (!descriptorName || !descriptorName[0])
+	{
+		return -1;
+	}
+
+	i32 disabled = 0;
+	FOR_EACH_VEC(g_mappingApi.triggers, i)
+	{
+		KzTrigger *trigger = &g_mappingApi.triggers[i];
+		if (trigger->type != type)
+		{
+			continue;
+		}
+		// Регистр — как в Mapi_FindCourse (KZ_STREQI): двух курсов, различающихся только
+		// регистром, на карте быть не может, Mapi_CreateCourse отбивает такие по тому же
+		// сравнению. Строгое KZ_STREQ здесь пропустило бы часть зон курса.
+		if (!KZ_STREQI(trigger->zone.courseDescriptor, descriptorName))
+		{
+			continue;
+		}
+		trigger->type = KZTRIGGER_DISABLED;
+		disabled++;
+	}
+	return disabled;
+}
+
+bool KZ::mapapi::SetCourseDisabled(const char *descriptorName, bool disabled)
+{
+	KZCourseDescriptor *desc = Mapi_FindCourse(descriptorName);
+	if (!desc || desc->disabled == disabled)
+	{
+		return false;
+	}
+
+	// Таймеры останавливаем ДО перестроения витрины и строго в этом порядке: GetCourse() ищет
+	// курс по guid в g_sortedCourses, а после перестроения отключённого курса там уже нет —
+	// сравнить стало бы не с чем, и ран продолжал бы идти в никуда.
+	if (disabled)
+	{
+		// Граница цикла — как в KZ::zones::ResetEditors: перегрузка ToPlayer(CPlayerSlot) внутри
+		// делает index = slot.Get() + 1 по массиву players[MAXPLAYERS + 1], поэтому строго
+		// `i < MAXPLAYERS`. Индексная перегрузка ToPlayer(u32) требует другой границы — не
+		// переносить сюда цикл из соседнего файла, не посмотрев, какая из них там вызывается.
+		for (i32 i = 0; i < MAXPLAYERS; i++)
+		{
+			KZPlayer *player = g_pKZPlayerManager->ToPlayer(CPlayerSlot(i));
+			if (!player || !player->timerService || !player->timerService->GetTimerRunning())
+			{
+				continue;
+			}
+			if (player->timerService->GetCourse() != desc)
+			{
+				continue;
+			}
+			KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] timer_stopped_course_disabled steam_id=%llu course=%s\n", player->GetSteamId64(false),
+						desc->name);
+			player->timerService->TimerStop(true, "course_disabled");
+			// Молчаливый срыв рана неотличим от съеденного времени — говорим причину.
+			player->PrintChat(true, false, "{grey}Зоны:{default} курс {yellow}%s{default} отключён администратором — забег остановлен.", desc->name);
+		}
+	}
+
+	desc->disabled = disabled;
+	Mapi_RebuildSortedCourses();
+	KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] course_%s descriptor=%s name=%s\n", disabled ? "disabled" : "enabled", desc->entityTargetname,
+				desc->name);
+	return true;
+}
+
 bool KZ::mapapi::GetCourseLocalDatabaseId(const char *descriptorName, u32 &out)
 {
 	// Пишем out ВСЕГДА, включая ветку отказа: контракт «на false out не трогаем» держался бы на
@@ -1099,6 +1198,15 @@ const KZCourseDescriptor *KZ::mapapi::GetCourseDescriptorFromTrigger(const KzTri
 			{
 				Mapi_Error("%s: Couldn't find course descriptor from name \"%s\"! Trigger's Hammer Id: %i", g_errorPrefix,
 						   trigger->zone.courseDescriptor, trigger->hammerId);
+			}
+			else if (course->disabled)
+			{
+				// Курс отключён платформой: ведём себя как «курса нет», но МОЛЧА. Mapi_Error здесь
+				// был бы катастрофой — он копит строки и раз в минуту высыпает их в общий чат
+				// всем игрокам, а касание отключённой зоны это штатное событие, а не ошибка.
+				// Вызывающие (kz/trigger/callbacks.cpp, StartTouch и EndTouch) уже умеют выходить
+				// по !course для зон таймера, поэтому таймер на отключённом курсе не стартует.
+				course = nullptr;
 			}
 		}
 		break;
