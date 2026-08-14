@@ -232,6 +232,11 @@ public:
 	std::vector<CEntityHandle> showBeams;
 	// Время последнего показа (curtime) — для кулдауна KZ_ZONE_SHOW_COOLDOWN.
 	f32 lastShowTime {};
+	// Время последней ЗАПИСАННОЙ В ЛОГ жалобы на серверный бюджет. Отдельное поле, потому что
+	// сам отказ по бюджету кулдаун не ставит (игрок ничего не получил и ждать не должен) — а
+	// значит строку можно было бы вызывать биндом десятками в секунду, и она уехала бы в Loki.
+	// Гейтится только ЛОГ: подсказка в чат остаётся на каждый вызов, она адресована игроку.
+	f32 lastShowRejectLogTime {};
 	// Своё поколение у показа: за 12 секунд игрок может выключить и включить показ снова, и
 	// таймер от прошлого не должен гасить новый.
 	u32 showGeneration {};
@@ -247,6 +252,7 @@ public:
 		this->ClearPreview();
 		this->ClearShow();
 		this->lastShowTime = {};
+		this->lastShowRejectLogTime = {};
 		this->perm = PERM_UNKNOWN;
 		this->hasPendingCorner = false;
 		this->pendingType = {};

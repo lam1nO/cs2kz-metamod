@@ -99,8 +99,9 @@ void KZZonesService::OnMapChanged()
 	this->ClearPreview(true);
 	this->ClearShow(true);
 	// curtime отсчитывается от загрузки карты, то есть на новой карте он МЕНЬШЕ прошлого
-	// замера. Забываем замер здесь, а не полагаемся на арифметику отрицательной разницы.
+	// замера. Забываем замеры здесь, а не полагаемся на арифметику отрицательной разницы.
 	this->lastShowTime = {};
+	this->lastShowRejectLogTime = {};
 	this->hasPendingCorner = false;
 	this->pendingType = {};
 	this->pendingJumpFactor = {};
@@ -314,11 +315,21 @@ void KZZonesService::ShowAllZones()
 	const i32 budgetServer = KZ_ZONE_SHOW_MAX_EDGES_SERVER - activeEdges;
 	if (budgetServer < KZ_ZONE_BOX_EDGES)
 	{
+		// Подсказка в чат — на КАЖДЫЙ вызов: она адресована игроку, который только что нажал
+		// кнопку, и молчать ему в ответ нельзя.
 		this->player->PrintChat(true, false, "{grey}Зоны:{default} показ сейчас занят другими игроками, повтори через несколько секунд.");
-		// Отказали пользователю — значит warn с машинно-читаемой причиной: упор ВСЕГО СЕРВЕРА в
-		// бюджет рёбер эксплуатации интересен, а из чата его не видно.
-		KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] zone_show_rejected steam_id=%llu map=%s reason=server_budget active=%d limit=%d\n",
-					this->player->GetSteamId64(false), KZ::zones::CurrentMapName(), activeEdges, KZ_ZONE_SHOW_MAX_EDGES_SERVER);
+		// А ЛОГ — не чаще раза в кулдаун на игрока. Отказали пользователю, значит warn с
+		// машинно-читаемой причиной: упор ВСЕГО СЕРВЕРА в бюджет рёбер эксплуатации интересен, а
+		// из чата его не видно. Но сам этот путь кулдауном не гейтится (игрок ничего не получил),
+		// то есть на бинде давал бы десятки строк в секунду — и все уехали бы в Loki. Состояние
+		// «упёрлись в потолок» держится минутами, второй строкой оно нового не сообщает.
+		const f32 sinceLog = now - this->lastShowRejectLogTime;
+		if (this->lastShowRejectLogTime <= 0.0f || sinceLog < 0.0f || sinceLog >= KZ_ZONE_SHOW_COOLDOWN)
+		{
+			this->lastShowRejectLogTime = now;
+			KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] zone_show_rejected steam_id=%llu map=%s reason=server_budget active=%d limit=%d\n",
+						this->player->GetSteamId64(false), KZ::zones::CurrentMapName(), activeEdges, KZ_ZONE_SHOW_MAX_EDGES_SERVER);
+		}
 		return;
 	}
 	const i32 budgetEdges = MIN(KZ_ZONE_SHOW_MAX_EDGES_PLAYER, budgetServer);
