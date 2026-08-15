@@ -16,6 +16,8 @@
 #define SUBTICK_ZERO_WHEN_RATIO_THRESHOLD  0.9f
 
 CConVar<bool> kz_ac_subtick_debug("kz_ac_subtick_debug", FCVAR_CHEAT, "Enable subtick abuse detector debug messages", false);
+// Определён в anticheat/detectors/cvars.cpp.
+extern CConVar<bool> kz_allow_turnbinds;
 
 // Every command should have all button presses/releases accounted for in subtick moves.
 // Only cheats that modify buttons without updating subtick moves would fail this.
@@ -68,14 +70,17 @@ static_global bool HasExcessiveSubtickMovesWithAngles(const PlayerCommand &cmd)
 			continue;
 		}
 		// Ignore attack buttons and turn binds.
-		// cybershoke: у апстрима turn-бинды исключены с оговоркой «они всё равно не
-		// работают» — у нас с kz_allow_turnbinds 1 работают. Исключение оставлено
-		// СОЗНАТЕЛЬНО: детектор ищет десабтикинг (пресс и релиз одной кнопки в одну
-		// метку времени с дельтой угла), и у легального turn-бинда дельта угла есть
-		// всегда — включив их сюда, мы получили бы ложные срабатывания на разрешённой
-		// механике, а у этого детектора есть путь до бана.
-		if (step.button() == IN_ATTACK || step.button() == IN_ATTACK2 || step.button() == IN_USE || step.button() == IN_RELOAD
-			|| step.button() == IN_TURNLEFT || step.button() == IN_TURNRIGHT)
+		// cybershoke: апстрим исключает turn-бинды с оговоркой «они всё равно не работают».
+		// С kz_allow_turnbinds 1 работают — и исключение превращается в канал alias-abuse,
+		// который детектор перестаёт видеть. Поэтому исключаем их ровно по той же причине,
+		// что и апстрим: только когда бинды подавлены. Ложных срабатываний на живом бинде
+		// это не создаёт — детектор ищет пресс И релиз ОДНОЙ кнопки в одну метку времени,
+		// дважды в команде и 20 таких команд за 0.5 с; удержанием клавиши так не сделать.
+		if (step.button() == IN_ATTACK || step.button() == IN_ATTACK2 || step.button() == IN_USE || step.button() == IN_RELOAD)
+		{
+			continue;
+		}
+		if ((step.button() == IN_TURNLEFT || step.button() == IN_TURNRIGHT) && !kz_allow_turnbinds.Get())
 		{
 			continue;
 		}

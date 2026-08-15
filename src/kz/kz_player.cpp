@@ -948,7 +948,12 @@ void KZPlayer::DisableTurnbinds()
 	// kz_allow_turnbinds 0. Угол запоминаем в ОБОИХ случаях — иначе после переключения
 	// cvar на живом сервере первый же кадр с зажатым биндом швырнёт игрока на yaw,
 	// протухший с момента последнего «разрешённого» кадра.
-	if (usingTurnbinds && !kz_allow_turnbinds.Get())
+	// Интерлок: в глобальном режиме бинды подавляем всегда, чем бы ни был выставлен cvar.
+	// Раны оттуда уходят в глобальную БД cs2kz (timer/submission.cpp SubmitGlobal), где
+	// turn-бинды запрещены; сейчас мы non-global и это спит, но появись ключ — мы бы молча
+	// погнали туда раны на биндах.
+	bool turnbindsAllowed = kz_allow_turnbinds.Get() && !KZGlobalService::IsAvailable();
+	if (usingTurnbinds && !turnbindsAllowed)
 	{
 		angles.y = this->lastValidYaw;
 		// NOTE(GameChaos): Using SetAngles, which uses Teleport makes player movement really weird
