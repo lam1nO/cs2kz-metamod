@@ -41,12 +41,14 @@ struct KzSpawnedZone
 {
 	CEntityHandle handle;
 	KzCyberZone zone;
-	// Контур постоянной подсветки (только start и end; у остальных типов пусто). Хендлы лежат
-	// ЗДЕСЬ, внутри записи, а не в отдельной коллекции: diff переносит выжившие записи целиком,
-	// поэтому у неизменившейся зоны рёбра не пересоздаются, а у снимаемой уходят вместе с ней.
-	// Две параллельные коллекции пришлось бы согласовывать руками — ровно там и живут баги вида
-	// «зона снята, а контур висит».
-	CEntityHandle highlight[KZ_ZONE_BOX_EDGES] {};
+	// Контур постоянной подсветки: нижняя грань, только start и end (у остальных типов пусто).
+	// Хендлы лежат ЗДЕСЬ, внутри записи, а не в отдельной коллекции: diff переносит выжившие
+	// записи целиком, поэтому у неизменившейся зоны рёбра не пересоздаются, а у снимаемой уходят
+	// вместе с ней. Две параллельные коллекции пришлось бы согласовывать руками — ровно там и
+	// живут баги вида «зона снята, а контур висит».
+	// Размер массива и граница КАЖДОГО цикла по нему — KZ_ZONE_BOX_BOTTOM_EDGES, не полный ящик:
+	// числа рёбер здесь и в !zone show разные и разъезжаться им нельзя.
+	CEntityHandle highlight[KZ_ZONE_BOX_BOTTOM_EDGES] {};
 	bool highlighted {};
 };
 
@@ -188,23 +190,55 @@ Color KZ::zones::ZoneColor(KzCyberZoneType type)
 	}
 }
 
-i32 KZ::zones::DrawBoxEdges(const Vector &mins, const Vector &maxs, const Color &color, const char *targetname, bool ownerOnly, CEntityHandle *out)
+// Рёбра AABB парами индексов углов (нумерация углов — в массиве c[] внутри DrawBoxEdges).
+// ПОРЯДОК ТАБЛИЦЫ ЗНАЧИМ: первые KZ_ZONE_BOX_BOTTOM_EDGES рёбер — нижняя грань, и постоянная
+// подсветка рисует ровно этот префикс. Перестановка строк утащила бы контур с пола вверх, а
+// заметили бы это только в игре, поэтому инвариант проверяется компилятором ниже.
+static_global constexpr int g_boxEdges[KZ_ZONE_BOX_EDGES][2] = {
+	{0, 1}, {1, 2}, {2, 3}, {3, 0}, // нижняя грань: углы 0..3 — единственные на mins.z
+	{4, 5}, {5, 6}, {6, 7}, {7, 4}, // верхняя грань
+	{0, 4}, {1, 5}, {2, 6}, {3, 7}, // вертикальные стойки
+};
+
+static_function constexpr bool BoxBottomPrefixIsFloor()
+{
+	for (int i = 0; i < KZ_ZONE_BOX_BOTTOM_EDGES; i++)
+	{
+		// Углы 0..3 лежат на mins.z, 4..7 — на maxs.z. Ребро нижней грани не вправе тронуть верх.
+		if (g_boxEdges[i][0] > 3 || g_boxEdges[i][1] > 3)
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+static_assert(KZ_ZONE_BOX_BOTTOM_EDGES <= KZ_ZONE_BOX_EDGES, "bottom edge count must fit into the box edge table");
+static_assert(BoxBottomPrefixIsFloor(), "first KZ_ZONE_BOX_BOTTOM_EDGES rows of g_boxEdges must be the bottom face");
+
+i32 KZ::zones::DrawBoxEdges(const Vector &mins, const Vector &maxs, const Color &color, const char *targetname, bool ownerOnly, i32 edgeCount,
+							CEntityHandle *out)
 {
 	const Vector c[8] = {
 		Vector(mins.x, mins.y, mins.z), Vector(maxs.x, mins.y, mins.z), Vector(maxs.x, maxs.y, mins.z), Vector(mins.x, maxs.y, mins.z),
 		Vector(mins.x, mins.y, maxs.z), Vector(maxs.x, mins.y, maxs.z), Vector(maxs.x, maxs.y, maxs.z), Vector(mins.x, maxs.y, maxs.z),
 	};
-	static const int edges[KZ_ZONE_BOX_EDGES][2] = {{0, 1}, {1, 2}, {2, 3}, {3, 0}, {4, 5}, {5, 6}, {6, 7}, {7, 4}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
+	// Границу считаем сами, а не верим вызывающему: выход за таблицу читал бы чужую память, а
+	// цена проверки — одно сравнение на весь контур.
+	if (edgeCount > KZ_ZONE_BOX_EDGES)
+	{
+		edgeCount = KZ_ZONE_BOX_EDGES;
+	}
 
 	// Зануляем ВЕСЬ массив сразу, а не по ходу: при раннем выходе хвост иначе остался бы с
 	// прежним содержимым, и обещание шапки («на месте несозданных — пустой хендл») держалось бы
 	// только на том, что все нынешние вызывающие передают чистый массив.
-	for (int i = 0; i < KZ_ZONE_BOX_EDGES; i++)
+	for (i32 i = 0; i < edgeCount; i++)
 	{
 		out[i] = {};
 	}
 
-	for (int i = 0; i < KZ_ZONE_BOX_EDGES; i++)
+	for (i32 i = 0; i < edgeCount; i++)
 	{
 		CParticleSystem *beam = utils::CreateEntityByName<CParticleSystem>("info_particle_system");
 		if (!beam)
@@ -220,11 +254,11 @@ i32 KZ::zones::DrawBoxEdges(const Vector &mins, const Vector &maxs, const Color 
 		// m_designerName, поэтому без этой строки условие снятия было бы ложным всегда.
 		kv->SetString("targetname", targetname);
 		kv->SetString("effect_name", KZ_ZONE_BEAM_EFFECT);
-		kv->SetVector("origin", c[edges[i][0]]);
+		kv->SetVector("origin", c[g_boxEdges[i][0]]);
 		kv->SetInt("tint_cp", 16);
 		kv->SetColor("tint_cp_color", color);
 		kv->SetInt("data_cp", 1);
-		kv->SetVector("data_cp_value", c[edges[i][1]]);
+		kv->SetVector("data_cp_value", c[g_boxEdges[i][1]]);
 		kv->SetBool("start_active", true);
 		if (ownerOnly)
 		{
@@ -236,7 +270,9 @@ i32 KZ::zones::DrawBoxEdges(const Vector &mins, const Vector &maxs, const Color 
 		beam->DispatchSpawn(kv);
 		out[i] = beam->GetRefEHandle();
 	}
-	return KZ_ZONE_BOX_EDGES;
+	// Именно edgeCount, а не KZ_ZONE_BOX_EDGES: вызывающий сравнивает ответ со СВОИМ числом рёбер
+	// («контур либо целый, либо его нет»), и константа здесь врала бы подсветке про успех.
+	return edgeCount;
 }
 
 void KZ::zones::RemoveBoxEdges(CEntityHandle *handles, i32 count, const char *targetname, bool keepEntities)
@@ -262,13 +298,13 @@ static_function void RemoveHighlight(KzSpawnedZone &spawned)
 	{
 		return;
 	}
-	KZ::zones::RemoveBoxEdges(spawned.highlight, KZ_ZONE_BOX_EDGES, KZ_ZONE_HIGHLIGHT_NAME);
+	KZ::zones::RemoveBoxEdges(spawned.highlight, KZ_ZONE_BOX_BOTTOM_EDGES, KZ_ZONE_HIGHLIGHT_NAME);
 	spawned.highlighted = false;
 }
 
 // Привести подсветку зоны к нужному состоянию. Идемпотентна: если зона уже подсвечена и должна
-// быть — не трогаем ничего, иначе неизменившаяся зона пересоздавала бы двенадцать энтити на
-// каждое применение набора (а их на карте до десятка).
+// быть — не трогаем ничего, иначе неизменившаяся зона пересоздавала бы свои энтити на каждое
+// применение набора (а зон на карте до десятка).
 static_function void SyncHighlight(KzSpawnedZone &spawned, bool wanted)
 {
 	if (wanted == spawned.highlighted)
@@ -281,18 +317,20 @@ static_function void SyncHighlight(KzSpawnedZone &spawned, bool wanted)
 		return;
 	}
 	// ownerOnly=false: контур обязан быть виден ВСЕМ на сервере без всякой команды.
+	// KZ_ZONE_BOX_BOTTOM_EDGES: постоянный слой рисует ТОЛЬКО периметр на mins.z. Верх и стойки
+	// показывает !zone show — там реальные габариты зоны нужны админу, здесь они мешают игроку.
 	const i32 created = KZ::zones::DrawBoxEdges(spawned.zone.mins, spawned.zone.maxs, KZ::zones::ZoneColor(spawned.zone.type), KZ_ZONE_HIGHLIGHT_NAME,
-												false, spawned.highlight);
+												false, KZ_ZONE_BOX_BOTTOM_EDGES, spawned.highlight);
 	// Контур либо целый, либо его нет. Частичный оставлять нельзя дважды: он выглядит как
 	// сломанная зона, а флаг «подсвечена» закрыл бы ей дорогу к дорисовке навсегда —
 	// идемпотентность по флагу больше никогда не вернулась бы к этой зоне. Снимаем созданное и
 	// пробуем на следующем применении набора (round_start, правка зоны).
-	if (created < KZ_ZONE_BOX_EDGES)
+	if (created < KZ_ZONE_BOX_BOTTOM_EDGES)
 	{
-		KZ::zones::RemoveBoxEdges(spawned.highlight, KZ_ZONE_BOX_EDGES, KZ_ZONE_HIGHLIGHT_NAME);
+		KZ::zones::RemoveBoxEdges(spawned.highlight, KZ_ZONE_BOX_BOTTOM_EDGES, KZ_ZONE_HIGHLIGHT_NAME);
 		spawned.highlighted = false;
 		KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] zone_highlight_failed id=%s type=%s created=%d of=%d reason=entity_create_failed\n",
-					spawned.zone.id, ZoneTypeName(spawned.zone.type), created, KZ_ZONE_BOX_EDGES);
+					spawned.zone.id, ZoneTypeName(spawned.zone.type), created, KZ_ZONE_BOX_BOTTOM_EDGES);
 		return;
 	}
 	spawned.highlighted = true;
@@ -796,7 +834,7 @@ static_function bool IsKnownHighlightEdge(const CEntityHandle &handle)
 		{
 			continue;
 		}
-		for (i32 i = 0; i < KZ_ZONE_BOX_EDGES; i++)
+		for (i32 i = 0; i < KZ_ZONE_BOX_BOTTOM_EDGES; i++)
 		{
 			if (spawned.highlight[i] == handle)
 			{

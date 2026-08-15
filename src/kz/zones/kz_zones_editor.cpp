@@ -363,7 +363,10 @@ void KZZonesService::ShowAllZones()
 		const Vector maxs(zone.maxs.x + KZ_ZONE_SHOW_INFLATE, zone.maxs.y + KZ_ZONE_SHOW_INFLATE, zone.maxs.z + KZ_ZONE_SHOW_INFLATE);
 		CEntityHandle edges[KZ_ZONE_BOX_EDGES] {};
 		// ownerOnly=true: показ адресный, его видит только тот, кто позвал.
-		const i32 created = KZ::zones::DrawBoxEdges(mins, maxs, KZ::zones::ZoneColor(zone.type), KZ_ZONE_SHOW_NAME, true, edges);
+		// KZ_ZONE_BOX_EDGES — полный ящик намеренно, и это НЕ то же, что постоянная подсветка:
+		// она с cyb.123 рисует одну нижнюю грань (игроку нужна граница на полу), а !zone show
+		// админский и обязан показывать реальные габариты зоны, включая высоту.
+		const i32 created = KZ::zones::DrawBoxEdges(mins, maxs, KZ::zones::ZoneColor(zone.type), KZ_ZONE_SHOW_NAME, true, KZ_ZONE_BOX_EDGES, edges);
 		// Ящик либо целый, либо его нет — ровно как у постоянного контура (SyncHighlight).
 		// Недорисованный читается как сломанная зона, а «created > 0 значит нарисовали» прятало
 		// бы отказ движка: кончись энтити на ПОСЛЕДНЕЙ зоне отбора, счётчик failed остался бы
@@ -454,7 +457,9 @@ void KZZonesService::DrawBox(const Vector &mins, const Vector &maxs, Color color
 	// Здесь достаточно «хотя бы одно ребро», в отличие от постоянного контура, где частичный
 	// снимается целиком: превью и так живёт 15 секунд и снимается по таймеру, а вот у
 	// постоянного слоя флаг «подсвечена» закрыл бы зоне дорогу к дорисовке навсегда.
-	this->previewActive = KZ::zones::DrawBoxEdges(mins, maxs, color, KZ_ZONE_PREVIEW_NAME, true, this->previewBeams) > 0;
+	// Полный ящик: превью показывает автору тот объём, который он сейчас отправит в api, вместе с
+	// высотой. Нижнюю грань в одиночку рисует только постоянный слой.
+	this->previewActive = KZ::zones::DrawBoxEdges(mins, maxs, color, KZ_ZONE_PREVIEW_NAME, true, KZ_ZONE_BOX_EDGES, this->previewBeams) > 0;
 
 	// Превью живёт ограниченное время: беамы висят до ручного снятия, а игрок про них забудет.
 	// CTimer::Fn — сырой указатель на функцию, захватывающая лямбда в него не приводится.
