@@ -18,7 +18,8 @@
 
 #include "utils/utils.h"
 #include "utils/simplecmds.h"
-#include "utils/http.h" // Steam async HTTP для догрузки платформенных PB/WR
+#include "utils/http.h"   // Steam async HTTP для догрузки платформенных PB/WR
+#include "utils/ctimer.h" // периодическое обновление платформенных PB/WR в худе
 #include "vendor/sql_mm/src/public/sql_mm.h"
 
 #include <optional>
@@ -325,6 +326,8 @@ bool KZTimerService::TimerStart(const KZCourseDescriptor *courseDesc, bool playS
 	this->reachedCheckpoints = 0;
 	this->lastCheckpoint = 0;
 	this->lastSplit = 0;
+	// Новый ран — новое право на одно предупреждение о сбросе (см. CheckSafeguard).
+	this->resetConfirmWarned = false;
 
 	f64 invalidTime = -1;
 	this->splitZoneTimes.SetSize(courseDesc->splitCount);
@@ -921,14 +924,36 @@ void KZTimerService::ToggleProSafeguard()
 
 bool KZTimerService::CheckSafeguard(bool showError)
 {
-	// Гейт «сброса таймера»: только флаг sgReset (!sg). Телепорты сюда НЕ относятся.
-	if (!this->GetSafeguardReset() || !this->GetTimerRunning() || !this->GetValidTimer())
+	// Защищать нечего: рана нет или он уже невалиден.
+	if (!this->GetTimerRunning() || !this->GetValidTimer())
 	{
 		return true;
 	}
+	// Гейт «сброса таймера»: только флаг sgReset (!sg). Телепорты сюда НЕ относятся.
+	if (this->GetSafeguardReset())
+	{
+		if (showError)
+		{
+			this->player->languageService->PrintChat(true, false, "Safeguard - Blocked");
+			this->player->PlayErrorSound();
+		}
+		return false;
+	}
+
+	// !sg ВЫКЛЮЧЕН — сброс разрешён, но длинный ран не должен умирать от одного случайного
+	// нажатия (noclip-бинд, смена команды, !end). Один раз за ран просим подтверждение;
+	// дальше эта попытка сбрасывается молча, сколько бы раз игрок сюда ни пришёл.
+	// Порог по ИГРОВОМУ времени рана (GetTime), а не realtime: пауза длину забега не растит.
+	if (this->GetTime() < KZ_RESET_CONFIRM_MIN_RUNTIME || this->resetConfirmWarned)
+	{
+		return true;
+	}
+	// Предупреждение тратится даже при showError=false: иначе тихий вызывающий сжёг бы ран,
+	// не показав игроку ничего, а флаг остался бы нетронутым.
+	this->resetConfirmWarned = true;
 	if (showError)
 	{
-		this->player->languageService->PrintChat(true, false, "Safeguard - Blocked");
+		this->player->languageService->PrintChat(true, false, "Reset Confirm - Warning");
 		this->player->PlayErrorSound();
 	}
 	return false;
@@ -955,6 +980,18 @@ bool KZTimerService::CheckSafeguardRestart(bool showError)
 	// Рестарт — тоже «сброс таймера»: гейт по флагу sgReset (!sg), с кулдауном/двойным тапом.
 	if (!this->GetSafeguardReset() || !this->GetTimerRunning() || !this->GetValidTimer())
 	{
+		return true;
+	}
+	// Свободный рестарт в начале рана (решение пользователя 15.08): первые
+	// KZ_SAFEGUARD_RESTART_FREE_WINDOW секунд забега !r проходит без двойного тапа — на этом
+	// отрезке сейфгарду нечего спасать, а мешает он ровно тем, кто перезаходит на старт.
+	// Только этот путь (!r): CheckSafeguard/CheckSafeguardPro окна не получают — noclip и
+	// чекпоинт-ТП в начале рана всё так же гейтятся своими флагами.
+	if (this->GetTime() < KZ_SAFEGUARD_RESTART_FREE_WINDOW)
+	{
+		// Незакрытый двойной тап не должен пережить окно и «засчитаться» первым нажатием после
+		// него: пятисекундный MAX_DELAY длиннее остатка окна.
+		this->lastRestartAttemptTime = 0.0;
 		return true;
 	}
 	f64 currentTime = g_pKZUtils->GetServerGlobals()->curtime;
@@ -1022,6 +1059,7 @@ void KZTimerService::Reset()
 	this->touchedGroundSinceTouchingStartZone = {};
 	this->shouldPlayTimerStopSound = true;
 	this->lastRestartAttemptTime = {};
+	this->resetConfirmWarned = {};
 	// Гигиена: залипший в true флаг тихо отключил бы DropFrozenRun("death") в OnPlayerDeath.
 	this->changingTeam = {};
 }
@@ -1539,7 +1577,7 @@ void KZTimerService::IngestPlatformRecords(const char *body, KZPlayer *pbPlayer)
 	}
 }
 
-void KZTimerService::FetchPlatformWorldRecords()
+void KZTimerService::FetchPlatformWorldRecords(bool resetCache)
 {
 	const char *url = KZOptionService::GetOptionStr("cybEmitUrl", "");
 	if (!url || url[0] == '\0')
@@ -1555,7 +1593,14 @@ void KZTimerService::FetchPlatformWorldRecords()
 	}
 
 	// Свежая карта — прежний WR-кэш недействителен (наполнится из ответа).
-	KZTimerService::platformWrCache.clear();
+	// На ПЕРИОДИЧЕСКОМ обновлении (resetCache=false) чистить нельзя: между clear() и приходом
+	// ответа кэш пуст, и худ каждые несколько секунд ронял бы строку WR на фолбэк и обратно —
+	// заметное мигание. IngestPlatformRecords пишет только положительные значения поверх, так
+	// что перезапись без очистки безопасна; исчезнувший рекорд подчистит смена карты.
+	if (resetCache)
+	{
+		KZTimerService::platformWrCache.clear();
+	}
 
 	std::string fullUrl = url;
 	if (!fullUrl.empty() && fullUrl.back() == '/')
@@ -1599,7 +1644,7 @@ void KZTimerService::FetchPlatformWorldRecords()
 	// clang-format on
 }
 
-void KZTimerService::FetchPlatformPB(KZPlayer *player)
+void KZTimerService::FetchPlatformPB(KZPlayer *player, bool resetCache)
 {
 	if (!player)
 	{
@@ -1607,7 +1652,11 @@ void KZTimerService::FetchPlatformPB(KZPlayer *player)
 	}
 	// Свежий заход игрока (в т.ч. на переиспользованный слот) — платформенный PB начинаем с чистого
 	// листа, чтобы не показать чужой PB прежнего владельца слота; наполнится из ответа на его steamId.
-	player->timerService->platformPbCache.clear();
+	// На периодическом обновлении (resetCache=false) — не чистим, см. FetchPlatformWorldRecords.
+	if (resetCache)
+	{
+		player->timerService->platformPbCache.clear();
+	}
 
 	const char *url = KZOptionService::GetOptionStr("cybEmitUrl", "");
 	if (!url || url[0] == '\0')
@@ -1675,6 +1724,66 @@ void KZTimerService::FetchPlatformPB(KZPlayer *player)
 			KZ_LOG_INFO(LogChannel::Timer, "[cyb_records] PB fetch network error\n");
 		});
 	// clang-format on
+}
+
+// Периодическое обновление платформенных PB/WR (п.5 пакета 15.08). До этого WR тянулись один
+// раз на карту (OnMapSetup), а PB — один раз на заход игрока (OnClientSetup), поэтому рекорд,
+// поставленный кем-то на другом сервере сети, появлялся в худе только после реконнекта.
+//
+// Стоимость держим независимой от онлайна: WR — общий на сервер, один запрос за тик; PB —
+// по игроку, но НЕ веером, а по одному игроку за тик (round-robin по слотам). Иначе на полном
+// сервере это давало бы до 2*N запросов каждые 3 секунды в api. Свой PB на этом сервере и так
+// обновляется локально на финише — polling здесь закрывает только «поставил на соседнем».
+static_global CTimer<> *g_platformRecordsTimer = nullptr;
+// ИНДЕКС (не слот!), с которого продолжаем обход по кругу. Именно индексная перегрузка
+// ToPlayer(u32) — она же players[index] — выбирается для i32 без явного каста: i32 -> u32 это
+// стандартное преобразование, а i32 -> CPlayerSlot пользовательское. Отсюда и граница
+// MAXPLAYERS + 1, как в ClearRecordCache. Про эти грабли «граница цикла ↔ перегрузка» в репо
+// уже спотыкались (kz_zones.cpp, kz_mappingapi.cpp) — трогая цикл, сперва посмотри перегрузку.
+static_global i32 g_platformPbRefreshIndex = 0;
+
+static_function f64 RefreshPlatformRecords()
+{
+	// Один живой аутентифицированный игрок за тик, начиная со следующего после прошлого.
+	// Заодно это ответ на вопрос «есть ли кому показывать»: пустой сервер не должен
+	// круглосуточно долбить api ни PB-, ни WR-запросом.
+	bool anyHuman = false;
+	for (i32 step = 0; step < MAXPLAYERS + 1; step++)
+	{
+		i32 index = (g_platformPbRefreshIndex + step) % (MAXPLAYERS + 1);
+		KZPlayer *player = g_pKZPlayerManager->ToPlayer(index);
+		// Те же предусловия, что внутри FetchPlatformPB (клиент есть, steamID резолвится) —
+		// проверяем ЗДЕСЬ, иначе тик обхода тратился бы на пустой слот или бота, и на сервере
+		// с ботами живые игроки обновлялись бы кратно реже. Пустой слот безопасен: GetClient()
+		// там nullptr, а GetSteamId64() у неаутентифицированного отдаёт 0 (см. Player::GetSteamId).
+		if (player && player->timerService && player->GetClient() && !player->IsFakeClient() && player->GetSteamId64() != 0)
+		{
+			anyHuman = true;
+			KZTimerService::FetchPlatformPB(player, false);
+			g_platformPbRefreshIndex = (index + 1) % (MAXPLAYERS + 1);
+			break;
+		}
+	}
+
+	// WR общий на сервер, но живым он нужен только когда есть кому смотреть в худ.
+	if (anyHuman)
+	{
+		KZTimerService::FetchPlatformWorldRecords(false);
+	}
+
+	return KZ_PLATFORM_RECORDS_REFRESH_INTERVAL;
+}
+
+void KZTimerService::StartPlatformRecordsRefresh()
+{
+	if (g_platformRecordsTimer)
+	{
+		return; // таймер persistent (переживает смену карты) — заводим ровно один раз
+	}
+	// preserveMapChange=true: источник и интервал от карты не зависят, а пересоздание таймера на
+	// каждой карте плодило бы дубликаты. useRealTime=true: обновление худа не должно замирать
+	// вместе с игровым временем (пауза/смена карты).
+	g_platformRecordsTimer = StartTimer(RefreshPlatformRecords, KZ_PLATFORM_RECORDS_REFRESH_INTERVAL, true, true);
 }
 
 void KZTimerService::UpdateLocalRecordCache()
@@ -2207,6 +2316,9 @@ void KZDatabaseServiceEventListener_Timer::OnMapSetup()
 	// Платформенные WR (тот же источник, что лидерборд сайта) — одна async-догрузка на карту,
 	// параллельно локальному кэшу; худ покажет их даже вне активного курса (главный курс).
 	KZTimerService::FetchPlatformWorldRecords();
+	// Дальше те же WR (и PB игроков) обновляются периодически, чтобы рекорд, поставленный на
+	// другом сервере сети, доезжал в худ без реконнекта. Идемпотентно: таймер persistent.
+	KZTimerService::StartPlatformRecordsRefresh();
 	// Раз на загрузку карты (OnMapSetup стреляет один раз после успешного SetupMap()) -
 	// TTL-чистка SavedRuns, fire-and-forget (Task 5).
 	KZSavedRunService::PurgeExpired();

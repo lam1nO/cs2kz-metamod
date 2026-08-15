@@ -1019,4 +1019,11 @@
 		"ru"		"{grey}Действие заблокировано защитой таймера. Пожалуйста, подождите {default}{cooldown} {grey}секунд и повторите команду."
 		"ua"		"{grey}Дію заблоковано запобіжником. Будь ласка, зачекайте {default}{cooldown} {grey}сек. і повторіть команду."
 	}
+	"Reset Confirm - Warning"
+	{
+		"en"		"{darkred}This would reset your progress. {default}Press again to confirm{darkred}."
+		"chi"		"{darkred}此操作会重置你的进度. {default}再按一次以确认{darkred}."
+		"ru"		"{darkred}Твой прогресс будет сброшен. {default}Нажми ещё раз для подтверждения{darkred}."
+		"ua"		"{darkred}Твій прогрес буде скинуто. {default}Натисни ще раз для підтвердження{darkred}."
+	}
 }

@@ -22,8 +22,21 @@
 
 #define KZ_PAUSE_COOLDOWN 1.0f
 
+// Период обновления платформенных PB/WR в худе (сек realtime). Рекорд, поставленный на другом
+// сервере сети, до этого появлялся только после реконнекта (см. StartPlatformRecordsRefresh).
+#define KZ_PLATFORM_RECORDS_REFRESH_INTERVAL 3.0
+
 #define KZ_SAFEGUARD_RESTART_MIN_DELAY 0.6f
 #define KZ_SAFEGUARD_RESTART_MAX_DELAY 5.0f
+// Окно «свободного рестарта» в начале рана (сек ИГРОВОГО времени рана, не realtime): пока
+// таймер не набрал столько, !r при включённом !sg проходит без двойного тапа. Терять тут
+// нечего — забег ещё не начался по существу, а сейфгард в этот момент только мешает
+// перезаходить на старт. Дальше — обычный двойной тап (см. CheckSafeguardRestart).
+#define KZ_SAFEGUARD_RESTART_FREE_WINDOW 15.0f
+// Порог «ран уже жалко» для подтверждения сброса при ВЫКЛЮЧЕННОМ !sg (сек игрового времени
+// рана): после него первый сброс таймера не проходит молча, а просит подтверждения.
+// См. KZTimerService::CheckSafeguard и resetConfirmWarned.
+#define KZ_RESET_CONFIRM_MIN_RUNTIME 300.0f
 
 // Legacy: старый единый int-преф "safeguard". Оставлен ТОЛЬКО для миграции —
 // расцеплённые флаги теперь живут в отдельных префах "sgTeleport"/"sgReset"
@@ -212,8 +225,13 @@ public:
 	// Платформенная догрузка PB/WR из cyber-api (тот же источник, что лидерборд сайта). WR — раз
 	// на карту (OnMapSetup); PB игрока — на его заходе (OnClientSetup). Async, fail-soft: сбой /
 	// timeout / выключенный cybEmitUrl оставляет платформенные кэши как есть, худ падает на локаль.
-	static void FetchPlatformWorldRecords();
-	static void FetchPlatformPB(KZPlayer *player);
+	// resetCache=true (заход/смена карты) чистит кэш перед запросом; периодическое обновление
+	// (StartPlatformRecordsRefresh) зовёт с false, чтобы худ не мигал на время round-trip.
+	static void FetchPlatformWorldRecords(bool resetCache = true);
+	static void FetchPlatformPB(KZPlayer *player, bool resetCache = true);
+	// Заводит persistent-таймер обновления платформенных PB/WR (см. RefreshPlatformRecords).
+	// Идемпотентна: повторные вызовы — no-op.
+	static void StartPlatformRecordsRefresh();
 	static void InsertRecordToCache(f64 time, const KZCourseDescriptor *courseName, PluginId modeID, bool hasTeleports, bool global,
 									CUtlString metadata = "");
 
@@ -545,6 +563,11 @@ private:
 	bool shouldPlayTimerStopSound = true;
 
 	f64 lastRestartAttemptTime {};
+	// «Предупреждение о сбросе уже потрачено в этом ране» (см. CheckSafeguard, п.4 пакета
+	// 15.08). Ровно одно на ран: второй случайный сброс той же попытки проходит молча —
+	// иначе гейт превращается в постоянный двойной тап на всё подряд. Сбрасывается вместе
+	// с остальным состоянием рана в KZTimerService::Reset() и на TimerStart.
+	bool resetConfirmWarned {};
 
 public:
 	bool GetPaused()
