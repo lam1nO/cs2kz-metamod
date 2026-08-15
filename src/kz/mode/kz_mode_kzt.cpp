@@ -256,12 +256,18 @@ void KZTimerModeService::OnStopTouchGround()
 		// GO-паритет наземного времени: same-tick касание получает столько 128-тиков
 		// велмода, сколько реально пробыло на земле (те же кванты, что k формулы);
 		// буферный пре-клик (tog~0) = 1 итерация.
-		i32 touchIters = MAX(1, MIN((i32)(realTog * 128.0f), 8));
+		i32 touchIters = MAX(1, MIN((i32)(realTog * KZT_VELMOD_RATE), 8));
 		for (i32 ti = 0; ti < touchIters; ti++)
 		{
 			this->effectivePreVelMod = this->CalcPrestrafeVelMod(true);
 		}
 		this->velModTouchIterTime = this->player->landingTimeActual;
+		// Форс списывает своё время из общего бюджета темпа: иначе то же наземное
+		// время отработается второй раз натуральным путём в OnProcessMovement
+		// (сегмент мог получить 0 итераций и оставить время в аккумуляторе) —
+		// ровно тот переразгон, против которого бюджет и заведён. Клок один на оба пути.
+		this->preVelModTimeAccum = MAX(0.0f, this->preVelModTimeAccum - touchIters / KZT_VELMOD_RATE);
+		this->velModTickIters += touchIters;
 	}
 
 	CCSPlayer_MovementServices *msDuck = this->player->GetMoveServices();
@@ -555,15 +561,23 @@ void KZTimerModeService::OnProcessMovement()
 			this->preVelModTimeAccum += elapsed;
 			// +1e-4 — против накопления ошибки f32 на границе интервала.
 			iterations = (i32)(this->preVelModTimeAccum * KZT_VELMOD_RATE + 1e-4f);
-			// Потолок на случай лага/паузы: разом не догоняем больше тика GO-темпа.
+			// Потолок против лага/паузы. Штатный односегментный тик даёт ровно 2
+			// итерации, поэтому потолок стоит выше — он должен ловить лаг, а не
+			// нормальную игру. Остаток НЕ обнуляем (это систематически теряло бы темп
+			// вниз), а клампим одним интервалом: curtime — f32, на долгой карте его ULP
+			// сравним с долей интервала, и дрожание не должно копиться ни в одну сторону.
 			if (iterations > KZT_VELMOD_MAX_ITERS_PER_CALL)
 			{
 				iterations = KZT_VELMOD_MAX_ITERS_PER_CALL;
-				this->preVelModTimeAccum = 0.0f;
 			}
-			else
+			this->preVelModTimeAccum -= iterations / KZT_VELMOD_RATE;
+			if (this->preVelModTimeAccum > 1.0f / KZT_VELMOD_RATE)
 			{
-				this->preVelModTimeAccum -= iterations / KZT_VELMOD_RATE;
+				this->preVelModTimeAccum = 1.0f / KZT_VELMOD_RATE;
+			}
+			else if (this->preVelModTimeAccum < 0.0f)
+			{
+				this->preVelModTimeAccum = 0.0f;
 			}
 		}
 		this->preVelModLastServiceTime = curtime;
@@ -694,6 +708,10 @@ void KZTimerModeService::ResetPrestrafe()
 	this->tickYawValid = false;
 	this->preVelModTimeAccum = 0.0f;
 	this->preVelModLastServiceTime = -1.0f;
+	// Счётчики телеметрии тоже: после сброса tickYawValid=false, ветка смены тика не
+	// отработает, и первый тик напечатал бы seg=/it= из прошлой жизни.
+	this->velModTickSegments = 0;
+	this->velModTickIters = 0;
 }
 
 // Ported from gokz CalcPrestrafeVelMod (KZTimerGlobal).
@@ -1361,7 +1379,17 @@ void KZTimerModeService::OnTeleport(const Vector *newPosition, const QAngle *new
 		// «переезжает» через телепорт (prekeep) и игрок стартует с готовыми 276 вместо
 		// 250. В gokz это ResetPrestrafeVelMod на GOKZ_OnCountedTeleport_Post
 		// (gokz-mode-kztimer.sp), у нас этого вызова не было вовсе.
-		this->ResetPrestrafe();
+		//
+		// Но ТОЛЬКО если игрока реально переставили. Мы висим на сыром движковом хуке
+		// Teleport, а MovementPlayer::SetAngles зовёт его с одними углами (NULL, angles,
+		// NULL) — отсюда !hideweapon, выключение !hideplayers, загрузка преференсов,
+		// смена команды. Это не телепорт игрока, и обнулять велмод посреди рана они не
+		// должны. Чекпоинт под условие попадает всегда: даже ветка stayOnGround передаёт
+		// нулевую скорость (kz_checkpoint.cpp).
+		if (newPosition || newVelocity)
+		{
+			this->ResetPrestrafe();
+		}
 		return;
 	}
 	// Only happens when triggerfix happens.

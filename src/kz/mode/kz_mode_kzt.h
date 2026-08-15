@@ -20,8 +20,8 @@
 // frametime, поэтому темп набора престрейфа = частота вызовов. В GO это RunCmd на
 // 128-тиковом сервере, отсюда 128 Гц. Привязываем к времени, а не к числу вызовов
 // движения: сегментов ProcessMovement на тик движок даёт разное число.
-#define KZT_VELMOD_RATE                128.0f
-#define KZT_VELMOD_MAX_ITERS_PER_CALL  2
+#define KZT_VELMOD_RATE               128.0f
+#define KZT_VELMOD_MAX_ITERS_PER_CALL 4
 // Bhop related — gokz TweakJump: cap horizontal speed at perf to 380 u/s
 #define PERF_SPEED_CAP 380.0f
 // Perf window under legacy jump: jump within this much time after landing = perf.
