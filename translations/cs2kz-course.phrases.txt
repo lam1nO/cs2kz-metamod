@@ -277,6 +277,10 @@
 		"ru"		"Выбор маршрута"
 	}
 
+	// ОСИРОТЕЛА: `!tier` переехал на нашу платформу и печатает "Tier Info - Platform"
+	// (тир один на карту+режим). Фразу намеренно НЕ удаляем — она описывает порежимную
+	// пару nub/pro по КУРСУ со state и описанием, то есть готовый формат вывода на случай,
+	// если платформа научится тирам по курсам. Вернуть = снова начать её звать.
 	"Tier Info"
 	{
 		// Main (Ranked) - Tier 1/2: Simple jumps all around.
@@ -286,5 +290,38 @@
 		"ru"		"{default}{course}{grey} ({purple}{state}{grey}) - Tier {yellow}{tier_nub}{grey}/{blue}{tier_pro}{grey}{description}"
 		"ua"		"{default}{course}{grey} ({purple}{state}{grey}) - Складність {yellow}{tier_nub}{grey}/{blue}{tier_pro}{grey}{description}"
 		"es"		"{default}{course}{grey} ({purple}{state}{grey}) - Nivel {yellow}{tier_nub}{grey}/{blue}{tier_pro}{grey}{description}"
+	}
+	// Тир с НАШЕЙ платформы (cyber-api), а не из глобального cs2kz-api: тир у нас
+	// один на (карта, режим) — не порежимная пара nub/pro и не по курсам, поэтому
+	// и подпись другая, без state/description (их платформа не хранит).
+	"Tier Info - Platform"
+	{
+		"#format"	"map:s,tier:d"
+		"en"		"{default}{map}{grey} - Tier {yellow}{tier}{grey}."
+		"chi"		"{default}{map}{grey} - Tier {yellow}{tier}{grey}."
+		"ru"		"{default}{map}{grey} - тир {yellow}{tier}{grey}."
+		"ua"		"{default}{map}{grey} - тір {yellow}{tier}{grey}."
+	}
+	"Tier Info - Platform Unknown"
+	{
+		"#format"	"map:s"
+		"en"		"{grey}No tier set for {default}{map}{grey} in this mode."
+		"chi"		"{grey}此模式下 {default}{map}{grey} 尚未设置 Tier."
+		"ru"		"{grey}Для карты {default}{map}{grey} в этом режиме тир не задан."
+		"ua"		"{grey}Для карти {default}{map}{grey} у цьому режимі тір не задано."
+	}
+	"Tier Info - Platform Unavailable"
+	{
+		"en"		"{darkred}Tier is temporarily unavailable: no connection to the platform."
+		"chi"		"{darkred}暂时无法获取 Tier: 未连接到平台."
+		"ru"		"{darkred}Тир временно недоступен: нет связи с платформой."
+		"ua"		"{darkred}Тір тимчасово недоступний: немає зв'язку з платформою."
+	}
+	"Tier Info - Platform Mode Unsupported"
+	{
+		"en"		"{grey}Tiers are not kept for this mode."
+		"chi"		"{grey}该模式不记录 Tier."
+		"ru"		"{grey}Для этого режима тиры не ведутся."
+		"ua"		"{grey}Для цього режиму тіри не ведуться."
 	}
 }

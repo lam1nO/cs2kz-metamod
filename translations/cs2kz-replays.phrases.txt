@@ -819,4 +819,36 @@
 		"en"		"End"
 		"ru"		"Завершить"
 	}
+	// Поиск реплея по НИКУ (`!replay <подстрока>`) через наш api — путь, на котором
+	// раньше был безусловный отказ «Invalid UUID».
+	"Replay Search Menu - Title"
+	{
+		"en"		"Select a replay"
+		"chi"		"选择回放"
+		"ru"		"Выберите реплей"
+		"ua"		"Виберіть реплей"
+	}
+	"Replay Search Menu - Entry"
+	{
+		"#format"	"nickname:s,time:s"
+		"en"		"{nickname} - {time}"
+		"chi"		"{nickname} - {time}"
+		"ru"		"{nickname} - {time}"
+		"ua"		"{nickname} - {time}"
+	}
+	"Replay - Search No Matches"
+	{
+		"#format"	"query:s"
+		"en"		"{darkred}No player with a personal best on this map matches {grey}'{default}{query}{grey}'."
+		"chi"		"{darkred}本图没有个人纪录的玩家匹配 {grey}'{default}{query}{grey}'."
+		"ru"		"{darkred}Ни один игрок с рекордом на этой карте не подходит под {grey}'{default}{query}{grey}'."
+		"ua"		"{darkred}Жоден гравець із рекордом на цій карті не підходить під {grey}'{default}{query}{grey}'."
+	}
+	"Replay - Search Unavailable"
+	{
+		"en"		"{darkred}Replay search is temporarily unavailable: no connection to the platform."
+		"chi"		"{darkred}暂时无法搜索回放: 未连接到平台."
+		"ru"		"{darkred}Поиск реплеев временно недоступен: нет связи с платформой."
+		"ua"		"{darkred}Пошук реплеїв тимчасово недоступний: немає зв'язку з платформою."
+	}
 }

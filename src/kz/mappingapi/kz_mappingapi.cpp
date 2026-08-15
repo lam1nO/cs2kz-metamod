@@ -21,6 +21,12 @@
 #include "utils/simplecmds.h"
 #include "utils/tables.h"
 #include "UtlSortVector.h"
+// `!tier` ходит за тиром в наш api: HTTP-клиент, базовый URL из опций, общий маппинг
+// режима/валидация имени карты и разбор JSON-ответа.
+#include "utils/http.h"
+#include "kz/option/kz_option.h"
+#include "kz/replays/cyb_replay_common.h"
+#include "tier1/keyvalues3.h"
 
 #include <vendor/mm-cs2menus/src/public/ics2menus.h>
 
@@ -28,6 +34,9 @@
 // но правило одно для всего файла.
 #include <cctype>
 #include <cstdlib>
+// std::string/std::optional — тело и разбор ответа api в `!tier`.
+#include <optional>
+#include <string>
 
 #include "tier0/memdbgon.h"
 
@@ -1983,79 +1992,129 @@ SCMD(kz_mapinfo, SCFL_MAP | SCFL_GLOBAL | SCFL_HELP)
 
 SCMD_LINK(kz_mi, kz_mapinfo)
 
+// `!tier` берёт тир с НАШЕЙ платформы (cyber-api), а не из глобального cs2kz-api.
+// Почему: глобальный api для этой сети недоступен (запрос падал с ошибкой подключения) и
+// принимает только vanilla/classic со сверкой md5 бинарника режима — на kzt и прочих
+// кастомных режимах `!tier` не работал в принципе. Истина по тирам у нас и так своя:
+// coalesce(map_tier_overrides(map, mode), maps.tier), порежимно (см. apps/api).
+//
+// Плата за переезд, осознанная: платформенный тир — ОДИН на (карта, режим). Прежняя выдача
+// была богаче (курс, пара nub/pro, state, описание), но её источник для нас мёртв, а этих
+// полей платформа не хранит. Поэтому аргумент курса больше не участвует в резолве: команда
+// отвечает про текущую карту в текущем режиме. Если понадобится порежимный тир по курсам —
+// это расширение и схемы api, и таблицы оверрайдов, отдельной задачей.
 static_function void PrintCourseTier(KZPlayer *player, const CCommand *args)
 {
-	const KZCourseDescriptor *course = player->timerService->GetCourse();
-	if (args->ArgC() < 2 && course == nullptr)
+	// Аргумент (курс) осознанно игнорируем — см. комментарий выше. Молча: ругаться на
+	// привычный `!tier <курс>` значило бы наказывать игрока за нашу смену источника.
+	(void)args;
+
+	const char *url = KZOptionService::GetOptionStr("cybEmitUrl", "");
+	if (!url || url[0] == '\0')
 	{
-		player->languageService->PrintChat(true, false, "No Current Course");
-		KZ::course::PrintCourses(player);
+		player->languageService->PrintChat(true, false, "Tier Info - Platform Unavailable");
 		return;
 	}
-	const char *courseName = args->ArgS();
-	if (!course)
+
+	bool mapNameOk = false;
+	CUtlString mapNameStr = g_pKZUtils->GetCurrentMapName(&mapNameOk);
+	std::string mapName = mapNameOk ? mapNameStr.Get() : "";
+	// Тот же вайтлист имени карты, что у реплеев/PB-WR: api валидирует map тем же
+	// [a-z0-9_-]{1,128}, заведомо мимо — не ходим в сеть и не показываем игроку «нет связи».
+	if (!CybReplayCommon::IsValidMapName(mapName))
 	{
-		if (utils::IsNumeric(courseName))
-		{
-			i32 courseID = atoi(courseName);
-			course = KZ::course::GetCourseByCourseID(courseID);
-		}
-		else
-		{
-			course = KZ::course::GetCourse(courseName, false, true);
-		}
-	}
-	if (!course)
-	{
-		player->languageService->PrintChat(true, false, "Course Data Unavailable", courseName);
+		player->languageService->PrintChat(true, false, "Tier Info - Platform Unknown", mapName.c_str());
 		return;
 	}
-	if (!KZGlobalService::IsAvailable())
+
+	// Режим — в api-нотацию (ckz/vnl/kzt) общим маппингом. Пустая строка = режим, которого
+	// центральное хранилище не знает: гейт остался, но он ПРО ПЛАТФОРМУ, а не про
+	// Classic/Vanilla, как было раньше, — kzt теперь проходит.
+	const char *mode = CybReplayCommon::MapMode(player->modeService->GetModeShortName());
+	if (!mode || mode[0] == '\0')
 	{
-		player->languageService->PrintChat(true, false, "Map Info - No API Connection (Short)");
+		player->languageService->PrintChat(true, false, "Tier Info - Platform Mode Unsupported");
 		return;
 	}
-	bool hasMap = false;
-	std::vector<KZ::api::Map::Course> courses;
-	hasMap = KZGlobalService::WithCurrentMap(
-		[&](const std::optional<KZ::api::Map> &currentMap)
+
+	std::string fullUrl = url;
+	if (!fullUrl.empty() && fullUrl.back() == '/')
+	{
+		fullUrl.pop_back();
+	}
+	fullUrl += "/v1/kz/maps/" + mapName + "/tier";
+
+	HTTP::Request req(HTTP::Method::GET, fullUrl);
+	req.SetQuery("mode", mode);
+
+	// Ответ адресуем по userID, а не по указателю: игрок мог выйти за время round-trip,
+	// а слот — успеть достаться другому (тот же гард, что у PB-фетча в kz_timer.cpp).
+	CPlayerUserId userID = player->GetClient()->GetUserID();
+	u64 requesterSteamId64 = player->GetSteamId64();
+	std::string requestedMap = mapName;
+
+	// clang-format off
+	req.Send(
+		[userID, requesterSteamId64, requestedMap](HTTP::Response resp)
 		{
-			if (currentMap)
+			KZPlayer *pl = g_pKZPlayerManager->ToPlayer(userID);
+			if (!pl)
 			{
-				courses = currentMap->courses;
-				return true;
+				return;
 			}
-			return false;
-		});
-	if (!hasMap)
-	{
-		player->languageService->PrintChat(true, false, "Map Info - No API Map Data (Short)");
-		return;
-	}
-	const KZ::api::Map::Course *apiCourse = nullptr;
-	for (auto &c : courses)
-	{
-		if (c.id == course->globalDatabaseID)
+			// Гард переиспользования userID, как у поиска реплеев и PB-фетча: слот мог достаться
+			// другому игроку, пока летел запрос. Здесь цена ошибки меньше (чужая строка в чат,
+			// а не запуск реплея), но guard тот же — расхождение в таких местах и рождает баги.
+			if (pl->GetSteamId64() != requesterSteamId64)
+			{
+				return;
+			}
+			if (resp.status < 200 || resp.status >= 300)
+			{
+				KZ_LOG_INFO(LogChannel::General, "[cyb_tier] HTTP %u for map=%s\n", (unsigned)resp.status, requestedMap.c_str());
+				pl->languageService->PrintChat(true, false, "Tier Info - Platform Unavailable");
+				return;
+			}
+			std::optional<std::string> body = resp.Body();
+			if (!body.has_value())
+			{
+				pl->languageService->PrintChat(true, false, "Tier Info - Platform Unavailable");
+				return;
+			}
+
+			KeyValues3 kv(KV3_TYPEEX_TABLE, KV3_SUBTYPE_UNSPECIFIED);
+			CUtlString error = "";
+			LoadKV3FromJSON(&kv, &error, body->c_str(), "");
+			if (!error.IsEmpty())
+			{
+				KZ_LOG_WARN(LogChannel::General, "[cyb_tier] failed to parse api response: %s\n", error.Get());
+				pl->languageService->PrintChat(true, false, "Tier Info - Platform Unavailable");
+				return;
+			}
+
+			// tier: number|null по контракту (kzMapTierResponseSchema). null — штатный ответ
+			// «карты не знаем ИЛИ тир не задан», а не ошибка: ручка на этот случай отдаёт 200.
+			// Отсутствующий/не-числовой член трактуем так же — нам нечего показать.
+			KeyValues3 *tierMember = kv.FindMember("tier");
+			KV3Type_t tierType = tierMember ? tierMember->GetType() : KV3_TYPE_NULL;
+			if (!tierMember || (tierType != KV3_TYPE_INT && tierType != KV3_TYPE_UINT && tierType != KV3_TYPE_DOUBLE))
+			{
+				pl->languageService->PrintChat(true, false, "Tier Info - Platform Unknown", requestedMap.c_str());
+				return;
+			}
+			i32 tier = (i32)tierMember->GetDouble(0.0);
+			pl->languageService->PrintChat(true, false, "Tier Info - Platform", requestedMap.c_str(), tier);
+		},
+		[userID]()
 		{
-			apiCourse = &c;
-			break;
-		}
-	}
-	// If the course isn't found in the API map data or the player's current mode isn't Classic or Vanilla, we can't show tier info.
-	if (!apiCourse || (!KZ_STREQI(player->modeService->GetModeName(), "Classic") && (!KZ_STREQI(player->modeService->GetModeName(), "Vanilla"))))
-	{
-		player->languageService->PrintChat(true, false, "Course Data Unavailable", courseName);
-		return;
-	}
-	u8 nubTier =
-		u8(KZ_STREQI(player->modeService->GetModeName(), "Classic") ? apiCourse->filters.classic.nubTier : apiCourse->filters.vanilla.nubTier);
-	u8 proTier =
-		u8(KZ_STREQI(player->modeService->GetModeName(), "Classic") ? apiCourse->filters.classic.proTier : apiCourse->filters.vanilla.proTier);
-	std::string state = KZ_STREQI(player->modeService->GetModeName(), "Classic")
-							? player->languageService->PrepareMessage(courseStateKeys[(i8)apiCourse->filters.classic.state + 1])
-							: player->languageService->PrepareMessage(courseStateKeys[(i8)apiCourse->filters.vanilla.state + 1]);
-	std::string description = apiCourse->description ? ": " + apiCourse->description.value() : "";
-	player->languageService->PrintChat(true, false, "Tier Info", course->name, nubTier, proTier, state.c_str(), description.c_str());
+			KZPlayer *pl = g_pKZPlayerManager->ToPlayer(userID);
+			if (pl)
+			{
+				pl->languageService->PrintChat(true, false, "Tier Info - Platform Unavailable");
+			}
+			KZ_LOG_INFO(LogChannel::General, "[cyb_tier] network error\n");
+		});
+	// clang-format on
 }
 
 SCMD(kz_tier, SCFL_MAP | SCFL_GLOBAL | SCFL_HELP)

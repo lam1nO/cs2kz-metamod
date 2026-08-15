@@ -163,6 +163,72 @@ void KZ::replaysystem::menu::OpenReplayControlsMenu(KZPlayer *player)
 	g_pMenus->DisplayMenu(m, slot, 0);
 }
 
+// Выбор реплея из списка совпавших по нику (паттерн kz_spec_menu.cpp).
+static_function void OnReplaySearchMenuSelect(MenuHandle menu, int slot, int item)
+{
+	KZPlayer *p = g_pKZPlayerManager->ToPlayer(CPlayerSlot(slot));
+	if (!p)
+	{
+		return;
+	}
+	// info — UUID реплея строкой. Ревалидации «цель ещё существует» здесь нет и не нужно:
+	// LoadReplay сам разбирает UUID, ищет файл локально и при промахе уходит в докачку
+	// с центрального хранилища — то есть закрывает и случай «файл уехал, пока меню висело».
+	const char *info = g_pMenus->GetItemInfo(menu, item);
+	if (!info || !info[0])
+	{
+		return;
+	}
+	KZ::replaysystem::commands::LoadReplay(p, info);
+}
+
+bool KZ::replaysystem::menu::OpenReplaySearchMenu(KZPlayer *player, const std::vector<SearchHit> &hits)
+{
+	if (g_pMenus == nullptr || !player || hits.empty())
+	{
+		return false;
+	}
+
+	int slot = player->GetPlayerSlot().Get();
+	if (slot < 0 || slot > MAXPLAYERS)
+	{
+		return false;
+	}
+
+	// Один хэндл на слот — пересоздаём при повторном вызове (паттерн kz_option_menu/!spec).
+	static MenuHandle s_searchMenu[MAXPLAYERS + 1] = {};
+	if (s_searchMenu[slot] != kInvalidMenuHandle)
+	{
+		g_pMenus->DestroyMenu(s_searchMenu[slot]);
+		s_searchMenu[slot] = kInvalidMenuHandle;
+	}
+
+	const char *lang = player->languageService->GetLanguage();
+	std::string title = KZLanguageService::PrepareMessageWithLang(lang, "Replay Search Menu - Title");
+	MenuHandle m = g_pMenus->CreateMenu(MenuType::Default, title.c_str(), &OnReplaySearchMenuSelect);
+	if (m == kInvalidMenuHandle)
+	{
+		return false;
+	}
+
+	for (const SearchHit &hit : hits)
+	{
+		// Порядок пунктов — как пришёл от api (по PB по возрастанию, лучший первым);
+		// своей сортировки здесь нет намеренно, чтобы список совпадал с сайтом.
+		char timeText[32];
+		utils::FormatTime((f64)hit.pbTimeMs / 1000.0, timeText, sizeof(timeText));
+		std::string label = KZLanguageService::PrepareMessageWithLang(lang, "Replay Search Menu - Entry", hit.nickname.c_str(), timeText);
+		g_pMenus->AddItem(m, label.c_str(), hit.replayUuid.c_str(), false);
+	}
+
+	// Одноразовый выбор — меню закрывается по клику (как !spec, в отличие от !rpmenu).
+	g_pMenus->SetCloseOnSelect(m, true);
+
+	s_searchMenu[slot] = m;
+	g_pMenus->DisplayMenu(m, slot, 0);
+	return true;
+}
+
 bool KZ::replaysystem::menu::IsReplayControlsMenuOpen(int slot)
 {
 	if (g_pMenus == nullptr || slot < 0 || slot > MAXPLAYERS)

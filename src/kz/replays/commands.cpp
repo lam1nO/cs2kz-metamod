@@ -16,14 +16,20 @@
 #include "playback.h"
 #include "watcher.h"
 #include "cyb_replay_download.h"
+#include "cyb_replay_common.h" // MapMode/IsValidMapName — общий маппинг режима и валидация карты
 #include "menu.h"
 #include "utils/uuid.h"
 #include "utils/simplecmds.h"
+#include "utils/http.h"       // поиск реплея по нику через наш api
+#include "tier1/keyvalues3.h" // разбор JSON-ответа поиска
 #include "kz/global/kz_global.h"
 #include "vendor/sql_mm/src/public/sql_mm.h"
 #include <cctype>
 #include <cstdlib>
 #include <functional>
+#include <optional>
+#include <string>
+#include <vector>
 extern ReplayWatcher g_ReplayWatcher;
 
 namespace KZ::replaysystem::commands
@@ -60,6 +66,215 @@ namespace KZ::replaysystem::commands
 		}
 	}
 
+	// `!replay <подстрока>` — поиск по НИКУ среди держателей PB-реплеев на текущей карте
+	// (курс main) и режиме, через наш api. Зовётся, только когда локальный поиск по
+	// подстроке UUID не дал НИ ОДНОГО совпадения (см. LoadReplay): прежний путь на этом
+	// месте просто ругался «Invalid UUID», поэтому расширение никого не ломает.
+	//
+	// Результат по количеству совпадений: 0 — отказ, 1 — сразу грузим, >1 — меню выбора
+	// (топ-10, порядок api = по PB по возрастанию). Пустую строку сюда не пускает сам
+	// `!replay` (ArgC < 2 → Usage), это осталось как было.
+	// Percent-encoding значения query-параметра. Нужен именно здесь: HTTP::Request::SetQuery
+	// склеивает "key=value" в URL СЫРЫМИ (см. utils/http.cpp) — всем прежним вызывающим это
+	// сходило с рук, потому что они передают заведомо безопасное (имя карты по вайтлисту
+	// [a-z0-9_-], steamID цифрами, литералы режима). Здесь же значение — НИК, введённый
+	// игроком: '&' дописал бы лишний параметр, '#' обрубил бы запрос, пробел/кириллица дали
+	// бы битый URL. Общий SetQuery не трогаем — это поведение всего форка, отдельная задача.
+	static_function std::string UrlEncodeQueryValue(const std::string &value)
+	{
+		static const char *hex = "0123456789ABCDEF";
+		std::string out;
+		out.reserve(value.size() * 3);
+		for (unsigned char c : value)
+		{
+			// Unreserved по RFC 3986 — остальное кодируем, включая '~' (безобидно) и
+			// весь не-ASCII (ники в UTF-8 приезжают побайтово и кодируются как есть).
+			if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.')
+			{
+				out += (char)c;
+			}
+			else
+			{
+				out += '%';
+				out += hex[c >> 4];
+				out += hex[c & 0x0F];
+			}
+		}
+		return out;
+	}
+
+	static_function void SearchReplaysByNickname(KZPlayer *player, const std::string &query)
+	{
+		const char *url = KZOptionService::GetOptionStr("cybEmitUrl", "");
+		if (!url || url[0] == '\0')
+		{
+			player->languageService->PrintChat(true, false, "Replay - Invalid UUID");
+			return;
+		}
+
+		std::string mapName = g_pKZUtils->GetCurrentMapName().Get();
+		if (!CybReplayCommon::IsValidMapName(mapName))
+		{
+			player->languageService->PrintChat(true, false, "Replay - Invalid UUID");
+			return;
+		}
+
+		// Режим — в api-нотацию общим маппингом; кастовый режим сверх ckz/vnl/kzt
+		// центральное хранилище не знает, PB-реплеев там нет по определению.
+		const char *mode = CybReplayCommon::MapMode(player->modeService->GetModeShortName());
+		if (!mode || mode[0] == '\0')
+		{
+			player->languageService->PrintChat(true, false, "Replay - Search No Matches", query.c_str());
+			return;
+		}
+
+		std::string fullUrl = url;
+		if (!fullUrl.empty() && fullUrl.back() == '/')
+		{
+			fullUrl.pop_back();
+		}
+		fullUrl += "/v1/kz/maps/" + mapName + "/replays/search";
+
+		HTTP::Request req(HTTP::Method::GET, fullUrl);
+		req.SetQuery("mode", mode);
+		// Контракт ограничивает query 64 символами — режем на своей стороне, иначе длинный
+		// ввод вернулся бы 400-м и игрок увидел бы «нет связи» вместо честного «не нашли».
+		// Режем ДО кодирования: считать надо исходные символы, а не percent-триплеты.
+		// Срез — по границе UTF-8: ники кириллицей двухбайтовые, и обрыв на середине символа
+		// дал бы битую последовательность, на которой fastify отвечает 400 «URI malformed»
+		// (то есть ровно тем отказом, который мы этим клампом и пытаемся предотвратить).
+		std::string trimmedQuery = query;
+		if (trimmedQuery.size() > 64)
+		{
+			size_t cut = 64;
+			// Continuation-байты UTF-8 имеют вид 10xxxxxx — откатываемся к началу символа.
+			while (cut > 0 && ((unsigned char)trimmedQuery[cut] & 0xC0) == 0x80)
+			{
+				cut--;
+			}
+			trimmedQuery.resize(cut);
+		}
+		req.SetQuery("query", UrlEncodeQueryValue(trimmedQuery));
+		// limit по контракту 1..10; просим ровно тот максимум, который показываем.
+		req.SetQuery("limit", "10");
+
+		CPlayerUserId userID = player->GetClient()->GetUserID();
+		u64 requesterSteamId64 = player->GetSteamId64();
+		std::string requestedQuery = query;
+		std::string requestedMap = mapName;
+
+		// clang-format off
+		req.Send(
+			[userID, requesterSteamId64, requestedQuery, requestedMap](HTTP::Response resp)
+			{
+				KZPlayer *pl = g_pKZPlayerManager->ToPlayer(userID);
+				if (!pl)
+				{
+					return; // игрок вышел за время round-trip
+				}
+				// Гард переиспользования userID (тот же, что у PB-фетча в kz_timer.cpp): слот мог
+				// освободиться и достаться другому игроку, пока запрос летел. Без сверки ему
+				// открылось бы чужое меню, а выбор в нём запустил бы реплей, которого он не просил.
+				if (pl->GetSteamId64() != requesterSteamId64)
+				{
+					return;
+				}
+				// Карта сменилась, пока запрос летел — реплеи относятся к другой карте.
+				if (!KZ_STREQ(requestedMap.c_str(), g_pKZUtils->GetCurrentMapName().Get()))
+				{
+					return;
+				}
+				if (resp.status < 200 || resp.status >= 300)
+				{
+					KZ_LOG_INFO(LogChannel::General, "[cyb_replay_search] HTTP %u for map=%s\n", (unsigned)resp.status, requestedMap.c_str());
+					pl->languageService->PrintChat(true, false, "Replay - Search Unavailable");
+					return;
+				}
+				std::optional<std::string> body = resp.Body();
+				if (!body.has_value())
+				{
+					pl->languageService->PrintChat(true, false, "Replay - Search Unavailable");
+					return;
+				}
+
+				KeyValues3 kv(KV3_TYPEEX_TABLE, KV3_SUBTYPE_UNSPECIFIED);
+				CUtlString error = "";
+				LoadKV3FromJSON(&kv, &error, body->c_str(), "");
+				if (!error.IsEmpty())
+				{
+					KZ_LOG_WARN(LogChannel::General, "[cyb_replay_search] failed to parse api response: %s\n", error.Get());
+					pl->languageService->PrintChat(true, false, "Replay - Search Unavailable");
+					return;
+				}
+
+				KeyValues3 *results = kv.FindMember("results");
+				if (!results || results->GetType() != KV3_TYPE_ARRAY)
+				{
+					pl->languageService->PrintChat(true, false, "Replay - Search No Matches", requestedQuery.c_str());
+					return;
+				}
+
+				// Порядок элементов НЕ трогаем — api уже отдал по PB по возрастанию.
+				std::vector<KZ::replaysystem::menu::SearchHit> hits;
+				int count = results->GetArrayElementCount();
+				for (int i = 0; i < count; i++)
+				{
+					KeyValues3 *entry = results->GetArrayElement(i);
+					if (!entry)
+					{
+						continue;
+					}
+					KeyValues3 *uuidMember = entry->FindMember("replayUuid");
+					KeyValues3 *nickMember = entry->FindMember("nickname");
+					// Без UUID пункт бесполезен (грузить нечего), без ника — неотличим в меню.
+					if (!uuidMember || uuidMember->GetType() != KV3_TYPE_STRING || !nickMember || nickMember->GetType() != KV3_TYPE_STRING)
+					{
+						continue;
+					}
+					KZ::replaysystem::menu::SearchHit hit;
+					hit.nickname = nickMember->GetString("");
+					hit.replayUuid = uuidMember->GetString("");
+					KeyValues3 *pbMember = entry->FindMember("pbTimeMs");
+					if (pbMember)
+					{
+						KV3Type_t t = pbMember->GetType();
+						if (t == KV3_TYPE_INT || t == KV3_TYPE_UINT || t == KV3_TYPE_DOUBLE)
+						{
+							hit.pbTimeMs = (u64)pbMember->GetDouble(0.0);
+						}
+					}
+					if (hit.replayUuid.empty())
+					{
+						continue;
+					}
+					hits.push_back(hit);
+				}
+
+				if (hits.empty())
+				{
+					pl->languageService->PrintChat(true, false, "Replay - Search No Matches", requestedQuery.c_str());
+					return;
+				}
+				// Однозначное совпадение — не мучаем игрока меню из одного пункта. Если меню
+				// показать не вышло (cs2menus не загружен), грузим первый элемент — он же
+				// лучший PB: поведение не хуже прежнего безусловного отказа (паттерн !spec).
+				if (hits.size() == 1 || !KZ::replaysystem::menu::OpenReplaySearchMenu(pl, hits))
+				{
+					LoadReplay(pl, hits[0].replayUuid.c_str());
+				}
+			},
+			[userID]()
+			{
+				KZPlayer *pl = g_pKZPlayerManager->ToPlayer(userID);
+				if (pl)
+				{
+					pl->languageService->PrintChat(true, false, "Replay - Search Unavailable");
+				}
+				KZ_LOG_INFO(LogChannel::General, "[cyb_replay_search] network error\n");
+			});
+		// clang-format on
+	}
+
 	void LoadReplay(KZPlayer *player, const char *uuid)
 	{
 		if (!player)
@@ -81,7 +296,12 @@ namespace KZ::replaysystem::commands
 			auto matches = g_ReplayWatcher.FindReplaysByUUIDSubstring(uuid);
 			if (matches.empty())
 			{
-				player->languageService->PrintChat(true, false, "Replay - Invalid UUID");
+				// Ни одного локального реплея с такой подстрокой UUID — трактуем ввод как НИК
+				// и спрашиваем платформу (п.7 пакета 15.08). Раньше здесь был безусловный
+				// отказ, так что этот путь ничего не отнимает: он либо найдёт игрока, либо
+				// напечатает свой отказ. Ответ асинхронный — дальше по нему идёт либо
+				// LoadReplay, либо меню выбора.
+				SearchReplaysByNickname(player, uuid);
 				return;
 			}
 			else if (matches.size() > 1)
