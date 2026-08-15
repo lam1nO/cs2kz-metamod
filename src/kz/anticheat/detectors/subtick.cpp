@@ -16,8 +16,6 @@
 #define SUBTICK_ZERO_WHEN_RATIO_THRESHOLD  0.9f
 
 CConVar<bool> kz_ac_subtick_debug("kz_ac_subtick_debug", FCVAR_CHEAT, "Enable subtick abuse detector debug messages", false);
-// Определён в anticheat/detectors/cvars.cpp.
-extern CConVar<bool> kz_allow_turnbinds;
 
 // Every command should have all button presses/releases accounted for in subtick moves.
 // Only cheats that modify buttons without updating subtick moves would fail this.
@@ -80,7 +78,7 @@ static_global bool HasExcessiveSubtickMovesWithAngles(const PlayerCommand &cmd)
 		{
 			continue;
 		}
-		if ((step.button() == IN_TURNLEFT || step.button() == IN_TURNRIGHT) && !kz_allow_turnbinds.Get())
+		if ((step.button() == IN_TURNLEFT || step.button() == IN_TURNRIGHT) && !KZ_AreTurnbindsAllowed())
 		{
 			continue;
 		}

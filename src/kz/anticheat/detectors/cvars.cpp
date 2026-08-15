@@ -7,6 +7,7 @@
 #include "kz/anticheat/kz_anticheat.h"
 #include "kz/language/kz_language.h"
 #include "kz/timer/kz_timer.h"
+#include "kz/global/kz_global.h"
 #include "kz/telemetry/kz_telemetry.h"
 #include "utils/ctimer.h"
 #include <vendor/ClientCvarValue/public/iclientcvarvalue.h>
@@ -25,6 +26,20 @@ CConVar<bool> kz_anticheat("kz_anticheat", FCVAR_NONE, "Run cs2kz anti-cheat det
 // 0 = поведение upstream (гасить).
 CConVar<bool> kz_allow_turnbinds("kz_allow_turnbinds", FCVAR_NONE,
 								 "Allow +left/+right turn binds (0 = upstream behaviour: turn binds are suppressed)", true);
+
+bool KZ_AreTurnbindsAllowed()
+{
+	// Интерлок глобального режима. Предикат тот же, которым «глобальность» рана
+	// определяет сам таймер (timer/submission.cpp: hasPrime && MayBecomeAvailable) и
+	// анти-чит. Именно MayBecomeAvailable, а НЕ IsAvailable: последний истинен только
+	// при завершённом хендшейке, а обрыв вебсокета живёт долго (автореконнект 10–60 с).
+	// На IsAvailable окно реконнекта обходило бы интерлок — бинды снова заработали бы,
+	// ран прошёлся бы на них, а SubmitGlobal не выбрасывает такие раны, а ставит в
+	// очередь и отправляет после реконнекта. То есть ровно тот сценарий, ради которого
+	// интерлок и заведён. Без глобального ключа Init() уходит в Disconnected — на наших
+	// серверах предикат ложен и бинды разрешены.
+	return kz_allow_turnbinds.Get() && !KZGlobalService::MayBecomeAvailable();
+}
 
 // Мастер-свитч анти-чита (чистый вкл/выкл, без sv_cheats-задержки ShouldRunDetections).
 // Гейтит и детекторы, и анти-чит предупреждения в чате.

@@ -297,3 +297,10 @@ public:
 	// Mark a detection, generate a replay if specified, and optionally ban/kick the player.
 	void MarkInfraction(Infraction::Type type, const std::string &reason);
 };
+
+// cybershoke: ЕДИНЫЙ предикат «turn-бинды (+left/+right) сейчас разрешены».
+// Зовут оба места, которые обязаны решать одинаково: подавление угла в
+// KZPlayer::DisableTurnbinds и исключение turn-кнопок в детекторе десабтикинга
+// (anticheat/detectors/subtick.cpp). Держать два независимых условия нельзя —
+// они разъезжаются. Определён в anticheat/detectors/cvars.cpp рядом с cvar'ом.
+bool KZ_AreTurnbindsAllowed();
