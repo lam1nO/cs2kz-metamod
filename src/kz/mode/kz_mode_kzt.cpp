@@ -112,15 +112,7 @@ void KZTimerModeService::Reset()
 	this->forcedUnduck = {};
 	this->postProcessMovementZSpeed = {};
 
-	this->preVelMod = 1.0f;
-	this->effectivePreVelMod = 1.0f;
-	this->preTickCounter = {};
-	this->preVelModLastChange = {};
-	this->velModTouchIterTime = -1.0f;
-	this->tickYaw = 0.0f;
-	this->prevTickYaw = 0.0f;
-	this->tickYawNum = -1;
-	this->tickYawValid = false;
+	this->ResetPrestrafe();
 
 	this->didTPM = {};
 	this->overrideTPM = {};
@@ -384,10 +376,11 @@ void KZTimerModeService::OnStopTouchGround()
 		}
 		f64 dbgWhole;
 		i32 dbgHalf = modf((f64)g_pKZUtils->GetGlobals()->curtime * ENGINE_FIXED_TICK_RATE, &dbgWhole) > 0.25 ? 1 : 0;
-		Msg("[kzt-v2] %s land=%.0f preC=%.0f takeoff=%.0f press_dt=%.2f tog=%.2f n=%d ceil=%d perf=%d tsp=%d boost=%d duck=%d dfrac=%.2f vm=%.3f dyaw=%.2f half=%d\n",
+		Msg("[kzt-v2] %s land=%.0f preC=%.0f takeoff=%.0f press_dt=%.2f tog=%.2f n=%d ceil=%d perf=%d tsp=%d boost=%d duck=%d dfrac=%.2f vm=%.3f dyaw=%.2f half=%d seg=%d it=%d\n",
 			this->player->GetName(), this->lastLandingSpeed, preC, velocity.Length2D(), pressDt * 1000.0f,
 			realTog * 1000.0f, dbgN, dbgPen, perf ? 1 : 0, kz_kzt_takeoff_speed.GetBool() ? 1 : 0, hasBoost ? 1 : 0,
-			ducked ? 1 : 0, duckFrac, this->effectivePreVelMod, dbgDyaw, dbgHalf);
+			ducked ? 1 : 0, duckFrac, this->effectivePreVelMod, dbgDyaw, dbgHalf, this->velModTickSegments,
+			this->velModTickIters);
 		fflush(stdout);
 	}
 }
@@ -498,6 +491,7 @@ void KZTimerModeService::OnSetupMove(PlayerCommand *pc)
 void KZTimerModeService::OnProcessMovement()
 {
 	this->didTPM = false;
+	f32 curtime = g_pKZUtils->GetGlobals()->curtime;
 	if (this->player->GetPlayerPawn()->m_flVelocityModifier() != 1.0f)
 	{
 		this->player->GetPlayerPawn()->m_flVelocityModifier(1.0f);
@@ -506,7 +500,7 @@ void KZTimerModeService::OnProcessMovement()
 	// на смене номера тика, второй полувызов того же тика значение не трогает.
 	{
 		f32 rawYaw = this->player->moveDataPre.m_vecViewAngles.y;
-		i32 tickNum = (i32)(g_pKZUtils->GetGlobals()->curtime * ENGINE_FIXED_TICK_RATE + 0.25f);
+		i32 tickNum = (i32)(curtime * ENGINE_FIXED_TICK_RATE + 0.25f);
 		if (!this->tickYawValid)
 		{
 			this->tickYaw = this->prevTickYaw = rawYaw;
@@ -518,25 +512,68 @@ void KZTimerModeService::OnProcessMovement()
 			this->prevTickYaw = this->tickYaw;
 			this->tickYaw = rawYaw;
 			this->tickYawNum = tickNum;
+			this->velModTickSegments = 0;
+			this->velModTickIters = 0;
 		}
+		this->velModTickSegments++;
 	}
 	this->CheckVelocityQuantization();
 	this->RemoveCrouchJumpBind();
 	this->ReduceDuckSlowdown();
 	this->InterpolateViewAngles();
-	// Велмод: 1 итерация на вызов движения. ProcessMovement идёт двумя полувызовами
-	// на тик (128 Гц) → 2 итерации/тик = темп GO@128. Раньше стояло 2 итерации на
-	// вызов (cyb.56): темп сходился с GO только потому, что второй полувызов тика
-	// глох на ложном TURN_NONE (GetTurning сравнивал полувызовы при пер-тиковых
-	// углах) — и этот же ложный TURN_NONE с протухшим за полёт 0.2с-таймером
-	// жёстко сбрасывал велмод на первом наземном вызове касания. Теперь turning
-	// везде считается по дельте тика (см. CalcPrestrafeVelMod), обе итерации живые.
+	// Велмод. Инкремент в формуле KZTimer фиксированный (не масштабируется frametime),
+	// поэтому скорость набора престрейфа = ЧАСТОТА итераций. В GO это RunCmd, то есть
+	// ровно tickrate сервера — 128 Гц. Отсюда 0→276 за ~0.72 с (58 итераций до 1.104).
+	//
+	// Раньше мы вешали ровно одну итерацию на вызов движения, полагаясь на то, что
+	// ProcessMovement приходит строго двумя полувызовами на тик (2 × 64 = 128 Гц).
+	// Это допущение неверно: движок нарезает тик на сегменты по субтиковым входам
+	// игрока, и их число зависит от того, что игрок нажимает. Пока turning считался
+	// сравнением полувызовов, лишние сегменты глохли на ложном TURN_NONE и темп держался
+	// сам собой; с переходом на пер-тиковую дельту угла (cyb.66) живой стала КАЖДАЯ
+	// итерация — и каждый лишний сегмент стал ускорять престрейф (3 сегмента = 192 Гц,
+	// 0→276 за 0.58 с вместо 0.72 с).
+	//
+	// Поэтому темп берём из времени, а не из числа вызовов: сколько целых интервалов
+	// 1/128 с прошло с прошлой итерации — столько итераций и крутим. В штатном случае
+	// (два полувызова по 1/128 с) это ровно одна итерация на вызов, то есть поведение
+	// не меняется; отклонения движка больше на темп не влияют.
 	// Вызовы с frametime=0 пропускаем — это не RunCmd-кадры GO.
 	bool velModOnGround = (this->player->GetPlayerPawn()->m_fFlags & FL_ONGROUND) != 0;
 	if (g_pKZUtils->GetGlobals()->frametime > 0.0f)
 	{
-		this->effectivePreVelMod = this->CalcPrestrafeVelMod();
-		if (velModOnGround)
+		i32 iterations = 1;
+		if (this->preVelModLastServiceTime >= 0.0f)
+		{
+			f32 elapsed = curtime - this->preVelModLastServiceTime;
+			if (elapsed < 0.0f)
+			{
+				// Время поехало назад (смена карты/рестарт раунда) — начинаем заново.
+				this->preVelModTimeAccum = 0.0f;
+				elapsed = 0.0f;
+			}
+			this->preVelModTimeAccum += elapsed;
+			// +1e-4 — против накопления ошибки f32 на границе интервала.
+			iterations = (i32)(this->preVelModTimeAccum * KZT_VELMOD_RATE + 1e-4f);
+			// Потолок на случай лага/паузы: разом не догоняем больше тика GO-темпа.
+			if (iterations > KZT_VELMOD_MAX_ITERS_PER_CALL)
+			{
+				iterations = KZT_VELMOD_MAX_ITERS_PER_CALL;
+				this->preVelModTimeAccum = 0.0f;
+			}
+			else
+			{
+				this->preVelModTimeAccum -= iterations / KZT_VELMOD_RATE;
+			}
+		}
+		this->preVelModLastServiceTime = curtime;
+
+		for (i32 i = 0; i < iterations; i++)
+		{
+			this->effectivePreVelMod = this->CalcPrestrafeVelMod();
+		}
+		this->velModTickIters += iterations;
+		if (iterations > 0 && velModOnGround)
 		{
 			// Касание получило наземную итерацию — форс в прыжке не нужен
 			this->velModTouchIterTime = this->player->landingTimeActual;
@@ -636,6 +673,27 @@ void KZTimerModeService::ReduceDuckSlowdown()
 	{
 		this->player->GetMoveServices()->m_flDuckSpeed = DUCK_SPEED_MINIMUM;
 	}
+}
+
+// Полный сброс престрейфа. Зеркало gokz ResetPrestrafeVelMod (gF_PreVelMod = 1.0,
+// gI_PreTickCounter = 0) плюс наше пер-тиковое хозяйство: трекер yaw (иначе первый
+// вызов после смены угла телепортом даёт мусорную дельту и ложный TURN), аккумулятор
+// темпа и привязка «касание уже получило итерацию».
+void KZTimerModeService::ResetPrestrafe()
+{
+	this->preVelMod = 1.0f;
+	this->effectivePreVelMod = 1.0f;
+	this->preTickCounter = 0;
+	// Reset() зовётся и вне игрового кадра (смена режима, спавн) — globals может не быть.
+	CGlobalVars *globals = g_pKZUtils ? g_pKZUtils->GetGlobals() : nullptr;
+	this->preVelModLastChange = globals ? globals->curtime : 0.0f;
+	this->velModTouchIterTime = -1.0f;
+	this->tickYaw = 0.0f;
+	this->prevTickYaw = 0.0f;
+	this->tickYawNum = -1;
+	this->tickYawValid = false;
+	this->preVelModTimeAccum = 0.0f;
+	this->preVelModLastServiceTime = -1.0f;
 }
 
 // Ported from gokz CalcPrestrafeVelMod (KZTimerGlobal).
@@ -1294,9 +1352,16 @@ void KZTimerModeService::OnTeleport(const Vector *newPosition, const QAngle *new
 {
 	if (!this->player->processingMovement)
 	{
-		// Внешний телепорт (чекпоинт и т.п.): HandleTeleport двигает landingTime без
-		// нового касания — рвём привязку, чтобы формула не перенесла старую скорость.
+		// Внешний телепорт (чекпоинт, !start, !tp и т.п.): HandleTeleport двигает
+		// landingTime без нового касания — рвём привязку, чтобы формула не перенесла
+		// старую скорость касания.
+		this->lastLandingSpeed = -1.0f;
 		this->lastLandingSpeedTime = -1.0f;
+		// И сбрасываем сам престрейф: телепорт обнуляет накопленный велмод, иначе он
+		// «переезжает» через телепорт (prekeep) и игрок стартует с готовыми 276 вместо
+		// 250. В gokz это ResetPrestrafeVelMod на GOKZ_OnCountedTeleport_Post
+		// (gokz-mode-kztimer.sp), у нас этого вызова не было вовсе.
+		this->ResetPrestrafe();
 		return;
 	}
 	// Only happens when triggerfix happens.

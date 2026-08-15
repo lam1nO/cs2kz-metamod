@@ -16,6 +16,12 @@
 #define SPEED_NORMAL 250.0f
 // KZTimer prestrafe: tick-counter velMod model (ported from gokz CalcPrestrafeVelMod)
 #define PRE_VELMOD_MAX 1.104f // Max prestrafe velocity modifier: 250 * 1.104 = 276 u/s
+// Частота итераций велмода. Инкремент в формуле фиксированный, не масштабируется
+// frametime, поэтому темп набора престрейфа = частота вызовов. В GO это RunCmd на
+// 128-тиковом сервере, отсюда 128 Гц. Привязываем к времени, а не к числу вызовов
+// движения: сегментов ProcessMovement на тик движок даёт разное число.
+#define KZT_VELMOD_RATE                128.0f
+#define KZT_VELMOD_MAX_ITERS_PER_CALL  2
 // Bhop related — gokz TweakJump: cap horizontal speed at perf to 380 u/s
 #define PERF_SPEED_CAP 380.0f
 // Perf window under legacy jump: jump within this much time after landing = perf.
@@ -180,6 +186,16 @@ class KZTimerModeService : public KZModeService
 	f32 prevTickYaw {};
 	i32 tickYawNum {-1};
 	bool tickYawValid {false};
+	// Темп велмода привязан к РЕАЛЬНОМУ времени (128 Гц — частота RunCmd в GO), а не к
+	// числу вызовов движения: сколько сегментов ProcessMovement движок нарежет на тик,
+	// зависит от субтиковых входов игрока, «ровно два» не гарантированы.
+	f32 preVelModTimeAccum {};
+	f32 preVelModLastServiceTime {-1.0f};
+	// Телеметрия темпа (только под kz_kzt_subtick_debug): сколько сегментов движения
+	// движок дал на текущий тик и сколько итераций велмода мы на нём открутили.
+	// Именно этим на живом сервере проверяется «наш темп == GO@128».
+	i32 velModTickSegments {};
+	i32 velModTickIters {};
 	f32 originalMaxSpeed {};
 
 	bool didTPM {};
@@ -236,6 +252,8 @@ public:
 	// KZTimer prestrafe: tick-counter velMod model (ported from gokz CalcPrestrafeVelMod)
 	f32 CalcPrestrafeVelMod(bool forceGround = false);
 	f32 GetClientMovingDirection();
+	// Полный сброс престрейфа (gokz ResetPrestrafeVelMod + наш пер-тиковый трекер).
+	void ResetPrestrafe();
 
 	void CheckVelocityQuantization();
 	void RemoveCrouchJumpBind();
