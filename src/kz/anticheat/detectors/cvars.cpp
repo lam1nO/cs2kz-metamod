@@ -18,6 +18,14 @@ CConVarRef<bool> sv_cheats("sv_cheats");
 // По умолчанию 1 = поведение upstream. Серверный cvar (не sv_cheats-сёлдж).
 CConVar<bool> kz_anticheat("kz_anticheat", FCVAR_NONE, "Run cs2kz anti-cheat detectors (0 = off; allow assist binds on non-global servers)", true);
 
+// cybershoke: turn-бинды (+left/+right) РАЗРЕШЕНЫ (решение пользователя 15.08).
+// Апстрим их гасит принудительно: KZPlayer::DisableTurnbinds на каждом вызове движения
+// возвращает yaw прошлого кадра, пока зажат один из них. Это не детектор анти-чита —
+// отдельный механизм в KZPlayer, поэтому и cvar отдельный, kz_anticheat его не гейтит.
+// 0 = поведение upstream (гасить).
+CConVar<bool> kz_allow_turnbinds("kz_allow_turnbinds", FCVAR_NONE,
+								 "Allow +left/+right turn binds (0 = upstream behaviour: turn binds are suppressed)", true);
+
 // Мастер-свитч анти-чита (чистый вкл/выкл, без sv_cheats-задержки ShouldRunDetections).
 // Гейтит и детекторы, и анти-чит предупреждения в чате.
 bool KZAnticheatService::IsEnabled()

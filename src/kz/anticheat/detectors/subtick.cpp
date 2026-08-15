@@ -67,7 +67,13 @@ static_global bool HasExcessiveSubtickMovesWithAngles(const PlayerCommand &cmd)
 		{
 			continue;
 		}
-		// Ignore attack buttons and turn binds (since they wouldn't work anyway)
+		// Ignore attack buttons and turn binds.
+		// cybershoke: у апстрима turn-бинды исключены с оговоркой «они всё равно не
+		// работают» — у нас с kz_allow_turnbinds 1 работают. Исключение оставлено
+		// СОЗНАТЕЛЬНО: детектор ищет десабтикинг (пресс и релиз одной кнопки в одну
+		// метку времени с дельтой угла), и у легального turn-бинда дельта угла есть
+		// всегда — включив их сюда, мы получили бы ложные срабатывания на разрешённой
+		// механике, а у этого детектора есть путь до бана.
 		if (step.button() == IN_ATTACK || step.button() == IN_ATTACK2 || step.button() == IN_USE || step.button() == IN_RELOAD
 			|| step.button() == IN_TURNLEFT || step.button() == IN_TURNRIGHT)
 		{

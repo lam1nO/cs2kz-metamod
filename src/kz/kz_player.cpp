@@ -35,12 +35,16 @@
 #include "prac/kz_prac.h"
 
 #include "cs2kz.h"
+#include "convar.h"
 #include "sdk/datatypes.h"
 #include "sdk/entity/cbasetrigger.h"
 #include "vprof.h"
 #include "steam/isteamgameserver.h"
 #include "tier0/memdbgon.h"
 extern CSteamGameServerAPIContext g_steamAPI;
+// Объявлен рядом с kz_anticheat (anticheat/detectors/cvars.cpp): turn-бинды не детектор,
+// но по смыслу это тот же тумблер «помощник-бинды на наших non-global серверах».
+extern CConVar<bool> kz_allow_turnbinds;
 
 void KZPlayer::Init()
 {
@@ -940,7 +944,11 @@ void KZPlayer::DisableTurnbinds()
 	bool usingTurnbinds = (this->IsButtonPressed(IN_TURNLEFT) ^ this->IsButtonPressed(IN_TURNRIGHT));
 	QAngle angles;
 	this->GetAngles(&angles);
-	if (usingTurnbinds)
+	// Turn-бинды разрешены (cyber, решение пользователя 15.08): гасим только при
+	// kz_allow_turnbinds 0. Угол запоминаем в ОБОИХ случаях — иначе после переключения
+	// cvar на живом сервере первый же кадр с зажатым биндом швырнёт игрока на yaw,
+	// протухший с момента последнего «разрешённого» кадра.
+	if (usingTurnbinds && !kz_allow_turnbinds.Get())
 	{
 		angles.y = this->lastValidYaw;
 		// NOTE(GameChaos): Using SetAngles, which uses Teleport makes player movement really weird
