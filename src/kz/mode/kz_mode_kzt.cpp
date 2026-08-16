@@ -26,6 +26,12 @@ CConVar<float> kz_kzt_perf_window("kz_kzt_perf_window", FCVAR_NONE,
                                   "KZT: окно перфа в секундах после физического касания", 0.0078125f);
 CConVar<bool> kz_kzt_subtick_debug("kz_kzt_subtick_debug", FCVAR_NONE,
                                    "KZT: пер-хоповый леджер [kzt-v2] в консоль сервера (временная телеметрия)", false);
+// GO-паритет высоты перфа: в GO флаг земли ставится трассой на 2 юнита вниз БЕЗ сдвига
+// игрока, а на поверхность его стягивает StayOnGround в хвосте WalkMove — перф прыгает
+// раньше этого тика и взлетает выше поверхности (отсюда «перфом блок берётся, промахом
+// нет»). Наш снап origin к земле убивал этот бонус; cvar оставлен как откат к CKZ.
+CConVar<bool> kz_kzt_perf_ground_snap("kz_kzt_perf_ground_snap", FCVAR_NONE,
+                                      "KZT: стягивать origin перфа к поверхности земли (0 = как в CS:GO, перф взлетает выше)", false);
 
 bool KZTimerModePlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool late)
 {
@@ -347,6 +353,17 @@ void KZTimerModeService::OnStopTouchGround()
 		}
 	}
 
+	// Зазор над поверхностью на отрыве: для перфа это и есть бонус высоты, для промаха —
+	// база сравнения (после StayOnGround ожидаем ~0). Трасса GetGroundPosition не
+	// бесплатна — считаем под тем же гейтом, что и печать леджера ниже.
+	f32 dbgTakeoffDz = 0.0f;
+	if (kz_kzt_subtick_debug.GetBool() && this->player->jumped)
+	{
+		Vector originNow;
+		this->player->GetOrigin(&originNow);
+		dbgTakeoffDz = originNow.z - this->player->GetGroundPosition();
+	}
+
 	if (perf)
 	{
 		if (!formulaApplied)
@@ -365,12 +382,17 @@ void KZTimerModeService::OnStopTouchGround()
 			this->player->takeoffVelocity = velocity;
 		}
 
-		// Перф-высота: выровнять origin.z по поверхности земли (консистентность jumpstats, как CKZ).
-		Vector origin;
-		this->player->GetOrigin(&origin);
-		origin.z = this->player->GetGroundPosition();
-		this->player->SetOrigin(origin);
-		this->player->takeoffOrigin = origin;
+		// Перф-высота: под cvar — старое поведение CKZ (выровнять origin.z по поверхности,
+		// консистентность jumpstats). По умолчанию НЕ стягиваем: в GO ни движок, ни GOKZ
+		// перф вниз не двигают, и именно это даёт перфу лишнюю высоту.
+		if (kz_kzt_perf_ground_snap.GetBool())
+		{
+			Vector origin;
+			this->player->GetOrigin(&origin);
+			origin.z = this->player->GetGroundPosition();
+			this->player->SetOrigin(origin);
+			this->player->takeoffOrigin = origin;
+		}
 	}
 
 	// Временная телеметрия v2 (Msg: KZ_LOG не линкуется в сателлит; fflush: stdout
@@ -389,10 +411,10 @@ void KZTimerModeService::OnStopTouchGround()
 		f64 dbgWhole;
 		i32 dbgHalf = modf((f64)g_pKZUtils->GetGlobals()->curtime * ENGINE_FIXED_TICK_RATE, &dbgWhole) > 0.25 ? 1 : 0;
 		Msg("[kzt-v2] %s land=%.0f preC=%.0f takeoff=%.0f press_dt=%.2f tog=%.2f n=%d ceil=%d perf=%d tsp=%d boost=%d duck=%d dfrac=%.2f vm=%.3f "
-			"dyaw=%.2f half=%d seg=%d it=%d\n",
+			"dyaw=%.2f half=%d seg=%d it=%d dz=%.3f snap=%d\n",
 			this->player->GetName(), this->lastLandingSpeed, preC, velocity.Length2D(), pressDt * 1000.0f, realTog * 1000.0f, dbgN, dbgPen,
 			perf ? 1 : 0, kz_kzt_takeoff_speed.GetBool() ? 1 : 0, hasBoost ? 1 : 0, ducked ? 1 : 0, duckFrac, this->effectivePreVelMod, dbgDyaw,
-			dbgHalf, this->velModTickSegments, this->velModTickIters);
+			dbgHalf, this->velModTickSegments, this->velModTickIters, dbgTakeoffDz, kz_kzt_perf_ground_snap.GetBool() ? 1 : 0);
 		fflush(stdout);
 	}
 }
