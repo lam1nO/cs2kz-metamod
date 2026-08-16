@@ -440,10 +440,7 @@ void KZHUDService::UpdateMHUDSpeed()
 	}
 
 	KZPlayer *src = this->MHUDDataSource();
-	Vector velocity, baseVelocity;
-	src->GetVelocity(&velocity);
-	src->GetBaseVelocity(&baseVelocity);
-	velocity += baseVelocity;
+	Vector velocity = KZHUDService::GetDisplayVelocity(src);
 
 	bool useTakeoff = !((src->GetPlayerPawn()->m_fFlags() & FL_ONGROUND
 						 && g_pKZUtils->GetServerGlobals()->curtime - src->landingTime > KZ_HUD_ON_GROUND_THRESHOLD)

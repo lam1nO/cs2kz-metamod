@@ -329,6 +329,14 @@ public:
 	// Клавиши: W A S D J C.
 	static constexpr i32 MHUD_KEY_COUNT = 6;
 
+	// Единственный источник скорости для ЛЮБЫХ показаний худа: velocity + baseVelocity,
+	// а у реплей-бота на паузе — скорость кадра записи (у замороженного бота velocity
+	// принудительно обнулена, чтобы физика его не унесла, — см. replays/playback.cpp).
+	// Веток показа скорости четыре (BuildVersionCHud, GetSpeedText, ComputeBottomState,
+	// particle-MHUD), и считать её каждая обязана одинаково — иначе «0 на паузе»
+	// чинится в одном стиле худа и остаётся в трёх других.
+	static Vector GetDisplayVelocity(KZPlayer *src);
+
 private:
 	// dataSource = источник данных (наблюдаемый при спектировании); nullptr → сам игрок.
 	// Настройки (цвета perf/CJ) всегда идут с this (получателя) — см. GetMHUDColorPref.

@@ -81,6 +81,11 @@ namespace KZ::replaysystem::data
 
 		// Reset replay pause state
 		replay->replayPaused = false;
+
+		// Позиция плейхеда внутри кадра — часть состояния воспроизведения, обнуляется
+		// вместе с ним. Саму скорость (playbackSpeed) здесь НЕ трогаем: сик не должен
+		// сбрасывать выбранную зрителем скорость; она задаётся на старте реплея.
+		replay->tickFraction = 0.0f;
 	}
 
 	ReplayPlayback *GetCurrentReplay()

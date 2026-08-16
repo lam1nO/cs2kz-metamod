@@ -13,6 +13,8 @@
 #include "kz/spec/kz_spec.h"
 #include "kz/replays/kz_replaysystem.h"
 #include "kz/replays/menu.h"              // IsReplayControlsMenuOpen — показания под меню только для !rpmenu
+#include "kz/replays/data.h"              // состояние плейбека: пауза реплея для источника скорости
+#include "kz/replays/playback.h"          // GetDisplayedFrameVelocity — скорость кадра на паузе
 #include "kz/style/kz_style.h"            // GetStyleName для лейбла стиля (деф. Normal) в строке 1
 #include "kz/mode/kz_mode.h"              // KZModeService::GetModeShortName для метки режима в строке 1
 #include "kz/replays/cyb_replay_common.h" // MapMode — тот же маппинг режима, что у PB/WR-фетча
@@ -379,16 +381,35 @@ static_function std::string DropEmptySegments(const std::string &text, const cha
 #define KZ_HUD_C_JUMPBUG "#FFFF20" // престрейф после jumpbug/duckbug
 #define KZ_HUD_C_CJ      "#71EEB8" // приписка C (crouch-jump)
 
+Vector KZHUDService::GetDisplayVelocity(KZPlayer *src)
+{
+	Vector velocity, baseVelocity;
+	src->GetVelocity(&velocity);
+	src->GetBaseVelocity(&baseVelocity);
+	velocity += baseVelocity;
+
+	// Реплей-бот на паузе: его velocity принудительно обнулена, чтобы физика не унесла
+	// замороженного бота (replays/playback.cpp), — худ показывал бы честный, но
+	// бесполезный 0 вместо скорости момента, ради которого зритель и жмёт паузу.
+	// Только на паузе: в движении пешке присвоена та же скорость из кадра записи.
+	if (KZ::replaysystem::data::IsReplayPlaying() && KZ::replaysystem::data::GetCurrentReplay()->replayPaused)
+	{
+		Vector frameVelocity;
+		if (KZ::replaysystem::playback::GetDisplayedFrameVelocity(src, frameVelocity))
+		{
+			return frameVelocity;
+		}
+	}
+	return velocity;
+}
+
 std::string KZHUDService::GetSpeedText(const char *language, KZPlayer *dataSource)
 {
 	// dataSource — источник ДАННЫХ (скорость/перф/крауч-джамп), settings (цвета, через
 	// GetMHUDColorPref/MHUDSettingsSource) — всегда this (получатель). При вызове со
 	// спектатора: cfg->GetSpeedText(language, player) — тот же контракт, что в BuildVersionCHud.
 	KZPlayer *src = dataSource ? dataSource : this->player;
-	Vector velocity, baseVelocity;
-	src->GetVelocity(&velocity);
-	src->GetBaseVelocity(&baseVelocity);
-	velocity += baseVelocity;
+	Vector velocity = KZHUDService::GetDisplayVelocity(src);
 	// Keep the takeoff velocity on for a while after landing so the speed values flicker less.
 	if ((src->GetPlayerPawn()->m_fFlags & FL_ONGROUND
 		 && g_pKZUtils->GetServerGlobals()->curtime - src->landingTime > KZ_HUD_ON_GROUND_THRESHOLD)
@@ -874,10 +895,7 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 	//        когда игрок осел на земле). ---
 	if (showSpeed)
 	{
-		Vector velocity, baseVelocity;
-		dataSource->GetVelocity(&velocity);
-		dataSource->GetBaseVelocity(&baseVelocity);
-		velocity += baseVelocity;
+		Vector velocity = KZHUDService::GetDisplayVelocity(dataSource);
 		i32 speed = RoundFloatToInt(velocity.Length2D());
 
 		bool onGroundSettled = (dataSource->GetPlayerPawn()->m_fFlags() & FL_ONGROUND
@@ -1377,10 +1395,7 @@ void KZHUDService::ComputeBottomState(KZPlayer *player, KZPlayer *target, Bottom
 		out.showKeys = cfg->IsMHUDKeysEnabled();
 		if (out.showSpeed)
 		{
-			Vector velocity, baseVelocity;
-			player->GetVelocity(&velocity);
-			player->GetBaseVelocity(&baseVelocity);
-			velocity += baseVelocity;
+			Vector velocity = KZHUDService::GetDisplayVelocity(player);
 			out.speed = RoundFloatToInt(velocity.Length2D());
 			// Точка отрыва в скобках — то же условие, что в GetSpeedText: в воздухе либо сразу
 			// после приземления (сглаживание мерцания); на лестнице — только с зажатым прыжком.

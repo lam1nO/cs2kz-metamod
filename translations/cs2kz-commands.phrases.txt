@@ -1686,6 +1686,16 @@
 		"de"		"Zeige Informationen über die aktuelle Wiederholung an."
 		"es"		"Mostrar información sobre la repetición actual."
 	}
+  	"Command Description - kz_rpspeed"
+	{
+		"en"		"Set replay playback speed (0.1..4)."
+		"ru"		"Задать скорость воспроизведения повтора (0.1..4)."
+	}
+  	"Command Description - kz_rpstep"
+	{
+		"en"		"Step the paused replay by ticks (negative goes back)."
+		"ru"		"Шагнуть по тикам в приостановленном повторе (отрицательное — назад)."
+	}
   	"Command Description - kz_rppause"
 	{
 		"en"		"Pause or resume the current replay."

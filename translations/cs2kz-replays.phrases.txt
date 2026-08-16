@@ -252,6 +252,34 @@
 		"en"		"{grey}Replay ended."
 		"ru"		"{grey}Реплей завершён."
 	}
+	"Replay - Speed Set"
+	{
+		"#format"	"speed:s"
+		"en"		"{grey}Playback speed: {lime}{speed}{grey}."
+		"ru"		"{grey}Скорость воспроизведения: {lime}{speed}{grey}."
+	}
+	"Replay - Speed Current"
+	{
+		"#format"	"speed:s,min:s,max:s"
+		"en"		"{grey}Playback speed: {lime}{speed}x{grey}. Usage: {lime}!rpspeed {min}{grey}..{lime}{max}{grey}."
+		"ru"		"{grey}Скорость воспроизведения: {lime}{speed}x{grey}. Задать: {lime}!rpspeed {min}{grey}..{lime}{max}{grey}."
+	}
+	"Replay - Invalid Speed"
+	{
+		"en"		"{darkred}Invalid speed. Must be a positive number, e.g. 0.25 or 2."
+		"ru"		"{darkred}Неверная скорость. Нужно положительное число, например 0.25 или 2."
+	}
+	"Replay - Invalid Step"
+	{
+		"en"		"{darkred}Invalid step. Must be a non-zero integer number of ticks."
+		"ru"		"{darkred}Неверный шаг. Нужно ненулевое целое число тиков."
+	}
+	"Replay - Stepped"
+	{
+		"#format"	"frames:d,tick:d,time:s"
+		"en"		"{grey}Stepped {lime}{frames}{grey} tick(s) — tick {lime}{tick}{grey} ({lime}{time}{grey})"
+		"ru"		"{grey}Шаг на {lime}{frames}{grey} тик(ов) — тик {lime}{tick}{grey} ({lime}{time}{grey})"
+	}
 	"Replay - Loading"
 	{
 		"en"		"{grey}Loading replay, please wait..."
@@ -813,6 +841,24 @@
 		"#format"	"step:d"
 		"en"		"Rewind: {step} sec"
 		"ru"		"Перемотка: {step} сек"
+	}
+	"Replay Menu - Speed"
+	{
+		"#format"	"speed:s"
+		"en"		"Speed: {speed}x"
+		"ru"		"Скорость: {speed}x"
+	}
+	// Строка паузы делает два дела: выбор — пауза/продолжить, ◄ ► — шаг на тик записи.
+	// Отдельной строки под шаг нет: бюджет меню — 5 видимых строк (CYBER.md).
+	"Replay Menu - Pause Step"
+	{
+		"en"		"Pause | tick step"
+		"ru"		"Пауза | шаг по тикам"
+	}
+	"Replay Menu - Resume Step"
+	{
+		"en"		"Resume | tick step"
+		"ru"		"Продолжить | шаг по тикам"
 	}
 	"Replay Menu - End"
 	{

@@ -32,6 +32,18 @@ namespace KZ::replaysystem::commands
 	void JumpToReplayTick(KZPlayer *player, const char *input);
 	void GetReplayInfo(KZPlayer *player);
 	void ToggleReplayPause(KZPlayer *player);
+	// Скорость воспроизведения: сколько кадров записи проигрывается за серверный тик.
+	// Кламп — [KZ_REPLAY_SPEED_MIN, KZ_REPLAY_SPEED_MAX]; announce=false для меню,
+	// которое и так показывает значение в своей строке.
+	void SetReplaySpeed(KZPlayer *player, f32 speed, bool announce = true);
+	f32 GetReplaySpeed();
+	// Скорость в текст без хвостовых нулей («0.25», «1», «1.75»), без суффикса «x».
+	void FormatReplaySpeed(f32 speed, char *out, size_t size);
+	// Шаг по тикам записи на стопкадре (frames < 0 — назад). Если реплей не на паузе,
+	// ставит его на паузу: покадровый просмотр без стопкадра смысла не имеет.
+	// announce=false для меню: cs2menus повторяет adjust на удержании клавиши, и строка
+	// в чат на каждый тик залила бы чат.
+	void StepReplay(KZPlayer *player, i32 frames, bool announce = true);
 	// Штатно завершает воспроизведение: убирает бота и снимает флаг плейбека
 	// (та же последовательность, что при естественном конце реплея).
 	void StopReplay(KZPlayer *player);

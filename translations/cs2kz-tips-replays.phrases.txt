@@ -45,6 +45,16 @@
 		"de"		"{grey}Gib {default}!rpinfo {grey}ein, um Informationen zum aktuellen Replay anzuzeigen."
 		"pl"		"{grey}Wpisz {default}!rpinfo {grey}, aby wyświetlić informacje o aktualnej powtórce."
 	}
+	"Tip - kz_rpspeed"
+	{
+		"en"		"{grey}Type {default}!rpspeed 0.25 {grey}to watch the replay in slow motion."
+		"ru"		"{grey}Напишите {default}!rpspeed 0.25{grey}, чтобы смотреть повтор в замедлении."
+	}
+	"Tip - kz_rpstep"
+	{
+		"en"		"{grey}Type {default}!rpstep {grey}to step through the paused replay tick by tick."
+		"ru"		"{grey}Напишите {default}!rpstep{grey}, чтобы листать приостановленный повтор по тикам."
+	}
 	"Tip - kz_rppause"
 	{
 		"en"		"{grey}Type {default}!rppause {grey}to pause or resume the replay playback."

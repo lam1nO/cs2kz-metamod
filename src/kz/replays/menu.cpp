@@ -9,6 +9,8 @@
 
 #include <vendor/mm-cs2menus/src/public/ics2menus.h>
 
+#include <cmath>
+
 #include "tier0/memdbgon.h"
 
 // Меню-движок cs2menus (определён в cs2kz.cpp); может быть nullptr, если плагин не загружен.
@@ -19,17 +21,55 @@ namespace
 	// Пауза — первый пункт меню: подпись живая, пересобирается в OnRpMenuSelect.
 	constexpr int RPMENU_ITEM_PAUSE = 0;
 
-	// Шаги перемотки (сек) для регулируемых строк; знак delta задаёт направление
+	// Шаг перемотки (сек) для регулируемой строки; знак delta задаёт направление
 	// (A/AdjustDec = назад, D/AdjustInc = вперёд).
+	// Вторая строка перемотки (30 сек) убрана, когда появилась строка скорости: бюджет
+	// видимых строк меню — 5 (см. CYBER.md, «Бюджет !rpmenu»), шестая уводит меню в
+	// пагинацию и прячет «Завершить» за «далее». ±30 сек остаётся тройным ► по этой
+	// строке и командой !rpgoto +30.
 	constexpr float RPMENU_SEEK_STEP_10 = 10.0f;
-	constexpr float RPMENU_SEEK_STEP_30 = 30.0f;
 
+	// Строка скорости: индекс фиксирован, подпись живая (перерисовывается после A/D).
+	constexpr int RPMENU_ITEM_SPEED = 3;
+
+	// Пресеты скорости: A/D переключают по списку, а не прибавляют шаг — на замедлении
+	// осмысленны доли (0.25 ощутимо медленнее 0.5), а на ускорении — кратности.
+	constexpr float RPMENU_SPEEDS[] = {0.1f, 0.25f, 0.5f, 1.0f, 2.0f, 4.0f};
+	constexpr int RPMENU_SPEEDS_COUNT = (int)(sizeof(RPMENU_SPEEDS) / sizeof(RPMENU_SPEEDS[0]));
+
+	// Ближайший пресет к текущей скорости: она могла быть задана !rpspeed произвольным
+	// числом, и A/D обязаны продолжить с ближайшей ступени, а не прыгнуть в начало списка.
+	int NearestSpeedIndex(float speed)
+	{
+		int best = 0;
+		for (int i = 1; i < RPMENU_SPEEDS_COUNT; i++)
+		{
+			if (fabsf(RPMENU_SPEEDS[i] - speed) < fabsf(RPMENU_SPEEDS[best] - speed))
+			{
+				best = i;
+			}
+		}
+		return best;
+	}
+
+	std::string SpeedItemText(KZPlayer *player)
+	{
+		using namespace KZ::replaysystem;
+		char speedText[16];
+		commands::FormatReplaySpeed(commands::GetReplaySpeed(), speedText, sizeof(speedText));
+		const char *lang = player->languageService->GetLanguage();
+		return KZLanguageService::PrepareMessageWithLang(lang, "Replay Menu - Speed", speedText);
+	}
+
+	// Строка паузы делает два дела: E — пауза/продолжить, A/D — шаг на один тик записи.
+	// Отдельной строки под шаг нет намеренно — бюджет меню 5 строк (CYBER.md), а жест
+	// «встал на стопкадр и листаю» естественно живёт на той же строке, что и стопкадр.
 	std::string PauseItemText(KZPlayer *player)
 	{
 		using namespace KZ::replaysystem;
 		bool paused = data::IsReplayPlaying() && data::GetCurrentReplay()->replayPaused;
 		const char *lang = player->languageService->GetLanguage();
-		return KZLanguageService::PrepareMessageWithLang(lang, paused ? "Replay Menu - Resume" : "Replay Menu - Pause");
+		return KZLanguageService::PrepareMessageWithLang(lang, paused ? "Replay Menu - Resume Step" : "Replay Menu - Pause Step");
 	}
 
 	// Текст регулируемой строки перемотки: «Перемотка: N сек». Стрелки ◄ ► рисует
@@ -64,9 +104,35 @@ static_function void OnRpMenuAdjust(MenuHandle menu, int slot, int item, f32 del
 	{
 		return;
 	}
+
+	using namespace KZ::replaysystem;
+
+	// Регулируемых строк несколько (перемотка, скорость, шаг) — что именно крутят,
+	// говорит info строки, а не её индекс.
+	const char *key = g_pMenus->GetItemInfo(menu, item);
+	if (key && KZ_STREQ(key, "speed"))
+	{
+		int idx = NearestSpeedIndex(commands::GetReplaySpeed());
+		idx += (delta > 0.0f) ? 1 : -1;
+		idx = idx < 0 ? 0 : (idx >= RPMENU_SPEEDS_COUNT ? RPMENU_SPEEDS_COUNT - 1 : idx);
+		// announce=false: значение видно в самой строке, дублировать его в чат незачем.
+		commands::SetReplaySpeed(p, RPMENU_SPEEDS[idx], false);
+		g_pMenus->SetItemText(menu, RPMENU_ITEM_SPEED, SpeedItemText(p).c_str());
+		return;
+	}
+	if (key && KZ_STREQ(key, "pause"))
+	{
+		// A/D по строке паузы — шаг на тик. announce=false: строку в чат на каждый шаг
+		// печатать нельзя, cs2menus повторяет adjust на удержании клавиши.
+		commands::StepReplay(p, delta > 0.0f ? 1 : -1, false);
+		// Шаг сам ставит реплей на паузу — подпись строки обязана это отразить.
+		g_pMenus->SetItemText(menu, RPMENU_ITEM_PAUSE, PauseItemText(p).c_str());
+		return;
+	}
+
 	char seek[16];
 	V_snprintf(seek, sizeof(seek), "%+d", (int)delta);
-	KZ::replaysystem::commands::JumpToReplayTime(p, seek);
+	commands::JumpToReplayTime(p, seek);
 }
 
 static_function void OnRpMenuSelect(MenuHandle menu, int slot, int item)
@@ -104,11 +170,14 @@ static_function void OnRpMenuSelect(MenuHandle menu, int slot, int item)
 		g_pMenus->CancelMenu(slot);
 		return;
 	}
-	// Регулируемые строки перемотки (info "seek") реагируют на A/D в OnRpMenuAdjust;
+	// Регулируемые строки (info "seek" и "speed") реагируют на A/D в OnRpMenuAdjust;
 	// выбор E по ним ничего не делает — сюда попадём, но действий нет.
 
-	// Подпись паузы — по фактическому состоянию (могла смениться и рестартом, и !rppause мимо меню).
+	// Живые подписи — по фактическому состоянию: и пауза, и скорость могли смениться
+	// мимо меню (!rppause, !rpspeed, рестарт), а обновить их можно только отсюда и из
+	// OnRpMenuAdjust — своего тика у меню нет.
 	g_pMenus->SetItemText(menu, RPMENU_ITEM_PAUSE, PauseItemText(p).c_str());
+	g_pMenus->SetItemText(menu, RPMENU_ITEM_SPEED, SpeedItemText(p).c_str());
 }
 
 void KZ::replaysystem::menu::OpenReplayControlsMenu(KZPlayer *player)
@@ -140,16 +209,21 @@ void KZ::replaysystem::menu::OpenReplayControlsMenu(KZPlayer *player)
 	}
 
 	// Порядок фиксирован: пауза обязана быть пунктом RPMENU_ITEM_PAUSE.
-	g_pMenus->AddItem(m, PauseItemText(player).c_str(), "pause", false);
+	// Строка регулируемая: E (выбор) — пауза/продолжить, A/D — шаг на тик записи.
+	g_pMenus->AddAdjustableItem(m, PauseItemText(player).c_str(), "pause", 1.0f, -1.0f, 1.0f);
 	std::string restart = KZLanguageService::PrepareMessageWithLang(lang, "Replay Menu - Restart");
 	g_pMenus->AddItem(m, restart.c_str(), "restart", false);
 
-	// Перемотка — одной регулируемой строкой на шаг: A (◄) — назад, D (►) — вперёд.
-	// Стрелки рисует движок; текст показывает фиксированный шаг. Вторая строка — шаг 30.
+	// Перемотка — одной регулируемой строкой: A (◄) — назад, D (►) — вперёд.
+	// Стрелки рисует движок; текст показывает фиксированный шаг.
 	std::string seek10 = SeekItemText(player, (int)RPMENU_SEEK_STEP_10);
 	g_pMenus->AddAdjustableItem(m, seek10.c_str(), "seek", RPMENU_SEEK_STEP_10, -RPMENU_SEEK_STEP_10, RPMENU_SEEK_STEP_10);
-	std::string seek30 = SeekItemText(player, (int)RPMENU_SEEK_STEP_30);
-	g_pMenus->AddAdjustableItem(m, seek30.c_str(), "seek", RPMENU_SEEK_STEP_30, -RPMENU_SEEK_STEP_30, RPMENU_SEEK_STEP_30);
+
+	// Скорость воспроизведения: A (◄) — медленнее, D (►) — быстрее, по пресетам.
+	// Индекс строки обязан совпадать с RPMENU_ITEM_SPEED — по нему обновляется подпись.
+	std::string speed = SpeedItemText(player);
+	g_pMenus->AddAdjustableItem(m, speed.c_str(), "speed", 1.0f, -1.0f, 1.0f);
+
 	g_pMenus->SetAdjustCallback(m, &OnRpMenuAdjust);
 
 	// «Завершить» — останавливает реплей и закрывает меню (обрабатывается в OnRpMenuSelect).

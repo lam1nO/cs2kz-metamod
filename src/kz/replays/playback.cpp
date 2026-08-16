@@ -8,6 +8,7 @@
 #include "events.h"
 #include "sdk/usercmd.h"
 #include <vector>
+#include <cmath>
 
 namespace KZ::replaysystem::playback
 {
@@ -159,6 +160,107 @@ namespace KZ::replaysystem::playback
 		}
 	}
 
+	// Порог «между кадрами был телепорт, а не движение», юниты. Обычная скорость в KZ —
+	// сотни u/s, то есть единицы юнитов за тик; сотня юнитов за кадр бывает только на
+	// телепорте/чекпоинте. Интерполировать через такой разрыв нельзя — бот проехал бы
+	// сквозь карту, поэтому на нём сэмпл вырождается в «взять кадр как есть».
+	static constexpr f32 KZ_RP_INTERP_MAX_DIST = 128.0f;
+
+	// Линейная интерполяция угла по кратчайшей дуге: yaw записан в (-180, 180],
+	// без нормализации переход через ±180 развернул бы бота на полный оборот.
+	static_function f32 LerpAngle(f32 a, f32 b, f32 f)
+	{
+		f32 diff = fmodf(b - a + 540.0f, 360.0f) - 180.0f;
+		return a + diff * f;
+	}
+
+	// Состояние кадра, которое имеет смысл интерполировать между записанными тиками.
+	// Остальное (кнопки, присед, оружие, флаги) берётся с ближайшего кадра целиком:
+	// это дискретные величины, у них промежуточного значения не существует.
+	struct SampledState
+	{
+		Vector origin;
+		Vector velocity;
+		QAngle angles;
+	};
+
+	// Сэмпл внутри записанного кадра: frac=0 — начало тика (pre), frac=1 — конец (post).
+	// Именно pre→post, а не pre[i]→pre[i+1]: запись может иметь пропуски тиков, и тогда
+	// pre следующего кадра — уже другой момент времени, а pre/post одного кадра всегда
+	// пара «начало/конец одной симуляции».
+	static_function SampledState SampleFrame(const data::ReplayPlayback *replay, u32 tick, f32 frac)
+	{
+		const TickData *td = &replay->tickData[tick];
+		if (frac <= 0.0f)
+		{
+			return {td->pre.origin, td->pre.velocity, td->pre.angles};
+		}
+		if (frac >= 1.0f)
+		{
+			return {td->post.origin, td->post.velocity, td->post.angles};
+		}
+		if ((td->post.origin - td->pre.origin).Length() > KZ_RP_INTERP_MAX_DIST)
+		{
+			// Телепорт внутри кадра — показываем начало, скачок произойдёт на границе кадра.
+			return {td->pre.origin, td->pre.velocity, td->pre.angles};
+		}
+		SampledState out;
+		out.origin = td->pre.origin + (td->post.origin - td->pre.origin) * frac;
+		out.velocity = td->pre.velocity + (td->post.velocity - td->pre.velocity) * frac;
+		out.angles = QAngle(LerpAngle(td->pre.angles.x, td->post.angles.x, frac), LerpAngle(td->pre.angles.y, td->post.angles.y, frac),
+							LerpAngle(td->pre.angles.z, td->post.angles.z, frac));
+		return out;
+	}
+
+	// Куда плейхед приедет к концу серверного тика, в виде (кадр, доля).
+	// Ровная граница представляется как (кадр-1, 1.0), а не (кадр, 0.0): при скорости 1
+	// это даёт ровно post текущего кадра — то же, что делал код до множителя скорости.
+	static_function void EndOfTickPlayhead(const data::ReplayPlayback *replay, u32 *tick, f32 *frac)
+	{
+		if (replay->tickCount == 0)
+		{
+			// Данных нет — индексировать нечего. Вызывающие это и так гарантируют, но
+			// результат уходит прямо в индекс массива, поэтому гард стоит на месте.
+			*tick = 0;
+			*frac = 0.0f;
+			return;
+		}
+		f32 pos = replay->tickFraction + replay->playbackSpeed;
+		u32 steps = (u32)pos;
+		f32 leftover = pos - (f32)steps;
+		if (leftover <= 0.0f && steps > 0)
+		{
+			steps--;
+			leftover = 1.0f;
+		}
+		u32 target = replay->currentTick + steps;
+		if (target >= replay->tickCount)
+		{
+			target = replay->tickCount - 1;
+			leftover = 1.0f;
+		}
+		*tick = target;
+		*frac = leftover;
+	}
+
+	bool GetDisplayedFrameVelocity(KZPlayer *player, Vector &out)
+	{
+		if (!player || !bot::IsValidBot(player->GetController()))
+		{
+			return false;
+		}
+		auto replay = data::GetCurrentReplay();
+		if (!replay->playingReplay || replay->currentTick >= replay->tickCount)
+		{
+			return false;
+		}
+		u32 tick;
+		f32 frac;
+		EndOfTickPlayhead(replay, &tick, &frac);
+		out = SampleFrame(replay, tick, frac).velocity;
+		return true;
+	}
+
 	void OnPhysicsSimulate(KZPlayer *player)
 	{
 		if (!player || !bot::IsValidBot(player->GetController()))
@@ -175,10 +277,14 @@ namespace KZ::replaysystem::playback
 		TickData *tickData = &replay->tickData[replay->currentTick];
 		auto pawn = player->GetPlayerPawn();
 
+		// Начало тика — сэмпл на текущей позиции плейхеда. При скорости 1 tickFraction
+		// всегда 0, то есть это ровно pre текущего кадра, как было раньше.
+		SampledState pre = SampleFrame(replay, replay->currentTick, replay->tickFraction);
+
 		// Setting the origin via teleport will break client interp, set the values directly
-		pawn->m_CBodyComponent()->m_pSceneNode()->m_vecAbsOrigin(tickData->pre.origin);
-		pawn->m_angEyeAngles(tickData->pre.angles);
-		pawn->m_vecAbsVelocity(tickData->pre.velocity);
+		pawn->m_CBodyComponent()->m_pSceneNode()->m_vecAbsOrigin(pre.origin);
+		pawn->m_angEyeAngles(pre.angles);
+		pawn->m_vecAbsVelocity(pre.velocity);
 
 		auto moveServices = player->GetMoveServices();
 		moveServices->m_LegacyJump().m_flJumpPressedTime =
@@ -261,14 +367,20 @@ namespace KZ::replaysystem::playback
 
 		// Setting the origin via teleport will break client interp, set the values directly.
 		// We have to do it here to be ahead of SetAbsOrigin calls in FinishMove.
-		TickData *tickData = &replay->tickData[replay->currentTick];
-		mv->m_vecAbsOrigin = tickData->post.origin;
-		mv->m_vecVelocity = tickData->post.velocity;
-		mv->m_vecViewAngles = tickData->post.angles;
+		// Позиция конца тика — это то, что реально увидит клиент (сеть отдаёт её раз в тик),
+		// поэтому замедление живёт именно здесь: при скорости <1 плейхед за тик проходит
+		// часть кадра, и бот едет плавно, а не замирает до следующего целого кадра.
+		u32 endTick;
+		f32 endFrac;
+		EndOfTickPlayhead(replay, &endTick, &endFrac);
+		SampledState post = SampleFrame(replay, endTick, endFrac);
+		mv->m_vecAbsOrigin = post.origin;
+		mv->m_vecVelocity = post.velocity;
+		mv->m_vecViewAngles = post.angles;
 
 		// Directly set the pawn's origin/angles/velocity to something else so that they will be resynchronized.
 		auto pawn = player->GetPlayerPawn();
-		pawn->m_CBodyComponent()->m_pSceneNode()->m_vecAbsOrigin(tickData->post.origin + Vector(0, 0, 1000)); // Move it up so it's obviously wrong
+		pawn->m_CBodyComponent()->m_pSceneNode()->m_vecAbsOrigin(post.origin + Vector(0, 0, 1000)); // Move it up so it's obviously wrong
 	}
 
 	void OnPhysicsSimulatePost(KZPlayer *player)
@@ -303,7 +415,15 @@ namespace KZ::replaysystem::playback
 		player->SetMoveType(tickData->post.moveType);
 		u32 playerFlagBits = (-1) & ~((u32)(FL_CLIENT | FL_FAKECLIENT | FL_BOT));
 		pawn->m_fFlags = (pawn->m_fFlags & ~playerFlagBits) | (tickData->post.entityFlags & playerFlagBits);
-		pawn->v_angle = tickData->post.angles;
+		// Углы конца тика — с того же сэмпла, что и позиция в OnFinishMovePre: v_angle
+		// определяет взгляд наблюдателя за ботом, разъехавшись с телом он давал бы рывки
+		// камеры на замедлении. При скорости 1 сэмпл равен post текущего кадра.
+		{
+			u32 angTick;
+			f32 angFrac;
+			EndOfTickPlayhead(replay, &angTick, &angFrac);
+			pawn->v_angle = SampleFrame(replay, angTick, angFrac).angles;
+		}
 
 		// If replay is paused, disable gravity and freeze the bot at current tick
 		if (replay->replayPaused)
@@ -313,7 +433,12 @@ namespace KZ::replaysystem::playback
 			// Keep velocity at zero to prevent movement
 			pawn->m_vecAbsVelocity(Vector(0, 0, 0));
 			// Don't advance tick or process events/jumps
-			if (replay->startTime > 0.0f)
+			// «Таймер рана идёт» — это startTime != 0, а НЕ startTime > 0: якорь считается
+			// как curtime - время события, а curtime обнуляется на смене карты, поэтому на
+			// свежей карте якорь трёхминутного рана штатно отрицателен. С прежним `> 0`
+			// пауза не морозила таймер первые минуты аптайма. Тот же признак, что в
+			// GetReplayTime (data.cpp).
+			if (replay->startTime != 0.0f)
 			{
 				// Зрительская пауза (не записанная): тик заморожен, а curtime идёт —
 				// двигаем startTime, чтобы активное время не росло.
@@ -345,14 +470,44 @@ namespace KZ::replaysystem::playback
 		// набирается в accumulatedPauseTime на TIMER_RESUME (events.cpp), поэтому здесь
 		// тиковая компенсация startTime на записанной паузе НЕ нужна.
 
-		replay->currentTick++;
+		// Продвижение плейхеда со скоростью воспроизведения: за серверный тик проигрывается
+		// playbackSpeed кадров записи. Дробный остаток копится в tickFraction (по нему идёт
+		// интерполяция позы), целая часть — сколько записанных кадров реально пройдено.
+		// При скорости 1 это ровно `currentTick++`, как было.
+		f32 playhead = replay->tickFraction + replay->playbackSpeed;
+		u32 steps = (u32)playhead;
+		replay->tickFraction = playhead - (f32)steps;
+
+		// Время рана обязано идти по КАДРАМ, а не по стенным часам: за этот серверный тик
+		// показано steps кадров, значит время рана выросло на steps интервалов, а curtime —
+		// на один. Разницу гасим сдвигом якоря (та же механика, что у зрительской паузы,
+		// которая есть частный случай steps == 0).
+		// startTime != 0 (а не > 0) — по той же причине, что и в ветке паузы выше.
+		if (steps != 1 && replay->startTime != 0.0f)
+		{
+			f32 drift = (1.0f - (f32)steps) * ENGINE_FIXED_TICK_INTERVAL;
+			replay->startTime += drift;
+			if (replay->paused && replay->pauseStartTime > 0.0f)
+			{
+				replay->pauseStartTime += drift;
+			}
+		}
+
+		replay->currentTick += steps;
 		// Пропуск записанных пауз: если следующий тик попал в паузный сегмент, прыгаем
 		// сразу на кадр возобновления — бот не стоит на месте всю паузу записанного игрока.
 		// Активное время не разъезжается: пропускаются РОВНО паузные тики, поэтому число
 		// реально проигранных кадров = число активных тиков, и curtime-startTime и так даёт
 		// активное время (accumulatedPauseTime остаётся ~0: TIMER_PAUSE и TIMER_RESUME
 		// обрабатываются в CheckEvents одним кадром на возобновлении).
+		u32 tickBeforeSkip = replay->currentTick;
 		replay->currentTick = AdvancePastPauses(replay->currentTick);
+		if (replay->currentTick != tickBeforeSkip)
+		{
+			// Перепрыгнули паузный сегмент — приземлились ровно на кадр возобновления,
+			// доля внутри кадра к нему не относится.
+			replay->tickFraction = 0.0f;
+		}
 		if (replay->currentTick >= replay->tickCount)
 		{
 			bot::KickBot();
@@ -567,6 +722,10 @@ namespace KZ::replaysystem::playback
 		replay->playingReplay = true;
 		replay->replayPaused = false;
 		replay->currentTick = 0;
+		// Новый реплей всегда стартует в обычной скорости: прошлый зритель мог оставить
+		// замедление, а следующий об этом не знает (бот и реплей в сети — одни на всех).
+		replay->playbackSpeed = 1.0f;
+		replay->tickFraction = 0.0f;
 		g_lastFailedGiveItemDef = -1;
 		// Разбор диапазонов записанных пауз (для их пропуска при воспроизведении).
 		BuildPauseSegments();

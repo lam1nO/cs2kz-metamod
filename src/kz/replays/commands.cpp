@@ -26,6 +26,7 @@
 #include "vendor/sql_mm/src/public/sql_mm.h"
 #include <cctype>
 #include <cstdlib>
+#include <algorithm>
 #include <functional>
 #include <optional>
 #include <string>
@@ -683,6 +684,107 @@ namespace KZ::replaysystem::commands
 		}
 	}
 
+	// Формат скорости для чата и меню: 0.25, 1, 1.75 — без хвостовых нулей, потому что
+	// «1.00» в строке меню читается хуже, чем «1». Точность 3 знака после запятой:
+	// %.2g округлял бы 1.75 до «1.8», то есть показывал НЕ то, что применено.
+	// Суффикс «x» дописывают фразы перевода, а не эта функция.
+	void FormatReplaySpeed(f32 speed, char *out, size_t size)
+	{
+		V_snprintf(out, (int)size, "%.3f", speed);
+		char *dot = strchr(out, '.');
+		if (!dot)
+		{
+			return;
+		}
+		char *end = out + strlen(out) - 1;
+		while (end > dot && *end == '0')
+		{
+			*end-- = '\0';
+		}
+		if (end == dot)
+		{
+			*dot = '\0';
+		}
+	}
+
+	f32 GetReplaySpeed()
+	{
+		return data::IsReplayPlaying() ? data::GetCurrentReplay()->playbackSpeed : 1.0f;
+	}
+
+	void SetReplaySpeed(KZPlayer *player, f32 speed, bool announce)
+	{
+		if (!player)
+		{
+			return;
+		}
+
+		if (!data::IsReplayPlaying())
+		{
+			player->languageService->PrintChat(true, false, "Replay - No Replay Playing");
+			return;
+		}
+
+		speed = (std::min)((std::max)(speed, data::KZ_REPLAY_SPEED_MIN), data::KZ_REPLAY_SPEED_MAX);
+
+		auto replay = data::GetCurrentReplay();
+		replay->playbackSpeed = speed;
+
+		if (announce)
+		{
+			char speedText[16];
+			FormatReplaySpeed(speed, speedText, sizeof(speedText));
+			player->languageService->PrintChat(true, false, "Replay - Speed Set", speedText);
+		}
+	}
+
+	void StepReplay(KZPlayer *player, i32 frames, bool announce)
+	{
+		if (!player)
+		{
+			return;
+		}
+
+		if (!data::IsReplayPlaying())
+		{
+			player->languageService->PrintChat(true, false, "Replay - No Replay Playing");
+			return;
+		}
+
+		auto replay = data::GetCurrentReplay();
+		if (replay->tickCount == 0)
+		{
+			// Индексировать нечего. Остальные сик-пути отсекают это проверкой
+			// targetTick >= tickCount, здесь цель считается от currentTick — гард свой.
+			return;
+		}
+
+		// Шаг по тикам имеет смысл только на стопкадре — иначе следующий же тик
+		// плейбека затрёт результат. Не в паузе — встаём в неё сами, это и есть намерение.
+		// О самом факте остановки сообщаем ВСЕГДА, даже при announce=false: первое A/D по
+		// строке паузы в !rpmenu иначе молча замораживает реплей, и это читается как «завис».
+		if (!replay->replayPaused)
+		{
+			player->languageService->PrintChat(true, false, "Replay - Paused");
+		}
+		// Арифметика в i64: frames приходит из чата, i32-сложение переполнялось бы (UB).
+		i64 target = (i64)replay->currentTick + (i64)frames;
+		target = (std::min)((std::max)(target, (i64)0), (i64)replay->tickCount - 1);
+
+		NavigateReplay(player, (u32)target);
+		// NavigateReplay проходит через ResetReplayState, а тот снимает паузу — для сика
+		// это верно (зритель перематывает и смотрит дальше), для шага нет: стопкадр обязан
+		// остаться стопкадром. Возвращаем паузу после навигации, а не до.
+		replay->replayPaused = true;
+
+		if (announce)
+		{
+			char time[32];
+			utils::FormatTime(replay->currentTick * ENGINE_FIXED_TICK_INTERVAL, time, sizeof(time), false);
+			player->languageService->PrintChat(true, false, "Replay - Stepped", frames, replay->currentTick, time);
+		}
+	}
+
 	void StopReplay(KZPlayer *player)
 	{
 		if (!data::IsReplayPlaying())
@@ -1268,6 +1370,68 @@ SCMD(kz_rpgototick, SCFL_REPLAY)
 	}
 
 	KZ::replaysystem::commands::JumpToReplayTick(player, args->Arg(1));
+	return MRES_SUPERCEDE;
+}
+
+SCMD(kz_rpspeed, SCFL_REPLAY)
+{
+	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
+	if (!player)
+	{
+		return MRES_SUPERCEDE;
+	}
+
+	if (args->ArgC() < 2)
+	{
+		// Без аргумента — показываем текущую скорость и границы, а не ругаемся:
+		// команда чаще зовётся «а сейчас сколько?», чем по ошибке.
+		char speedText[16], minText[16], maxText[16];
+		KZ::replaysystem::commands::FormatReplaySpeed(KZ::replaysystem::commands::GetReplaySpeed(), speedText, sizeof(speedText));
+		KZ::replaysystem::commands::FormatReplaySpeed(KZ::replaysystem::data::KZ_REPLAY_SPEED_MIN, minText, sizeof(minText));
+		KZ::replaysystem::commands::FormatReplaySpeed(KZ::replaysystem::data::KZ_REPLAY_SPEED_MAX, maxText, sizeof(maxText));
+		player->languageService->PrintChat(true, false, "Replay - Speed Current", speedText, minText, maxText);
+		return MRES_SUPERCEDE;
+	}
+
+	char *endPtr = nullptr;
+	f32 speed = (f32)strtod(args->Arg(1), &endPtr);
+	if (endPtr == args->Arg(1) || *endPtr != '\0' || !(speed > 0.0f))
+	{
+		player->languageService->PrintChat(true, false, "Replay - Invalid Speed");
+		return MRES_SUPERCEDE;
+	}
+
+	KZ::replaysystem::commands::SetReplaySpeed(player, speed);
+	return MRES_SUPERCEDE;
+}
+
+SCMD(kz_rpstep, SCFL_REPLAY)
+{
+	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
+	if (!player)
+	{
+		return MRES_SUPERCEDE;
+	}
+
+	// Без аргумента — шаг на один кадр вперёд: это основной жест покадрового просмотра.
+	i32 frames = 1;
+	if (args->ArgC() >= 2)
+	{
+		char *endPtr = nullptr;
+		long parsed = strtol(args->Arg(1), &endPtr, 10);
+		if (endPtr == args->Arg(1) || *endPtr != '\0' || parsed == 0)
+		{
+			player->languageService->PrintChat(true, false, "Replay - Invalid Step");
+			return MRES_SUPERCEDE;
+		}
+		// Кламп ДО приведения к i32: без него !rpstep 99999999999 (strtol → LONG_MAX)
+		// после среза давал бы −1, то есть шаг НАЗАД вместо «в конец записи».
+		const long limit = (long)KZ::replaysystem::data::GetTickCount();
+		parsed = (std::min)((std::max)(parsed, -limit), limit);
+		frames = (i32)parsed;
+	}
+
+	KZ::replaysystem::commands::StepReplay(player, frames);
 	return MRES_SUPERCEDE;
 }
 

@@ -262,7 +262,7 @@ namespace KZ::replaysystem::events
 				replay->pausedTime =
 					event->data.timer.time > 0.0f
 						? event->data.timer.time
-						: (replay->startTime > 0.0f
+						: (replay->startTime != 0.0f
 							   ? g_pKZUtils->GetServerGlobals()->curtime - replay->startTime - replay->accumulatedPauseTime
 							   : 0.0f);
 				// Якорь аккумулятора: curtime входа в паузу. startTime НЕ трогаем.
@@ -393,7 +393,7 @@ namespace KZ::replaysystem::events
 			if (event->serverTick > targetServerTick)
 			{
 				// If we're in a pause that extends past our target, add partial pause time
-				if (inPause && inActiveTimerRun && replay->startTime > 0.0f)
+				if (inPause && inActiveTimerRun && replay->startTime != 0.0f)
 				{
 					// Find tick data indices
 					u32 pauseStartTickIndex = 0;
@@ -564,12 +564,16 @@ namespace KZ::replaysystem::events
 			}
 		}
 
+		// «Ран идёт» — startTime != 0, а не > 0: якорь = curtime - время события, а curtime
+		// обнуляется на смене карты, поэтому на свежей карте якорь штатно отрицателен
+		// (тот же признак, что в GetReplayTime). С прежним `> 0` пауза и компенсация
+		// времени молча выключались первые минуты аптайма карты.
 		// Аккумулятор пауз (та же модель, что в live-пути): startTime остаётся сырым
 		// якорем старта рана, накопленная пауза учитывается отдельно и вычитается в
 		// GetReplayTime. NavigateReplay всегда зовёт ResetReplayState перед reprocess'ом
 		// (accumulatedPauseTime/pauseStartTime уже обнулены), а TIMER_START внутри цикла
 		// обнуляет их повторно на свежий ран — поэтому += задаёт полную паузу до target.
-		if (replay->startTime > 0.0f)
+		if (replay->startTime != 0.0f)
 		{
 			replay->accumulatedPauseTime += totalPauseTime;
 			// Если перемотка приземлилась ВНУТРИ записанной паузы — заякорить её для

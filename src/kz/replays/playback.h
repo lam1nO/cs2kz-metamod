@@ -36,6 +36,12 @@ namespace KZ::replaysystem::playback
 	u32 SnapSeekTargetOutOfPause(u32 tick);
 	void ResetPauseCursor(u32 tick);
 
+	// Скорость кадра, на котором стоит бот прямо сейчас (с учётом дробной позиции
+	// плейхеда при замедлении). Нужна худу: на паузе velocity пешки принудительно
+	// обнулена, чтобы бота не унесло физикой, и спрашивать её бесполезно — там всегда 0.
+	// false, если игрок не реплей-бот или реплей не воспроизводится.
+	bool GetDisplayedFrameVelocity(KZPlayer *player, Vector &out);
+
 	// Navigation support
 	void NavigateToTick(u32 targetTick);
 	void ApplyTickState(KZPlayer *player, const TickData *tickData);
