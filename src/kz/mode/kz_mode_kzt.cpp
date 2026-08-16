@@ -26,17 +26,13 @@ CConVar<float> kz_kzt_perf_window("kz_kzt_perf_window", FCVAR_NONE,
                                   "KZT: окно перфа в секундах после физического касания", 0.0078125f);
 CConVar<bool> kz_kzt_subtick_debug("kz_kzt_subtick_debug", FCVAR_NONE,
                                    "KZT: пер-хоповый леджер [kzt-v2] в консоль сервера (временная телеметрия)", false);
-// GO-паритет высоты перфа: в GO флаг земли ставится трассой на 2 юнита вниз БЕЗ сдвига
-// игрока, а на поверхность его стягивает StayOnGround в хвосте WalkMove — перф прыгает
-// раньше этого тика и взлетает выше поверхности (отсюда «перфом блок берётся, промахом
-// нет»). Наш снап origin к земле убивал этот бонус; cvar оставлен как откат к CKZ.
-CConVar<bool> kz_kzt_perf_ground_snap("kz_kzt_perf_ground_snap", FCVAR_NONE,
-                                      "KZT: стягивать origin перфа к поверхности земли (0 = как в CS:GO, перф взлетает выше)", false);
+// Высота перфа над обычным прыжком. Ровно +1 юнит: обычный прыжок 55.83 (в даке 64.83),
+// перф 56.83 (65.83) — 57-й и 66-й блоки недостижимы, 66-й только через crouchjump.
+CConVar<float> kz_kzt_perf_height_bonus("kz_kzt_perf_height_bonus", FCVAR_NONE, "KZT: бонус высоты перфа в юнитах", 1.0f);
 // Замер 16.08 на канарейке: у всех 20 перфов зазор над поверхностью нулевой, а ненулевой
 // (до 0.974) дали только буферные пре-клики, которые строгое правило v2 считает промахом.
 // В GOKZ HitPerf структурный и такие прыжки включал — отсюда версия для сравнения.
-CConVar<bool> kz_kzt_perf_structural("kz_kzt_perf_structural", FCVAR_NONE,
-                                     "KZT: перф по-GOKZ — структурный (буферный пре-клик тоже перф); гейтит и скорость, и HUD", false);
+CConVar<bool> kz_kzt_perf_structural("kz_kzt_perf_structural", FCVAR_NONE, "KZT: перф по-GOKZ (структурный)", false);
 
 bool KZTimerModePlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool late)
 {
@@ -212,6 +208,25 @@ const CVValue_t *KZTimerModeService::GetModeConVarValues()
 	return modeCvarValues;
 }
 
+bool KZTimerModeService::FindGroundZ(const Vector &origin, f32 &groundZ)
+{
+	// Зеркало MovementPlayer::GetGroundPosition, но с честным «нашли/не нашли»: там
+	// фолбэком возвращается сам origin, и промах трассы притворяется полом под ногами.
+	bbox_t bounds;
+	this->player->GetBBoxBounds(&bounds);
+	CTraceFilterPlayerMovementCS filter(this->player->GetPlayerPawn());
+	Vector ground = origin;
+	ground.z -= 2;
+	trace_t trace;
+	INavPhysicsInterface::TraceShape(Ray_t(bounds.mins, bounds.maxs), origin, ground, &filter, &trace);
+	if (trace.m_bStartInSolid || trace.m_flFraction == 1.0f)
+	{
+		return false;
+	}
+	groundZ = trace.m_vEndPos.z;
+	return true;
+}
+
 void KZTimerModeService::OnStopTouchGround()
 {
 	if (this->player->GetMoveType() != MOVETYPE_WALK)
@@ -260,8 +275,9 @@ void KZTimerModeService::OnStopTouchGround()
 	// Версия «как GOKZ»: перф структурный, буферный пре-клик тоже перф. Меняет НЕ только
 	// высоту — тем же флагом гейтятся перф-модель скорости (ноль трения, кап 380), HUD и
 	// старт таймера. Дефолт 0 = строгое правило v2 (решение пользователя 2026-07-19).
-	bool strictPerf = perf; // строгий вердикт v2 — в леджер отдельным полем, чтобы под
-	                        // включённым cvar было видно расхождение классификаций
+	// Строгий вердикт v2 — в леджер отдельным полем, чтобы под включённым cvar было
+	// видно расхождение классификаций.
+	bool strictPerf = perf;
 	if (kz_kzt_perf_structural.GetBool())
 	{
 		perf = this->player->jumped && structuralPerf && !this->player->possibleLadderHop && !this->player->takeoffFromLadder;
@@ -375,16 +391,10 @@ void KZTimerModeService::OnStopTouchGround()
 		}
 	}
 
-	// Зазор над поверхностью на отрыве: для перфа это и есть бонус высоты, для промаха —
-	// база сравнения (после StayOnGround ожидаем ~0). Трасса GetGroundPosition не
-	// бесплатна — считаем под тем же гейтом, что и печать леджера ниже.
-	f32 dbgTakeoffDz = 0.0f;
-	if (kz_kzt_subtick_debug.GetBool() && this->player->jumped)
-	{
-		Vector originNow;
-		this->player->GetOrigin(&originNow);
-		dbgTakeoffDz = originNow.z - this->player->GetGroundPosition();
-	}
+	// Зазор над поверхностью ДО нормализации — в леджер, чтобы видеть, что именно
+	// движок раздавал. -1 = не мерили (прыжок не нормализовался: буст, ладдер, нет пола),
+	// иначе честный ноль был бы неотличим от «не мерили».
+	f32 dbgTakeoffDz = -1.0f;
 
 	if (perf)
 	{
@@ -403,15 +413,59 @@ void KZTimerModeService::OnStopTouchGround()
 			}
 			this->player->takeoffVelocity = velocity;
 		}
+	}
 
-		// Перф-высота: под cvar — старое поведение CKZ (выровнять origin.z по поверхности,
-		// консистентность jumpstats). По умолчанию НЕ стягиваем: в GO ни движок, ни GOKZ
-		// перф вниз не двигают, и именно это даёт перфу лишнюю высоту.
-		if (kz_kzt_perf_ground_snap.GetBool())
+	// Высота тейкоффа — ДЕТЕРМИНИРОВАННО и на КАЖДОМ прыжке.
+	// Движок ставит FL_ONGROUND трассой на 2 юнита вниз, НЕ двигая игрока, а субтиковый
+	// прыжок успевает сработать раньше, чем игрок доехал до пола. Замер на канарейке
+	// 16.08: отрыв случался с произвольной высоты 0…1.84 над поверхностью, а апекс
+	// считается от точки отрыва — отсюда «бхопом залезаю на 56-й блок без дака и на 66-й
+	// с даком» вместо 55.83 / 64.83. Высота прыжка в KZ — счётная величина, разыгрывать
+	// её нельзя. Промах кладём ровно на поверхность, перфу даём ровно бонус.
+	// Бустеры и нулевой импульс (анти-бхоп зона, jumpFactor 0) исключены: там высоту
+	// задаёт не наш прыжок, и нормализация испортила бы выверенную геометрию карты.
+	i32 dbgBump = -1; // -1 не применяли, 0 применили, 1 отказ по габариту, 2 пол не найден
+	if (this->player->jumped && !this->player->takeoffFromLadder && !this->player->possibleLadderHop && !hasBoost && velocity.z > 0.0f)
+	{
+		Vector origin;
+		this->player->GetOrigin(&origin);
+		f32 groundZ;
+		if (!this->FindGroundZ(origin, groundZ))
 		{
-			Vector origin;
-			this->player->GetOrigin(&origin);
-			origin.z = this->player->GetGroundPosition();
+			// Пола под ногами не нашли (startsolid, движущаяся платформа, вода). Бонус
+			// поверх неизвестного зазора — ровно тот дефект, который тут и чинится,
+			// поэтому не трогаем ничего.
+			dbgBump = 2;
+		}
+		else
+		{
+			dbgTakeoffDz = origin.z - groundZ;
+			f32 bonus = MIN(MAX(0.0f, kz_kzt_perf_height_bonus.Get()), KZT_PERF_HEIGHT_BONUS_MAX);
+			f32 targetZ = groundZ + (perf ? bonus : 0.0f);
+			dbgBump = 0;
+			if (targetZ > origin.z)
+			{
+				// Подъём вслепую вклеил бы игрока в потолок под низким перекрытием —
+				// проверяем габаритом, что место есть; нет — оставляем как было.
+				bbox_t bounds;
+				this->player->GetBBoxBounds(&bounds);
+				CTraceFilterPlayerMovementCS filter(this->player->GetPlayerPawn());
+				Vector dest = origin;
+				dest.z = targetZ;
+				trace_t trace;
+				INavPhysicsInterface::TraceShape(Ray_t(bounds.mins, bounds.maxs), origin, dest, &filter, &trace);
+				if (trace.m_bStartInSolid || trace.m_flFraction < 1.0f)
+				{
+					// Места на бонус нет — но высоту всё равно детерминируем: вниз, на
+					// пол, двигать безопасно (трасса вниз уже сделана). Иначе в этой
+					// ветке осталась бы ровно та случайная высота, которую мы чиним.
+					targetZ = groundZ;
+					dbgBump = 1;
+				}
+			}
+			// Свип триггеров по пути не делаем осознанно: вниз полосу уже подмёл свип
+			// приземления (OnStartTouchGround), вверх игрок тут же пролетает сам.
+			origin.z = targetZ;
 			this->player->SetOrigin(origin);
 			this->player->takeoffOrigin = origin;
 		}
@@ -433,11 +487,10 @@ void KZTimerModeService::OnStopTouchGround()
 		f64 dbgWhole;
 		i32 dbgHalf = modf((f64)g_pKZUtils->GetGlobals()->curtime * ENGINE_FIXED_TICK_RATE, &dbgWhole) > 0.25 ? 1 : 0;
 		Msg("[kzt-v2] %s land=%.0f preC=%.0f takeoff=%.0f press_dt=%.2f tog=%.2f n=%d ceil=%d perf=%d tsp=%d boost=%d duck=%d dfrac=%.2f vm=%.3f "
-			"dyaw=%.2f half=%d seg=%d it=%d dz=%.3f snap=%d sperf=%d vperf=%d\n",
+			"dyaw=%.2f half=%d seg=%d it=%d dz=%.3f vz=%.1f bump=%d sperf=%d vperf=%d\n",
 			this->player->GetName(), this->lastLandingSpeed, preC, velocity.Length2D(), pressDt * 1000.0f, realTog * 1000.0f, dbgN, dbgPen,
 			perf ? 1 : 0, kz_kzt_takeoff_speed.GetBool() ? 1 : 0, hasBoost ? 1 : 0, ducked ? 1 : 0, duckFrac, this->effectivePreVelMod, dbgDyaw,
-			dbgHalf, this->velModTickSegments, this->velModTickIters, dbgTakeoffDz, kz_kzt_perf_ground_snap.GetBool() ? 1 : 0,
-			structuralPerf ? 1 : 0, strictPerf ? 1 : 0);
+			dbgHalf, this->velModTickSegments, this->velModTickIters, dbgTakeoffDz, velocity.z, dbgBump, structuralPerf ? 1 : 0, strictPerf ? 1 : 0);
 		fflush(stdout);
 	}
 }

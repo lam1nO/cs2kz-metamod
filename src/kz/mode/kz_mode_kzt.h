@@ -28,6 +28,10 @@
 // Mode detects perf itself (base sets inPerf only for modern jump). 1/128 s = ~один
 // 128-tick кадр после приземления — строгий KZTimer-перф (важное условие режима).
 #define KZT_PERF_WINDOW 0.0078125f // 1/128
+// Потолок бонуса высоты перфа. Cvar меняет достижимую геометрию, а KZ-рекорды по сети
+// общие — сервер с произвольным бонусом давал бы несравнимые рекорды. Ровно 1.0: спека
+// «перф 56.83, 57-й блок недостижим», поэтому cvar умеет только уменьшать бонус.
+#define KZT_PERF_HEIGHT_BONUS_MAX 1.0f
 // Дальше этого времени на земле формула скорости не применяется — движок как есть
 #define KZT_BHOP_FORMULA_RANGE (4.0f * ENGINE_FIXED_TICK_INTERVAL)
 // Misc
@@ -254,6 +258,12 @@ public:
 	f32 GetClientMovingDirection();
 	// Полный сброс престрейфа (gokz ResetPrestrafeVelMod + наш пер-тиковый трекер).
 	void ResetPrestrafe();
+
+	// Пол под игроком с ЧЕСТНЫМ признаком «нашли». MovementPlayer::GetGroundPosition при
+	// startsolid или промахе трассы возвращает сам origin, из-за чего «пола нет»
+	// неотличимо от «пол ровно под ногами» — нормализация высоты на этом навесила бы
+	// бонус поверх неизвестного зазора. Возвращает false, если пол не найден.
+	bool FindGroundZ(const Vector &origin, f32 &groundZ);
 
 	void CheckVelocityQuantization();
 	void RemoveCrouchJumpBind();
