@@ -32,6 +32,11 @@ CConVar<bool> kz_kzt_subtick_debug("kz_kzt_subtick_debug", FCVAR_NONE,
 // нет»). Наш снап origin к земле убивал этот бонус; cvar оставлен как откат к CKZ.
 CConVar<bool> kz_kzt_perf_ground_snap("kz_kzt_perf_ground_snap", FCVAR_NONE,
                                       "KZT: стягивать origin перфа к поверхности земли (0 = как в CS:GO, перф взлетает выше)", false);
+// Замер 16.08 на канарейке: у всех 20 перфов зазор над поверхностью нулевой, а ненулевой
+// (до 0.974) дали только буферные пре-клики, которые строгое правило v2 считает промахом.
+// В GOKZ HitPerf структурный и такие прыжки включал — отсюда версия для сравнения.
+CConVar<bool> kz_kzt_perf_structural("kz_kzt_perf_structural", FCVAR_NONE,
+                                     "KZT: перф по-GOKZ — структурный (буферный пре-клик тоже перф); гейтит и скорость, и HUD", false);
 
 bool KZTimerModePlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool late)
 {
@@ -217,6 +222,14 @@ void KZTimerModeService::OnStopTouchGround()
 	Vector velocity;
 	this->player->GetVelocity(&velocity);
 
+	// Структурный перф — ровно семантика HitPerf в GOKZ: между касанием и прыжком не было
+	// наземного WalkMove-тика, буферный пре-клик тоже перф. Считаем условие сами, а НЕ
+	// читаем player->inPerf: там оно верно лишь пока KZT держит sv_legacy_jump=true (иначе
+	// kz_player.cpp:883 перезапишет флаг вердиктом субтикового окна до нашего хука).
+	// oldWalkMoved обновляется в OnProcessMovementPost, то есть после нас — значение то же,
+	// что видел mv_hooks.cpp:286.
+	bool structuralPerf = !this->player->takeoffFromLadder && !this->player->oldWalkMoved;
+
 	// v2 «честный субтик»: перф — реальный клик в окне СТРОГО ПОСЛЕ физического
 	// касания (landingTimeActual: трейс-фракция/ледж/прогноз, вычисляет core).
 	// inPerf ПЕРЕЗАПИСЫВАЕМ (как в базе): один флаг гейтит кап, HUD и старт таймера.
@@ -244,6 +257,15 @@ void KZTimerModeService::OnStopTouchGround()
 	// структурный и включал буферные прессы), решение пользователя 2026-07-19.
 	bool perf = this->player->jumped && pressTime > 0.0f && pressDt > 0.0f
 				&& pressDt <= kz_kzt_perf_window.Get() && !this->player->possibleLadderHop && !this->player->takeoffFromLadder;
+	// Версия «как GOKZ»: перф структурный, буферный пре-клик тоже перф. Меняет НЕ только
+	// высоту — тем же флагом гейтятся перф-модель скорости (ноль трения, кап 380), HUD и
+	// старт таймера. Дефолт 0 = строгое правило v2 (решение пользователя 2026-07-19).
+	bool strictPerf = perf; // строгий вердикт v2 — в леджер отдельным полем, чтобы под
+	                        // включённым cvar было видно расхождение классификаций
+	if (kz_kzt_perf_structural.GetBool())
+	{
+		perf = this->player->jumped && structuralPerf && !this->player->possibleLadderHop && !this->player->takeoffFromLadder;
+	}
 	this->player->inPerf = perf;
 
 	f32 preC = velocity.Length2D();
@@ -411,10 +433,11 @@ void KZTimerModeService::OnStopTouchGround()
 		f64 dbgWhole;
 		i32 dbgHalf = modf((f64)g_pKZUtils->GetGlobals()->curtime * ENGINE_FIXED_TICK_RATE, &dbgWhole) > 0.25 ? 1 : 0;
 		Msg("[kzt-v2] %s land=%.0f preC=%.0f takeoff=%.0f press_dt=%.2f tog=%.2f n=%d ceil=%d perf=%d tsp=%d boost=%d duck=%d dfrac=%.2f vm=%.3f "
-			"dyaw=%.2f half=%d seg=%d it=%d dz=%.3f snap=%d\n",
+			"dyaw=%.2f half=%d seg=%d it=%d dz=%.3f snap=%d sperf=%d vperf=%d\n",
 			this->player->GetName(), this->lastLandingSpeed, preC, velocity.Length2D(), pressDt * 1000.0f, realTog * 1000.0f, dbgN, dbgPen,
 			perf ? 1 : 0, kz_kzt_takeoff_speed.GetBool() ? 1 : 0, hasBoost ? 1 : 0, ducked ? 1 : 0, duckFrac, this->effectivePreVelMod, dbgDyaw,
-			dbgHalf, this->velModTickSegments, this->velModTickIters, dbgTakeoffDz, kz_kzt_perf_ground_snap.GetBool() ? 1 : 0);
+			dbgHalf, this->velModTickSegments, this->velModTickIters, dbgTakeoffDz, kz_kzt_perf_ground_snap.GetBool() ? 1 : 0,
+			structuralPerf ? 1 : 0, strictPerf ? 1 : 0);
 		fflush(stdout);
 	}
 }
