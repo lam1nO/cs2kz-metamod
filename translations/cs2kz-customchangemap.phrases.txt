@@ -1,24 +1,52 @@
 "Phrases"
 {
+	// ВНИМАНИЕ: у фразы С аргументами блок "#format" ОБЯЗАТЕЛЕН, а плейсхолдеры — токены
+	// {name}, не printf-спецификаторы. Без "#format" PrepareMessageWithLang возвращает строку
+	// как есть, НЕ вызывая tfm::format (kz_language.h:122-138): аргумент молча выбрасывается,
+	// а printf-спецификатор доезжает до второго vsnprintf в KZPlayer::PrintChat уже без
+	// varargs — то есть читается мусор из стека. Именно так тут и было до 17.08: весь файл
+	// жил на `%s`/`%i` без "#format", и игрок вместо названия карты видел «null» или случайный
+	// символ (жалоба 17.08). Цветовые токены {darkred}/{default} к "#format" отношения не
+	// имеют — BuildTemplate заменяет только объявленные имена, остальные фигурные скобки
+	// достаются CFormat во втором проходе.
 	"Mcustom - Downloading"
 	{
-		"en"	"Downloading map {darkred}%s{default}…"
-		"ru"	"Скачиваю карту {darkred}%s{default}…"
+		"#format"	"map:s"
+		"en"	"Downloading map {darkred}{map}{default}…"
+		"ru"	"Скачиваю карту {darkred}{map}{default}…"
 	}
 	"Mcustom - Ready"
 	{
-		"en"	"Map {darkred}%s{default} ready, switching…"
-		"ru"	"Карта {darkred}%s{default} готова, переключаю…"
+		"#format"	"map:s"
+		"en"	"Map {darkred}{map}{default} ready, switching…"
+		"ru"	"Карта {darkred}{map}{default} готова, переключаю…"
+	}
+	// Безымянные варианты: имени карты нет ни от вызывающего, ни на диске (докачка ещё не
+	// началась). Решение пользователя 17.08: лучше вообще без названия, чем workshop-ID или
+	// мусор. Аргументов нет — поэтому и "#format" здесь не нужен.
+	"Mcustom - Downloading Unnamed"
+	{
+		"en"	"Downloading the map…"
+		"ru"	"Скачиваю карту…"
+	}
+	"Mcustom - Ready Unnamed"
+	{
+		"en"	"Map ready, switching…"
+		"ru"	"Карта готова, переключаю…"
 	}
 	"Mcustom - Retry"
 	{
-		"en"	"Still downloading (attempt %i of %i)…"
-		"ru"	"Всё ещё качаю (попытка %i из %i)…"
+		"#format"	"attempt:d,total:d"
+		"en"	"Still downloading (attempt {attempt} of {total})…"
+		"ru"	"Всё ещё качаю (попытка {attempt} из {total})…"
 	}
+	// Здесь подставляется workshop-ID намеренно: это аргумент команды, которую игроку
+	// предлагают повторить — по названию карты !mcustom не сработает.
 	"Mcustom - Exhausted"
 	{
-		"en"	"Failed to download the map — Steam connection issue. Try {darkred}!mcustom %s{default} again in a minute."
-		"ru"	"Не удалось скачать карту — проблема связи со Steam. Попробуйте {darkred}!mcustom %s{default} ещё раз через минуту."
+		"#format"	"id:s"
+		"en"	"Failed to download the map — Steam connection issue. Try {darkred}!mcustom {id}{default} again in a minute."
+		"ru"	"Не удалось загрузить карту — проблема связи со Steam. Попробуйте {darkred}!mcustom {id}{default} ещё раз через минуту."
 	}
 	"Mcustom - Already Playing"
 	{

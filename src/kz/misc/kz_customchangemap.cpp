@@ -26,6 +26,9 @@ struct CustomMapState
 	bool pending = false;
 	PublishedFileId_t workshopId = 0;
 	int attempt = 0;
+	// Имя карты для чата, если его передал вызывающий (GG1 знает display-имя пула, а мы —
+	// нет: до конца докачки на диске нет ни .vpk, ни титула из Steam). Пустое = нечем.
+	std::string displayName;
 };
 
 CustomMapState s_state;
@@ -63,9 +66,40 @@ bool IsSafeMapName(const std::string &name)
 	return true;
 }
 
-// Название карты установленного айтема = имя .vpk в его папке (титул из Steam
-// доступен только асинхронным UGC-запросом — не тянем ради строки в чате).
-// Фолбэк — сам workshop-ID строкой (в т.ч. если имя из .vpk не прошло санитайз).
+// Имя из АРГУМЕНТА команды (GG1 передаёт display-имя пула вторым аргументом). Санитайз
+// шире, чем у IsSafeMapName: display-имя законно содержит пробелы и скобки
+// («kz_bhop_slide [NO GLOBAL]»), но НЕ имеет права содержать `%` и `{`/`}`.
+// Причина не косметическая: строка фразы прогоняется через FormatV ДВАЖДЫ (PrintType →
+// player->PrintChat отдаёт уже подставленный текст как формат), а `{...}` — токен цвета.
+// Одна такая пара из имени карты съела бы хвост сообщения или покрасила бы полстроки.
+bool IsSafeDisplayName(const std::string &name)
+{
+	if (name.size() < 3 || name.size() > 64)
+	{
+		return false;
+	}
+	bool anyLetter = false;
+	for (unsigned char c : name)
+	{
+		if (c < 0x20 || c == 0x7F || c == '%' || c == '{' || c == '}')
+		{
+			return false;
+		}
+		anyLetter = anyLetter || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+	}
+	// Требуем хотя бы одну букву, а не просто «не все цифры»: имя из одних цифр — это
+	// Workshop-ID (так выглядит и фолбэк GetDisplayName у GG1 при пустом display_name пула, и
+	// .vpk, названный числом), а «не все цифры» пропускало ещё и имя из одних пробелов —
+	// «Скачиваю карту   ». Инвариант «в чат не уходит ни число, ни пустота» держим ЗДЕСЬ, а
+	// не только у вызывающего.
+	return anyLetter;
+}
+
+// Название карты установленного айтема = имя .vpk в его папке. Титул из Steam здесь НЕ
+// годится принципиально, а не из экономии: он несёт витринные суффиксы вроде
+// «kz_bhop_slide [NO GLOBAL]», а нам нужно игровое имя карты.
+// Пустая строка = имени нет (айтем не установлен, каталог не читается, .vpk не прошёл
+// санитайз). Возвращать вместо имени workshop-ID нельзя — число в чате не название.
 std::string GetInstalledMapName(PublishedFileId_t id)
 {
 	u64 sizeOnDisk = 0;
@@ -73,7 +107,7 @@ std::string GetInstalledMapName(PublishedFileId_t id)
 	u32 timestamp = 0;
 	if (!g_steamAPI.SteamUGC()->GetItemInstallInfo(id, &sizeOnDisk, folder, sizeof(folder), &timestamp) || folder[0] == '\0')
 	{
-		return std::to_string(id);
+		return std::string();
 	}
 	// Ручной инкремент через increment(ec): range-for operator++ бросает при
 	// ошибке чтения каталога, а сборка с -fno-exceptions (AMBuildScript).
@@ -102,13 +136,39 @@ std::string GetInstalledMapName(PublishedFileId_t id)
 		}
 		it.increment(ec);
 	}
-	// Не нашли валидного нормального имени → показываем workshop-ID вместо мусора.
-	return IsSafeMapName(firstVpk) ? firstVpk : std::to_string(id);
+	// Не нашли валидного имени → пусто (безымянный вариант фразы), но не ID и не мусор.
+	return IsSafeMapName(firstVpk) ? firstVpk : std::string();
 }
 
 void StartDownload(PublishedFileId_t id)
 {
 	g_steamAPI.SteamUGC()->DownloadItem(id, true);
+}
+
+// Имя карты для чата: имя из аргумента (единственный источник ДО докачки; GG1 передаёт
+// display-имя пула) → имя .vpk установленного айтема. Пусто = имени НЕТ, и тогда зовущий
+// печатает безымянный вариант фразы. Workshop-ID и мусор с диска сюда не попадают намеренно
+// (решение пользователя 17.08): число в чате — не название карты.
+std::string MapLabel(PublishedFileId_t id, const std::string &hint)
+{
+	if (IsSafeDisplayName(hint))
+	{
+		return hint;
+	}
+	std::string installed = GetInstalledMapName(id);
+	return IsSafeDisplayName(installed) ? installed : std::string();
+}
+
+// Печать «скачиваю»/«готово» с именем или без него — ветка одна на оба места вызова, чтобы
+// выбор фразы не разъехался между ними.
+void PrintMapPhrase(const char *namedKey, const char *unnamedKey, const std::string &label)
+{
+	if (label.empty())
+	{
+		KZLanguageService::PrintChatAll(true, unnamedKey);
+		return;
+	}
+	KZLanguageService::PrintChatAll(true, namedKey, label.c_str());
 }
 
 static_function struct CustomMapDownloadHandler
@@ -128,7 +188,9 @@ void CustomMapDownloadHandler::OnDownloadResult(DownloadItemResult_t *pParam)
 	{
 		KZ_LOG_INFO(LogChannel::General, "kz_customchangemap: попытка %d/%d для %llu — успех\n", s_state.attempt,
 					CUSTOMMAP_MAX_ATTEMPTS, s_state.workshopId);
-		KZLanguageService::PrintChatAll(true, "Mcustom - Ready", GetInstalledMapName(s_state.workshopId).c_str());
+		// Докачка завершилась — .vpk на диске уже есть, но имя из аргумента всё равно
+		// приоритетнее: у split-vpk стем бывает техническим («foo_dir»/«foo_000»).
+		PrintMapPhrase("Mcustom - Ready", "Mcustom - Ready Unnamed", MapLabel(s_state.workshopId, s_state.displayName));
 		SwitchToMap(s_state.workshopId);
 		s_state = {};
 		return;
@@ -139,6 +201,8 @@ void CustomMapDownloadHandler::OnDownloadResult(DownloadItemResult_t *pParam)
 
 	if (s_state.attempt >= CUSTOMMAP_MAX_ATTEMPTS)
 	{
+		// Здесь подставляется аргумент команды `!mcustom <...>`, которую игроку предлагают
+		// повторить, — поэтому ID, а не имя: по имени команда не сработает.
 		KZLanguageService::PrintChatAll(true, "Mcustom - Exhausted", std::to_string(s_state.workshopId).c_str());
 		s_state = {};
 		return;
@@ -154,7 +218,14 @@ void CustomMapDownloadHandler::OnDownloadResult(DownloadItemResult_t *pParam)
 // Server.ExecuteCommand, т.е. серверным контекстом без игрока. SCMD-диспатч живёт в хуке
 // DispatchConCommand и требует controller — из серверной консоли/RCON такая команда
 // давала "Unknown command" (подтверждено вживую на srv-1, cyb.32).
-CON_COMMAND_F(kz_customchangemap, "Switch to a workshop map, downloading it with retries if needed (used by !mcustom).", FCVAR_NONE)
+// Второй аргумент (необязательный) — display-имя карты для чата. Его знает вызывающий: GG1
+// берёт его из пула (GGMCmaps.json), а сам форк до конца докачки не знает названия вовсе — на
+// диске ещё нет .vpk, а титул из Steam доступен только асинхронным UGC-запросом. Раньше в чат
+// поэтому уезжал сырой workshop-ID («Скачиваю карту 3760078813»), а через kz_customchangemap
+// идёт КАЖДАЯ смена workshop-карты в ротации, не только ручной !mcustom.
+// Обратная совместимость обязательна: Mcustom (CSSharp) зовёт команду одним аргументом,
+// и раскатка DLL с конфигом/GG1 не одномоментна.
+CON_COMMAND_F(kz_customchangemap, "Switch to a workshop map, downloading it with retries if needed (used by !mcustom). Usage: kz_customchangemap <workshop_id> [display_name]", FCVAR_NONE)
 {
 	// atoll — та же конвенция парсинга u64 из строкового аргумента, что в
 	// src/kz/anticheat/kz_anticheat.cpp:27.
@@ -163,6 +234,8 @@ CON_COMMAND_F(kz_customchangemap, "Switch to a workshop map, downloading it with
 	{
 		return;
 	}
+	// Arg(2) у отсутствующего аргумента отдаёт "", не nullptr; IsSafeDisplayName отсеет.
+	std::string nameHint = args.Arg(2);
 
 	if (IsMapReady(id))
 	{
@@ -176,7 +249,7 @@ CON_COMMAND_F(kz_customchangemap, "Switch to a workshop map, downloading it with
 		// pending-запрос (другой ID, чья докачка ещё идёт) не был подхвачен колбэком
 		// и не откатил это переключение на свою карту при своём успехе.
 		s_state = {};
-		KZLanguageService::PrintChatAll(true, "Mcustom - Ready", GetInstalledMapName(id).c_str());
+		PrintMapPhrase("Mcustom - Ready", "Mcustom - Ready Unnamed", MapLabel(id, nameHint));
 		SwitchToMap(id);
 		return;
 	}
@@ -192,7 +265,8 @@ CON_COMMAND_F(kz_customchangemap, "Switch to a workshop map, downloading it with
 	s_state.pending = true;
 	s_state.workshopId = id;
 	s_state.attempt = 1;
-	KZLanguageService::PrintChatAll(true, "Mcustom - Downloading", std::to_string(id).c_str());
+	s_state.displayName = nameHint;
+	PrintMapPhrase("Mcustom - Downloading", "Mcustom - Downloading Unnamed", MapLabel(id, nameHint));
 	StartDownload(id);
 }
 
