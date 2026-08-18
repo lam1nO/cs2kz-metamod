@@ -1437,7 +1437,17 @@ bool KZTimerService::GetHudPBTime(f64 &outTime, const KZCourseDescriptor *course
 		return false;
 	}
 	auto modeInfo = KZ::mode::GetModeInfo(this->player->modeService->GetModeName());
-	// 1) Платформенный PB (совпадает с лидербордом сайта) — первым.
+	// ЛУЧШЕЕ из двух источников, а НЕ «платформенный, иначе локальный» (правка 18.08 по
+	// багрепорту «в худе PB/WR замерли с загрузки карты, а !pb/!wr правы»).
+	// Почему так: платформенный кэш наполняется ОДИН раз, на загрузке карты (периодический
+	// таймер не работает — отдельная задача), а локальный обновляется из БД на КАЖДОМ финише
+	// (RunSubmission::UpdateLocalCache). Прежний порядок «платформенный первым» на этом и ломался:
+	// найдя непустое значение с загрузки карты, худ до свежего локального просто не доходил, и
+	// рекорд, поставленный при живом игроке, в худ не попадал до смены карты. Минимум снимает
+	// зависимость и от таймера, и от сети: кто из источников знает время лучше, тот и прав.
+	// Известный компромисс: удалённый рекорд, о котором платформа ещё не знает, останется
+	// видимым до смены карты — ровно как и до этой правки (кэш платформы не умеет забывать).
+	f64 best = 0.0;
 	i32 modeIdx = ApiModeToIndex(CybReplayCommon::MapMode(std::string(modeInfo.shortModeName.Get(), modeInfo.shortModeName.Length())));
 	if (modeIdx >= 0)
 	{
@@ -1445,27 +1455,51 @@ bool KZTimerService::GetHudPBTime(f64 &outTime, const KZCourseDescriptor *course
 		auto it = this->platformPbCache.find(ToPlatformKey(modeIdx, cyberCourse));
 		if (it != this->platformPbCache.end() && it->second > 0)
 		{
-			outTime = it->second;
-			return true;
+			best = it->second;
 		}
-		KZTimerService::NoteHudPlatformMiss(false, modeInfo.shortModeName.Get(), modeIdx, cyberCourse, this->platformPbCache.size());
+		else
+		{
+			KZTimerService::NoteHudPlatformMiss(false, modeInfo.shortModeName.Get(), modeIdx, cyberCourse, this->platformPbCache.size());
+		}
 	}
 	else
 	{
 		KZTimerService::NoteHudPlatformMiss(false, modeInfo.shortModeName.Get(), modeIdx, -1, this->platformPbCache.size());
 	}
-	// 2) Фолбэк: локальные PB-кэши (глобальный PB важнее локального; overall = зачёт с ТП).
+	// В МИНИМУМ идёт только НАШ источник — localPBCache (COMPARE_SPB), он наполняется из общей
+	// MySQL нашей сети. globalPBCache (COMPARE_GPB) — PB из ЧУЖОЙ сети cs2kz (api.cs2kz.org,
+	// KZGlobalService), и пускать его в минимум нельзя: он почти всегда меньше нашего, и худ
+	// показывал бы число, которого нет ни в !pb, ни в лидерборде сайта. Сейчас он пуст только
+	// потому, что apiUrl в gameops пустой — то есть инвариант держался бы строкой конфига в
+	// другом репозитории. Оставлен КРАЙНИМ фолбэком (как и до правки 18.08): если своего нет
+	// вовсе, показать чужое лучше, чем прочерк.
+	// platformHit фиксируем ДО сравнения: «наше побило платформенное» и «платформа по этому
+	// ключу не знала ничего» — разные события, и смешивать их в одном счётчике нельзя. Ценна
+	// именно первая: она и означает, что платформенный кэш устарел.
+	const bool platformHitPb = best > 0;
 	PBDataKey key = ToPBDataKey(modeInfo.id, course->guid);
-	const PBData *pb = this->GetCompareTargetForType(COMPARE_GPB, key);
-	if (!pb || pb->overall.pbTime <= 0)
+	const PBData *ourPb = this->GetCompareTargetForType(COMPARE_SPB, key);
+	if (ourPb && ourPb->overall.pbTime > 0 && (best <= 0 || ourPb->overall.pbTime < best))
 	{
-		pb = this->GetCompareTargetForType(COMPARE_SPB, key);
+		best = ourPb->overall.pbTime;
+		if (platformHitPb)
+		{
+			KZTimerService::NoteHudLocalWin(false);
+		}
 	}
-	if (!pb || pb->overall.pbTime <= 0)
+	if (best <= 0)
+	{
+		const PBData *globalPb = this->GetCompareTargetForType(COMPARE_GPB, key);
+		if (globalPb && globalPb->overall.pbTime > 0)
+		{
+			best = globalPb->overall.pbTime;
+		}
+	}
+	if (best <= 0)
 	{
 		return false;
 	}
-	outTime = pb->overall.pbTime;
+	outTime = best;
 	return true;
 }
 
@@ -1480,7 +1514,11 @@ bool KZTimerService::GetHudWorldRecordTime(f64 &outTime, const KZCourseDescripto
 		return false;
 	}
 	auto modeInfo = KZ::mode::GetModeInfo(this->player->modeService->GetModeName());
-	// 1) Платформенный WR (рекорд сети с сайта) — первым.
+	// ЛУЧШЕЕ из двух источников — обоснование целиком в GetHudPBTime выше (та же правка 18.08).
+	// Коротко: платформенный кэш наполняется один раз на загрузке карты, локальный (srCache/
+	// wrCache через UpdateLocalRecordCache) — на каждом финише из БД; «платформенный первым»
+	// прятал свежий рекорд до смены карты.
+	f64 best = 0.0;
 	i32 modeIdx = ApiModeToIndex(CybReplayCommon::MapMode(std::string(modeInfo.shortModeName.Get(), modeInfo.shortModeName.Length())));
 	if (modeIdx >= 0)
 	{
@@ -1488,29 +1526,46 @@ bool KZTimerService::GetHudWorldRecordTime(f64 &outTime, const KZCourseDescripto
 		auto it = KZTimerService::platformWrCache.find(ToPlatformKey(modeIdx, cyberCourse));
 		if (it != KZTimerService::platformWrCache.end() && it->second > 0)
 		{
-			outTime = it->second;
-			return true;
+			best = it->second;
 		}
-		// Промах ключа — уходим на локальный кэш, который грузится лишь на OnMapSetup: ровно то,
-		// что в багрепорте выглядит как «значение замерло с загрузки карты».
-		KZTimerService::NoteHudPlatformMiss(true, modeInfo.shortModeName.Get(), modeIdx, cyberCourse, KZTimerService::platformWrCache.size());
+		else
+		{
+			KZTimerService::NoteHudPlatformMiss(true, modeInfo.shortModeName.Get(), modeIdx, cyberCourse, KZTimerService::platformWrCache.size());
+		}
 	}
 	else
 	{
 		KZTimerService::NoteHudPlatformMiss(true, modeInfo.shortModeName.Get(), modeIdx, -1, KZTimerService::platformWrCache.size());
 	}
-	// 2) Фолбэк: глобальный wrCache (глобальные карты), затем srCache (рекорд нашей сети).
+	// В МИНИМУМ идёт только НАШ источник — srCache (COMPARE_SR), рекорд нашей сети из общей
+	// MySQL: семантически то же, что платформенный kz_records. wrCache (COMPARE_WR) — рекорд
+	// ЧУЖОЙ сети cs2kz, в минимуме он побеждал бы почти всегда, и худ расходился бы с !wr,
+	// !maptop и сайтом. Оставлен крайним фолбэком, как и до правки 18.08. Подробнее — в
+	// GetHudPBTime выше.
+	const bool platformHitWr = best > 0; // см. GetHudPBTime: считаем только реальную победу
 	PBDataKey key = ToPBDataKey(modeInfo.id, course->guid);
-	const PBData *wr = this->GetCompareTargetForType(COMPARE_WR, key);
-	if (!wr || wr->overall.pbTime <= 0)
+	const PBData *ourWr = this->GetCompareTargetForType(COMPARE_SR, key);
+	if (ourWr && ourWr->overall.pbTime > 0 && (best <= 0 || ourWr->overall.pbTime < best))
 	{
-		wr = this->GetCompareTargetForType(COMPARE_SR, key);
+		best = ourWr->overall.pbTime;
+		if (platformHitWr)
+		{
+			KZTimerService::NoteHudLocalWin(true);
+		}
 	}
-	if (!wr || wr->overall.pbTime <= 0)
+	if (best <= 0)
+	{
+		const PBData *globalWr = this->GetCompareTargetForType(COMPARE_WR, key);
+		if (globalWr && globalWr->overall.pbTime > 0)
+		{
+			best = globalWr->overall.pbTime;
+		}
+	}
+	if (best <= 0)
 	{
 		return false;
 	}
-	outTime = wr->overall.pbTime;
+	outTime = best;
 	return true;
 }
 
@@ -1541,13 +1596,14 @@ void KZTimerService::ClearRecordCache()
 // при промахе ключа худ уходит на локальный кэш, а тот грузится лишь на OnMapSetup).
 struct PlatformIngestStats
 {
-	u32 fetchWr, fetchPb;          // выдано запросов
-	u32 noBody, staleMap, noArray; // ответ отброшен
-	u32 slotReused;                // PB-колбэк: слот занял другой игрок
-	u32 recordsSeen;               // элементов в массиве records
-	u32 skipNoCourse, skipBadMode; // пропуск записи
-	u32 wrSet, pbSet;              // ФАКТИЧЕСКИ записано в кэш
-	u32 hudMissWr, hudMissPb;      // промах чтения в худе (ушли на локальный фолбэк)
+	u32 fetchWr, fetchPb;             // выдано запросов
+	u32 noBody, staleMap, noArray;    // ответ отброшен
+	u32 slotReused;                   // PB-колбэк: слот занял другой игрок
+	u32 recordsSeen;                  // элементов в массиве records
+	u32 skipNoCourse, skipBadMode;    // пропуск записи
+	u32 wrSet, pbSet;                 // ФАКТИЧЕСКИ записано в кэш
+	u32 hudMissWr, hudMissPb;         // промах платформенного кэша при чтении в худе
+	u32 hudLocalWinWr, hudLocalWinPb; // наш источник оказался ЛУЧШЕ НЕПУСТОГО платформенного
 	bool warnedStale, warnedHudMiss, snapshotDone;
 	// Имя карты, к которой относятся числа. Запоминается при ПЕРВОМ выданном запросе, а не
 	// читается на печати: сводка prev_map печатается из OnMapSetup, когда GetCurrentMapName()
@@ -1565,9 +1621,10 @@ static_function void PrintPlatformIngestSummary(const char *tag, size_t wrCacheS
 	KZ_LOG_INFO(LogChannel::Timer,
 				"[cyb_records] platform_ingest_%s map=%s fetch_wr=%u fetch_pb=%u wr_set=%u pb_set=%u records=%u "
 				"stale_map=%u no_array=%u no_body=%u slot_reused=%u skip_no_course=%u skip_bad_mode=%u "
-				"hud_miss_wr=%u hud_miss_pb=%u wr_cache=%zu\n",
+				"hud_miss_wr=%u hud_miss_pb=%u local_win_wr=%u local_win_pb=%u wr_cache=%zu\n",
 				tag, g_pis.map, g_pis.fetchWr, g_pis.fetchPb, g_pis.wrSet, g_pis.pbSet, g_pis.recordsSeen, g_pis.staleMap, g_pis.noArray,
-				g_pis.noBody, g_pis.slotReused, g_pis.skipNoCourse, g_pis.skipBadMode, g_pis.hudMissWr, g_pis.hudMissPb, wrCacheSize);
+				g_pis.noBody, g_pis.slotReused, g_pis.skipNoCourse, g_pis.skipBadMode, g_pis.hudMissWr, g_pis.hudMissPb, g_pis.hudLocalWinWr,
+				g_pis.hudLocalWinPb, wrCacheSize);
 }
 
 void KZTimerService::ResetPlatformIngestStats()
@@ -1605,6 +1662,21 @@ void KZTimerService::NotePlatformFetchIssued(bool isWr)
 	else
 	{
 		g_pis.fetchPb++;
+	}
+}
+
+// Наш локальный источник оказался лучше платформенного — то есть минимум сработал и худ
+// показал свежее значение. Это и метрика полезности правки 18.08, и косвенный признак того,
+// что платформенный кэш устарел (периодическое обновление не работает — отдельная задача).
+void KZTimerService::NoteHudLocalWin(bool isWr)
+{
+	if (isWr)
+	{
+		g_pis.hudLocalWinWr++;
+	}
+	else
+	{
+		g_pis.hudLocalWinPb++;
 	}
 }
 

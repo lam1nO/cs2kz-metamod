@@ -182,8 +182,9 @@ private:
 	// Платформенные кэши PB/WR из cyber-api (те же данные, что лидерборд сайта). Ключуются по
 	// (api-mode-index, cyber-course-number), а НЕ по внутренним mode/course id — чтобы сойтись с
 	// ответом api (см. FetchPlatform*/IngestPlatformRecords). Времена в секундах (api отдаёт ms).
-	// WR — общий (static, по карте); PB — по игроку. Наполняются async; промах → худ падает на
-	// локальный фолбэк (wrCache/srCache, globalPBCache/localPBCache).
+	// WR — общий (static, по карте); PB — по игроку. Наполняются async. Худ берёт ЛУЧШЕЕ из
+	// платформенного и НАШЕГО локального (srCache/localPBCache), а не «платформенный первым»:
+	// обоснование в GetHudPBTime (kz_timer.cpp).
 	static std::unordered_map<u64, f64> platformWrCache;
 	std::unordered_map<u64, f64> platformPbCache;
 
@@ -234,6 +235,7 @@ public:
 	static void MaybeSnapshotPlatformIngest();
 	static void NotePlatformFetchIssued(bool isWr);
 	static void NotePlatformRespNoBody();
+	static void NoteHudLocalWin(bool isWr);
 	static void NotePlatformSlotReused();
 	// expected — имя карты на момент отправки, current — на момент ответа. Обе половины
 	// обязательны: по одной нельзя отличить патологию от штатного отбоя на смене карты.
@@ -449,15 +451,17 @@ public:
 
 	// --- HUD (кибершоковский стандартный худ, строка PB/WR) ---
 	// Лучшее доступное персональное время для режима игрока и курса; overall = зачёт с телепортами.
-	// Приоритет — платформенный кэш (platformPbCache, совпадает с сайтом), при промахе — фолбэк на
-	// локальные PB-кэши (глоб. PB важнее локального). Только чтение кэшей, без сети. course == nullptr
-	// → активный курс игрока (this->GetCourse()); передан явно (напр. главный курс) — лукап по нему,
+	// ЛУЧШЕЕ (минимум) из платформенного кэша (platformPbCache, совпадает с сайтом) и НАШЕГО
+	// localPBCache; globalPBCache (PB чужой сети cs2kz) — только крайний фолбэк, в минимум не
+	// входит. Почему минимум, а не приоритет — см. kz_timer.cpp. Только чтение кэшей, без сети.
+	// course == nullptr → активный курс игрока (this->GetCourse()); передан явно (напр. главный
+	// курс) — лукап по нему,
 	// чтобы PB показывался и вне старт-зоны. false, если курса нет или PB не наполнен нигде.
 	bool GetHudPBTime(f64 &outTime, const KZCourseDescriptor *course = nullptr);
-	// WR-время (overall) для режима+курса. Приоритет — платформенный кэш (platformWrCache, рекорд
-	// сети с сайта); при промахе — глобальный wrCache (глобальные карты), затем srCache (рекорд наших
-	// серверов). course == nullptr → активный курс; иначе лукап по переданному. false только когда
-	// нет ни одного источника.
+	// WR-время (overall) для режима+курса. ЛУЧШЕЕ (минимум) из платформенного кэша и srCache
+	// (рекорд НАШЕЙ сети); wrCache (рекорд чужой сети cs2kz) — только крайний фолбэк, в минимум
+	// не входит. course == nullptr → активный курс; иначе лукап по переданному. false только
+	// когда нет ни одного источника. Почему минимум, а не приоритет — см. kz_timer.cpp.
 	bool GetHudWorldRecordTime(f64 &outTime, const KZCourseDescriptor *course = nullptr);
 
 	void SetCourse(u32 courseGUID)
