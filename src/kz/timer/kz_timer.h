@@ -227,6 +227,18 @@ public:
 	// timeout / выключенный cybEmitUrl оставляет платформенные кэши как есть, худ падает на локаль.
 	// resetCache=true (заход/смена карты) чистит кэш перед запросом; периодическое обновление
 	// (StartPlatformRecordsRefresh) зовёт с false, чтобы худ не мигал на время round-trip.
+	// Наблюдаемость тракта платформенных PB/WR (см. реализацию). ПУБЛИЧНЫЕ намеренно:
+	// ResetPlatformIngestStats зовётся из KZDatabaseServiceEventListener_Timer::OnMapSetup —
+	// это ДРУГОЙ класс, из приватной секции он бы не собрался.
+	static void ResetPlatformIngestStats();
+	static void MaybeSnapshotPlatformIngest();
+	static void NotePlatformFetchIssued(bool isWr);
+	static void NotePlatformRespNoBody();
+	static void NotePlatformSlotReused();
+	// expected — имя карты на момент отправки, current — на момент ответа. Обе половины
+	// обязательны: по одной нельзя отличить патологию от штатного отбоя на смене карты.
+	static void NotePlatformIngestStaleMap(const char *expected, const char *current);
+	static void NoteHudPlatformMiss(bool isWr, const char *modeShort, i32 modeIdx, i32 course, size_t cacheSize);
 	static void FetchPlatformWorldRecords(bool resetCache = true);
 	static void FetchPlatformPB(KZPlayer *player, bool resetCache = true);
 	// Заводит persistent-таймер обновления платформенных PB/WR (см. RefreshPlatformRecords).

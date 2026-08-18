@@ -1441,12 +1441,18 @@ bool KZTimerService::GetHudPBTime(f64 &outTime, const KZCourseDescriptor *course
 	i32 modeIdx = ApiModeToIndex(CybReplayCommon::MapMode(std::string(modeInfo.shortModeName.Get(), modeInfo.shortModeName.Length())));
 	if (modeIdx >= 0)
 	{
-		auto it = this->platformPbCache.find(ToPlatformKey(modeIdx, KZ::course::GetCyberCourseNumber(course)));
+		const i32 cyberCourse = KZ::course::GetCyberCourseNumber(course);
+		auto it = this->platformPbCache.find(ToPlatformKey(modeIdx, cyberCourse));
 		if (it != this->platformPbCache.end() && it->second > 0)
 		{
 			outTime = it->second;
 			return true;
 		}
+		KZTimerService::NoteHudPlatformMiss(false, modeInfo.shortModeName.Get(), modeIdx, cyberCourse, this->platformPbCache.size());
+	}
+	else
+	{
+		KZTimerService::NoteHudPlatformMiss(false, modeInfo.shortModeName.Get(), modeIdx, -1, this->platformPbCache.size());
 	}
 	// 2) Фолбэк: локальные PB-кэши (глобальный PB важнее локального; overall = зачёт с ТП).
 	PBDataKey key = ToPBDataKey(modeInfo.id, course->guid);
@@ -1478,12 +1484,20 @@ bool KZTimerService::GetHudWorldRecordTime(f64 &outTime, const KZCourseDescripto
 	i32 modeIdx = ApiModeToIndex(CybReplayCommon::MapMode(std::string(modeInfo.shortModeName.Get(), modeInfo.shortModeName.Length())));
 	if (modeIdx >= 0)
 	{
-		auto it = KZTimerService::platformWrCache.find(ToPlatformKey(modeIdx, KZ::course::GetCyberCourseNumber(course)));
+		const i32 cyberCourse = KZ::course::GetCyberCourseNumber(course);
+		auto it = KZTimerService::platformWrCache.find(ToPlatformKey(modeIdx, cyberCourse));
 		if (it != KZTimerService::platformWrCache.end() && it->second > 0)
 		{
 			outTime = it->second;
 			return true;
 		}
+		// Промах ключа — уходим на локальный кэш, который грузится лишь на OnMapSetup: ровно то,
+		// что в багрепорте выглядит как «значение замерло с загрузки карты».
+		KZTimerService::NoteHudPlatformMiss(true, modeInfo.shortModeName.Get(), modeIdx, cyberCourse, KZTimerService::platformWrCache.size());
+	}
+	else
+	{
+		KZTimerService::NoteHudPlatformMiss(true, modeInfo.shortModeName.Get(), modeIdx, -1, KZTimerService::platformWrCache.size());
 	}
 	// 2) Фолбэк: глобальный wrCache (глобальные карты), затем srCache (рекорд нашей сети).
 	PBDataKey key = ToPBDataKey(modeInfo.id, course->guid);
@@ -1515,6 +1529,136 @@ void KZTimerService::ClearRecordCache()
 	}
 }
 
+// Наблюдаемость тракта платформенных PB/WR. Заведена 18.08 по багрепорту «в худе PB/WR замерли
+// на момент загрузки карты, лечит только перезаход или рестарт», при том что !wr/!pb/!maptop
+// показывают верное. Замерами исключено: таймер живёт, api отвечает 200 и отдаёт то же, что
+// локальная БД, код на флоте совпадает с текущим, худ читает геттеры каждый тик.
+//
+// Приборы стоят на ВСЕХ молчащих ветках тракта, а не на одной: «ответ 200» и «данные легли в
+// кэш» — разные события, и первое достижимо при пустом records (api отдаёт 200 + [] для карты,
+// которой нет в каталоге platform). Поэтому считаются ФАКТИЧЕСКИЕ записи в кэш (wr_set/pb_set),
+// отдельно — причины пропуска, отдельно — промахи ЧТЕНИЯ в худе (там симптом объясняется так же:
+// при промахе ключа худ уходит на локальный кэш, а тот грузится лишь на OnMapSetup).
+struct PlatformIngestStats
+{
+	u32 fetchWr, fetchPb;          // выдано запросов
+	u32 noBody, staleMap, noArray; // ответ отброшен
+	u32 slotReused;                // PB-колбэк: слот занял другой игрок
+	u32 recordsSeen;               // элементов в массиве records
+	u32 skipNoCourse, skipBadMode; // пропуск записи
+	u32 wrSet, pbSet;              // ФАКТИЧЕСКИ записано в кэш
+	u32 hudMissWr, hudMissPb;      // промах чтения в худе (ушли на локальный фолбэк)
+	bool warnedStale, warnedHudMiss, snapshotDone;
+	// Имя карты, к которой относятся числа. Запоминается при ПЕРВОМ выданном запросе, а не
+	// читается на печати: сводка prev_map печатается из OnMapSetup, когда GetCurrentMapName()
+	// уже отдаёт НОВУЮ карту, и числа приписались бы не той карте.
+	char map[64];
+};
+
+static_global PlatformIngestStats g_pis {};
+
+// wrCacheSize параметром: сама функция файловая, а platformWrCache приватный —
+// читают его вызывающие (они члены класса).
+static_function void PrintPlatformIngestSummary(const char *tag, size_t wrCacheSize)
+{
+	// key=value, как остальные строки форка (bin/logs.sh и алерты собираются по полям).
+	KZ_LOG_INFO(LogChannel::Timer,
+				"[cyb_records] platform_ingest_%s map=%s fetch_wr=%u fetch_pb=%u wr_set=%u pb_set=%u records=%u "
+				"stale_map=%u no_array=%u no_body=%u slot_reused=%u skip_no_course=%u skip_bad_mode=%u "
+				"hud_miss_wr=%u hud_miss_pb=%u wr_cache=%zu\n",
+				tag, g_pis.map, g_pis.fetchWr, g_pis.fetchPb, g_pis.wrSet, g_pis.pbSet, g_pis.recordsSeen, g_pis.staleMap, g_pis.noArray,
+				g_pis.noBody, g_pis.slotReused, g_pis.skipNoCourse, g_pis.skipBadMode, g_pis.hudMissWr, g_pis.hudMissPb, wrCacheSize);
+}
+
+void KZTimerService::ResetPlatformIngestStats()
+{
+	// Итог ПРОШЛОЙ карты печатаем до обнуления: снимок в момент, когда всё уже случилось.
+	if (g_pis.fetchWr || g_pis.fetchPb)
+	{
+		PrintPlatformIngestSummary("prev_map", KZTimerService::platformWrCache.size());
+	}
+	g_pis = PlatformIngestStats {};
+}
+
+// Снимок в пределах ОДНОЙ карты: без него прогон, после которого сервер рестартуют «чтобы
+// полечить», не оставляет лога вовсе — а это как раз тот прогон, который нужен.
+void KZTimerService::MaybeSnapshotPlatformIngest()
+{
+	if (g_pis.snapshotDone || (g_pis.fetchWr + g_pis.fetchPb) < 30)
+	{
+		return;
+	}
+	g_pis.snapshotDone = true;
+	PrintPlatformIngestSummary("snapshot", KZTimerService::platformWrCache.size());
+}
+
+void KZTimerService::NotePlatformFetchIssued(bool isWr)
+{
+	if (g_pis.map[0] == '\0')
+	{
+		V_strncpy(g_pis.map, g_pKZUtils->GetCurrentMapName().Get(), sizeof(g_pis.map));
+	}
+	if (isWr)
+	{
+		g_pis.fetchWr++;
+	}
+	else
+	{
+		g_pis.fetchPb++;
+	}
+}
+
+void KZTimerService::NotePlatformRespNoBody()
+{
+	g_pis.noBody++;
+}
+
+void KZTimerService::NotePlatformSlotReused()
+{
+	g_pis.slotReused++;
+}
+
+// expected — имя карты на момент ОТПРАВКИ (захвачено лямбдой), current — на момент ответа.
+// Обе половины обязательны: по одной нельзя отличить патологию (имена разные ВСЮ карту) от
+// штатного отбоя на смене карты (expected = прошлая карта, ответ доехал уже после OnMapSetup).
+void KZTimerService::NotePlatformIngestStaleMap(const char *expected, const char *current)
+{
+	if (!g_pis.warnedStale)
+	{
+		g_pis.warnedStale = true;
+		KZ_LOG_WARN(LogChannel::Timer, "[cyb_records] resp_rejected reason=stale_map expected=%s current=%s\n", expected ? expected : "",
+					current ? current : "");
+	}
+	g_pis.staleMap++;
+}
+
+// Промах ЧТЕНИЯ в худе: ключ не найден в платформенном кэше, значение берётся из локального.
+// Один раз на карту — геттеры зовутся каждый тик.
+// cacheSize — размер ИМЕННО того кэша, в котором промахнулись (WR общий, PB на игрока):
+// иначе главный вопрос «данные не доехали или доехали, а ключ не совпал» строкой не решается.
+void KZTimerService::NoteHudPlatformMiss(bool isWr, const char *modeShort, i32 modeIdx, i32 course, size_t cacheSize)
+{
+	if (isWr)
+	{
+		g_pis.hudMissWr++;
+	}
+	else
+	{
+		g_pis.hudMissPb++;
+	}
+	// warn — ТОЛЬКО когда кэш непуст, то есть данные доехали, а ключ не совпал: это патология.
+	// Пустой кэш — штатная ситуация (новичок без PB на карте, курс/режим без рекорда), и warn
+	// на ней занял бы единственный слот на карте ложной тревогой. Само «кэш пуст» видно в
+	// сводке по wr_set/pb_set.
+	if (g_pis.warnedHudMiss || cacheSize == 0)
+	{
+		return;
+	}
+	g_pis.warnedHudMiss = true;
+	KZ_LOG_WARN(LogChannel::Timer, "[cyb_records] hud_lookup_miss kind=%s mode=%s mode_idx=%d course=%d cache=%zu\n", isWr ? "wr" : "pb",
+				modeShort ? modeShort : "", modeIdx, course, cacheSize);
+}
+
 void KZTimerService::IngestPlatformRecords(const char *body, KZPlayer *pbPlayer)
 {
 	KeyValues3 kv(KV3_TYPEEX_TABLE, KV3_SUBTYPE_UNSPECIFIED);
@@ -1529,10 +1673,12 @@ void KZTimerService::IngestPlatformRecords(const char *body, KZPlayer *pbPlayer)
 	KeyValues3 *records = kv.FindMember("records");
 	if (!records || records->GetType() != KV3_TYPE_ARRAY)
 	{
+		g_pis.noArray++;
 		return; // нет массива records — трактуем как "данных нет", худ на фолбэке
 	}
 
 	int count = records->GetArrayElementCount();
+	g_pis.recordsSeen += (u32)(count > 0 ? count : 0);
 	for (int i = 0; i < count; i++)
 	{
 		KeyValues3 *rec = records->GetArrayElement(i);
@@ -1544,17 +1690,20 @@ void KZTimerService::IngestPlatformRecords(const char *body, KZPlayer *pbPlayer)
 		f64 courseF = 0;
 		if (!KV3ReadNumber(rec, "course", courseF))
 		{
+			g_pis.skipNoCourse++;
 			continue;
 		}
 		// mode (api-строка) — обязателен и должен маппиться в поддерживаемый индекс.
 		KeyValues3 *modeMember = rec->FindMember("mode");
 		if (!modeMember || modeMember->GetType() != KV3_TYPE_STRING)
 		{
+			g_pis.skipBadMode++;
 			continue;
 		}
 		i32 modeIdx = ApiModeToIndex(modeMember->GetString(""));
 		if (modeIdx < 0)
 		{
+			g_pis.skipBadMode++;
 			continue;
 		}
 		u64 key = ToPlatformKey(modeIdx, (i32)courseF);
@@ -1564,6 +1713,7 @@ void KZTimerService::IngestPlatformRecords(const char *body, KZPlayer *pbPlayer)
 		if (KV3ReadNumber(rec, "wrTimeMs", wrMs) && wrMs > 0)
 		{
 			KZTimerService::platformWrCache[key] = wrMs / 1000.0;
+			g_pis.wrSet++;
 		}
 		// PB — только для player-level ответа (пришёл steamId64).
 		if (pbPlayer)
@@ -1572,6 +1722,7 @@ void KZTimerService::IngestPlatformRecords(const char *body, KZPlayer *pbPlayer)
 			if (KV3ReadNumber(rec, "pbTimeMs", pbMs) && pbMs > 0)
 			{
 				pbPlayer->timerService->platformPbCache[key] = pbMs / 1000.0;
+				g_pis.pbSet++;
 			}
 		}
 	}
@@ -1616,6 +1767,8 @@ void KZTimerService::FetchPlatformWorldRecords(bool resetCache)
 		req.SetHeader("Authorization", std::string("Bearer ") + token);
 	}
 
+	KZTimerService::NotePlatformFetchIssued(true);
+
 	// clang-format off
 	req.Send(
 		[mapName](HTTP::Response resp)
@@ -1628,11 +1781,13 @@ void KZTimerService::FetchPlatformWorldRecords(bool resetCache)
 			// Карта могла смениться, пока запрос летел — не засоряем кэш новой карты старыми данными.
 			if (!KZ_STREQ(mapName.c_str(), g_pKZUtils->GetCurrentMapName().Get()))
 			{
+				KZTimerService::NotePlatformIngestStaleMap(mapName.c_str(), g_pKZUtils->GetCurrentMapName().Get());
 				return;
 			}
 			std::optional<std::string> respBody = resp.Body();
 			if (!respBody.has_value())
 			{
+				KZTimerService::NotePlatformRespNoBody();
 				return;
 			}
 			KZTimerService::IngestPlatformRecords(respBody->c_str(), nullptr);
@@ -1677,6 +1832,7 @@ void KZTimerService::FetchPlatformPB(KZPlayer *player, bool resetCache)
 		return; // не аутентифицирован / нет клиента — PB спросить не по кому
 	}
 	CPlayerUserId userID = player->GetClient()->GetUserID();
+	KZTimerService::NotePlatformFetchIssued(false);
 
 	std::string fullUrl = url;
 	if (!fullUrl.empty() && fullUrl.back() == '/')
@@ -1704,17 +1860,20 @@ void KZTimerService::FetchPlatformPB(KZPlayer *player, bool resetCache)
 			}
 			if (!KZ_STREQ(mapName.c_str(), g_pKZUtils->GetCurrentMapName().Get()))
 			{
+				KZTimerService::NotePlatformIngestStaleMap(mapName.c_str(), g_pKZUtils->GetCurrentMapName().Get());
 				return; // карта сменилась — PB относится к другой карте
 			}
 			KZPlayer *pl = g_pKZPlayerManager->ToPlayer(userID);
 			// Гард переиспользования userID: слот мог освободиться и занять другой игрок.
 			if (!pl || pl->GetSteamId64() != steamID64)
 			{
+				KZTimerService::NotePlatformSlotReused();
 				return;
 			}
 			std::optional<std::string> respBody = resp.Body();
 			if (!respBody.has_value())
 			{
+				KZTimerService::NotePlatformRespNoBody();
 				return;
 			}
 			KZTimerService::IngestPlatformRecords(respBody->c_str(), pl);
@@ -1771,6 +1930,9 @@ static_function f64 RefreshPlatformRecords()
 	{
 		KZTimerService::FetchPlatformWorldRecords(false);
 	}
+	// Снимок в пределах карты (см. MaybeSnapshotPlatformIngest): иначе прогон, после которого
+	// сервер рестартуют, не оставит лога — а нужен именно он.
+	KZTimerService::MaybeSnapshotPlatformIngest();
 
 	return KZ_PLATFORM_RECORDS_REFRESH_INTERVAL;
 }
@@ -2316,6 +2478,7 @@ void KZDatabaseServiceEventListener_Timer::OnMapSetup()
 	KZTimerService::UpdateLocalRecordCache();
 	// Платформенные WR (тот же источник, что лидерборд сайта) — одна async-догрузка на карту,
 	// параллельно локальному кэшу; худ покажет их даже вне активного курса (главный курс).
+	KZTimerService::ResetPlatformIngestStats();
 	KZTimerService::FetchPlatformWorldRecords();
 	// Дальше те же WR (и PB игроков) обновляются периодически, чтобы рекорд, поставленный на
 	// другом сервере сети, доезжал в худ без реконнекта. Идемпотентно: таймер persistent.
