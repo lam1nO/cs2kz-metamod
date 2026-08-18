@@ -278,6 +278,7 @@ void MovementPlayer::RegisterTakeoff(bool jumped, bool fromLadder, Vector *overr
 		mv = &this->moveDataPost;
 	}
 	this->takeoffFromLadder = fromLadder;
+	this->airMaxValid = false; // максимум высоты копится строго в пределах одного полёта
 	this->takeoffOrigin = overrideOrigin ? *overrideOrigin : mv->m_vecAbsOrigin;
 	this->takeoffTime = g_pKZUtils->GetGlobals()->curtime - g_pKZUtils->GetGlobals()->frametime;
 	this->takeoffVelocity = mv->m_vecVelocity;
@@ -421,8 +422,10 @@ void MovementPlayer::Reset()
 	this->landingOriginActual.Init();
 	this->landingTimeActual = 0.0f;
 	this->landingTimeInput = 0.0f;
-	this->landingDiffZ = 0.0f;
-	this->landingTimeSource = 0;
+	this->landingDiffZ = -1.0f;
+	this->landingTimeSource = -1;
+	this->airMaxZ = 0.0f;
+	this->airMaxValid = false;
 	this->enableWaterFix = false;
 	this->ignoreNextCategorizePosition = false;
 	this->collidingWithWorld = false;

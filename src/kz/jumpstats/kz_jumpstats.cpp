@@ -1054,6 +1054,7 @@ void KZJumpstatsService::HandleTeleport()
 	this->player->landingTimeServer = g_pKZUtils->GetServerGlobals()->curtime;
 	this->player->landingTimeActual = this->player->landingTime;
 	this->player->landingTimeInput = this->player->landingTime;
+	this->player->airMaxValid = false; // апекс в леджере не склеивает полёты через чекпоинт
 	this->player->landingVelocity = this->player->currentMoveData->m_vecVelocity;
 
 	jump->Invalidate("Teleported");

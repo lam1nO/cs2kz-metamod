@@ -146,6 +146,9 @@ void KZTimerModeService::Reset()
 	this->jumpPressIdx = 0;
 	this->lastLandingSpeed = -1.0f;
 	this->lastLandingSpeedTime = -1.0f;
+	this->lastLandRise = -9999.0f;
+	this->lastAirApex = -9999.0f;
+	this->lastLandDucked = false;
 }
 
 void KZTimerModeService::Cleanup()
@@ -278,11 +281,18 @@ void KZTimerModeService::OnStopTouchGround()
 			pressTime = t;
 		}
 	}
-	// Клип: предсказанное «докоснётся» в будущем не может задавать окно ввода (см. cvar).
+	// Клип метки касания. Порог — РОВНО окно перфа, отдельной константы не вводим:
+	// если предсказанное касание уехало от такта движка дальше, чем всё окно, попасть в
+	// окно нечем — игрок ориентируется на такт, в котором его уже поставили на землю.
+	// Сдвиги меньше окна (обычное падение с |vz| ~300 даёт 5-7 мс) НЕ трогаем: там перф
+	// достижим и без клипа, а классификацию пре-кликов замер менять не обосновывает.
+	f32 landShift = this->player->landingTimeActual - this->player->landingTime;
 	f32 landingRef = this->player->landingTimeActual;
-	if (kz_kzt_perf_input_clamp.GetBool() && this->player->landingTimeInput > 0.0f)
+	bool clampApplied = false;
+	if (kz_kzt_perf_input_clamp.GetBool() && landShift > kz_kzt_perf_window.Get() && this->player->landingTimeInput > 0.0f)
 	{
 		landingRef = this->player->landingTimeInput;
+		clampApplied = true;
 	}
 	f32 pressDt = pressTime > 0.0f ? pressTime - landingRef : -1.0f;
 	// Старое число (от сырой landingTimeActual) — в леджер, чтобы расхождение было видно.
@@ -511,7 +521,7 @@ void KZTimerModeService::OnStopTouchGround()
 		i32 dbgHalf = modf((f64)g_pKZUtils->GetGlobals()->curtime * ENGINE_FIXED_TICK_RATE, &dbgWhole) > 0.25 ? 1 : 0;
 		// Сдвиг метки касания: >0 = landingTimeActual уехала в БУДУЩЕЕ относительно такта,
 		// в котором движок уже поставил на землю (ветка предсказания при малой |vz|).
-		f32 dbgLandShift = (this->player->landingTimeActual - this->player->landingTime) * 1000.0f;
+		f32 dbgLandShift = landShift * 1000.0f;
 		f32 dbgGroundMs = (this->player->takeoffTime - this->player->landingTime) * 1000.0f;
 		Msg("[kzt-v2] %s land=%.0f preC=%.0f takeoff=%.0f press_dt=%.2f tog=%.2f n=%d ceil=%d perf=%d tsp=%d boost=%d duck=%d dfrac=%.2f vm=%.3f "
 			"dyaw=%.2f half=%d seg=%d it=%d dz=%.3f vz=%.1f bump=%d sperf=%d vperf=%d "
@@ -520,7 +530,7 @@ void KZTimerModeService::OnStopTouchGround()
 			perf ? 1 : 0, kz_kzt_takeoff_speed.GetBool() ? 1 : 0, hasBoost ? 1 : 0, ducked ? 1 : 0, duckFrac, this->effectivePreVelMod, dbgDyaw,
 			dbgHalf, this->velModTickSegments, this->velModTickIters, dbgTakeoffDz, velocity.z, dbgBump, structuralPerf ? 1 : 0, strictPerf ? 1 : 0,
 			dbgLandShift, this->player->landingTimeSource, this->player->landingVelocity.z, this->player->landingDiffZ, this->lastLandRise,
-			this->lastAirApex, dbgGroundMs, pressDtRaw * 1000.0f, pressBufN, kz_kzt_perf_input_clamp.GetBool() ? 1 : 0,
+			this->lastAirApex, dbgGroundMs, pressDtRaw * 1000.0f, pressBufN, clampApplied ? 1 : 0,
 			g_pKZUtils->GetGlobals()->frametime * 1000.0f, this->lastLandDucked ? 1 : 0);
 		fflush(stdout);
 	}
@@ -539,9 +549,12 @@ void KZTimerModeService::OnStartTouchGround()
 	// Геометрия завершившегося полёта для леджера: на сколько юнитов точка касания выше
 	// точки отрыва (rise) и какой был максимум подъёма (apex). takeoffGroundOrigin здесь
 	// ещё от отрыва, начавшего этот полёт — RegisterTakeoff нового прыжка будет позже.
-	this->lastLandRise = this->player->landingOrigin.z - this->player->takeoffGroundOrigin.z;
-	this->lastAirApex = this->airMaxValid ? this->airMaxZ - this->player->takeoffGroundOrigin.z : -1.0f;
-	this->airMaxValid = false;
+	// Сентинел -9999: отрыва ещё не было (rise законно бывает отрицательным — прыжок вниз,
+	// поэтому -1 сентинелом служить не может).
+	bool haveTakeoff = this->player->takeoffTime > 0.0f;
+	this->lastLandRise = haveTakeoff ? this->player->landingOrigin.z - this->player->takeoffGroundOrigin.z : -9999.0f;
+	this->lastAirApex =
+		(haveTakeoff && this->player->airMaxValid) ? this->player->airMaxZ - this->player->takeoffGroundOrigin.z : -9999.0f;
 	CCSPlayer_MovementServices *msLand = this->player->GetMoveServices();
 	this->lastLandDucked = msLand && (msLand->m_bDucked() || msLand->m_bDucking);
 	bbox_t bounds;
@@ -672,10 +685,10 @@ void KZTimerModeService::OnProcessMovement()
 	{
 		Vector airOrigin;
 		this->player->GetOrigin(&airOrigin);
-		if (!this->airMaxValid || airOrigin.z > this->airMaxZ)
+		if (!this->player->airMaxValid || airOrigin.z > this->player->airMaxZ)
 		{
-			this->airMaxZ = airOrigin.z;
-			this->airMaxValid = true;
+			this->player->airMaxZ = airOrigin.z;
+			this->player->airMaxValid = true;
 		}
 	}
 	this->CheckVelocityQuantization();
