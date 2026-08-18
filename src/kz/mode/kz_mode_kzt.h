@@ -200,6 +200,14 @@ class KZTimerModeService : public KZModeService
 	// Именно этим на живом сервере проверяется «наш темп == GO@128».
 	i32 velModTickSegments {};
 	i32 velModTickIters {};
+	// Геометрия предыдущего полёта для леджера (поведение не гейтят). airMaxZ копится в
+	// воздухе, на касании замораживается в apex/rise относительно точки отрыва: именно
+	// rise отвечает на вопрос «на сколько блок выше предыдущего».
+	f32 airMaxZ {};
+	bool airMaxValid {false};
+	f32 lastLandRise {};
+	f32 lastAirApex {};
+	bool lastLandDucked {};
 	f32 originalMaxSpeed {};
 
 	bool didTPM {};

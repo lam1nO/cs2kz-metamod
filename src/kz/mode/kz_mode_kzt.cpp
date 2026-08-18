@@ -33,6 +33,15 @@ CConVar<float> kz_kzt_perf_height_bonus("kz_kzt_perf_height_bonus", FCVAR_NONE, 
 // (до 0.974) дали только буферные пре-клики, которые строгое правило v2 считает промахом.
 // В GOKZ HitPerf структурный и такие прыжки включал — отсюда версия для сравнения.
 CConVar<bool> kz_kzt_perf_structural("kz_kzt_perf_structural", FCVAR_NONE, "KZT: перф по-GOKZ (структурный)", false);
+// Метку касания для окна перфа не берём из будущего. landingTimeActual в ветке предсказания
+// (RegisterLanding, reverse bug) уезжает вперёд на десятки мс: движок ставит на землю уже при
+// подъёме медленнее 140 (deadstrafe), у верхушки прыжка |vz| мала, и корень в квадратном
+// уравнении даёт большое время «докоснётся через». Клик игрока против такой метки всегда
+// «до касания», перф недостижим структурно, а не по таймингу. Замер srv-5 17.08: 110 прыжков
+// с отрицательным realTog — ноль перфов, при 22% на остальных 165. Порог по высоте блока
+// сходится с эмпирикой тестера: (302^2 - 140^2)/1600 = 44.75 юнита.
+CConVar<bool> kz_kzt_perf_input_clamp("kz_kzt_perf_input_clamp", FCVAR_NONE,
+                                      "KZT: окно перфа считать от метки касания, не уехавшей в будущее", true);
 
 bool KZTimerModePlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool late)
 {
@@ -256,17 +265,31 @@ void KZTimerModeService::OnStopTouchGround()
 	}
 	// Клик, вызвавший этот прыжок — последний валидный пресс не позже отрыва.
 	f32 pressTime = -1.0f;
+	i32 pressBufN = 0;
 	for (int i = 0; i < 4; i++)
 	{
 		f32 t = this->jumpPressTimes[i];
+		if (t > 0.0f)
+		{
+			pressBufN++;
+		}
 		if (t > 0.0f && t <= curtime && t <= this->player->takeoffTime + 0.0001f && t > pressTime)
 		{
 			pressTime = t;
 		}
 	}
-	f32 pressDt = pressTime > 0.0f ? pressTime - this->player->landingTimeActual : -1.0f;
+	// Клип: предсказанное «докоснётся» в будущем не может задавать окно ввода (см. cvar).
+	f32 landingRef = this->player->landingTimeActual;
+	if (kz_kzt_perf_input_clamp.GetBool() && this->player->landingTimeInput > 0.0f)
+	{
+		landingRef = this->player->landingTimeInput;
+	}
+	f32 pressDt = pressTime > 0.0f ? pressTime - landingRef : -1.0f;
+	// Старое число (от сырой landingTimeActual) — в леджер, чтобы расхождение было видно.
+	f32 pressDtRaw = pressTime > 0.0f ? pressTime - this->player->landingTimeActual : -1.0f;
 
-	// Перф — клик СТРОГО ПОСЛЕ касания в окне. Буферный пре-клик прыгает (движок,
+	// Перф — клик СТРОГО ПОСЛЕ касания в окне (касание — landingRef выше: не из будущего).
+	// Буферный пре-клик прыгает (движок,
 	// как предсказал клиент — «землит» не возвращается), но классифицируется промахом
 	// и идёт в общую формулу скорости — осознанный отход от GOKZ (у них HitPerf
 	// структурный и включал буферные прессы), решение пользователя 2026-07-19.
@@ -486,11 +509,19 @@ void KZTimerModeService::OnStopTouchGround()
 		}
 		f64 dbgWhole;
 		i32 dbgHalf = modf((f64)g_pKZUtils->GetGlobals()->curtime * ENGINE_FIXED_TICK_RATE, &dbgWhole) > 0.25 ? 1 : 0;
+		// Сдвиг метки касания: >0 = landingTimeActual уехала в БУДУЩЕЕ относительно такта,
+		// в котором движок уже поставил на землю (ветка предсказания при малой |vz|).
+		f32 dbgLandShift = (this->player->landingTimeActual - this->player->landingTime) * 1000.0f;
+		f32 dbgGroundMs = (this->player->takeoffTime - this->player->landingTime) * 1000.0f;
 		Msg("[kzt-v2] %s land=%.0f preC=%.0f takeoff=%.0f press_dt=%.2f tog=%.2f n=%d ceil=%d perf=%d tsp=%d boost=%d duck=%d dfrac=%.2f vm=%.3f "
-			"dyaw=%.2f half=%d seg=%d it=%d dz=%.3f vz=%.1f bump=%d sperf=%d vperf=%d\n",
+			"dyaw=%.2f half=%d seg=%d it=%d dz=%.3f vz=%.1f bump=%d sperf=%d vperf=%d "
+			"ldt=%.2f lsrc=%d lvz=%.1f ldz=%.3f rise=%.1f apex=%.1f gnd=%.2f pdt0=%.2f pn=%d clamp=%d ft=%.2f lduck=%d\n",
 			this->player->GetName(), this->lastLandingSpeed, preC, velocity.Length2D(), pressDt * 1000.0f, realTog * 1000.0f, dbgN, dbgPen,
 			perf ? 1 : 0, kz_kzt_takeoff_speed.GetBool() ? 1 : 0, hasBoost ? 1 : 0, ducked ? 1 : 0, duckFrac, this->effectivePreVelMod, dbgDyaw,
-			dbgHalf, this->velModTickSegments, this->velModTickIters, dbgTakeoffDz, velocity.z, dbgBump, structuralPerf ? 1 : 0, strictPerf ? 1 : 0);
+			dbgHalf, this->velModTickSegments, this->velModTickIters, dbgTakeoffDz, velocity.z, dbgBump, structuralPerf ? 1 : 0, strictPerf ? 1 : 0,
+			dbgLandShift, this->player->landingTimeSource, this->player->landingVelocity.z, this->player->landingDiffZ, this->lastLandRise,
+			this->lastAirApex, dbgGroundMs, pressDtRaw * 1000.0f, pressBufN, kz_kzt_perf_input_clamp.GetBool() ? 1 : 0,
+			g_pKZUtils->GetGlobals()->frametime * 1000.0f, this->lastLandDucked ? 1 : 0);
 		fflush(stdout);
 	}
 }
@@ -505,6 +536,14 @@ void KZTimerModeService::OnStartTouchGround()
 	this->player->GetVelocity(&landingV);
 	this->lastLandingSpeed = landingV.Length2D();
 	this->lastLandingSpeedTime = this->player->landingTime;
+	// Геометрия завершившегося полёта для леджера: на сколько юнитов точка касания выше
+	// точки отрыва (rise) и какой был максимум подъёма (apex). takeoffGroundOrigin здесь
+	// ещё от отрыва, начавшего этот полёт — RegisterTakeoff нового прыжка будет позже.
+	this->lastLandRise = this->player->landingOrigin.z - this->player->takeoffGroundOrigin.z;
+	this->lastAirApex = this->airMaxValid ? this->airMaxZ - this->player->takeoffGroundOrigin.z : -1.0f;
+	this->airMaxValid = false;
+	CCSPlayer_MovementServices *msLand = this->player->GetMoveServices();
+	this->lastLandDucked = msLand && (msLand->m_bDucked() || msLand->m_bDucking);
 	bbox_t bounds;
 	this->player->GetBBoxBounds(&bounds);
 	Vector ground = this->player->landingOrigin;
@@ -626,6 +665,18 @@ void KZTimerModeService::OnProcessMovement()
 			this->velModTickIters = 0;
 		}
 		this->velModTickSegments++;
+	}
+	// Максимум высоты в воздухе — только для леджера прыжков, поэтому под тем же cvar:
+	// это игровой такт, лишней работы на кадр здесь быть не должно.
+	if (kz_kzt_subtick_debug.GetBool() && (this->player->GetPlayerPawn()->m_fFlags & FL_ONGROUND) == 0)
+	{
+		Vector airOrigin;
+		this->player->GetOrigin(&airOrigin);
+		if (!this->airMaxValid || airOrigin.z > this->airMaxZ)
+		{
+			this->airMaxZ = airOrigin.z;
+			this->airMaxValid = true;
+		}
 	}
 	this->CheckVelocityQuantization();
 	this->RemoveCrouchJumpBind();
