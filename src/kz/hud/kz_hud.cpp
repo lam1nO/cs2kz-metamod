@@ -1116,17 +1116,25 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		addLine(buf);
 	}
 
-	// --- Координаты и углы (!showpos). Тумблер — настройка получателя (this), данные —
-	//        наблюдаемого (dataSource). В компакте скрыто (как раньше). Стиль как раньше. ---
+	// --- Координаты и углы (!showpos) — ДВЕ строки: «pos: x y z» и «ang: pitch yaw». Тумблер —
+	//        настройка получателя (this), данные — наблюдаемого (dataSource). В компакте скрыто.
+	//        Почему две: с точностью до сотых одна строка не влезала в ширину панели и рвалась
+	//        движком посередине (решение пользователя 18.08 — переносить по смыслу). Цена — на
+	//        одну строку больше в панели, чья высота ограничена; поэтому блок и стоит ПОСЛЕДНИМ
+	//        (см. комментарий у CP/TP выше): при обрезке низа страдают отладочные координаты. ---
 	if (showPos)
 	{
 		Vector origin;
 		QAngle angles;
 		dataSource->GetOrigin(&origin);
 		dataSource->GetAngles(&angles);
-		std::string posText =
-			KZLanguageService::PrepareMessageWithLang(language, "HUD - Position Text", origin.x, origin.y, origin.z, angles.x, angles.y);
+		// Две строки, а не одна: до сотых «pos … ang …» не влезало в ширину панели и рвалось
+		// движком посередине (решение пользователя 18.08 — переносить по смыслу).
+		std::string posText = KZLanguageService::PrepareMessageWithLang(language, "HUD - Position Text", origin.x, origin.y, origin.z);
 		V_snprintf(buf, sizeof(buf), "<font class='" KZ_HUD_FS_SECONDARY "'><font color='" KZ_HUD_C_MUTED "'>%s</font></font>", posText.c_str());
+		addLine(buf);
+		std::string angText = KZLanguageService::PrepareMessageWithLang(language, "HUD - Angles Text", angles.x, angles.y);
+		V_snprintf(buf, sizeof(buf), "<font class='" KZ_HUD_FS_SECONDARY "'><font color='" KZ_HUD_C_MUTED "'>%s</font></font>", angText.c_str());
 		addLine(buf);
 	}
 
