@@ -301,8 +301,11 @@ void KZTimerModeService::OnStopTouchGround()
 	f32 landShift = this->player->landingTimeActual - this->player->landingTime;
 	f32 landingRef = this->player->landingTimeActual;
 	bool clampApplied = false;
-	if (kz_kzt_perf_input_clamp.GetBool() && landShift > kz_kzt_perf_input_clamp_shift.Get()
-		&& this->player->landingTimeInput > 0.0f)
+	// Значение порога зажимаем: отрицательное воспроизвело бы необоснованный радиус
+	// (клип на всех касаниях ветки предсказания), а больше такта — бесшумно равно
+	// выключенному фиксу при включённом буле, для чего есть сам бул.
+	f32 clampShift = MAX(0.0f, MIN(kz_kzt_perf_input_clamp_shift.Get(), ENGINE_FIXED_TICK_INTERVAL));
+	if (kz_kzt_perf_input_clamp.GetBool() && landShift > clampShift && this->player->landingTimeInput > 0.0f)
 	{
 		landingRef = this->player->landingTimeInput;
 		clampApplied = true;
@@ -535,16 +538,25 @@ void KZTimerModeService::OnStopTouchGround()
 		// Сдвиг метки касания: >0 = landingTimeActual уехала в БУДУЩЕЕ относительно такта,
 		// в котором движок уже поставил на землю (ветка предсказания при малой |vz|).
 		f32 dbgLandShift = landShift * 1000.0f;
+		// Фаза КАСАНИЯ внутри такта. Точный порог недостижимости фазозависим
+		// (landingTime не лежит на сетке тиков: движок режет тик на сегменты по субтиковым
+		// входам, см. велмод ниже), поэтому внутри полосы (1/128, 1/64] сидят две разные
+		// популяции — недостижимые и до клипа, и достижимые-со-сдвинутым-окном. Разделяет
+		// их только эта фаза. Существующее half= сюда не годится: оно берёт curtime в этом
+		// хуке, то есть фазу сегмента ОТРЫВА.
+		f64 dbgLandWhole;
+		f32 dbgLandPhase = (f32)modf((f64)this->player->landingTime * ENGINE_FIXED_TICK_RATE, &dbgLandWhole);
 		f32 dbgGroundMs = (this->player->takeoffTime - this->player->landingTime) * 1000.0f;
 		Msg("[kzt-v2] %s land=%.0f preC=%.0f takeoff=%.0f press_dt=%.2f tog=%.2f n=%d ceil=%d perf=%d tsp=%d boost=%d duck=%d dfrac=%.2f vm=%.3f "
 			"dyaw=%.2f half=%d seg=%d it=%d dz=%.3f vz=%.1f bump=%d sperf=%d vperf=%d "
-			"ldt=%.2f lsrc=%d lvz=%.1f ldz=%.3f rise=%.1f apex=%.1f gnd=%.2f pdt0=%.2f pn=%d clamp=%d ft=%.2f lduck=%d\n",
+			"ldt=%.2f lsrc=%d lvz=%.1f ldz=%.3f rise=%.1f apex=%.1f gnd=%.2f pdt0=%.2f pn=%d clamp=%d ft=%.2f lduck=%d "
+			"lph=%.3f\n",
 			this->player->GetName(), this->lastLandingSpeed, preC, velocity.Length2D(), pressDt * 1000.0f, realTog * 1000.0f, dbgN, dbgPen,
 			perf ? 1 : 0, kz_kzt_takeoff_speed.GetBool() ? 1 : 0, hasBoost ? 1 : 0, ducked ? 1 : 0, duckFrac, this->effectivePreVelMod, dbgDyaw,
 			dbgHalf, this->velModTickSegments, this->velModTickIters, dbgTakeoffDz, velocity.z, dbgBump, structuralPerf ? 1 : 0, strictPerf ? 1 : 0,
 			dbgLandShift, this->player->landingTimeSource, this->player->landingVelocity.z, this->player->landingDiffZ, this->lastLandRise,
 			this->lastAirApex, dbgGroundMs, pressDtRaw * 1000.0f, pressBufN, clampApplied ? 1 : 0,
-			g_pKZUtils->GetGlobals()->frametime * 1000.0f, this->lastLandDucked ? 1 : 0);
+			g_pKZUtils->GetGlobals()->frametime * 1000.0f, this->lastLandDucked ? 1 : 0, dbgLandPhase);
 		fflush(stdout);
 	}
 }
