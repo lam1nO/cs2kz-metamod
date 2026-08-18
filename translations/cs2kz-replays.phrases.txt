@@ -368,10 +368,15 @@
 	}
 	"Replay - Usage Command"
 	{
-		"en"		"{grey}Usage: kz_replay <ID> | pb [name|steamid64] | wr | <wrpro/sr/gpb/spb[pro]> [<course> [<mode>]]"
-		"chi"		"{grey}用法: kz_replay <ID> 或 kz_replay <wr/sr/pb/gpb/spb[pro]> [<关卡> [<模式>]]"
-		"ru"		"{grey}Применение: kz_replay <ID> | pb [ник|steamid64] | wr | <wrpro/sr/gpb/spb[pro]> [<маршрут> [<режим>]]"
-		"ua"		"{grey}Використання: kz_replay <ID> або kz_replay <wr/sr/pb/gpb/spb[pro]> [<course> [<mode>]]"
+		// Синтаксис РАЗНЫЙ у трёх групп, и путать их нельзя (18.08): pb/pbpro/gpb/gpbpro
+		// берут вторым аргументом НИК или steamid64 (gpb == pb, отдельного глобального
+		// хранилища у нас нет); wr/wrpro аргументов не берут вовсе — ключ строится из
+		// текущего курса и режима; и только серверные sr/srpro/spb/spbpro сохранили
+		// апстримные [<курс> [<режим>]].
+		"en"		"{grey}Usage: kz_replay <ID> | <pb/pbpro/gpb/gpbpro> [name|steamid64] | <wr/wrpro> | <sr/srpro/spb/spbpro> [<course> [<mode>]]"
+		"chi"		"{grey}用法: kz_replay <ID> | <pb/pbpro/gpb/gpbpro> [名字|steamid64] | <wr/wrpro> | <sr/srpro/spb/spbpro> [<关卡> [<模式>]]"
+		"ru"		"{grey}Применение: kz_replay <ID> | <pb/pbpro/gpb/gpbpro> [ник|steamid64] | <wr/wrpro> | <sr/srpro/spb/spbpro> [<маршрут> [<режим>]]"
+		"ua"		"{grey}Використання: kz_replay <ID> | <pb/pbpro/gpb/gpbpro> [нік|steamid64] | <wr/wrpro> | <sr/srpro/spb/spbpro> [<маршрут> [<режим>]]"
 	}
 	"Replay - Load Cancelled"
 	{
@@ -810,6 +815,17 @@
 	{
 		"en"		"{darkred}No central replay found for this map/course/mode."
 		"ru"		"{darkred}Центральный повтор для этой карты/маршрута/режима не найден."
+	}
+	// Отказ pro-видов (!replay wrpro/pbpro/gpbpro). Отдельная фраза, потому что причина
+	// тут почти всегда НЕ «рекорда нет»: реплей выгружается только на overall/NUB-ран, и у
+	// держателя pro-рекорда файла под именно этот ран может не быть. Общая фраза про
+	// «повтор не найден» заставляла бы искать несуществующую проблему с рекордом.
+	// Аргументов нет — блок "#format" не нужен (с ним бы и не работало, см.
+	// cs2kz-customchangemap.phrases.txt).
+	"Replay - Pro Not Saved"
+	{
+		"en"		"{darkred}The PRO record has no saved replay (replays are stored for the overall record)."
+		"ru"		"{darkred}У PRO-рекорда нет сохранённого повтора (повторы пишутся для общего рекорда)."
 	}
 	"Replay - Central Downloading"
 	{

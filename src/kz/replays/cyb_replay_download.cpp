@@ -114,7 +114,7 @@ namespace
 		// clang-format on
 	}
 
-	void OnResolveResponse(CPlayerUserId userID, HTTP::Response resp)
+	void OnResolveResponse(CPlayerUserId userID, HTTP::Response resp, CybReplayDownload::Kind kind, bool targetIsSelf)
 	{
 		KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
 
@@ -122,7 +122,23 @@ namespace
 		{
 			if (player)
 			{
-				player->languageService->PrintChat(true, false, "Replay - Central Not Found");
+				// `!replay pbpro` РАБОТАЛ и до централизации: он не попадал под гейт
+				// «Global Mode Only», а LoadPBReplay при недоступном глобале молча
+				// фолбэчился на локальный серверный pro-PB. Поэтому центральный промах для
+				// PBPro обязан вернуться в тот же локальный путь — иначе мы бы не починили
+				// команду, а сломали работавшую. Только для СВОЕГО pro-PB: LoadSPBReplay
+				// берёт steamid самого игрока и чужую цель не поддерживает.
+				if (kind == CybReplayDownload::Kind::PBPro && targetIsSelf)
+				{
+					KZ::replaysystem::commands::LoadReplayForRecord(player, KZ::replaysystem::commands::RecordType::SPBPro, "", "");
+					return;
+				}
+				// У pro-видов 404 означает не только «рекорда нет», но и частый случай
+				// «рекорд есть, а файла под него нет»: реплей пишется лишь на overall/NUB-ран,
+				// и если pro-рекорд игрока — другой ран, отдавать нечего (см. заголовок).
+				// Общая фраза про «повтор не найден» тут вводила бы в заблуждение.
+				const bool isPro = kind == CybReplayDownload::Kind::PBPro || kind == CybReplayDownload::Kind::WRPro;
+				player->languageService->PrintChat(true, false, isPro ? "Replay - Pro Not Saved" : "Replay - Central Not Found");
 			}
 			return;
 		}
@@ -224,8 +240,25 @@ void CybReplayDownload::RequestAndPlay(KZPlayer *player, Kind kind, u64 targetSt
 	req.SetQuery("map", key.map);
 	req.SetQuery("course", std::to_string(key.course));
 	req.SetQuery("mode", key.mode);
-	req.SetQuery("type", kind == Kind::PB ? "pb" : "wr");
-	if (kind == Kind::PB)
+	// Имена типов — контракт с api (resolveQuery в replays.controller.ts): pb|wr|pbpro|wrpro.
+	const char *typeArg = "wr";
+	switch (kind)
+	{
+		case Kind::PB:
+			typeArg = "pb";
+			break;
+		case Kind::WR:
+			typeArg = "wr";
+			break;
+		case Kind::PBPro:
+			typeArg = "pbpro";
+			break;
+		case Kind::WRPro:
+			typeArg = "wrpro";
+			break;
+	}
+	req.SetQuery("type", typeArg);
+	if (kind == Kind::PB || kind == Kind::PBPro)
 	{
 		req.SetQuery("steamId64", std::to_string(targetSteamId64));
 	}
@@ -235,8 +268,10 @@ void CybReplayDownload::RequestAndPlay(KZPlayer *player, Kind kind, u64 targetSt
 	}
 
 	CPlayerUserId userID = player->GetClient()->GetUserID();
+	// Фолбэк на локальный pro-PB возможен только для СВОЕГО реплея (см. OnResolveResponse).
+	const bool targetIsSelf = targetSteamId64 != 0 && targetSteamId64 == player->GetSteamId64();
 
-	req.Send([userID](HTTP::Response resp) { OnResolveResponse(userID, resp); },
+	req.Send([userID, kind, targetIsSelf](HTTP::Response resp) { OnResolveResponse(userID, resp, kind, targetIsSelf); },
 			 [userID]()
 			 {
 				 KZ_LOG_INFO(LogChannel::Replays, "[cyb_replay] resolve network error\n");
@@ -281,7 +316,7 @@ void CybReplayDownload::RequestAndPlayByUuid(KZPlayer *player, const char *uuid)
 	CPlayerUserId userID = player->GetClient()->GetUserID();
 
 	// Формат ответа идентичен resolve (url + replayUuid) — общий обработчик.
-	req.Send([userID](HTTP::Response resp) { OnResolveResponse(userID, resp); },
+	req.Send([userID](HTTP::Response resp) { OnResolveResponse(userID, resp, CybReplayDownload::Kind::PB, false); },
 			 [userID]()
 			 {
 				 KZ_LOG_INFO(LogChannel::Replays, "[cyb_replay] by-uuid network error\n");

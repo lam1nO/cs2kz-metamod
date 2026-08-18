@@ -1275,15 +1275,21 @@ SCMD(kz_replay, SCFL_REPLAY | SCFL_HELP)
 
 	const char *arg1 = args->Arg(1);
 
-	// `!replay pb [ник|steamid64]` / `!replay wr` — Cyber-платформа: центральное
-	// (кросс-серверное) хранилище через api, ПОДМЕНЯЕТ upstream-обработку этих
-	// двух ключевых слов (которая требовала глобального cs2kz-api — недоступен
-	// для кастомных режимов вроде kzt, см. refs/cs2kz-api в CLAUDE.md). Прочие
-	// upstream-варианты (wrpro/sr/srpro/pbpro/gpb/gpbpro/spb/spbpro) не тронуты —
-	// см. recordKeywords ниже. Ключ резолва — ТЕКУЩИЙ курс/режим игрока (без
-	// аргументов курса/режима, в отличие от upstream-варианта): это и есть
-	// mode-гейт спеки.
-	if (KZ_STREQI(arg1, "pb"))
+	// Cyber-платформа: центральное (кросс-серверное) хранилище через api, ПОДМЕНЯЕТ
+	// upstream-обработку шести ключевых слов — `pb`, `wr`, `wrpro`, `pbpro`, `gpb`,
+	// `gpbpro` (upstream роутил их в глобальный cs2kz-api, недоступный этой сети и не
+	// работающий для кастомных режимов вроде kzt, см. refs/cs2kz-api в CLAUDE.md).
+	// `gpb`/`gpbpro` схлопнуты в наши PB/PBPro: отдельного глобального хранилища у нас
+	// нет, наша сеть и есть источник. Апстримными остались серверные виды из локальной
+	// БД плагина — sr/srpro/spb/spbpro, см. recordKeywords ниже.
+	// Ключ резолва — ТЕКУЩИЙ курс/режим игрока (без аргументов курса/режима, в отличие
+	// от upstream-варианта): это и есть mode-гейт спеки.
+	// Личные виды (свой/чужой PB) — с разбором необязательной цели вторым аргументом;
+	// `gpb`/`gpbpro` тоже сюда: «глобальный PB» у нас и есть PB нашей сети, отдельного
+	// глобального хранилища нет. Ветка одна на все четыре, чтобы разбор цели не разъехался.
+	const bool isPbKind = KZ_STREQI(arg1, "pb") || KZ_STREQI(arg1, "gpb");
+	const bool isPbProKind = KZ_STREQI(arg1, "pbpro") || KZ_STREQI(arg1, "gpbpro");
+	if (isPbKind || isPbProKind)
 	{
 		u64 targetSteamId64 = player->GetSteamId64();
 		// До завершения Steam-auth свой steamid == 0 — честный отказ вместо api-400.
@@ -1306,7 +1312,7 @@ SCMD(kz_replay, SCFL_REPLAY | SCFL_HELP)
 				return MRES_SUPERCEDE;
 			}
 		}
-		CybReplayDownload::RequestAndPlay(player, CybReplayDownload::Kind::PB, targetSteamId64);
+		CybReplayDownload::RequestAndPlay(player, isPbProKind ? CybReplayDownload::Kind::PBPro : CybReplayDownload::Kind::PB, targetSteamId64);
 		return MRES_SUPERCEDE;
 	}
 	if (KZ_STREQI(arg1, "wr"))
@@ -1314,14 +1320,26 @@ SCMD(kz_replay, SCFL_REPLAY | SCFL_HELP)
 		CybReplayDownload::RequestAndPlay(player, CybReplayDownload::Kind::WR, 0);
 		return MRES_SUPERCEDE;
 	}
+	if (KZ_STREQI(arg1, "wrpro"))
+	{
+		CybReplayDownload::RequestAndPlay(player, CybReplayDownload::Kind::WRPro, 0);
+		return MRES_SUPERCEDE;
+	}
 
+	// Остались ТОЛЬКО серверные виды (локальная БД плагина) — они и раньше работали без
+	// глобального api. Из перехваченных выше трое (wrpro/gpb/gpbpro) требовали
+	// KZGlobalService и давали игроку «Глобальный API недоступен»/«только для глобальных
+	// режимов»; `pbpro` же работал — он фолбэчился на локальный SPBPro, и этот фолбэк
+	// сохранён на 404 центрального резолва (см. cyb_replay_download.cpp).
 	static const struct
 	{
 		const char *keyword;
 		RT type;
 	} recordKeywords[] = {
-		{"wrpro", RT::WRPro}, {"sr", RT::SR},         {"srpro", RT::SRPro}, {"pbpro", RT::PBPro},
-		{"gpb", RT::GPB},     {"gpbpro", RT::GPBPro}, {"spb", RT::SPB},     {"spbpro", RT::SPBPro},
+		{"sr", RT::SR},
+		{"srpro", RT::SRPro},
+		{"spb", RT::SPB},
+		{"spbpro", RT::SPBPro},
 	};
 
 	for (const auto &kw : recordKeywords)
@@ -1507,4 +1525,3 @@ SCMD(kz_rphidelegs, SCFL_REPLAY)
 	KZ::replaysystem::commands::ToggleLegsVisibility(player);
 	return MRES_SUPERCEDE;
 }
-
