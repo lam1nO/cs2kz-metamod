@@ -42,6 +42,19 @@ CConVar<bool> kz_kzt_perf_structural("kz_kzt_perf_structural", FCVAR_NONE, "KZT:
 // сходится с эмпирикой тестера: (302^2 - 140^2)/1600 = 44.75 юнита.
 CConVar<bool> kz_kzt_perf_input_clamp("kz_kzt_perf_input_clamp", FCVAR_NONE,
                                       "KZT: окно перфа считать от метки касания, не уехавшей в будущее", true);
+// Порог клипа: НАСКОЛЬКО метка должна уехать вперёд, чтобы её срезать. Дефолт — полный
+// такт (1/64), потому что перф недостижим ПОЛНОСТЬЮ только при сдвиге >= такта: прессы
+// следующей команды заполняют (landingTime, landingTime + 1/64] непрерывно (субтиковое
+// `when`, OnPlayerCommand ниже), а окно перфа — 1/128, половина такта. При сдвиге в
+// (1/128, 1/64] окно ещё пересекается с достижимым интервалом, и клип там не создавал бы
+// достижимость, а ПЕРЕНОСИЛ окно: часть кликов из промаха в перф, часть перфов в промах.
+// Такой перенос замером не обоснован, поэтому по умолчанию в эту полосу не лезем.
+// Открытый вопрос к живому замеру: попадают ли жалобы тестера («48+») в полосу
+// (1/128, 1/64] — в юнитах ступени это 17.0..47.7 при зазоре 2 и 47.3..54.9 при зазоре 1,
+// а зазор теперь пишется полем ldz=. Если да и без клипа полоса не лечится — порог сюда
+// же ставится в 0.0078125 одной командой, без пересборки.
+CConVar<float> kz_kzt_perf_input_clamp_shift("kz_kzt_perf_input_clamp_shift", FCVAR_NONE,
+                                             "KZT: порог сдвига метки касания для клипа, секунды", ENGINE_FIXED_TICK_INTERVAL);
 
 bool KZTimerModePlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool late)
 {
@@ -281,15 +294,15 @@ void KZTimerModeService::OnStopTouchGround()
 			pressTime = t;
 		}
 	}
-	// Клип метки касания. Порог — РОВНО окно перфа, отдельной константы не вводим:
-	// если предсказанное касание уехало от такта движка дальше, чем всё окно, попасть в
-	// окно нечем — игрок ориентируется на такт, в котором его уже поставили на землю.
-	// Сдвиги меньше окна (обычное падение с |vz| ~300 даёт 5-7 мс) НЕ трогаем: там перф
-	// достижим и без клипа, а классификацию пре-кликов замер менять не обосновывает.
+	// Клип метки касания: срезаем её до такта движка, когда предсказанное касание уехало
+	// вперёд дальше порога (kz_kzt_perf_input_clamp_shift, дефолт — полный такт; см. вывод
+	// порога у объявления cvar). Обычное падение с |vz| ~300 даёт 5-7 мс и под клип не
+	// попадает — там поведение бит-в-бит прежнее.
 	f32 landShift = this->player->landingTimeActual - this->player->landingTime;
 	f32 landingRef = this->player->landingTimeActual;
 	bool clampApplied = false;
-	if (kz_kzt_perf_input_clamp.GetBool() && landShift > kz_kzt_perf_window.Get() && this->player->landingTimeInput > 0.0f)
+	if (kz_kzt_perf_input_clamp.GetBool() && landShift > kz_kzt_perf_input_clamp_shift.Get()
+		&& this->player->landingTimeInput > 0.0f)
 	{
 		landingRef = this->player->landingTimeInput;
 		clampApplied = true;
