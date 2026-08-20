@@ -89,6 +89,11 @@
 		"de"		"{grey}Bitte warte, bevor du diesen Befehl erneut verwendest."
 		"es"		"{grey}Por favor, espere antes de usar ese comando otra vez."
 	}
+	"Command Cooldown (Time Remaining)"
+	{
+		"#format"	"time:.2f"
+		"en"		"{grey}Please wait {default}{time}{grey} seconds before using another command."
+	}
 	"Beta Join Warning"
 	{
 		"en"		"CS2KZ is currently in the testing phase. Please be aware that all records and data will be wiped when CS2KZ is out of beta."

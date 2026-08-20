@@ -189,6 +189,9 @@ public:
 	KZFOVService *fovService {};
 	KZZtopwatchService *ztopwatchService {};
 
+	// Timestamp (curtime) of the last accepted scmd command, used for the per-command cooldown.
+	f32 lastCommandTime {};
+
 	void DisableTurnbinds();
 	void EnableGodMode();
 
