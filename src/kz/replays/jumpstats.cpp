@@ -138,6 +138,11 @@ void RpJumpStats::ToJump(Jump &out, RpJumpStats *js)
 	out.jumpType = jumpTypeRaw < JUMPTYPE_COUNT ? static_cast<JumpType>(jumpTypeRaw) : JumpType_Invalid;
 	// originalJumpType читает GetReportJumpType() на ветках failstat/jsAlways. Реплеям v<=5
 	// поле подставляет ReadJumpsCompressed.
+	// ИЗВЕСТНОЕ ОГРАНИЧЕНИЕ: ветка jsAlways читает преф БОТА (у реплей-бота он дефолтный), а не
+	// смотрящего, поэтому для НЕвалидного не-failstat прыжка спектатор видит INVALID вместо
+	// исходного типа. Паритета с живым прыжком у игрока с jsAlways тут нет. Врать не начали —
+	// невалидный валидным не притворяется (это и была цель), но информативность ниже. Починка
+	// требует передать в GetReportJumpType() «кому показываем» либо трогать префы бота — шире #7.
 	u8 originalRaw = js->overall.originalJumpType;
 	out.originalJumpType = originalRaw < JUMPTYPE_COUNT ? static_cast<JumpType>(originalRaw) : out.jumpType;
 	out.totalDistance = js->overall.totalDistance;
