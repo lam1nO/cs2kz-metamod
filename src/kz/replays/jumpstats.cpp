@@ -292,7 +292,8 @@ void RpJumpStats::PrintJump(KZPlayer *bot)
 		}
 
 		KZJumpstatsService::PlayJumpstatSound(pl, &jump);
-		KZJumpstatsService::PrintJumpToChat(pl, &jump);
+		// extended — как у живого пути: преф смотрящего, а не константа.
+		KZJumpstatsService::PrintJumpToChat(pl, &jump, pl->optionService->GetPreferenceBool("jsExtendedChatStats", false));
 		KZJumpstatsService::PrintJumpToConsole(pl, &jump);
 	}
 }

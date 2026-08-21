@@ -94,6 +94,9 @@ struct RpJumpStats
 		// Failstat нельзя восстановить из invalidateReason: Jump::IsFailstat() смотрит failstatValid,
 		// а дистанция/синк/страйфы у failstat'а берутся из отдельных полей, не из агрегатов.
 		bool isFailstat;
+		// Паддинг здесь явный: секция прыжков едет в файл сырым memcpy, а `= {}` зануления
+		// паддинг-байтов не гарантирует — без этого поля два байта в файле были бы мусором.
+		u8 reserved[2];
 		f32 miss;
 		f32 failstatDistance;
 		f32 failstatOffset;

@@ -448,8 +448,13 @@ namespace KZ::course
 	// платформа задала сама, то есть они у неё уже есть; поле disabled в отчёте — снимок на
 	// момент отправки, а не источник истины.
 	//
-	// POST {cybEmitUrl}/ingest/v1/kz/courses/report, fire-and-forget. NO-OP при выключенном
-	// cybEmitUrl и на картах без Mapping API.
+	// POST {cybEmitUrl}/ingest/v1/kz/map-courses, fire-and-forget; форма тела — по контракту
+	// packages/contracts (kzMapCoursesReportSchema). NO-OP при выключенном cybEmitUrl.
+	// Курс, чей cyber-номер вылез за контрактные 0..999 (курсы платформы с id из
+	// KZ_PLATFORM_COURSE_ID_BASE, маппер с timer_course_number >= 900), в снимок не попадает:
+	// zod валидирует тело целиком, и один такой курс стоил бы платформе всех имён карты.
+	// Карта без Mapping API отчёт всё равно отправляет — у неё есть синтетический курс от
+	// Mapi_CreateCourse(), и его имя платформе тоже нужно.
 	void ReportCoursesToPlatform();
 
 	// Setup all the courses to the local database.

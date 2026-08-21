@@ -26,6 +26,8 @@
 #include "utils/http.h"
 #include "kz/option/kz_option.h"
 #include "kz/replays/cyb_replay_common.h"
+// KZ::zones::IsValidZoneMapName — алфавит имени карты у ingest-ручек зон и курсов.
+#include "kz/zones/kz_zones.h"
 #include "tier1/keyvalues3.h"
 
 #include <vendor/mm-cs2menus/src/public/ics2menus.h>
@@ -1542,11 +1544,12 @@ i32 KZ::course::GetCyberCourseNumber(const KZCourseDescriptor *course)
 	return 100 + course->id;
 }
 
-// Экранирование строки для JSON-тела: имя и дескриптор курса приходят из данных карты, то
-// есть от маппера, а не от нас. Незакрытая кавычка в имени сломала бы разбор всего отчёта.
-// Управляющие символы просто выкидываем: в имени курса им делать нечего, а полноценное
-// экранирование управляющих кодов здесь избыточно.
-static_function std::string Mapi_JsonEscape(const char *str)
+// Подготовка строки карты/курса для JSON-тела отчёта. Делает ровно то, что требует контракт
+// (kzCourseNameSchema / kzCourseDescriptorSchema в packages/contracts): управляющих символов нет,
+// пробелов по краям нет. Строки сырые, от маппера: незакрытая кавычка сломала бы разбор всего
+// тела, а невидимый пробел по краям — единственный курс с ним завалил бы zod, а вместе с ним
+// ВЕСЬ снимок (валидация тела целиком). Возвращённая пустая строка = поле отдавать нельзя.
+static_function std::string Mapi_JsonSanitize(const char *str)
 {
 	std::string out;
 	if (!str)
@@ -1556,6 +1559,10 @@ static_function std::string Mapi_JsonEscape(const char *str)
 	for (const char *p = str; *p; p++)
 	{
 		unsigned char c = (unsigned char)*p;
+		if (c < 0x20 || c == 0x7F)
+		{
+			continue;
+		}
 		if (c == '"')
 		{
 			out += "\\\"";
@@ -1564,12 +1571,20 @@ static_function std::string Mapi_JsonEscape(const char *str)
 		{
 			out += "\\\\";
 		}
-		else if (c >= 0x20 && c != 0x7F)
+		else
 		{
 			out += (char)c;
 		}
 	}
-	return out;
+	// Тримим ПОСЛЕ экранирования: обрезать нужно исходные пробелы, а экранирование их не
+	// добавляет и не съедает. Табы и переводы строк уже выкинуты выше.
+	size_t first = out.find_first_not_of(' ');
+	if (first == std::string::npos)
+	{
+		return std::string();
+	}
+	size_t last = out.find_last_not_of(' ');
+	return out.substr(first, last - first + 1);
 }
 
 void KZ::course::ReportCoursesToPlatform()
@@ -1587,15 +1602,15 @@ void KZ::course::ReportCoursesToPlatform()
 	}
 	if (g_mappingApi.courseDescriptors.Count() == 0)
 	{
-		return; // карта без Mapping API — отчитываться нечем, это не отказ
+		return; // курсов нет вовсе — отчитываться нечем, это не отказ
 	}
 	bool mapNameOk = false;
 	CUtlString mapNameStr = g_pKZUtils->GetCurrentMapName(&mapNameOk);
 	std::string mapName = mapNameOk ? mapNameStr.Get() : "";
-	if (!CybReplayCommon::IsValidMapName(mapName))
+	// Алфавит имени карты у ЭТОЙ ручки — зоновский ^[a-z0-9_]{1,64}$ (kzMapNameSchema), а НЕ
+	// реплейный [a-z0-9_-]{1,128}: карта с дефисом прошла бы реплейный гейт и получила 400.
+	if (!KZ::zones::IsValidZoneMapName(mapName))
 	{
-		// Тот же вайтлист, что у реплеев и PB/WR: api валидирует map тем же алфавитом, запрос
-		// заведомо мимо — в сеть не идём.
 		KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] courses_report_skipped map=%s reason=invalid_map_name\n", mapName.c_str());
 		g_mappingApi.coursesReported = true;
 		return;
@@ -1604,26 +1619,50 @@ void KZ::course::ReportCoursesToPlatform()
 	// Отключённые курсы В ОТЧЁТЕ ЕСТЬ: идём по courseDescriptors, а не по витрине
 	// g_sortedCourses. Платформе нужен полный список её карты, иначе отключённый курс выглядел
 	// бы «исчезнувшим», а его cyber-номер всё равно остаётся занятым (GetCyberCourseNumber
-	// считает главный курс по полному списку).
-	std::string body = "{\"map\":\"" + Mapi_JsonEscape(mapName.c_str()) + "\",\"courses\":[";
+	// считает главный курс по полному списку). Признака «отключён» в теле НЕТ: контракт
+	// (kzReportedCourseSchema) его не несёт, а отключения инициирует сама платформа.
+	std::string body = "{\"map\":\"" + mapName + "\",\"courses\":[";
 	i32 count = 0;
+	i32 skippedOutOfRange = 0;
 	FOR_EACH_VEC(g_mappingApi.courseDescriptors, i)
 	{
 		const KZCourseDescriptor *course = &g_mappingApi.courseDescriptors[i];
+		i32 number = KZ::course::GetCyberCourseNumber(course);
+		// Контракт держит номер в 0..999 (kzCyberCourseNumberSchema), а ветка «100 + id» в
+		// GetCyberCourseNumber этот потолок пробивает: у курса платформы id из диапазона
+		// KZ_PLATFORM_COURSE_ID_BASE (1000+), у маппера с timer_course_number >= 900 — тоже.
+		// Пропускаем ИМЕННО такой курс, а не бросаем весь отчёт: zod валидирует тело целиком,
+		// поэтому один курс за диапазоном стоил бы платформе всех имён этой карты.
+		if (number < 0 || number > 999)
+		{
+			skippedOutOfRange++;
+			continue;
+		}
 		if (count > 0)
 		{
 			body += ',';
 		}
 		char numBuf[16];
-		V_snprintf(numBuf, sizeof(numBuf), "%d", KZ::course::GetCyberCourseNumber(course));
+		V_snprintf(numBuf, sizeof(numBuf), "%d", number);
 		body += "{\"number\":";
 		body += numBuf;
-		body += ",\"name\":\"";
-		body += Mapi_JsonEscape(course->name);
-		body += "\",\"descriptor\":\"";
-		body += Mapi_JsonEscape(course->entityTargetname);
-		body += "\",\"disabled\":";
-		body += course->disabled ? "true" : "false";
+		// name и descriptor опциональны в контракте: пустое после санитайза поле просто не
+		// отдаём (min(1) отбил бы пустую строку и завалил бы всё тело). Имени у курса может не
+		// быть законно — сайт подставит свою подпись.
+		std::string name = Mapi_JsonSanitize(course->name);
+		if (!name.empty())
+		{
+			body += ",\"name\":\"";
+			body += name;
+			body += '"';
+		}
+		std::string descriptor = Mapi_JsonSanitize(course->entityTargetname);
+		if (!descriptor.empty())
+		{
+			body += ",\"descriptor\":\"";
+			body += descriptor;
+			body += '"';
+		}
 		body += '}';
 		count++;
 	}
@@ -1631,14 +1670,25 @@ void KZ::course::ReportCoursesToPlatform()
 
 	g_mappingApi.coursesReported = true;
 
+	// Пустой снимок не отправляем: по контракту он НЕ снимает курсы карты, но и смысла в нём
+	// нет — а строка в логе про 0 курсов полезнее молчания.
+	if (count == 0)
+	{
+		KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] courses_report_skipped map=%s reason=no_reportable_courses out_of_range=%d\n", mapName.c_str(),
+					skippedOutOfRange);
+		return;
+	}
+
 	std::string fullUrl = url;
 	if (!fullUrl.empty() && fullUrl.back() == '/')
 	{
 		fullUrl.pop_back();
 	}
-	// НЕ существующий POST /ingest/v1/kz/courses: тот про создание курсов из игрового редактора
-	// зон и требует права game.kz_zones_edit по steamId64. Здесь запрос машинный, игрока нет.
-	fullUrl += "/ingest/v1/kz/courses/report";
+	// Путь и форма тела — по контракту packages/contracts/src/http/kz-courses.ts
+	// (kzMapCoursesReportSchema), гард на api — ServerTokenGuard, как у /ingest/v1/kz/records.
+	// НЕ /ingest/v1/kz/courses: та ручка — редактор курсов из игры, требует steamId64 и право
+	// game.kz_zones_edit, ключуется дескриптором. Здесь актора нет, отчитывается сервер.
+	fullUrl += "/ingest/v1/kz/map-courses";
 
 	const char *token = KZOptionService::GetOptionStr("cybEmitToken", "");
 	HTTP::Request req(HTTP::Method::POST, fullUrl);
@@ -1649,7 +1699,7 @@ void KZ::course::ReportCoursesToPlatform()
 	}
 	req.SetBody(body);
 
-	KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] courses_report map=%s courses=%d\n", mapName.c_str(), count);
+	KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] courses_report map=%s courses=%d out_of_range=%d\n", mapName.c_str(), count, skippedOutOfRange);
 
 	// Fire-and-forget: отчёт — не гейт игры, отказ только в лог. Повторных попыток нет намеренно:
 	// следующая загрузка карты отправит его заново, а спам ретраями на мёртвом api не нужен.
