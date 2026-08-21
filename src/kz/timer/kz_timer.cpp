@@ -326,8 +326,8 @@ bool KZTimerService::TimerStart(const KZCourseDescriptor *courseDesc, bool playS
 	this->reachedCheckpoints = 0;
 	this->lastCheckpoint = 0;
 	this->lastSplit = 0;
-	// Новый ран — новое право на одно предупреждение о сбросе (см. CheckSafeguard).
-	this->resetConfirmWarned = false;
+	// Новый ран — незакрытые подтверждения сброса от прошлого не переносим (см. CheckSafeguard).
+	memset(this->resetConfirmTime, 0, sizeof(this->resetConfirmTime));
 
 	f64 invalidTime = -1;
 	this->splitZoneTimes.SetSize(courseDesc->splitCount);
@@ -453,8 +453,8 @@ bool KZTimerService::TimerEnd(const KZCourseDescriptor *courseDesc)
 		// финишную зону (на bhop-картах игроки на ней стоят) и ничего не диагностирует.
 		if (this->timerRunning)
 		{
-			KZ_LOG_INFO(LogChannel::Timer, "[cyb] run_reject steam_id=%llu course=%s reason=wrong_course\n",
-						this->player->GetSteamId64(false), courseDesc->name);
+			KZ_LOG_INFO(LogChannel::Timer, "[cyb] run_reject steam_id=%llu course=%s reason=wrong_course\n", this->player->GetSteamId64(false),
+						courseDesc->name);
 		}
 		return false;
 	}
@@ -507,10 +507,8 @@ bool KZTimerService::TimerEnd(const KZCourseDescriptor *courseDesc)
 
 	// Финиш рана: ровно то, чего не хватало при жалобе «мой ран не засчитался».
 	KZ_LOG_INFO(LogChannel::Timer, "[cyb] run_finish steam_id=%llu map=%s course=%s mode=%s style=%s time=%.3f tps=%u\n",
-				this->player->GetSteamId64(false), g_pKZUtils->GetCurrentMapName().Get(), courseDesc->name,
-				this->player->modeService->GetModeName(),
-				this->player->styleServices.Count() > 0 ? this->player->styleServices[0]->GetStyleShortName() : "normal", time,
-				teleportsUsed);
+				this->player->GetSteamId64(false), g_pKZUtils->GetCurrentMapName().Get(), courseDesc->name, this->player->modeService->GetModeName(),
+				this->player->styleServices.Count() > 0 ? this->player->styleServices[0]->GetStyleShortName() : "normal", time, teleportsUsed);
 
 	for (KZPlayer *spec = player->specService->GetNextSpectator(NULL); spec != NULL; spec = player->specService->GetNextSpectator(spec))
 	{
@@ -922,7 +920,7 @@ void KZTimerService::ToggleProSafeguard()
 	this->player->languageService->PrintChat(true, false, enabled ? "Safeguard - Enable (PRO)" : "Safeguard PRO - Disable");
 }
 
-bool KZTimerService::CheckSafeguard(bool showError)
+bool KZTimerService::CheckSafeguard(ResetConfirmAction action, bool showError)
 {
 	// Защищать нечего: рана нет или он уже невалиден.
 	if (!this->GetTimerRunning() || !this->GetValidTimer())
@@ -932,6 +930,14 @@ bool KZTimerService::CheckSafeguard(bool showError)
 	// Гейт «сброса таймера»: только флаг sgReset (!sg). Телепорты сюда НЕ относятся.
 	if (this->GetSafeguardReset())
 	{
+		// Единственное исключение — окно свободного рестарта в самом начале рана.
+		if (action == RESET_CONFIRM_RESTART && this->GetTime() < KZ_SAFEGUARD_RESTART_FREE_WINDOW)
+		{
+			// Незакрытое подтверждение не должно пережить окно и «засчитаться» первым
+			// нажатием после него.
+			this->resetConfirmTime[action] = 0.0;
+			return true;
+		}
 		if (showError)
 		{
 			this->player->languageService->PrintChat(true, false, "Safeguard - Blocked");
@@ -941,16 +947,26 @@ bool KZTimerService::CheckSafeguard(bool showError)
 	}
 
 	// !sg ВЫКЛЮЧЕН — сброс разрешён, но длинный ран не должен умирать от одного случайного
-	// нажатия (noclip-бинд, смена команды, !end). Один раз за ран просим подтверждение;
-	// дальше эта попытка сбрасывается молча, сколько бы раз игрок сюда ни пришёл.
+	// нажатия (noclip-бинд, смена команды, !end).
 	// Порог по ИГРОВОМУ времени рана (GetTime), а не realtime: пауза длину забега не растит.
-	if (this->GetTime() < KZ_RESET_CONFIRM_MIN_RUNTIME || this->resetConfirmWarned)
+	if (this->GetTime() < KZ_RESET_CONFIRM_MIN_RUNTIME)
 	{
 		return true;
 	}
-	// Предупреждение тратится даже при showError=false: иначе тихий вызывающий сжёг бы ран,
-	// не показав игроку ничего, а флаг остался бы нетронутым.
-	this->resetConfirmWarned = true;
+
+	const f64 now = g_pKZUtils->GetServerGlobals()->curtime;
+	const f64 pending = this->resetConfirmTime[action];
+	if (pending > 0.0 && now - pending <= KZ_RESET_CONFIRM_WINDOW)
+	{
+		// Повтор того же действия в окне — подтверждено. Защиту сразу взводим заново, чтобы
+		// следующий сброс в этом же ране опять спросил.
+		this->resetConfirmTime[action] = 0.0;
+		return true;
+	}
+	// Либо первое нажатие, либо окно истекло — предупреждаем и (пере)взводим защиту.
+	// Отметка ставится даже при showError=false: иначе тихий вызывающий сжёг бы ран, не
+	// показав игроку ничего.
+	this->resetConfirmTime[action] = now;
 	if (showError)
 	{
 		this->player->languageService->PrintChat(true, false, "Reset Confirm - Warning");
@@ -970,50 +986,6 @@ bool KZTimerService::CheckSafeguardPro(bool showError)
 	if (showError)
 	{
 		this->player->languageService->PrintChat(true, false, "Safeguard - Blocked (PRO)");
-		this->player->PlayErrorSound();
-	}
-	return false;
-}
-
-bool KZTimerService::CheckSafeguardRestart(bool showError)
-{
-	// Рестарт — тоже «сброс таймера»: гейт по флагу sgReset (!sg), с кулдауном/двойным тапом.
-	if (!this->GetSafeguardReset() || !this->GetTimerRunning() || !this->GetValidTimer())
-	{
-		return true;
-	}
-	// Свободный рестарт в начале рана (решение пользователя 15.08): первые
-	// KZ_SAFEGUARD_RESTART_FREE_WINDOW секунд забега !r проходит без двойного тапа — на этом
-	// отрезке сейфгарду нечего спасать, а мешает он ровно тем, кто перезаходит на старт.
-	// Только этот путь (!r): CheckSafeguard/CheckSafeguardPro окна не получают — noclip и
-	// чекпоинт-ТП в начале рана всё так же гейтятся своими флагами.
-	if (this->GetTime() < KZ_SAFEGUARD_RESTART_FREE_WINDOW)
-	{
-		// Незакрытый двойной тап не должен пережить окно и «засчитаться» первым нажатием после
-		// него: пятисекундный MAX_DELAY длиннее остатка окна.
-		this->lastRestartAttemptTime = 0.0;
-		return true;
-	}
-	f64 currentTime = g_pKZUtils->GetServerGlobals()->curtime;
-	f64 timeSinceLastAttempt = currentTime - this->lastRestartAttemptTime;
-	f64 cooldown;
-	if (this->lastRestartAttemptTime == 0.0 || timeSinceLastAttempt > KZ_SAFEGUARD_RESTART_MAX_DELAY)
-	{
-		this->lastRestartAttemptTime = currentTime;
-		cooldown = KZ_SAFEGUARD_RESTART_MIN_DELAY;
-	}
-	else
-	{
-		cooldown = KZ_SAFEGUARD_RESTART_MIN_DELAY - timeSinceLastAttempt;
-	}
-	if (cooldown <= 0.0)
-	{
-		this->lastRestartAttemptTime = 0.0;
-		return true;
-	}
-	if (showError)
-	{
-		this->player->languageService->PrintChat(true, false, "Safeguard - Blocked (Restart)", cooldown);
 		this->player->PlayErrorSound();
 	}
 	return false;
@@ -1058,8 +1030,7 @@ void KZTimerService::Reset()
 	this->lastInvalidateTime = {};
 	this->touchedGroundSinceTouchingStartZone = {};
 	this->shouldPlayTimerStopSound = true;
-	this->lastRestartAttemptTime = {};
-	this->resetConfirmWarned = {};
+	memset(this->resetConfirmTime, 0, sizeof(this->resetConfirmTime));
 	// Гигиена: залипший в true флаг тихо отключил бы DropFrozenRun("death") в OnPlayerDeath.
 	this->changingTeam = {};
 }
@@ -1232,7 +1203,7 @@ SCMD(kz_stop, SCFL_TIMER | SCFL_HELP)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (player->timerService->GetTimerRunning())
 	{
-		if (!player->timerService->CheckSafeguard())
+		if (!player->timerService->CheckSafeguard(RESET_CONFIRM_OTHER))
 		{
 			return MRES_SUPERCEDE;
 		}

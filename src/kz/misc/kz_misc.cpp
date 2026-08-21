@@ -130,7 +130,8 @@ SCMD(kz_end, SCFL_MAP | SCFL_HELP)
 
 	if (shouldTeleport)
 	{
-		if (!player->timerService->CheckSafeguard())
+		// !end — не рестарт: окно свободного рестарта на него не распространяется.
+		if (!player->timerService->CheckSafeguard(RESET_CONFIRM_OTHER))
 		{
 			return MRES_SUPERCEDE;
 		}
@@ -163,13 +164,13 @@ void KZ::misc::TeleportToCourse(KZPlayer *player, const KZCourseDescriptor *cour
 	// Общая воронка всех рестартов: !r/!restart, !course <имя|номер>, !main, !b/!bonus/!b1..!b9
 	// и выбор пункта в меню !courses. В prac рестарта нет ни одним из этих путей (решение
 	// пользователя 07.08) — гард стоит здесь, а не в каждой команде, чтобы новый вызывающий
-	// не появился мимо запрета. Отказ ДО CheckSafeguardRestart и DropFrozenRun ниже: иначе
+	// не появился мимо запрета. Отказ ДО CheckSafeguard и DropFrozenRun ниже: иначе
 	// запрещённая команда всё равно убила бы замороженный ран.
 	if (player->pracService->RejectMapTeleport("teleport_to_start"))
 	{
 		return;
 	}
-	if (!player->timerService->CheckSafeguardRestart())
+	if (!player->timerService->CheckSafeguard(RESET_CONFIRM_RESTART))
 	{
 		return;
 	}
@@ -312,7 +313,7 @@ SCMD(kz_lj, SCFL_JUMPSTATS | SCFL_MAP | SCFL_HELP)
 	QAngle destAngles;
 	if (g_pMappingApi->GetJumpstatArea(destPos, destAngles))
 	{
-		if (!player->timerService->CheckSafeguard())
+		if (!player->timerService->CheckSafeguard(RESET_CONFIRM_OTHER))
 		{
 			return MRES_SUPERCEDE;
 		}
@@ -439,7 +440,7 @@ SCMD(jointeam, SCFL_HIDDEN)
 			CloseTeamMenu(player);
 		}
 	}
-	else if (player->IsAlive() && !player->timerService->CheckSafeguard())
+	else if (player->IsAlive() && !player->timerService->CheckSafeguard(RESET_CONFIRM_OTHER))
 	{
 		CloseTeamMenu(player);
 		return MRES_SUPERCEDE;

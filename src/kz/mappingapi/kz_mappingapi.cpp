@@ -89,6 +89,12 @@ static_global const char *g_triggerNames[] = {"Disabled",   "Modifier",   "Reset
 											  "Start zone", "End zone",   "Split zone",        "Checkpoint zone",   "Stage zone",
 											  "Teleport",   "Multi bhop", "Single bhop",       "Sequential bhop"};
 
+// Дамп keyvalues всех сущностей карты в лог (см. KZ::mapapi::OnSpawn). Инструмент разбора
+// «ключей» — логики карты, которой форк не видит. FCVAR_NONE: включается по RCON на живом
+// сервере без sv_cheats, иначе ран стал бы невалидным и вместе с ним пропала бы половина
+// наблюдаемого поведения. Дефолт 0 — дамп тяжёлый и идёт в игровом потоке.
+CConVar<bool> kz_mapapi_dump_entities("kz_mapapi_dump_entities", FCVAR_NONE, "Dump keyvalues of every map entity on spawn (diagnostics)", false);
+
 static_function MappingInterface g_mappingInterface;
 
 MappingInterface *g_pMappingApi = &g_mappingInterface;
@@ -651,21 +657,30 @@ void KZ::mapapi::OnSpawn(int count, const EntitySpawnInfo_t *info)
 	for (i32 i = 0; i < count; i++)
 	{
 		auto ekv = info[i].m_pKeyValues;
-#if 0
-		// Debug print for all keyvalues
-		FOR_EACH_ENTITYKEY(ekv, iter)
+		// Дамп keyvalues всех сущностей карты. Был `#if 0`, то есть требовал своей сборки;
+		// переведён на cvar, потому что нужен именно на живом сервере: механику «ключей» на
+		// kz_niche/kz_angina_x/kz_mjs_katharaxith форк не видит вовсе (своих типов триггеров под
+		// это нет), и понять её можно только по outputs самой карты. Один заход на карту с
+		// kz_mapapi_dump_entities 1 отдаёт полную картину: classname, targetname и связи
+		// logic_*/math_counter/filter_*, по которым и восстанавливается «выдать ключ» / «сбросить
+		// ключ». Дефолт 0 — дамп тяжёлый (тысячи строк на карту) и в игровом потоке.
+		if (ekv && kz_mapapi_dump_entities.Get())
 		{
-			auto kv = ekv->GetKeyValue(iter);
-			if (!kv)
+			const char *cn = info[i].m_pEntity ? info[i].m_pEntity->GetClassname() : "(no entity)";
+			KZ_LOG_INFO(LogChannel::MappingAPI, "[entdump] --- %s ---\n", cn ? cn : "(null)");
+			FOR_EACH_ENTITYKEY(ekv, iter)
 			{
-				continue;
+				auto kv = ekv->GetKeyValue(iter);
+				if (!kv)
+				{
+					continue;
+				}
+				CBufferStringGrowable<128> bufferStr;
+				const char *key = ekv->GetEntityKeyId(iter).GetString();
+				const char *value = kv->ToString(bufferStr);
+				KZ_LOG_INFO(LogChannel::MappingAPI, "[entdump] %s: %s\n", key, value);
 			}
-			CBufferStringGrowable<128> bufferStr;
-			const char *key = ekv->GetEntityKeyId(iter).GetString();
-			const char *value = kv->ToString(bufferStr);
-			Msg("\t%s: %s\n", key, value);
 		}
-#endif
 
 		if (!info[i].m_pEntity || !ekv || !info[i].m_pEntity->GetClassname())
 		{

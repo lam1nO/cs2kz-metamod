@@ -978,17 +978,17 @@
 	}
 	"Safeguard - Enable"
 	{
-		"en"		"{grey}Safeguard enabled {default}(!sg){grey}. Commands that stop or reset your timer are now blocked during a valid run {default}(teleports are not affected — use {blue}!pro {default}for that){grey}."
-		"chi"		"{grey}安全防护已启用 {default}(!sg){grey}. 在有效跑图中会停止或重置计时器的命令现已被阻止 {default}(不影响传送 — 传送请用 {blue}!pro{default}){grey}."
-		"ru"		"{grey}Защита таймера включена {default}(!sg){grey}. Команды, останавливающие или сбрасывающие таймер, теперь заблокированы во время валидного забега {default}(на телепорты не влияет — для них {blue}!pro{default}){grey}."
-		"ua"		"{grey}Запобіжник увімкнено {default}(!sg){grey}. Команди, що зупиняють або скидають таймер, тепер заблоковані під час валідного проходження {default}(на телепорти не впливає — для них {blue}!pro{default}){grey}."
+		"en"		"{grey}Safeguard enabled {default}(!sg){grey}. Commands that stop or reset your timer are now blocked during a run {default}(teleports are not affected — use {blue}!pro {default}for that){grey}."
+		"chi"		"{grey}安全防护已启用 {default}(!sg){grey}. 在跑图中会停止或重置计时器的命令现已被阻止 {default}(不影响传送 — 传送请用 {blue}!pro{default}){grey}."
+		"ru"		"{grey}Защита таймера включена {default}(!sg){grey}. Команды, останавливающие или сбрасывающие таймер, теперь заблокированы во время забега {default}(на телепорты не влияет — для них {blue}!pro{default}){grey}."
+		"ua"		"{grey}Запобіжник увімкнено {default}(!sg){grey}. Команди, що зупиняють або скидають таймер, тепер заблоковані під час проходження {default}(на телепорти не впливає — для них {blue}!pro{default}){grey}."
 	}
 	"Safeguard - Enable (PRO)"
 	{
-		"en"		"{grey}Safeguard for {blue}PRO {grey}runs enabled {default}(!pro){grey}. Teleports are now blocked during a valid run {default}(restart and noclip are still allowed — use {blue}!sg {default}to block those){grey}."
-		"chi"		"{grey}{blue}PRO {grey}跑图安全防护已启用 {default}(!pro){grey}. 有效跑图中传送已被阻止 {default}(重新开始和穿墙仍然可用 — 用 {blue}!sg {default}来阻止){grey}."
-		"ru"		"{grey}Защита {blue}PRO {grey}включена {default}(!pro){grey}. Телепорты теперь заблокированы во время валидного забега {default}(рестарт и noclip по-прежнему разрешены — для них {blue}!sg{default}){grey}."
-		"ua"		"{grey}Захист {blue}PRO {grey}увімкнено {default}(!pro){grey}. Телепорти тепер заблоковані під час валідного проходження {default}(рестарт і noclip досі дозволені — для них {blue}!sg{default}){grey}."
+		"en"		"{grey}Safeguard for {blue}PRO {grey}runs enabled {default}(!pro){grey}. Teleports are now blocked during a run {default}(restart and noclip are still allowed — use {blue}!sg {default}to block those){grey}."
+		"chi"		"{grey}{blue}PRO {grey}跑图安全防护已启用 {default}(!pro){grey}. 跑图中传送已被阻止 {default}(重新开始和穿墙仍然可用 — 用 {blue}!sg {default}来阻止){grey}."
+		"ru"		"{grey}Защита {blue}PRO {grey}включена {default}(!pro){grey}. Телепорты теперь заблокированы во время забега {default}(рестарт и noclip по-прежнему разрешены — для них {blue}!sg{default}){grey}."
+		"ua"		"{grey}Захист {blue}PRO {grey}увімкнено {default}(!pro){grey}. Телепорти тепер заблоковані під час проходження {default}(рестарт і noclip досі дозволені — для них {blue}!sg{default}){grey}."
 	}
 	"Safeguard PRO - Disable"
 	{
@@ -1011,19 +1011,11 @@
 		"ru"		"{darkred}Нельзя телепортироваться в {blue}PRO {darkred}забеге, пока включена защита PRO {default}(!pro){darkred}."
 		"ua"		"{darkred}Не можна телепортуватися в {blue}PRO {darkred}проходженні, поки увімкнено захист PRO {default}(!pro){darkred}."
 	}
-	"Safeguard - Blocked (Restart)"
-	{
-		"#format"	"cooldown:.1f"
-		"en"		"{grey}Action is blocked by safeguard. Please wait {default}{cooldown} {grey}seconds then reissue the command again."
-		"chi"		"{grey}操作被安全防护阻止. 请等待 {default}{cooldown} {grey}秒后重新输入指令."
-		"ru"		"{grey}Действие заблокировано защитой таймера. Пожалуйста, подождите {default}{cooldown} {grey}секунд и повторите команду."
-		"ua"		"{grey}Дію заблоковано запобіжником. Будь ласка, зачекайте {default}{cooldown} {grey}сек. і повторіть команду."
-	}
 	"Reset Confirm - Warning"
 	{
-		"en"		"{darkred}This would reset your progress. {default}Press again to confirm{darkred}."
-		"chi"		"{darkred}此操作会重置你的进度. {default}再按一次以确认{darkred}."
-		"ru"		"{darkred}Твой прогресс будет сброшен. {default}Нажми ещё раз для подтверждения{darkred}."
-		"ua"		"{darkred}Твій прогрес буде скинуто. {default}Натисни ще раз для підтвердження{darkred}."
+		"en"		"{darkred}This would reset your progress. {default}Press again within a second to confirm{darkred}."
+		"chi"		"{darkred}此操作会重置你的进度. {default}一秒内再按一次以确认{darkred}."
+		"ru"		"{darkred}Твой прогресс будет сброшен. {default}Нажми ещё раз в течение секунды{darkred}."
+		"ua"		"{darkred}Твій прогрес буде скинуто. {default}Натисни ще раз протягом секунди{darkred}."
 	}
 }

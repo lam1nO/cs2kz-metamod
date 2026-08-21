@@ -12,6 +12,10 @@
 #include "tier0/memdbgon.h"
 // private structs
 #define SCMD_MAX_NAME_LEN 128
+// Буфер под ремап ЦЕЛОЙ чат-строки (имя команды + аргументы), см. OnDispatchConCommand.
+// Движок режет say длиннее 512 байт, а ремап кириллицы только СОКРАЩАЕТ строку (2 байта UTF-8
+// на 1 байт латиницы), так что усечения здесь быть не может.
+#define SCMD_MAX_CHAT_LEN 512
 
 struct Scmd
 {
@@ -389,6 +393,9 @@ META_RES scmd::OnClientCommand(CPlayerSlot &slot, const CCommand &args)
 // копируются как есть (в нижнем регистре). Возвращает true ТОЛЬКО если во входе
 // была хотя бы одна кириллическая буква и вся строка успешно перекодирована;
 // иначе повторный матч бессмыслен (латиница уже пробовалась как есть).
+// Работает и на ЦЕЛОЙ чат-строке с аргументами: пробел и '!' — ASCII, проходят как есть
+// («!тщьштфеу ля_лшцше» → «!nominate kz_kiwit»). Приведение к нижнему регистру аргументов
+// безвредно: имена режимов и карт всюду сравниваются регистронезависимо.
 static_function bool RemapCyrillicToLatin(const char *in, char *out, int outSize)
 {
 	// Таблица для строчных а(U+0430)..я(U+044F) по позиции клавиши в QWERTY.
@@ -531,16 +538,31 @@ META_RES scmd::OnDispatchConCommand(ConCommandRef cmd, const CCommandContext &ct
 		// Русская раскладка: если как есть не сматчилось — ремапнуть кириллицу в
 		// латиницу по позиции клавиш (ЙЦУКЕН→QWERTY) и попробовать снова. Латинские
 		// команды матчатся на первом проходе, поэтому не ломаются (RemapCyrillicToLatin
-		// без кириллицы вернёт false). Аргументы команды остаются как есть — в callback
-		// уходит исходный cmdArgs.
+		// без кириллицы вернёт false).
+		//
+		// Ремапим ВСЮ строку и токенизируем её заново, а не только имя для поиска в реестре.
+		// Причина (баг 21.08, «!сля → этот режим недоступен»): колбэку доставался ИСХОДНЫЙ
+		// cmdArgs, а Command_KzModeShort (kz_mode_manager.cpp) берёт имя режима из Arg(0) —
+		// то есть из сырой строки чата. Команда находилась, запускалась и уходила в
+		// SwitchToMode("сля"). Тем же ремапом закрываются аргументы: «!тщьштфеу ля_лшцше»
+		// доезжает до колбэка как «!nominate kz_kiwit».
+		// Аргументы ремапятся ТОЛЬКО в этой ветке, то есть когда имя команды само потребовало
+		// ремапа (игрок заведомо в русской раскладке). Иначе кириллический аргумент у
+		// латинской команды — например ник в «!ban Вася» — превратился бы в мусор.
 		// Результат второго прохода дальше не нужен: решение принимает только suppress
 		// (его выставляет сама команда), поэтому возврат намеренно не сохраняем.
 		if (!matched)
 		{
-			char remapped[SCMD_MAX_NAME_LEN];
-			if (RemapCyrillicToLatin(cmdName, remapped, sizeof(remapped)))
+			char remappedLine[SCMD_MAX_CHAT_LEN];
+			if (RemapCyrillicToLatin(args[1], remappedLine, sizeof(remappedLine)))
 			{
-				(void)DispatchChatByName(controller, cmdArgs, remapped, trigger, suppress);
+				CCommand remappedArgs;
+				remappedArgs.Tokenize(remappedLine);
+				// Пустой токенайз (строка из одного триггера) оставил бы cmdArgs[0] нулевым.
+				if (remappedArgs.ArgC() > 0 && remappedArgs[0][0] != '\0')
+				{
+					(void)DispatchChatByName(controller, remappedArgs, remappedArgs[0] + 1, trigger, suppress);
+				}
 			}
 		}
 
