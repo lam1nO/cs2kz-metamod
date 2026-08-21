@@ -131,12 +131,15 @@ void RpJumpStats::ToJump(Jump &out, RpJumpStats *js)
 	out.adjustedLandingOrigin.x = js->overall.adjustedLandingOrigin[0];
 	out.adjustedLandingOrigin.y = js->overall.adjustedLandingOrigin[1];
 	out.adjustedLandingOrigin.z = js->overall.adjustedLandingOrigin[2];
-	out.jumpType = static_cast<JumpType>(js->overall.jumpType);
-	// GetReportJumpType() читает originalJumpType на ветках failstat/jsAlways и индексирует им
-	// jumpTypeStr, поэтому за диапазон его пускать нельзя. Реплеям v<=5 поле подставляет
-	// ReadJumpsCompressed; кламп здесь — страховка от битого файла.
-	JumpType original = static_cast<JumpType>(js->overall.originalJumpType);
-	out.originalJumpType = (original >= JumpType_LongJump && original < JUMPTYPE_COUNT) ? original : out.jumpType;
+	// Оба типа индексируют jumpTypeStr/jumpTypeShortStr в отчёте, поэтому за JUMPTYPE_COUNT
+	// пускать их нельзя. В файл пишется только 0..JUMPTYPE_COUNT-1 (JumpType_FullInvalid == -1
+	// отсекается ещё в KZJumpstatsService::EndJump), так что кламп — страховка от битого файла.
+	u8 jumpTypeRaw = js->overall.jumpType;
+	out.jumpType = jumpTypeRaw < JUMPTYPE_COUNT ? static_cast<JumpType>(jumpTypeRaw) : JumpType_Invalid;
+	// originalJumpType читает GetReportJumpType() на ветках failstat/jsAlways. Реплеям v<=5
+	// поле подставляет ReadJumpsCompressed.
+	u8 originalRaw = js->overall.originalJumpType;
+	out.originalJumpType = originalRaw < JUMPTYPE_COUNT ? static_cast<JumpType>(originalRaw) : out.jumpType;
 	out.totalDistance = js->overall.totalDistance;
 	out.currentMaxSpeed = js->overall.maxSpeed;
 	out.currentMaxHeight = js->overall.maxHeight;
