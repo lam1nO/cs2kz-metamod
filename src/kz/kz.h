@@ -286,6 +286,12 @@ namespace KZ
 		void OnPhysicsGameSystemFrameBoundary(void *pThis);
 		void HandleTeleportToCourse(KZPlayer *player, const CCommand *args);
 		// Телепорт на старт курса (сейфгард + снятие паузы). course == nullptr — поведение !r без аргумента.
-		void TeleportToCourse(KZPlayer *player, const KZCourseDescriptor *course);
+		// confirmReset=true — путь «бинд-подобный» (безаргументный !r): именно он и защищается
+		// подтверждением сброса при выключенном !sg. Пути с ЯВНОЙ целью (пункт меню !courses,
+		// !course <имя>, !main, !bN) передают false: случайно их не выполнить, а подтверждение
+		// повтором в пределах секунды для них физически недостижимо — перевыбрать пункт меню или
+		// перепечатать команду за секунду нельзя, и рестарт стал бы неисполнимым (найдено ревью).
+		// Блок при ВКЛЮЧЁННОМ !sg от этого флага не зависит — он одинаков для всех путей.
+		void TeleportToCourse(KZPlayer *player, const KZCourseDescriptor *course, bool confirmReset);
 	} // namespace misc
 }; // namespace KZ

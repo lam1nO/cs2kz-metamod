@@ -667,7 +667,7 @@ void KZ::mapapi::OnSpawn(int count, const EntitySpawnInfo_t *info)
 		if (ekv && kz_mapapi_dump_entities.Get())
 		{
 			const char *cn = info[i].m_pEntity ? info[i].m_pEntity->GetClassname() : "(no entity)";
-			KZ_LOG_INFO(LogChannel::MappingAPI, "[entdump] --- %s ---\n", cn ? cn : "(null)");
+			KZ_LOG_INFO(LogChannel::MappingAPI, "[entdump] --- %s ---\n", cn ? cn : "(no classname)");
 			FOR_EACH_ENTITYKEY(ekv, iter)
 			{
 				auto kv = ekv->GetKeyValue(iter);
@@ -676,9 +676,11 @@ void KZ::mapapi::OnSpawn(int count, const EntitySpawnInfo_t *info)
 					continue;
 				}
 				CBufferStringGrowable<128> bufferStr;
+				// Оба геттера могут вернуть NULL, а %s с NULL — формально UB. В исходном #if 0
+				// проверок не было, но блок теперь включается на живом сервере по RCON.
 				const char *key = ekv->GetEntityKeyId(iter).GetString();
 				const char *value = kv->ToString(bufferStr);
-				KZ_LOG_INFO(LogChannel::MappingAPI, "[entdump] %s: %s\n", key, value);
+				KZ_LOG_INFO(LogChannel::MappingAPI, "[entdump] %s: %s\n", key ? key : "(null key)", value ? value : "(null)");
 			}
 		}
 
@@ -1593,7 +1595,7 @@ static_function void OnCoursesMenuSelect(MenuHandle menu, int slot, int item)
 		p->languageService->PrintChat(true, false, "No Start Position For Course", course->name);
 		return;
 	}
-	KZ::misc::TeleportToCourse(p, course);
+	KZ::misc::TeleportToCourse(p, course, false);
 }
 
 // Меню !courses: main первым, затем бонусы по номерам, затем прочие курсы.
@@ -1721,7 +1723,7 @@ static_function META_RES GotoBonus(CCSPlayerController *controller, i32 n)
 		player->languageService->PrintChat(true, false, "No Start Position For Course", course->name);
 		return MRES_SUPERCEDE;
 	}
-	KZ::misc::TeleportToCourse(player, course);
+	KZ::misc::TeleportToCourse(player, course, false);
 	return MRES_SUPERCEDE;
 }
 
@@ -1739,7 +1741,7 @@ SCMD(kz_main, SCFL_MAP)
 		player->languageService->PrintChat(true, false, "No Start Position For Course", "Main");
 		return MRES_SUPERCEDE;
 	}
-	KZ::misc::TeleportToCourse(player, course);
+	KZ::misc::TeleportToCourse(player, course, false);
 	return MRES_SUPERCEDE;
 }
 

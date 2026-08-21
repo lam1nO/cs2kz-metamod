@@ -159,7 +159,7 @@ SCMD(kz_end, SCFL_MAP | SCFL_HELP)
 	return MRES_SUPERCEDE;
 }
 
-void KZ::misc::TeleportToCourse(KZPlayer *player, const KZCourseDescriptor *course)
+void KZ::misc::TeleportToCourse(KZPlayer *player, const KZCourseDescriptor *course, bool confirmReset)
 {
 	// Общая воронка всех рестартов: !r/!restart, !course <имя|номер>, !main, !b/!bonus/!b1..!b9
 	// и выбор пункта в меню !courses. В prac рестарта нет ни одним из этих путей (решение
@@ -170,7 +170,7 @@ void KZ::misc::TeleportToCourse(KZPlayer *player, const KZCourseDescriptor *cour
 	{
 		return;
 	}
-	if (!player->timerService->CheckSafeguard(RESET_CONFIRM_RESTART))
+	if (!player->timerService->CheckSafeguard(RESET_CONFIRM_RESTART, true, confirmReset))
 	{
 		return;
 	}
@@ -287,7 +287,8 @@ void KZ::misc::HandleTeleportToCourse(KZPlayer *player, const CCommand *args)
 			return;
 		}
 	}
-	KZ::misc::TeleportToCourse(player, startPosCourse);
+	// Явно названный курс — путь с целью; голый !r (startPosCourse == nullptr) — бинд-подобный.
+	KZ::misc::TeleportToCourse(player, startPosCourse, startPosCourse == nullptr);
 }
 
 SCMD(kz_restart, SCFL_TIMER | SCFL_MAP)

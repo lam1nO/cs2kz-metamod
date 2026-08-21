@@ -327,7 +327,7 @@ bool KZTimerService::TimerStart(const KZCourseDescriptor *courseDesc, bool playS
 	this->lastCheckpoint = 0;
 	this->lastSplit = 0;
 	// Новый ран — незакрытые подтверждения сброса от прошлого не переносим (см. CheckSafeguard).
-	memset(this->resetConfirmTime, 0, sizeof(this->resetConfirmTime));
+	V_memset(this->resetConfirmTime, 0, sizeof(this->resetConfirmTime));
 
 	f64 invalidTime = -1;
 	this->splitZoneTimes.SetSize(courseDesc->splitCount);
@@ -920,8 +920,14 @@ void KZTimerService::ToggleProSafeguard()
 	this->player->languageService->PrintChat(true, false, enabled ? "Safeguard - Enable (PRO)" : "Safeguard PRO - Disable");
 }
 
-bool KZTimerService::CheckSafeguard(ResetConfirmAction action, bool showError)
+bool KZTimerService::CheckSafeguard(ResetConfirmAction action, bool showError, bool wantConfirm)
 {
+	// Индекс приходит от вызывающего — за границу массива уходить нельзя.
+	Assert(action < RESET_CONFIRM_COUNT);
+	if (action >= RESET_CONFIRM_COUNT)
+	{
+		return true;
+	}
 	// Защищать нечего: рана нет или он уже невалиден.
 	if (!this->GetTimerRunning() || !this->GetValidTimer())
 	{
@@ -949,14 +955,18 @@ bool KZTimerService::CheckSafeguard(ResetConfirmAction action, bool showError)
 	// !sg ВЫКЛЮЧЕН — сброс разрешён, но длинный ран не должен умирать от одного случайного
 	// нажатия (noclip-бинд, смена команды, !end).
 	// Порог по ИГРОВОМУ времени рана (GetTime), а не realtime: пауза длину забега не растит.
-	if (this->GetTime() < KZ_RESET_CONFIRM_MIN_RUNTIME)
+	if (!wantConfirm || this->GetTime() < KZ_RESET_CONFIRM_MIN_RUNTIME)
 	{
 		return true;
 	}
 
-	const f64 now = g_pKZUtils->GetServerGlobals()->curtime;
+	const f64 now = g_pKZUtils->GetServerGlobals()->realtime;
 	const f64 pending = this->resetConfirmTime[action];
-	if (pending > 0.0 && now - pending <= KZ_RESET_CONFIRM_WINDOW)
+	const f64 elapsed = now - pending;
+	// elapsed >= 0 обязателен: без него откат часов назад (смена карты обнуляет отсчёт, а
+	// отметка живёт до дисконнекта) делал бы условие истинным и пропускал сброс молча, без
+	// предупреждения — fail-open ровно в том сценарии, от которого защита и нужна.
+	if (pending > 0.0 && elapsed >= 0.0 && elapsed <= KZ_RESET_CONFIRM_WINDOW)
 	{
 		// Повтор того же действия в окне — подтверждено. Защиту сразу взводим заново, чтобы
 		// следующий сброс в этом же ране опять спросил.
@@ -1030,7 +1040,7 @@ void KZTimerService::Reset()
 	this->lastInvalidateTime = {};
 	this->touchedGroundSinceTouchingStartZone = {};
 	this->shouldPlayTimerStopSound = true;
-	memset(this->resetConfirmTime, 0, sizeof(this->resetConfirmTime));
+	V_memset(this->resetConfirmTime, 0, sizeof(this->resetConfirmTime));
 	// Гигиена: залипший в true флаг тихо отключил бы DropFrozenRun("death") в OnPlayerDeath.
 	this->changingTeam = {};
 }
