@@ -9,31 +9,6 @@
 	// символ (жалоба 17.08). Цветовые токены {darkred}/{default} к "#format" отношения не
 	// имеют — BuildTemplate заменяет только объявленные имена, остальные фигурные скобки
 	// достаются CFormat во втором проходе.
-	"Mcustom - Downloading"
-	{
-		"#format"	"map:s"
-		"en"	"Downloading map {darkred}{map}{default}…"
-		"ru"	"Скачиваю карту {darkred}{map}{default}…"
-	}
-	"Mcustom - Ready"
-	{
-		"#format"	"map:s"
-		"en"	"Map {darkred}{map}{default} ready, switching…"
-		"ru"	"Карта {darkred}{map}{default} готова, переключаю…"
-	}
-	// Безымянные варианты: имени карты нет ни от вызывающего, ни на диске (докачка ещё не
-	// началась). Решение пользователя 17.08: лучше вообще без названия, чем workshop-ID или
-	// мусор. Аргументов нет — поэтому и "#format" здесь не нужен.
-	"Mcustom - Downloading Unnamed"
-	{
-		"en"	"Downloading the map…"
-		"ru"	"Скачиваю карту…"
-	}
-	"Mcustom - Ready Unnamed"
-	{
-		"en"	"Map ready, switching…"
-		"ru"	"Карта готова, переключаю…"
-	}
 	"Mcustom - Retry"
 	{
 		"#format"	"attempt:d,total:d"
