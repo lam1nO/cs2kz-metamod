@@ -131,7 +131,7 @@ SCMD(kz_end, SCFL_MAP | SCFL_HELP)
 	if (shouldTeleport)
 	{
 		// !end — не рестарт: окно свободного рестарта на него не распространяется.
-		if (!player->timerService->CheckSafeguard(RESET_CONFIRM_OTHER))
+		if (!player->timerService->CheckSafeguard(RESET_CONFIRM_END))
 		{
 			return MRES_SUPERCEDE;
 		}
@@ -314,7 +314,7 @@ SCMD(kz_lj, SCFL_JUMPSTATS | SCFL_MAP | SCFL_HELP)
 	QAngle destAngles;
 	if (g_pMappingApi->GetJumpstatArea(destPos, destAngles))
 	{
-		if (!player->timerService->CheckSafeguard(RESET_CONFIRM_OTHER))
+		if (!player->timerService->CheckSafeguard(RESET_CONFIRM_JUMPSTAT_AREA))
 		{
 			return MRES_SUPERCEDE;
 		}
@@ -441,7 +441,7 @@ SCMD(jointeam, SCFL_HIDDEN)
 			CloseTeamMenu(player);
 		}
 	}
-	else if (player->IsAlive() && !player->timerService->CheckSafeguard(RESET_CONFIRM_OTHER))
+	else if (player->IsAlive() && !player->timerService->CheckSafeguard(RESET_CONFIRM_TEAM_CHANGE))
 	{
 		CloseTeamMenu(player);
 		return MRES_SUPERCEDE;

@@ -1213,7 +1213,7 @@ SCMD(kz_stop, SCFL_TIMER | SCFL_HELP)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (player->timerService->GetTimerRunning())
 	{
-		if (!player->timerService->CheckSafeguard(RESET_CONFIRM_OTHER))
+		if (!player->timerService->CheckSafeguard(RESET_CONFIRM_STOP))
 		{
 			return MRES_SUPERCEDE;
 		}

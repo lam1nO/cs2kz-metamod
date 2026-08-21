@@ -676,11 +676,12 @@ void KZ::mapapi::OnSpawn(int count, const EntitySpawnInfo_t *info)
 					continue;
 				}
 				CBufferStringGrowable<128> bufferStr;
-				// Оба геттера могут вернуть NULL, а %s с NULL — формально UB. В исходном #if 0
-				// проверок не было, но блок теперь включается на живом сервере по RCON.
+				// ToString может вернуть NULL, а %s с NULL — формально UB; блок включается на
+				// живом сервере по RCON, так что проверка нужна. У имени ключа её нет намеренно:
+				// CKV3MemberName::m_pszString инициализирован "" и NULL не бывает никогда.
 				const char *key = ekv->GetEntityKeyId(iter).GetString();
 				const char *value = kv->ToString(bufferStr);
-				KZ_LOG_INFO(LogChannel::MappingAPI, "[entdump] %s: %s\n", key ? key : "(null key)", value ? value : "(null)");
+				KZ_LOG_INFO(LogChannel::MappingAPI, "[entdump] %s: %s\n", key, value ? value : "(null)");
 			}
 		}
 
