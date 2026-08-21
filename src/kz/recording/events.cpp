@@ -303,21 +303,12 @@ void KZRecordingService::OnJumpFinish(Jump *jump)
 	{
 		return;
 	}
-	if (jump->IsFailstat() || !jump->IsValid() || jump->GetOffset() < -JS_EPSILON)
-	{
-		return;
-	}
+	// #7: в реплей идут ВСЕ прыжки — failstat'ы, невалидные, с отрицательным оффсетом, короткие,
+	// со стилями. Живой игрок и наблюдатель бота должны видеть одно и то же, а отбор по вкусу
+	// (jsAlways/jsFailstats/jsReporting) делает смотрящий в RpJumpStats::PrintJump.
+	// JumpType_FullInvalid сюда не доходит: KZJumpstatsService::EndJump отсекает его раньше.
+	// lastJumpUUID потребляется только ниже, при создании jump-рекордера.
 	this->lastJumpUUID = UUID_t(true);
-	// If the player has a style, ignore it.
-	if (this->player->styleServices.Count() > 0)
-	{
-		return;
-	}
-	// If a jump is way too short, ignore it.
-	if (jump->airtime < 0.5f)
-	{
-		return;
-	}
 	KZ_LOG_DEBUG(LogChannel::Recording, "Jump finish\n");
 	this->EnsureCircularRecorderInitialized();
 	RpJumpStats rpJump = {};
@@ -329,9 +320,15 @@ void KZRecordingService::OnJumpFinish(Jump *jump)
 	// У jump-рекордеров порог DistanceTier_None и полный формат, то есть для них ничего
 	// не изменилось.
 	this->PushToRecorders(rpJump, RecorderType::Both);
-	// Create a new jump recorder if the jump is good enough.
-	if (jump->IsValid() && jump->GetOffset() >= -JS_EPSILON
-		&& jump->GetJumpPlayer()->modeService->GetDistanceTier(jump->jumpType, jump->GetDistance(), jump->GetTakeoffSpeed()) >= kz_replay_recording_min_jump_tier.Get())
+	// Create a new jump recorder if the jump is good enough. Отбор здесь остался прежним (условия
+	// перечислены явно, раньше часть их стояла ранними return выше): отдельный файл-реплей на
+	// прыжок заводим только для честного зачётного прыжка, иначе на каждый мусорный прыжок
+	// улетал бы файл в S3.
+	bool worthOwnReplay = !jump->IsFailstat() && jump->IsValid() && jump->GetOffset() >= -JS_EPSILON && jump->airtime >= 0.5f
+						  && this->player->styleServices.Count() == 0;
+	if (worthOwnReplay
+		&& jump->GetJumpPlayer()->modeService->GetDistanceTier(jump->jumpType, jump->GetDistance(), jump->GetTakeoffSpeed())
+			   >= kz_replay_recording_min_jump_tier.Get())
 	{
 		this->jumpRecorders.push_back(JumpRecorder(jump));
 		this->jumpRecorders.back().uuid = this->lastJumpUUID;

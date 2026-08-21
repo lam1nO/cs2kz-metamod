@@ -13,7 +13,11 @@ class KZPlayer;
 
 enum : u32
 {
-	KZ_REPLAY_VERSION = 5,
+	// v6: RpJumpStats::GeneralData дополнена originalJumpType и failstat-полями (#7 — в реплей
+	// рана пишутся ВСЕ прыжки, включая невалидные и failstat'ы). Секция прыжков пишется сырым
+	// memcpy структуры, поэтому рост layout обязан ехать через версию: читатель v<=5 разбирает
+	// старую раскладку отдельно (см. ReadJumpsCompressed).
+	KZ_REPLAY_VERSION = 6,
 };
 
 // Maximum subtick moves per tick. The theoretical engine maximum is 64, but 36 is a much more reasonable amount.
@@ -82,6 +86,21 @@ struct RpJumpStats
 		f32 edge;
 		f32 landingEdge;
 		char invalidateReason[256];
+
+		// --- v6 ---
+		// Тип прыжка до инвалидации: GetReportJumpType() читает его на failstat'ах и при jsAlways,
+		// а невалидные прыжки теперь в реплей попадают, так что копией jumpType уже не обойтись.
+		u8 originalJumpType;
+		// Failstat нельзя восстановить из invalidateReason: Jump::IsFailstat() смотрит failstatValid,
+		// а дистанция/синк/страйфы у failstat'а берутся из отдельных полей, не из агрегатов.
+		bool isFailstat;
+		f32 miss;
+		f32 failstatDistance;
+		f32 failstatOffset;
+		f32 failstatSync;
+		f32 failstatBadAngles;
+		f32 failstatTotalDistance;
+		i32 failstatStrafeCount;
 	} overall;
 
 	struct StrafeData

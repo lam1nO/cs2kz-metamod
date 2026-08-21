@@ -41,6 +41,18 @@ void RpJumpStats::FromJump(RpJumpStats &stats, Jump *jump)
 	stats.overall.landingEdge = jump->GetEdge(true);
 	V_strncpy(stats.overall.invalidateReason, jump->invalidateReason, sizeof(stats.overall.invalidateReason));
 
+	// v6: в реплей рана идут все прыжки, поэтому нужен и тип до инвалидации, и failstat-метрики —
+	// без них наблюдатель бота увидел бы failstat как обычный прыжок с агрегатами приземления.
+	stats.overall.originalJumpType = static_cast<u8>(jump->originalJumpType);
+	stats.overall.isFailstat = jump->IsFailstat();
+	stats.overall.miss = jump->GetMiss();
+	stats.overall.failstatDistance = jump->failstatDistance;
+	stats.overall.failstatOffset = jump->failstatOffset;
+	stats.overall.failstatSync = jump->failstatSync;
+	stats.overall.failstatBadAngles = jump->failstatBadAngles;
+	stats.overall.failstatTotalDistance = jump->failstatTotalDistance;
+	stats.overall.failstatStrafeCount = jump->failstatStrafeCount;
+
 	// Strafe stats
 	for (int i = 0; i < jump->strafes.Count(); i++)
 	{
@@ -120,10 +132,11 @@ void RpJumpStats::ToJump(Jump &out, RpJumpStats *js)
 	out.adjustedLandingOrigin.y = js->overall.adjustedLandingOrigin[1];
 	out.adjustedLandingOrigin.z = js->overall.adjustedLandingOrigin[2];
 	out.jumpType = static_cast<JumpType>(js->overall.jumpType);
-	// originalJumpType в реплее не хранится, но GetReportJumpType() его читает (ветки failstat/
-	// jsAlways) — без присваивания это чтение неинициализированной памяти и индекс за границей
-	// jumpTypeStr. Реплеи невалидных прыжков не пишем, так что копия jumpType здесь корректна.
-	out.originalJumpType = out.jumpType;
+	// GetReportJumpType() читает originalJumpType на ветках failstat/jsAlways и индексирует им
+	// jumpTypeStr, поэтому за диапазон его пускать нельзя. Реплеям v<=5 поле подставляет
+	// ReadJumpsCompressed; кламп здесь — страховка от битого файла.
+	JumpType original = static_cast<JumpType>(js->overall.originalJumpType);
+	out.originalJumpType = (original >= JumpType_LongJump && original < JUMPTYPE_COUNT) ? original : out.jumpType;
 	out.totalDistance = js->overall.totalDistance;
 	out.currentMaxSpeed = js->overall.maxSpeed;
 	out.currentMaxHeight = js->overall.maxHeight;
@@ -137,6 +150,14 @@ void RpJumpStats::ToJump(Jump &out, RpJumpStats *js)
 	// в консоли не было строки Landing Edge, хотя данные в реплее есть.
 	out.landingEdge = js->overall.landingEdge;
 	V_strncpy(out.invalidateReason, js->overall.invalidateReason, sizeof(out.invalidateReason));
+	out.miss = js->overall.miss;
+	out.failstatValid = js->overall.isFailstat;
+	out.failstatDistance = js->overall.failstatDistance;
+	out.failstatOffset = js->overall.failstatOffset;
+	out.failstatSync = js->overall.failstatSync;
+	out.failstatBadAngles = js->overall.failstatBadAngles;
+	out.failstatTotalDistance = js->overall.failstatTotalDistance;
+	out.failstatStrafeCount = js->overall.failstatStrafeCount;
 
 	// Clear existing strafes just in case
 	out.strafes.RemoveAll();
@@ -244,10 +265,25 @@ void RpJumpStats::PrintJump(KZPlayer *bot)
 {
 	Jump jump(bot);
 	RpJumpStats::ToJump(jump, this);
+	bool isFailstat = jump.IsFailstat();
 	bool valid = jump.GetOffset() > -JS_EPSILON && jump.IsValid();
 	for (KZPlayer *pl = bot->specService->GetNextSpectator(nullptr); pl != nullptr; pl = bot->specService->GetNextSpectator(pl))
 	{
-		if (!valid && !pl->optionService->GetPreferenceBool("jsAlways", false))
+		// Отбор — тот же, что у живого игрока в KZJumpstatsService::AnnounceJump (ветка
+		// «спектатор прыгуна»): в реплей рана теперь пишутся все прыжки, поэтому фильтрует
+		// смотрящий, а не запись.
+		if (!pl->optionService->GetPreferenceBool("jsReporting", true))
+		{
+			continue;
+		}
+		if (isFailstat)
+		{
+			if (!pl->optionService->GetPreferenceBool("jsFailstats", true))
+			{
+				continue;
+			}
+		}
+		else if (!valid && !pl->optionService->GetPreferenceBool("jsAlways", false))
 		{
 			continue;
 		}

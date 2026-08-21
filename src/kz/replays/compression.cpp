@@ -2,6 +2,7 @@
 #include "compression.h"
 #include "filesystem.h"
 #include "vendor/zstd/lib/zstd.h"
+#include <cstddef>
 
 using namespace KZ::replaysystem::compression;
 
@@ -752,6 +753,13 @@ i32 KZ::replaysystem::compression::WriteEventsCompressed(std::vector<char> &outB
 // Jumps compression
 // ========================================
 
+// Размер GeneralData до версии 6: новые поля дописаны в хвост структуры, поэтому старая раскладка —
+// строгий префикс новой, и читать её достаточно укороченным memcpy (хвост уже обнулён).
+// static_assert пришит намеренно: он падает, если кто-то вставит поле в СЕРЕДИНУ GeneralData,
+// — иначе такая вставка молча раздала бы мусор всем ранее записанным реплеям.
+static constexpr size_t GENERAL_DATA_SIZE_V5 = offsetof(RpJumpStats::GeneralData, originalJumpType);
+static_assert(GENERAL_DATA_SIZE_V5 == 364, "layout GeneralData до v6 менять нельзя: секция прыжков пишется сырым memcpy");
+
 bool KZ::replaysystem::compression::ReadJumpsCompressed(const char *&cursor, const char *end, std::vector<RpJumpStats> &outJumps, u32 replayVersion)
 {
 	if (cursor + (ptrdiff_t)sizeof(CompressedSectionHeader) > end)
@@ -812,8 +820,20 @@ bool KZ::replaysystem::compression::ReadJumpsCompressed(const char *&cursor, con
 		RpJumpStats jump = {};
 
 		// Read jump overall data
-		memcpy(&jump.overall, readPtr, sizeof(jump.overall));
-		readPtr += sizeof(jump.overall);
+		if (replayVersion >= 6)
+		{
+			memcpy(&jump.overall, readPtr, sizeof(jump.overall));
+			readPtr += sizeof(jump.overall);
+		}
+		else
+		{
+			memcpy(&jump.overall, readPtr, GENERAL_DATA_SIZE_V5);
+			readPtr += GENERAL_DATA_SIZE_V5;
+			// Хвост v6 остаётся нулевым (jump инициализирован {}), но нуль в originalJumpType —
+			// это валидный JumpType_LongJump, а не «нет данных». В реплеях v<=5 невалидных
+			// прыжков нет, поэтому корректная подстановка — сам jumpType.
+			jump.overall.originalJumpType = jump.overall.jumpType;
+		}
 
 		// Read strafes
 		i32 numStrafes;
