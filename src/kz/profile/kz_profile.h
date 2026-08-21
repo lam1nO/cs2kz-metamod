@@ -25,6 +25,8 @@ public:
 		personalTag[0] = '\0';
 		personalTagChatColor[0] = '\0';
 		personalTagRequested = false;
+		personalTagRetryTime = 0.0f;
+		personalTagRetryUsed = false;
 	}
 
 	char clanTag[32] {};
@@ -50,12 +52,20 @@ public:
 	// зовётся на дисконнекте. Снятие из админки применяется по следующему заходу, так и
 	// задумано.
 	bool personalTagRequested = false;
+	// realtime отложенного ПОВТОРА запроса приписки; 0 = повтор не запланирован. Нужен потому,
+	// что транзиентный отказ (сетевой блип ровно на коннекте, рестарт api, 5xx) иначе оставлял
+	// бы игрока без приписки до реконнекта — а прежний хардкод отказать не мог вовсе.
+	f32 personalTagRetryTime = 0.0f;
+	// Повтор уже давали. Повтор РОВНО один: на лежащем api ретраи каждые пять секунд от каждого
+	// игрока — это спам в лог и в сеть, а приписка не гейт игры.
+	bool personalTagRetryUsed = false;
 
 	void RequestRating();
 	// Персональная приписка у ника: GET {cybEmitUrl}/ingest/v1/players/<steamid64>/tag
 	// (ServerTokenGuard, ответ {"tag": {...}|null}). Fail-soft: любой отказ = приписки нет,
-	// ранговый тег работает как раньше. Зовётся на аутентификации и на OnPlayerActive
-	// (страховка позднего auth / late-load), лишние вызовы гасит personalTagRequested.
+	// ранговый тег работает как раньше. Зовётся на аутентификации, на OnPlayerActive (страховка
+	// late-load без колбэков авторизации) и из такта OnPhysicsSimulatePost — единственным
+	// отложенным повтором после транзиентного отказа. Лишние вызовы гасит personalTagRequested.
 	void RequestPersonalTag();
 	bool CanDisplayRank();
 	// Индекс звания 0..22 по текущим очкам и шкале режима; -1 = звание недоступно.

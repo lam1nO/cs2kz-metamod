@@ -105,6 +105,10 @@ CConVar<bool> kz_gg1_bridge("kz_gg1_bridge", FCVAR_NONE, "Whether to broadcast p
 // проверяем СВОЙ буфер: clanTag[32] минус скобки формата "[%s]" и нуль = 29 байт. Меньшее из
 // двух, чтобы расширение лимита на платформе не начало молча резать тег в snprintf.
 #define KZ_PERSONAL_TAG_MAX_BYTES 24
+// Пауза перед единственным повтором после транзиентного отказа. Пять секунд — чтобы повтор не
+// лёг в ту же секунду, что и сбойнувший запрос (сетевой блип на коннекте, перезапуск api), но
+// игрок ещё не успел прочитать скорборд.
+#define KZ_PERSONAL_TAG_RETRY_DELAY 5.0f
 
 // Тело ручки приписки: {"tag": {...}|null}. `color` (hex для сайта) форку не нужен и не читается.
 struct CybPersonalTagPayload
@@ -118,8 +122,10 @@ struct CybPersonalTagPayload
 		{
 			return false;
 		}
-		// Цвет по контракту обязателен, но его отсутствие — не повод выкинуть приписку:
-		// пустая строка ниже превратится в дефолтный токен.
+		// Цвет по контракту обязателен (z.enum + CHECK в БД), так что путь недостижим, но из-за
+		// цвета приписку не выкидываем — пустая строка ниже превратится в дефолтный токен.
+		// Тишины тут не обещаем: Get на отсутствующем ключе сам пишет варнинг «[JSON] Key
+		// `chatColor` does not exist», и это ровно та диагностика, которая нужна.
 		if (!json.Get("chatColor", this->chatColor))
 		{
 			this->chatColor.clear();
@@ -154,6 +160,25 @@ static_function std::string CybSanitizePersonalTag(const std::string &raw)
 		return std::string();
 	}
 	return raw;
+}
+
+// Транзиентный отказ ручки приписки: вернуть право на ОДНУ повторную попытку. Терминальные
+// ответы (приписки нет, 401/403/404, негодный текст) сюда не приходят — повтор их не изменит.
+static_function void CybScheduleTagRetry(u64 steamID64)
+{
+	KZPlayer *player = g_pKZPlayerManager->SteamIdToPlayer(steamID64);
+	if (!player)
+	{
+		return; // игрок вышел; на реконнекте Reset вернёт полное право на попытку
+	}
+	KZProfileService *profile = player->profileService;
+	if (profile->personalTagRetryUsed)
+	{
+		return;
+	}
+	profile->personalTagRetryUsed = true;
+	profile->personalTagRequested = false;
+	profile->personalTagRetryTime = g_pKZUtils->GetServerGlobals()->realtime + KZ_PERSONAL_TAG_RETRY_DELAY;
 }
 
 // Есть ли неразосланное «цифры рангов изменились». Взводится ТОЛЬКО реальной записью в
@@ -207,8 +232,11 @@ void KZProfileService::OnPlayerActive()
 	// Страховка на случай, если клиент не готов принять флаг ровно в эту секунду: его
 	// собственная запись m_iCompetitiveRankType на первом же CheckTransmit взведёт
 	// s_rankRevealPending, и бродкаст догонит его в течение секунды.
-	// Приписка — страховочный путь: обычно запрос уходит из OnAuthorized, но при late-load
-	// плагина уже подключённые игроки этого события не увидят. Повтор гасит personalTagRequested.
+	// Приписка — страховочный путь. Обычно запрос уходит из OnAuthorized (его при late-load
+	// плагина прогоняет по уже аутентифицированным сам PlayerManager::OnLateLoad). Остаётся
+	// ранняя ветка того же OnLateLoad — выход по отсутствию g_pNetworkServerService, когда
+	// колбэки авторизации не регистрируются вовсе: тогда приписка догонит игрока здесь, на
+	// следующей смене карты. Лишние вызовы гасит personalTagRequested.
 	if (!this->player->IsFakeClient())
 	{
 		this->RequestPersonalTag();
@@ -400,6 +428,12 @@ void KZProfileService::RequestPersonalTag()
 		if (response.status < 200 || response.status >= 300)
 		{
 			KZ_LOG_WARN(LogChannel::Profile, "[cyb] player_tag_fetch_fail steam_id=%llu reason=http_%u\n", steamID64, (unsigned)response.status);
+			// 5xx и 429 — api живой, но сейчас не может: даём один повтор. 401/403/404 и прочие
+			// 4xx терминальны — это конфиг сервера или отсутствие записи, повтор их не изменит.
+			if (response.status >= 500 || response.status == 429)
+			{
+				CybScheduleTagRetry(steamID64);
+			}
 			return;
 		}
 		// Адресуем по steamID, а не по слоту: игрок мог выйти, пока летел запрос, а слот —
@@ -409,10 +443,13 @@ void KZProfileService::RequestPersonalTag()
 		{
 			return;
 		}
+		// Битое/пустое тело при 2xx — почти всегда обрыв или прокси на пути, а не наш контракт:
+		// поэтому bad_body тоже транзиентный и получает тот же один повтор.
 		std::string body = response.Body().value_or("");
 		if (body.empty())
 		{
 			KZ_LOG_WARN(LogChannel::Profile, "[cyb] player_tag_fetch_fail steam_id=%llu reason=bad_body\n", steamID64);
+			CybScheduleTagRetry(steamID64);
 			return;
 		}
 		Json json(body);
@@ -420,6 +457,7 @@ void KZProfileService::RequestPersonalTag()
 		if (!json.IsValid() || !json.Get("tag", tagJson))
 		{
 			KZ_LOG_WARN(LogChannel::Profile, "[cyb] player_tag_fetch_fail steam_id=%llu reason=bad_body\n", steamID64);
+			CybScheduleTagRetry(steamID64);
 			return;
 		}
 		// tag: object|null. Decode(std::optional) — единственный путь разобрать null без варнинга
@@ -428,6 +466,7 @@ void KZProfileService::RequestPersonalTag()
 		if (!tagJson.Decode(payload))
 		{
 			KZ_LOG_WARN(LogChannel::Profile, "[cyb] player_tag_fetch_fail steam_id=%llu reason=bad_body\n", steamID64);
+			CybScheduleTagRetry(steamID64);
 			return;
 		}
 		if (!payload.has_value())
@@ -437,6 +476,7 @@ void KZProfileService::RequestPersonalTag()
 		std::string tag = CybSanitizePersonalTag(payload->tag);
 		if (tag.empty())
 		{
+			// Терминально: ответ пришёл целым, приписка в нём негодна — повтор вернёт то же самое.
 			KZ_LOG_WARN(LogChannel::Profile, "[cyb] player_tag_fetch_fail steam_id=%llu reason=bad_tag_text\n", steamID64);
 			return;
 		}
@@ -448,7 +488,11 @@ void KZProfileService::RequestPersonalTag()
 		KZ_LOG_DEBUG(LogChannel::Profile, "[cyb] player_tag steam_id=%llu tag=%s color=%s\n", steamID64, tag.c_str(), chatColor);
 		player->profileService->UpdateClantag();
 	};
-	auto onError = [steamID64]() { KZ_LOG_WARN(LogChannel::Profile, "[cyb] player_tag_fetch_fail steam_id=%llu reason=network\n", steamID64); };
+	auto onError = [steamID64]()
+	{
+		KZ_LOG_WARN(LogChannel::Profile, "[cyb] player_tag_fetch_fail steam_id=%llu reason=network\n", steamID64);
+		CybScheduleTagRetry(steamID64);
+	};
 	request.Send(onResponse, onError);
 }
 
@@ -613,6 +657,15 @@ void KZProfileService::OnPhysicsSimulatePost()
 	{
 		this->UpdateClantag();
 		this->clantagOverrideApplied = this->clanTag[0] != '\0';
+	}
+	// Отложенный повтор после транзиентного отказа. Такт — этот же, в котором уже живёт
+	// RequestRating: своего таймера сущность не заводит, а проверка — сравнение float, без
+	// аллокаций. timeToNextRatingRefresh переиспользовать нельзя: его сдвигают смена режима и
+	// финиш рана, а приписке нужен ровно один отложенный выстрел, не привязанный к очкам.
+	if (this->personalTagRetryTime > 0.0f && g_pKZUtils->GetServerGlobals()->realtime >= this->personalTagRetryTime)
+	{
+		this->personalTagRetryTime = 0.0f;
+		this->RequestPersonalTag();
 	}
 	if (g_pKZUtils->GetServerGlobals()->realtime >= this->timeToNextRatingRefresh)
 	{
