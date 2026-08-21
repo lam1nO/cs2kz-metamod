@@ -46,6 +46,11 @@ namespace utils
 
 	// Print functions
 	bool CFormat(char *buffer, u64 buffer_size, const char *text);
+	// Известен ли движку цветовой токен чата с таким именем (без фигурных скобок): "yellow",
+	// "lightred", ... Нужен там, где имя токена приходит извне (персональная приписка с
+	// платформы) — список токенов закрытый, и держать его копию у вызывающего значило бы
+	// разъехаться с CFormat.
+	bool IsChatColorName(const char *name);
 	void SayChat(CBaseEntity *entity, const char *format, ...);
 	void ClientPrintFilter(IRecipientFilter *filter, int msg_dest, const char *msg_name, const char *param1, const char *param2, const char *param3,
 						   const char *param4);

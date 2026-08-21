@@ -22,6 +22,9 @@ public:
 		timeToNextRatingRefresh = 0.0f;
 		currentPoints = -1;
 		clantagOverrideApplied = false;
+		personalTag[0] = '\0';
+		personalTagChatColor[0] = '\0';
+		personalTagRequested = false;
 	}
 
 	char clanTag[32] {};
@@ -35,8 +38,25 @@ public:
 	// перерисовывается только по ответу платформы об очках, а он у такого игрока не
 	// обязателен (сеть легла, включены стили — запрос очков вообще не уходит).
 	bool clantagOverrideApplied = false;
+	// Персональная приписка у ника с платформы: ГОЛЫЙ текст без скобок (скобки ставит формат
+	// подстановки) и уже прошедший санитайз форка. Пусто = приписки нет, рисуем ранговый тег.
+	// 32 байта, хотя платформа режет до 24: буфер clanTag того же размера, а формат "[%s]"
+	// съедает ещё два — вписаться обязан сам snprintf, а не наша вера в лимит api.
+	char personalTag[32] {};
+	// Имя цветового токена чата для приписки, УЖЕ сверенное с закрытым списком движка
+	// (utils::IsChatColorName). Пусто = дефолт. Скорборд цвет клан-тега не передаёт вовсе.
+	char personalTagChatColor[16] {};
+	// Приписку в этой сессии уже запрашивали (кэш на сессию). Повтор — на реконнекте: Reset
+	// зовётся на дисконнекте. Снятие из админки применяется по следующему заходу, так и
+	// задумано.
+	bool personalTagRequested = false;
 
 	void RequestRating();
+	// Персональная приписка у ника: GET {cybEmitUrl}/ingest/v1/players/<steamid64>/tag
+	// (ServerTokenGuard, ответ {"tag": {...}|null}). Fail-soft: любой отказ = приписки нет,
+	// ранговый тег работает как раньше. Зовётся на аутентификации и на OnPlayerActive
+	// (страховка позднего auth / late-load), лишние вызовы гасит personalTagRequested.
+	void RequestPersonalTag();
 	bool CanDisplayRank();
 	// Индекс звания 0..22 по текущим очкам и шкале режима; -1 = звание недоступно.
 	i32 GetCurrentRankIndex();

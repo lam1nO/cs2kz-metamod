@@ -1,4 +1,5 @@
 #include "kz_profile.h"
+#include "utils/utils.h" // utils::IsChatColorName — сверка токена цвета чата, пришедшего с платформы
 #include "utils/http.h"
 #include "utils/json.h"
 #include "utils/simplecmds.h"
@@ -93,32 +94,66 @@ CConVar<bool> kz_profile_rating_badge_enabled("kz_profile_rating_badge_enabled",
 // эмит тогда молча пропускается по FindConCommand (см. EmitGG1Bridge).
 CConVar<bool> kz_gg1_bridge("kz_gg1_bridge", FCVAR_NONE, "Whether to broadcast player mode to GG1 via cyb_gg1_mode server command.", true);
 
-// Персональные клан-теги: steam_id64 → фиксированная строка вместо рангового «[РЕЖИМ Ранг]».
-// Таблица в коде, а не в конфиге, сознательно: на платформе нет ни ручки, ни поля под
-// персональный тег, а ради пары строк заводить их дороже, чем пересобрать форк.
-// Появится третий-четвёртый — переносить в конфиг профиля, не расширять таблицу бесконечно.
-static_global const struct
+// Персональная приписка у ника («KZ Boss» вместо рангового «[KZT Pro]»). До 21.08.2026 здесь
+// лежала таблица steam_id64 → строка, продублированная в контрактах платформы: правка требовала
+// релиза форка И редеплоя сайта. Теперь источник истины один — таблица `player_tags` платформы,
+// выдаёт приписку владелец из админки, форк её ЧИТАЕТ на аутентификации игрока.
+// Дефолт цвета в чате = {yellow}: единственный токен, не занятый ни одним званием
+// (в отличие от {gold} — им подсвечен Legend), и именно с ним приписка жила с cyb.115.
+#define KZ_PERSONAL_TAG_DEFAULT_CHAT_COLOR "yellow"
+// Предел байтов текста приписки. 24 — предел платформы (PLAYER_TAG_MAX_BYTES в контрактах), но
+// проверяем СВОЙ буфер: clanTag[32] минус скобки формата "[%s]" и нуль = 29 байт. Меньшее из
+// двух, чтобы расширение лимита на платформе не начало молча резать тег в snprintf.
+#define KZ_PERSONAL_TAG_MAX_BYTES 24
+
+// Тело ручки приписки: {"tag": {...}|null}. `color` (hex для сайта) форку не нужен и не читается.
+struct CybPersonalTagPayload
 {
-	u64 steamID64;
-	const char *tag;
-} s_clantagOverrides[] = {
-	{76561199702618240ull, "KZ Boss"}, // lam1n
+	std::string tag;
+	std::string chatColor;
+
+	bool FromJson(const Json &json)
+	{
+		if (!json.Get("tag", this->tag))
+		{
+			return false;
+		}
+		// Цвет по контракту обязателен, но его отсутствие — не повод выкинуть приписку:
+		// пустая строка ниже превратится в дефолтный токен.
+		if (!json.Get("chatColor", this->chatColor))
+		{
+			this->chatColor.clear();
+		}
+		return true;
+	}
 };
 
-static_function const char *CybClantagOverride(u64 steamID64)
+// Санитайз приписки, пришедшей от платформы. Дубль валидации api сознательный: приписка уезжает
+// в чат через utils::SayChat, а тот разбирает {токены} УЖЕ ПОСЛЕ подстановки %s — «{red}» в
+// приписке перекрасил бы остаток чужого сообщения. Форк не имеет права зависеть от того, что
+// валидация api никогда не изменится.
+// Возвращает пустую строку = приписку показывать нельзя. Не режем, а отвергаем: срез по байтам
+// разрубил бы UTF-8 посередине (кириллица — 2 байта на знак) и отправил бы клиенту битую строку.
+static_function std::string CybSanitizePersonalTag(const std::string &raw)
 {
-	if (steamID64 == 0)
+	if (raw.empty() || raw.size() > KZ_PERSONAL_TAG_MAX_BYTES)
 	{
-		return nullptr;
+		return std::string();
 	}
-	for (const auto &entry : s_clantagOverrides)
+	for (char ch : raw)
 	{
-		if (entry.steamID64 == steamID64)
+		unsigned char c = (unsigned char)ch;
+		if (c < 0x20 || c == 0x7F || c == '{' || c == '}')
 		{
-			return entry.tag;
+			return std::string();
 		}
 	}
-	return nullptr;
+	// Пробелы по краям невидимы в скорборде и в чате — приписка «  x» выглядела бы съехавшей.
+	if (raw.front() == ' ' || raw.back() == ' ')
+	{
+		return std::string();
+	}
+	return raw;
 }
 
 // Есть ли неразосланное «цифры рангов изменились». Взводится ТОЛЬКО реальной записью в
@@ -172,6 +207,12 @@ void KZProfileService::OnPlayerActive()
 	// Страховка на случай, если клиент не готов принять флаг ровно в эту секунду: его
 	// собственная запись m_iCompetitiveRankType на первом же CheckTransmit взведёт
 	// s_rankRevealPending, и бродкаст догонит его в течение секунды.
+	// Приписка — страховочный путь: обычно запрос уходит из OnAuthorized, но при late-load
+	// плагина уже подключённые игроки этого события не увидят. Повтор гасит personalTagRequested.
+	if (!this->player->IsFakeClient())
+	{
+		this->RequestPersonalTag();
+	}
 	if (!kz_profile_rating_badge_enabled.Get() || this->player->IsFakeClient())
 	{
 		return;
@@ -319,6 +360,98 @@ void KZProfileService::RequestRating()
 	request.Send(onResponse, onError);
 }
 
+void KZProfileService::RequestPersonalTag()
+{
+	// Кэш на сессию: приписку меняет админка, а не игра, и «применится по следующему заходу» —
+	// согласованное поведение. Флаг взводится ТОЛЬКО перед реальной отправкой (ниже), поэтому
+	// ранний вызов без steamID/без cybEmitUrl попытку не сжигает.
+	if (this->personalTagRequested)
+	{
+		return;
+	}
+	u64 steamID64 = this->player->GetSteamId64();
+	if (steamID64 == 0)
+	{
+		return; // ещё не аутентифицирован (или бот) — придём из OnPlayerActive/позднего auth
+	}
+	std::string apiURL = std::string(KZOptionService::GetOptionStr("cybEmitUrl", ""));
+	if (apiURL.empty())
+	{
+		return; // платформа не сконфигурирована — играем без приписок, это не отказ
+	}
+	if (apiURL.back() == '/')
+	{
+		apiURL.pop_back();
+	}
+	this->personalTagRequested = true;
+
+	// Гард ручки — ServerTokenGuard, как у отчёта курсов и рекордов: актора-админа тут нет,
+	// приписку за игрока спрашивает сервер.
+	std::string url = apiURL + "/ingest/v1/players/" + std::to_string(steamID64) + "/tag";
+	HTTP::Request request(HTTP::Method::GET, url);
+	const char *token = KZOptionService::GetOptionStr("cybEmitToken", "");
+	if (token && token[0] != '\0')
+	{
+		request.SetHeader("Authorization", std::string("Bearer ") + token);
+	}
+
+	auto onResponse = [steamID64](HTTP::Response response)
+	{
+		if (response.status < 200 || response.status >= 300)
+		{
+			KZ_LOG_WARN(LogChannel::Profile, "[cyb] player_tag_fetch_fail steam_id=%llu reason=http_%u\n", steamID64, (unsigned)response.status);
+			return;
+		}
+		// Адресуем по steamID, а не по слоту: игрок мог выйти, пока летел запрос, а слот —
+		// достаться другому (тот же гард, что у запроса очков).
+		KZPlayer *player = g_pKZPlayerManager->SteamIdToPlayer(steamID64);
+		if (player == nullptr)
+		{
+			return;
+		}
+		std::string body = response.Body().value_or("");
+		if (body.empty())
+		{
+			KZ_LOG_WARN(LogChannel::Profile, "[cyb] player_tag_fetch_fail steam_id=%llu reason=bad_body\n", steamID64);
+			return;
+		}
+		Json json(body);
+		Json tagJson;
+		if (!json.IsValid() || !json.Get("tag", tagJson))
+		{
+			KZ_LOG_WARN(LogChannel::Profile, "[cyb] player_tag_fetch_fail steam_id=%llu reason=bad_body\n", steamID64);
+			return;
+		}
+		// tag: object|null. Decode(std::optional) — единственный путь разобрать null без варнинга
+		// в лог на КАЖДОГО игрока: приписки нет почти ни у кого, это штатный ответ.
+		std::optional<CybPersonalTagPayload> payload;
+		if (!tagJson.Decode(payload))
+		{
+			KZ_LOG_WARN(LogChannel::Profile, "[cyb] player_tag_fetch_fail steam_id=%llu reason=bad_body\n", steamID64);
+			return;
+		}
+		if (!payload.has_value())
+		{
+			return; // приписки у игрока нет — рисуем ранговый тег, как раньше
+		}
+		std::string tag = CybSanitizePersonalTag(payload->tag);
+		if (tag.empty())
+		{
+			KZ_LOG_WARN(LogChannel::Profile, "[cyb] player_tag_fetch_fail steam_id=%llu reason=bad_tag_text\n", steamID64);
+			return;
+		}
+		// Токен цвета — только из закрытого списка движка; чужое имя молча заменяем дефолтом,
+		// иначе «{fuchsia}» уехало бы в чат как видимый текст.
+		const char *chatColor = utils::IsChatColorName(payload->chatColor.c_str()) ? payload->chatColor.c_str() : KZ_PERSONAL_TAG_DEFAULT_CHAT_COLOR;
+		V_strncpy(player->profileService->personalTag, tag.c_str(), sizeof(player->profileService->personalTag));
+		V_strncpy(player->profileService->personalTagChatColor, chatColor, sizeof(player->profileService->personalTagChatColor));
+		KZ_LOG_DEBUG(LogChannel::Profile, "[cyb] player_tag steam_id=%llu tag=%s color=%s\n", steamID64, tag.c_str(), chatColor);
+		player->profileService->UpdateClantag();
+	};
+	auto onError = [steamID64]() { KZ_LOG_WARN(LogChannel::Profile, "[cyb] player_tag_fetch_fail steam_id=%llu reason=network\n", steamID64); };
+	request.Send(onResponse, onError);
+}
+
 bool KZProfileService::CanDisplayRank()
 {
 	// Haven't obtained points yet.
@@ -441,16 +574,15 @@ void KZProfileService::UpdateClantag()
 		}
 		return;
 	}
-	// Персональный тег перекрывает ранговый: он не зависит ни от очков, ни от режима, ни от
-	// стилей — то есть переживает все три события, по которым тег перерисовывается.
-	// Проверка стоит ДО GetCurrentRankIndex: иначе очередной ответ платформы затирал бы тег.
-	// Скобки добавляются здесь, а не хранятся в s_clantagOverrides: штатные теги форка всегда
-	// в квадратных скобках, и новую запись таблицы физически нельзя завести «голой» —
-	// формат один на всех, а не дублируется в каждой строке.
-	const char *personal = CybClantagOverride(this->player->GetSteamId64());
-	if (personal)
+	// Персональная приписка перекрывает ранговый тег: она не зависит ни от очков, ни от режима,
+	// ни от стилей — то есть переживает все три события, по которым тег перерисовывается.
+	// Проверка стоит ДО GetCurrentRankIndex: иначе очередной ответ платформы об очках затирал бы
+	// приписку. Скобки ставит формат здесь, а не хранит платформа: api отдаёт голый текст,
+	// иначе в игре вышло бы «[[KZ Boss]]». Цвет в скорборде не применяем — движок цвет
+	// клан-тега (m_szClan) не передаёт вовсе.
+	if (this->personalTag[0] != '\0')
 	{
-		V_snprintf(this->clanTag, sizeof(this->clanTag), "[%s]", personal);
+		V_snprintf(this->clanTag, sizeof(this->clanTag), "[%s]", this->personalTag);
 		this->SetClantag(this->clanTag);
 		return;
 	}
@@ -474,9 +606,10 @@ void KZProfileService::UpdateClantag()
 
 void KZProfileService::OnPhysicsSimulatePost()
 {
-	// Персональный тег не ждёт очков: ставим, как только контроллер игрока готов его принять
+	// Персональная приписка не ждёт очков: ставим, как только контроллер игрока готов её принять
 	// (UpdateClantag сам отсеет ещё не подключённого — тогда пробуем на следующем тике).
-	if (!this->clantagOverrideApplied && CybClantagOverride(this->player->GetSteamId64()))
+	// Проверка — сравнение байта, без аллокаций и без сети: она крутится на каждом тике.
+	if (!this->clantagOverrideApplied && this->personalTag[0] != '\0')
 	{
 		this->UpdateClantag();
 		this->clantagOverrideApplied = this->clanTag[0] != '\0';
@@ -519,16 +652,20 @@ std::string KZProfileService::GetPrefix(bool colors)
 	{
 		this->UpdateClantag();
 	}
-	// Персональный тег и в чате должен быть персональным, не ранговым — единственный вызыватель
+	// Персональная приписка и в чате персональная, не ранговая — единственный вызыватель
 	// (say-хук в kz_misc.cpp) собирает именно чат-строку; !rank/PrintRank в GetPrefix не ходят,
 	// им ранговые цвета/имя нужны напрямую, так что раскраска рангов там не затронута.
-	// {yellow} — единственный токен из rankColors/gokz-палитры, который нигде не занят ни одним
-	// званием (в отличие от {gold} — он уже подсвечивает Legend), поэтому персональный тег не
-	// путается с топовым рангом на глаз.
-	const char *personal = CybClantagOverride(this->player->GetSteamId64());
-	if (personal)
+	// ЗДЕСЬ и применяется chatColor с платформы: это единственная поверхность приписки, которую
+	// движок красит. Токен уже сверен со списком движка при разборе ответа, а сама приписка
+	// прошла санитайз — фигурных скобок в ней нет, чужое сообщение перекрасить нечем.
+	if (this->personalTag[0] != '\0')
 	{
-		return std::string(colors ? "{yellow}[" : "[") + personal + (colors ? "]{default}" : "]");
+		const char *chatColor = this->personalTagChatColor[0] != '\0' ? this->personalTagChatColor : KZ_PERSONAL_TAG_DEFAULT_CHAT_COLOR;
+		if (!colors)
+		{
+			return std::string("[") + this->personalTag + "]";
+		}
+		return std::string("{") + chatColor + "}[" + this->personalTag + "]{default}";
 	}
 	i32 rank = this->GetCurrentRankIndex();
 	if (rank >= 0)

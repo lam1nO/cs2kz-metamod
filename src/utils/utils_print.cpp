@@ -95,6 +95,11 @@ static_function char ConvertColorStringToByte(const char *str, size_t length)
 	return 0;
 }
 
+bool utils::IsChatColorName(const char *name)
+{
+	return name && name[0] != '\0' && ConvertColorStringToByte(name, V_strlen(name)) != 0;
+}
+
 enum CFormatResult
 {
 	CFORMAT_NOT_US,

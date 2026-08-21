@@ -197,6 +197,9 @@ void KZPlayer::OnAuthorized()
 	MovementPlayer::OnAuthorized();
 	this->databaseService->SetupClient();
 	this->profileService->timeToNextRatingRefresh = 0.0f; // Force immediate refresh
+	// Персональная приписка у ника: основной момент запроса — здесь, steamID уже подтверждён
+	// (без него ручка платформы бессмысленна). Один запрос за сессию, см. RequestPersonalTag.
+	this->profileService->RequestPersonalTag();
 	// Мост GG1 — путь ПОЗДНЕЙ аутентификации: Steam подтвердил тикет уже после входа
 	// в игру (эмит с OnPlayerActive ушёл со steamId64=0 и был пропущен). Обычный ранний
 	// auth приходит, пока клиент ещё качает карту (signon < FULL), — тогда этот вызов
