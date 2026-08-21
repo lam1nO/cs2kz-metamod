@@ -428,6 +428,24 @@ namespace KZ::course
 	// обновиться между сессиями). nullptr, если курса с таким номером на карте больше нет.
 	const KZCourseDescriptor *GetCourseByCyberNumber(i32 n);
 
+	// Отдать платформе список курсов этой карты: cyber-номер + имя курса + дескриптор +
+	// признак «отключён платформой». Платформе имена курсов взять больше негде, а без них она
+	// показывает бонус как «C2» вместо «B1»: cyber-номер бонуса, чьё имя не «bonusN», уходит в
+	// диапазон 100+ (см. GetCyberCourseNumber — нумерацию менять НЕЛЬЗЯ, по ней уже лежат
+	// рекорды), и различить «бонус» от «стейджа» по одному числу невозможно.
+	//
+	// Точка вызова — round_start, ПОСЛЕ KZ::mapapi::OnRoundStart и KZ::zones::OnRoundStart, и
+	// ровно один раз за карту. Раньше нельзя: до валидации на round_start список курсов ещё
+	// может сократиться (FastRemove невалидного курса + Mapi_RebuildSortedCourses), а это меняет,
+	// какой курс «первый», то есть чей cyber-номер 0. Позже незачем: курсы платформы заводятся в
+	// KZ::zones::OnRoundStart, дальше набор карты не меняется до её смены. Отключения курсов,
+	// приходящие после (SetCourseDisabled), отчёт не переотправляет: их инициирует сама
+	// платформа, признак в отчёте — снимок на момент отправки.
+	//
+	// POST {cybEmitUrl}/ingest/v1/kz/courses/report, fire-and-forget. NO-OP при выключенном
+	// cybEmitUrl и на картах без Mapping API.
+	void ReportCoursesToPlatform();
+
 	// Setup all the courses to the local database.
 	void SetupLocalCourses();
 

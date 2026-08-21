@@ -81,6 +81,10 @@ static_global struct
 	bool hasJumpstatArea;
 	Vector jumpstatAreaPos;
 	QAngle jumpstatAreaAngles;
+
+	// Отчёт о курсах платформе уже отправлен на этой карте (см. KZ::course::ReportCoursesToPlatform).
+	// Обнуляется вместе со всей структурой в KZ::mapapi::Init(), то есть ровно на смене карты.
+	bool coursesReported;
 } g_mappingApi;
 
 static_global CTimer<> *g_errorTimer;
@@ -1536,6 +1540,133 @@ i32 KZ::course::GetCyberCourseNumber(const KZCourseDescriptor *course)
 	// Не-бонусный не-главный курс: уводим в диапазон 100+, чтобы номер не
 	// столкнулся с "Bonus N" на той же карте (лидерборд ключуется по course).
 	return 100 + course->id;
+}
+
+// Экранирование строки для JSON-тела: имя и дескриптор курса приходят из данных карты, то
+// есть от маппера, а не от нас. Незакрытая кавычка в имени сломала бы разбор всего отчёта.
+// Управляющие символы просто выкидываем: в имени курса им делать нечего, а полноценное
+// экранирование управляющих кодов здесь избыточно.
+static_function std::string Mapi_JsonEscape(const char *str)
+{
+	std::string out;
+	if (!str)
+	{
+		return out;
+	}
+	for (const char *p = str; *p; p++)
+	{
+		unsigned char c = (unsigned char)*p;
+		if (c == '"')
+		{
+			out += "\\\"";
+		}
+		else if (c == '\\')
+		{
+			out += "\\\\";
+		}
+		else if (c >= 0x20 && c != 0x7F)
+		{
+			out += (char)c;
+		}
+	}
+	return out;
+}
+
+void KZ::course::ReportCoursesToPlatform()
+{
+	// Один раз за карту: набор курсов и их cyber-номера с этого момента не меняются (см. шапку
+	// в заголовке), а платформа сама инициирует единственное, что меняется дальше — отключения.
+	if (g_mappingApi.coursesReported)
+	{
+		return;
+	}
+	const char *url = KZOptionService::GetOptionStr("cybEmitUrl", "");
+	if (!url || url[0] == '\0')
+	{
+		return; // платформенный источник выключен
+	}
+	if (g_mappingApi.courseDescriptors.Count() == 0)
+	{
+		return; // карта без Mapping API — отчитываться нечем, это не отказ
+	}
+	bool mapNameOk = false;
+	CUtlString mapNameStr = g_pKZUtils->GetCurrentMapName(&mapNameOk);
+	std::string mapName = mapNameOk ? mapNameStr.Get() : "";
+	if (!CybReplayCommon::IsValidMapName(mapName))
+	{
+		// Тот же вайтлист, что у реплеев и PB/WR: api валидирует map тем же алфавитом, запрос
+		// заведомо мимо — в сеть не идём.
+		KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] courses_report_skipped map=%s reason=invalid_map_name\n", mapName.c_str());
+		g_mappingApi.coursesReported = true;
+		return;
+	}
+
+	// Отключённые курсы В ОТЧЁТЕ ЕСТЬ: идём по courseDescriptors, а не по витрине
+	// g_sortedCourses. Платформе нужен полный список её карты, иначе отключённый курс выглядел
+	// бы «исчезнувшим», а его cyber-номер всё равно остаётся занятым (GetCyberCourseNumber
+	// считает главный курс по полному списку).
+	std::string body = "{\"map\":\"" + Mapi_JsonEscape(mapName.c_str()) + "\",\"courses\":[";
+	i32 count = 0;
+	FOR_EACH_VEC(g_mappingApi.courseDescriptors, i)
+	{
+		const KZCourseDescriptor *course = &g_mappingApi.courseDescriptors[i];
+		if (count > 0)
+		{
+			body += ',';
+		}
+		char numBuf[16];
+		V_snprintf(numBuf, sizeof(numBuf), "%d", KZ::course::GetCyberCourseNumber(course));
+		body += "{\"number\":";
+		body += numBuf;
+		body += ",\"name\":\"";
+		body += Mapi_JsonEscape(course->name);
+		body += "\",\"descriptor\":\"";
+		body += Mapi_JsonEscape(course->entityTargetname);
+		body += "\",\"disabled\":";
+		body += course->disabled ? "true" : "false";
+		body += '}';
+		count++;
+	}
+	body += "]}";
+
+	g_mappingApi.coursesReported = true;
+
+	std::string fullUrl = url;
+	if (!fullUrl.empty() && fullUrl.back() == '/')
+	{
+		fullUrl.pop_back();
+	}
+	// НЕ существующий POST /ingest/v1/kz/courses: тот про создание курсов из игрового редактора
+	// зон и требует права game.kz_zones_edit по steamId64. Здесь запрос машинный, игрока нет.
+	fullUrl += "/ingest/v1/kz/courses/report";
+
+	const char *token = KZOptionService::GetOptionStr("cybEmitToken", "");
+	HTTP::Request req(HTTP::Method::POST, fullUrl);
+	req.SetHeader("Content-Type", "application/json");
+	if (token && token[0] != '\0')
+	{
+		req.SetHeader("Authorization", std::string("Bearer ") + token);
+	}
+	req.SetBody(body);
+
+	KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] courses_report map=%s courses=%d\n", mapName.c_str(), count);
+
+	// Fire-and-forget: отчёт — не гейт игры, отказ только в лог. Повторных попыток нет намеренно:
+	// следующая загрузка карты отправит его заново, а спам ретраями на мёртвом api не нужен.
+	// clang-format off
+	req.Send(
+		[mapName](HTTP::Response resp)
+		{
+			if (resp.status < 200 || resp.status >= 300)
+			{
+				KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] courses_report_failed map=%s reason=http_%u\n", mapName.c_str(), (unsigned)resp.status);
+			}
+		},
+		[mapName]()
+		{
+			KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] courses_report_failed map=%s reason=network_error\n", mapName.c_str());
+		});
+	// clang-format on
 }
 
 const KZCourseDescriptor *KZ::course::GetCourseByCyberNumber(i32 n)

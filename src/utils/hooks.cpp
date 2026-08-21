@@ -689,6 +689,9 @@ static_function bool Hook_FireEvent(IGameEvent *event, bool bDontBroadcast)
 			KZ::mapapi::OnRoundStart();
 			// Мир доделан движком — теперь ставим зоны платформы и считаем аудит выживаемости.
 			KZ::zones::OnRoundStart();
+			// Строго ПОСЛЕ обоих: курсы карты провалидированы, курсы платформы заведены, дальше
+			// cyber-номера не двигаются. Сам вызов срабатывает один раз за карту.
+			KZ::course::ReportCoursesToPlatform();
 			KZ::replaysystem::OnRoundStart();
 		}
 		else if (KZ_STREQI(event->GetName(), "player_team"))
