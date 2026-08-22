@@ -63,15 +63,21 @@ struct ScmdManager
 
 static_global ScmdManager g_cmdManager = {};
 
-#define SCMD_COOLDOWN 0.25f
+#define SCMD_COOLDOWN 0.2f
 
 // Blocks commands from clients who aren't fully in-game yet, and enforces a cooldown between commands.
 // Silent when blocking for not-in-game (client can't receive chat yet); prints the remaining wait when on cooldown.
-static_global bool CanRunCommand(KZPlayer *player)
+static_global bool CanRunCommand(KZPlayer *player, u64 flags)
 {
 	if (!player->IsInGame())
 	{
 		return false;
+	}
+
+	// Checkpoint commands and measure commands are exempt from the cooldown, since they're expected to be spammed.
+	if (flags & (SCFL_CHECKPOINT | SCFL_MEASURE))
+	{
+		return true;
 	}
 
 	f32 curtime = g_pKZUtils->GetServerGlobals()->curtime;
@@ -401,7 +407,7 @@ META_RES scmd::OnClientCommand(CPlayerSlot &slot, const CCommand &args)
 
 		if (!V_stricmp(g_cmdManager.cmds[i].name, args[0]))
 		{
-			if (!CanRunCommand(player))
+			if (!CanRunCommand(player, g_cmdManager.cmds[i].flags))
 			{
 				return MRES_SUPERCEDE;
 			}
@@ -507,7 +513,7 @@ static_function bool DispatchChatByName(CCSPlayerController *controller, const C
 			// Кулдаун — один раз на строку чата, перед первым колбэком (апстрим 858020f
 			// ставил его в этом же месте своего инлайн-цикла). На кулдауне команду глотаем
 			// целиком: колбэки не зовём, строку в чат не пропускаем.
-			if (!matched && !CanRunCommand(g_pKZPlayerManager->ToPlayer(controller)))
+			if (!matched && !CanRunCommand(g_pKZPlayerManager->ToPlayer(controller), cmds[i].flags))
 			{
 				suppress = true;
 				return true;
@@ -637,7 +643,7 @@ META_RES scmd::OnDispatchConCommand(ConCommandRef cmd, const CCommandContext &ct
 			const char *cmdName = cmds[i].hasConsolePrefix ? cmds[i].name + strlen(SCMD_CONSOLE_PREFIX) : cmds[i].name;
 			if (!V_stricmp(commandName, cmdName))
 			{
-				if (!CanRunCommand(player))
+				if (!CanRunCommand(player, cmds[i].flags))
 				{
 					return MRES_SUPERCEDE;
 				}
