@@ -579,9 +579,12 @@ META_RES scmd::OnDispatchConCommand(ConCommandRef cmd, const CCommandContext &ct
 				const char *src = args.ArgC() >= 2 ? args[1] : "";
 				for (i32 i = 0; i < (i32)sizeof(text) - 1 && src[i]; i++)
 				{
-					text[i] = (u8)src[i] < 0x20 ? ' ' : src[i];
+					// Кавычку тоже гасим: text ниже цитируется, и незакрытая/лишняя "
+					// позволила бы тексту атакующего подделать соседние logfmt-поля.
+					char c = (u8)src[i] < 0x20 ? ' ' : src[i];
+					text[i] = c == '"' ? '\'' : c;
 				}
-				KZ_LOG_WARN(LogChannel::Player, "[cyb] chat_dropped steam_id=%llu slot=%d reason=not_in_game text=%s\n",
+				KZ_LOG_WARN(LogChannel::Player, "[cyb] chat_dropped steam_id=%llu slot=%d reason=not_in_game text=\"%s\"\n",
 							claimedId, (i32)slot.Get(), text);
 			}
 			return MRES_SUPERCEDE;
