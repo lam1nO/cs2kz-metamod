@@ -551,8 +551,13 @@ META_RES scmd::OnDispatchConCommand(ConCommandRef cmd, const CCommandContext &ct
 	if (!V_stricmp(commandName, "say") || !V_stricmp(commandName, "say_team"))
 	{
 		// A client that isn't fully in-game yet can't legitimately chat at all, command or not.
+		// Именно так спамят рекламные боты (инцидент 22.08: cs2commends.com): say уходит до
+		// завершения signon и в чате подписывается «Console<0>». Дроп логируем с reason и
+		// текстом — по этой строке инвариант/алерт отличает «дыра закрыта и ловит» от «дыры нет».
 		if (!player->IsInGame())
 		{
+			KZ_LOG_WARN(LogChannel::Player, "[cyb] chat_dropped steam_id=%llu reason=not_in_game text=%.128s\n",
+						player->GetSteamId64(false), args.ArgC() >= 2 ? args[1] : "");
 			return MRES_SUPERCEDE;
 		}
 
