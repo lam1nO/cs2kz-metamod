@@ -621,6 +621,14 @@ void KZ::misc::ProcessConCommand(ConCommandRef cmd, const CCommandContext &ctx, 
 	// Is it a chat message?
 	if (!V_stricmp(commandName, "say") || !V_stricmp(commandName, "say_team"))
 	{
+		// Клиент до полного коннекта (SIGNONSTATE_FULL) легитимно писать в чат не может —
+		// так спамят рекламные боты (инцидент 22.08). Не ре-броадкастим: движковый броадкаст
+		// того же say глушит и логирует гейт в scmd::OnDispatchConCommand (он выполняется
+		// следом в том же Hook_DispatchConCommand).
+		if (!player->IsInGame())
+		{
+			return;
+		}
 		if (args.ArgC() < 2)
 		{
 			// no argument, happens when the player just types "say" or "say_team" in console
