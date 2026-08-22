@@ -80,15 +80,22 @@ static_global bool CanRunCommand(KZPlayer *player, u64 flags)
 		return true;
 	}
 
-	f32 curtime = g_pKZUtils->GetServerGlobals()->curtime;
-	f32 remaining = SCMD_COOLDOWN - (curtime - player->lastCommandTime);
-	if (remaining > 0.0f)
+	// realtime, а не curtime (у апстрима): curtime обнуляется на смене карты, а
+	// KZPlayer::Reset() зовётся только на дисконнекте — с curtime кулдаун переживал бы
+	// карту гигантским значением и глушил команды до конца сессии (тот же случай уже
+	// разобран в kz_prac.cpp::RejectMapTeleport). Ход часов назад = кулдаун снят.
+	f32 now = g_pKZUtils->GetServerGlobals()->realtime;
+	if (player->lastCommandTime != 0.0f && now >= player->lastCommandTime)
 	{
-		player->languageService->PrintChat(true, false, "Command Cooldown (Time Remaining)", remaining);
-		return false;
+		f32 remaining = SCMD_COOLDOWN - (now - player->lastCommandTime);
+		if (remaining > 0.0f)
+		{
+			player->languageService->PrintChat(true, false, "Command Cooldown (Time Remaining)", remaining);
+			return false;
+		}
 	}
 
-	player->lastCommandTime = curtime;
+	player->lastCommandTime = now;
 	return true;
 }
 
@@ -556,8 +563,27 @@ META_RES scmd::OnDispatchConCommand(ConCommandRef cmd, const CCommandContext &ct
 		// текстом — по этой строке инвариант/алерт отличает «дыра закрыта и ловит» от «дыры нет».
 		if (!player->IsInGame())
 		{
-			KZ_LOG_WARN(LogChannel::Player, "[cyb] chat_dropped steam_id=%llu reason=not_in_game text=%.128s\n",
-						player->GetSteamId64(false), args.ArgC() >= 2 ? args[1] : "");
+			// Не чаще строки в секунду на весь сервер: текст — сырой ввод атакующего,
+			// без потолка бот, висящий в не-FULL, зафлудил бы journald/Loki.
+			static_persist f32 lastDropLog = 0.0f;
+			f32 now = g_pKZUtils->GetServerGlobals()->realtime;
+			if (lastDropLog == 0.0f || now < lastDropLog || now - lastDropLog >= 1.0f)
+			{
+				lastDropLog = now;
+				// steam_id — заявленный клиентом (claimed): validated-путь до FULL отдаёт 0,
+				// а спамера надо идентифицировать. Control-символы гасим пробелом — иначе
+				// \n в say-нетмессадже подделал бы соседние строки лога.
+				CServerSideClient *client = player->GetClient();
+				u64 claimedId = client ? client->GetClientSteamID().ConvertToUint64() : 0;
+				char text[129] {};
+				const char *src = args.ArgC() >= 2 ? args[1] : "";
+				for (i32 i = 0; i < (i32)sizeof(text) - 1 && src[i]; i++)
+				{
+					text[i] = (u8)src[i] < 0x20 ? ' ' : src[i];
+				}
+				KZ_LOG_WARN(LogChannel::Player, "[cyb] chat_dropped steam_id=%llu slot=%d reason=not_in_game text=%s\n",
+							claimedId, (i32)slot.Get(), text);
+			}
 			return MRES_SUPERCEDE;
 		}
 

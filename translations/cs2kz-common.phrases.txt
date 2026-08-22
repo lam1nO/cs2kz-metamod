@@ -93,6 +93,7 @@
 	{
 		"#format"	"time:.2f"
 		"en"		"{grey}Please wait {default}{time}{grey} seconds before using another command."
+		"ru"		"{grey}Подождите {default}{time}{grey} сек. перед следующей командой."
 	}
 	"Beta Join Warning"
 	{
