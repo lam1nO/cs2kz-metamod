@@ -26,8 +26,12 @@
 // Ретраер не трогает файлы моложе 30 с — их ещё пытается доставить онлайн-путь.
 static_global constexpr f64 KZ_OUTBOX_TICK_INTERVAL = 60.0;
 static_global constexpr i64 KZ_OUTBOX_MIN_AGE_SECONDS = 30;
-// За тик обрабатываем не больше стольких файлов — не душим кадр сканом/отправками.
+// За тик обрабатываем не больше стольких файлов — не душим кадр отправками.
 static_global constexpr u32 KZ_OUTBOX_MAX_PER_TICK = 20;
+// ...и просматриваем не больше стольких записей каталога: сам скан (directory_iterator +
+// last_write_time на файл) тоже идёт в игровом потоке, а после недельного обрыва в
+// очереди могут лежать тысячи файлов — обрываем итерацию, хвост дойдёт следующими тиками.
+static_global constexpr u32 KZ_OUTBOX_MAX_SCAN_PER_TICK = 200;
 
 // Имена файлов, по которым отправка уже идёт (HTTP в полёте / транзакция БД /
 // чтение реплея). Ретраер такие пропускает — защита от двойной отправки между тиками.
@@ -500,8 +504,15 @@ void KZOutboxService::ProcessQueue()
 
 	u32 pending = 0;
 	u32 processed = 0;
+	u32 scanned = 0;
+	bool scanTruncated = false;
 	for (const auto &entry : fs::directory_iterator(absDir, ec))
 	{
+		if (++scanned > KZ_OUTBOX_MAX_SCAN_PER_TICK)
+		{
+			scanTruncated = true; // pending в логе ниже становится нижней оценкой («+»)
+			break;
+		}
 		std::error_code entryEc;
 		if (!entry.is_regular_file(entryEc))
 		{
@@ -591,9 +602,9 @@ void KZOutboxService::ProcessQueue()
 		KZ_LOG_WARN(LogChannel::General, "[cyb_outbox] scan failed reason=%s\n", ec.message().c_str());
 		return;
 	}
-	if (pending > 0)
+	if (pending > 0 || scanTruncated)
 	{
-		KZ_LOG_INFO(LogChannel::General, "[cyb_outbox] tick pending=%u processed=%u\n", pending, processed);
+		KZ_LOG_INFO(LogChannel::General, "[cyb_outbox] tick pending=%u%s processed=%u\n", pending, scanTruncated ? "+" : "", processed);
 	}
 }
 
