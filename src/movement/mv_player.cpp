@@ -278,7 +278,6 @@ void MovementPlayer::RegisterTakeoff(bool jumped, bool fromLadder, Vector *overr
 		mv = &this->moveDataPost;
 	}
 	this->takeoffFromLadder = fromLadder;
-	this->airMaxValid = false; // максимум высоты копится строго в пределах одного полёта
 	this->takeoffOrigin = overrideOrigin ? *overrideOrigin : mv->m_vecAbsOrigin;
 	this->takeoffTime = g_pKZUtils->GetGlobals()->curtime - g_pKZUtils->GetGlobals()->frametime;
 	this->takeoffVelocity = mv->m_vecVelocity;
@@ -334,11 +333,6 @@ void MovementPlayer::RegisterLanding(const Vector &landingVelocity, bool distbug
 				this->landingTimeActual =
 					this->landingTime
 					- (1 - mv->m_TouchList[i].trace.m_flFraction) * g_pKZUtils->GetGlobals()->frametime; // TODO: make sure this is right
-				this->landingTimeSource = 0;
-				this->landingDiffZ = -1.0f; // трейс-ветка зазор не считает (лишний трейс)
-				// Трейс-ветка всегда даёт время В ПРОШЛОМ (доля уже пройденного тика) —
-				// метка ввода совпадает с ней, субтиковая точность не теряется.
-				this->landingTimeInput = this->landingTimeActual;
 				return;
 			}
 		}
@@ -349,8 +343,6 @@ void MovementPlayer::RegisterLanding(const Vector &landingVelocity, bool distbug
 	{
 		this->landingOriginActual = mv->m_vecAbsOrigin;
 		this->landingTimeActual = this->landingTime;
-		this->landingTimeSource = 1;
-		this->landingDiffZ = diffZ;
 	}
 	else
 	{
@@ -369,13 +361,7 @@ void MovementPlayer::RegisterLanding(const Vector &landingVelocity, bool distbug
 		const f64 time = (-landingVelocity.z - sqrt(delta)) / (gravity.z);
 		this->landingOriginActual = mv->m_vecAbsOrigin + landingVelocity * time + 0.5 * gravity * time * time;
 		this->landingTimeActual = this->landingTime + time;
-		this->landingTimeSource = 2;
-		this->landingDiffZ = diffZ;
 	}
-	// Метка для классификации ввода — никогда позже такта, в котором движок уже
-	// зарегистрировал землю. Предсказанное «докоснётся через N мс» описывает будущее и
-	// для сравнения с реальным кликом игрока непригодно.
-	this->landingTimeInput = this->landingTimeActual > this->landingTime ? this->landingTime : this->landingTimeActual;
 }
 
 void MovementPlayer::OnPostThink() {}
@@ -421,11 +407,6 @@ void MovementPlayer::Reset()
 	this->landingTimeServer = 0.0f;
 	this->landingOriginActual.Init();
 	this->landingTimeActual = 0.0f;
-	this->landingTimeInput = 0.0f;
-	this->landingDiffZ = -1.0f;
-	this->landingTimeSource = -1;
-	this->airMaxZ = 0.0f;
-	this->airMaxValid = false;
 	this->enableWaterFix = false;
 	this->ignoreNextCategorizePosition = false;
 	this->collidingWithWorld = false;

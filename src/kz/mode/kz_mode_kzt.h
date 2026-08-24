@@ -200,13 +200,6 @@ class KZTimerModeService : public KZModeService
 	// Именно этим на живом сервере проверяется «наш темп == GO@128».
 	i32 velModTickSegments {};
 	i32 velModTickIters {};
-	// Геометрия предыдущего полёта для леджера (поведение не гейтят): на касании
-	// замораживаем максимум подъёма и высоту точки касания над точкой отрыва. Именно
-	// rise отвечает на вопрос «на сколько блок выше предыдущего». Сам максимум копит
-	// MovementPlayer::airMaxZ — он же гасит его на отрыве и на телепорте.
-	f32 lastLandRise {-9999.0f};
-	f32 lastAirApex {-9999.0f};
-	bool lastLandDucked {};
 	f32 originalMaxSpeed {};
 
 	bool didTPM {};

@@ -33,28 +33,6 @@ CConVar<float> kz_kzt_perf_height_bonus("kz_kzt_perf_height_bonus", FCVAR_NONE, 
 // (до 0.974) дали только буферные пре-клики, которые строгое правило v2 считает промахом.
 // В GOKZ HitPerf структурный и такие прыжки включал — отсюда версия для сравнения.
 CConVar<bool> kz_kzt_perf_structural("kz_kzt_perf_structural", FCVAR_NONE, "KZT: перф по-GOKZ (структурный)", false);
-// Метку касания для окна перфа не берём из будущего. landingTimeActual в ветке предсказания
-// (RegisterLanding, reverse bug) уезжает вперёд на десятки мс: движок ставит на землю уже при
-// подъёме медленнее 140 (deadstrafe), у верхушки прыжка |vz| мала, и корень в квадратном
-// уравнении даёт большое время «докоснётся через». Клик игрока против такой метки всегда
-// «до касания», перф недостижим структурно, а не по таймингу. Замер srv-5 17.08: 110 прыжков
-// с отрицательным realTog — ноль перфов, при 22% на остальных 165. Порог по высоте блока
-// сходится с эмпирикой тестера: (302^2 - 140^2)/1600 = 44.75 юнита.
-CConVar<bool> kz_kzt_perf_input_clamp("kz_kzt_perf_input_clamp", FCVAR_NONE,
-                                      "KZT: окно перфа считать от метки касания, не уехавшей в будущее", true);
-// Порог клипа: НАСКОЛЬКО метка должна уехать вперёд, чтобы её срезать. Дефолт — полный
-// такт (1/64), потому что перф недостижим ПОЛНОСТЬЮ только при сдвиге >= такта: прессы
-// следующей команды заполняют (landingTime, landingTime + 1/64] непрерывно (субтиковое
-// `when`, OnPlayerCommand ниже), а окно перфа — 1/128, половина такта. При сдвиге в
-// (1/128, 1/64] окно ещё пересекается с достижимым интервалом, и клип там не создавал бы
-// достижимость, а ПЕРЕНОСИЛ окно: часть кликов из промаха в перф, часть перфов в промах.
-// Такой перенос замером не обоснован, поэтому по умолчанию в эту полосу не лезем.
-// Открытый вопрос к живому замеру: попадают ли жалобы тестера («48+») в полосу
-// (1/128, 1/64] — в юнитах ступени это 17.0..47.7 при зазоре 2 и 47.3..54.9 при зазоре 1,
-// а зазор теперь пишется полем ldz=. Если да и без клипа полоса не лечится — порог сюда
-// же ставится в 0.0078125 одной командой, без пересборки.
-CConVar<float> kz_kzt_perf_input_clamp_shift("kz_kzt_perf_input_clamp_shift", FCVAR_NONE,
-                                             "KZT: порог сдвига метки касания для клипа, секунды", ENGINE_FIXED_TICK_INTERVAL);
 
 bool KZTimerModePlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool late)
 {
@@ -159,9 +137,6 @@ void KZTimerModeService::Reset()
 	this->jumpPressIdx = 0;
 	this->lastLandingSpeed = -1.0f;
 	this->lastLandingSpeedTime = -1.0f;
-	this->lastLandRise = -9999.0f;
-	this->lastAirApex = -9999.0f;
-	this->lastLandDucked = false;
 }
 
 void KZTimerModeService::Cleanup()
@@ -281,46 +256,17 @@ void KZTimerModeService::OnStopTouchGround()
 	}
 	// Клик, вызвавший этот прыжок — последний валидный пресс не позже отрыва.
 	f32 pressTime = -1.0f;
-	i32 pressBufN = 0;
 	for (int i = 0; i < 4; i++)
 	{
 		f32 t = this->jumpPressTimes[i];
-		if (t > 0.0f)
-		{
-			pressBufN++;
-		}
 		if (t > 0.0f && t <= curtime && t <= this->player->takeoffTime + 0.0001f && t > pressTime)
 		{
 			pressTime = t;
 		}
 	}
-	// Клип метки касания: срезаем её до такта движка, когда предсказанное касание уехало
-	// вперёд дальше порога (kz_kzt_perf_input_clamp_shift, дефолт — полный такт; см. вывод
-	// порога у объявления cvar). Обычное падение с |vz| ~300 даёт 5-7 мс и под клип не
-	// попадает — там поведение бит-в-бит прежнее.
-	f32 landShift = this->player->landingTimeActual - this->player->landingTime;
-	f32 landingRef = this->player->landingTimeActual;
-	bool clampApplied = false;
-	// Значение порога зажимаем в [0, такт]. Верхняя граница по делу: больше такта —
-	// бесшумно равно выключенному фиксу при включённом буле, для чего есть сам бул.
-	// Нижняя отсекает только бессмысленные отрицательные значения и от широкого радиуса
-	// НЕ защищает: 0 отображается сам в себя, а порог 0 в ветке предсказания выполняется
-	// всегда (time = (vz + sqrt(vz^2 + 1600*diffZ))/800 > 0 безусловно), то есть 0 внутри
-	// диапазона — это ровно радиус первой версии, отревьюированный как необоснованный.
-	// Оставлен сознательно, чтобы его можно было воспроизвести на канарейке для сравнения;
-	// от него защищает не диапазон, а дефолт (полный такт) и бул.
-	f32 clampShift = MAX(0.0f, MIN(kz_kzt_perf_input_clamp_shift.Get(), ENGINE_FIXED_TICK_INTERVAL));
-	if (kz_kzt_perf_input_clamp.GetBool() && landShift > clampShift && this->player->landingTimeInput > 0.0f)
-	{
-		landingRef = this->player->landingTimeInput;
-		clampApplied = true;
-	}
-	f32 pressDt = pressTime > 0.0f ? pressTime - landingRef : -1.0f;
-	// Старое число (от сырой landingTimeActual) — в леджер, чтобы расхождение было видно.
-	f32 pressDtRaw = pressTime > 0.0f ? pressTime - this->player->landingTimeActual : -1.0f;
+	f32 pressDt = pressTime > 0.0f ? pressTime - this->player->landingTimeActual : -1.0f;
 
-	// Перф — клик СТРОГО ПОСЛЕ касания в окне (касание — landingRef выше: не из будущего).
-	// Буферный пре-клик прыгает (движок,
+	// Перф — клик СТРОГО ПОСЛЕ касания в окне. Буферный пре-клик прыгает (движок,
 	// как предсказал клиент — «землит» не возвращается), но классифицируется промахом
 	// и идёт в общую формулу скорости — осознанный отход от GOKZ (у них HitPerf
 	// структурный и включал буферные прессы), решение пользователя 2026-07-19.
@@ -540,28 +486,11 @@ void KZTimerModeService::OnStopTouchGround()
 		}
 		f64 dbgWhole;
 		i32 dbgHalf = modf((f64)g_pKZUtils->GetGlobals()->curtime * ENGINE_FIXED_TICK_RATE, &dbgWhole) > 0.25 ? 1 : 0;
-		// Сдвиг метки касания: >0 = landingTimeActual уехала в БУДУЩЕЕ относительно такта,
-		// в котором движок уже поставил на землю (ветка предсказания при малой |vz|).
-		f32 dbgLandShift = landShift * 1000.0f;
-		// Фаза КАСАНИЯ внутри такта. Точный порог недостижимости фазозависим
-		// (landingTime не лежит на сетке тиков: движок режет тик на сегменты по субтиковым
-		// входам, см. велмод ниже), поэтому внутри полосы (1/128, 1/64] сидят две разные
-		// популяции — недостижимые и до клипа, и достижимые-со-сдвинутым-окном. Разделяет
-		// их только эта фаза. Существующее half= сюда не годится: оно берёт curtime в этом
-		// хуке, то есть фазу сегмента ОТРЫВА.
-		f64 dbgLandWhole;
-		f32 dbgLandPhase = (f32)modf((f64)this->player->landingTime * ENGINE_FIXED_TICK_RATE, &dbgLandWhole);
-		f32 dbgGroundMs = (this->player->takeoffTime - this->player->landingTime) * 1000.0f;
 		Msg("[kzt-v2] %s land=%.0f preC=%.0f takeoff=%.0f press_dt=%.2f tog=%.2f n=%d ceil=%d perf=%d tsp=%d boost=%d duck=%d dfrac=%.2f vm=%.3f "
-			"dyaw=%.2f half=%d seg=%d it=%d dz=%.3f vz=%.1f bump=%d sperf=%d vperf=%d "
-			"ldt=%.2f lsrc=%d lvz=%.1f ldz=%.3f rise=%.1f apex=%.1f gnd=%.2f pdt0=%.2f pn=%d clamp=%d ft=%.2f lduck=%d "
-			"lph=%.3f\n",
+			"dyaw=%.2f half=%d seg=%d it=%d dz=%.3f vz=%.1f bump=%d sperf=%d vperf=%d\n",
 			this->player->GetName(), this->lastLandingSpeed, preC, velocity.Length2D(), pressDt * 1000.0f, realTog * 1000.0f, dbgN, dbgPen,
 			perf ? 1 : 0, kz_kzt_takeoff_speed.GetBool() ? 1 : 0, hasBoost ? 1 : 0, ducked ? 1 : 0, duckFrac, this->effectivePreVelMod, dbgDyaw,
-			dbgHalf, this->velModTickSegments, this->velModTickIters, dbgTakeoffDz, velocity.z, dbgBump, structuralPerf ? 1 : 0, strictPerf ? 1 : 0,
-			dbgLandShift, this->player->landingTimeSource, this->player->landingVelocity.z, this->player->landingDiffZ, this->lastLandRise,
-			this->lastAirApex, dbgGroundMs, pressDtRaw * 1000.0f, pressBufN, clampApplied ? 1 : 0,
-			g_pKZUtils->GetGlobals()->frametime * 1000.0f, this->lastLandDucked ? 1 : 0, dbgLandPhase);
+			dbgHalf, this->velModTickSegments, this->velModTickIters, dbgTakeoffDz, velocity.z, dbgBump, structuralPerf ? 1 : 0, strictPerf ? 1 : 0);
 		fflush(stdout);
 	}
 }
@@ -576,17 +505,6 @@ void KZTimerModeService::OnStartTouchGround()
 	this->player->GetVelocity(&landingV);
 	this->lastLandingSpeed = landingV.Length2D();
 	this->lastLandingSpeedTime = this->player->landingTime;
-	// Геометрия завершившегося полёта для леджера: на сколько юнитов точка касания выше
-	// точки отрыва (rise) и какой был максимум подъёма (apex). takeoffGroundOrigin здесь
-	// ещё от отрыва, начавшего этот полёт — RegisterTakeoff нового прыжка будет позже.
-	// Сентинел -9999: отрыва ещё не было (rise законно бывает отрицательным — прыжок вниз,
-	// поэтому -1 сентинелом служить не может).
-	bool haveTakeoff = this->player->takeoffTime > 0.0f;
-	this->lastLandRise = haveTakeoff ? this->player->landingOrigin.z - this->player->takeoffGroundOrigin.z : -9999.0f;
-	this->lastAirApex =
-		(haveTakeoff && this->player->airMaxValid) ? this->player->airMaxZ - this->player->takeoffGroundOrigin.z : -9999.0f;
-	CCSPlayer_MovementServices *msLand = this->player->GetMoveServices();
-	this->lastLandDucked = msLand && (msLand->m_bDucked() || msLand->m_bDucking);
 	bbox_t bounds;
 	this->player->GetBBoxBounds(&bounds);
 	Vector ground = this->player->landingOrigin;
@@ -708,18 +626,6 @@ void KZTimerModeService::OnProcessMovement()
 			this->velModTickIters = 0;
 		}
 		this->velModTickSegments++;
-	}
-	// Максимум высоты в воздухе — только для леджера прыжков, поэтому под тем же cvar:
-	// это игровой такт, лишней работы на кадр здесь быть не должно.
-	if (kz_kzt_subtick_debug.GetBool() && (this->player->GetPlayerPawn()->m_fFlags & FL_ONGROUND) == 0)
-	{
-		Vector airOrigin;
-		this->player->GetOrigin(&airOrigin);
-		if (!this->player->airMaxValid || airOrigin.z > this->player->airMaxZ)
-		{
-			this->player->airMaxZ = airOrigin.z;
-			this->player->airMaxValid = true;
-		}
 	}
 	this->CheckVelocityQuantization();
 	this->RemoveCrouchJumpBind();
