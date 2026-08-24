@@ -162,10 +162,13 @@ void KZGlobalService::ReplayManager::RequestReplay(KZPlayer *requester, UUID_t r
 		}
 	};
 
-	request.Send(onResponse, doOnErrorCleanup);
-
+	// pendingDownload взводится ДО Send: с синхронным onError (http.cpp) отправка может
+	// отказать прямо внутри Send, и cleanup обязан сбрасывать уже взведённое значение —
+	// иначе оно взводится после сброса и «Already Requested» залипает до рестарта.
 	{
 		std::lock_guard _guard(this->mutex);
 		this->pendingDownload = replayID;
 	}
+
+	request.Send(onResponse, doOnErrorCleanup);
 }

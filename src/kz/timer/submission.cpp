@@ -482,8 +482,10 @@ void RunSubmission::DoLateAPIResponse(const std::string &apiUUID)
 	// Если вставка уже прошла онлайн, её UUID правит UpdateRunUUID выше, а файла нет.
 	if (this->submitEligible && this->mode.localID > 0 && this->course.localID > 0 && this->stylesLocalOk)
 	{
-		KZOutboxService::RewriteTimeInsert(localUUID.ToString(), apiUUID, this->player.steamid64, this->course.localID, this->mode.localID,
-										   this->time, this->teleports, this->styleIDs, this->metadata);
+		// apiFinalUUID, не сырой apiUUID: строка приходит от внешнего API и уходит в SQL —
+		// UUID_t зануляет мусор, и строка Times не разъедется с метой/файлом реплея.
+		KZOutboxService::RewriteTimeInsert(localUUID.ToString(), apiFinalUUID.ToString(), this->player.steamid64, this->course.localID,
+										   this->mode.localID, this->time, this->teleports, this->styleIDs, this->metadata);
 	}
 
 	// Keep finalUUID consistent with the authoritative API-assigned UUID
