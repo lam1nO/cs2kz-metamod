@@ -30,6 +30,13 @@
 #define KZ_ZONE_PERMISSION      "game.kz_zones_edit"
 #define KZ_ZONE_PREVIEW_SECONDS 15.0f
 
+// Хелперы api-запросов определены ниже под квалифицированными именами (KZ::zones::ApiBaseUrl
+// и далее — их делит с этим файлом меню редактора), а звались всегда неквалифицированно.
+using KZ::zones::ApiBaseUrl;
+using KZ::zones::AuthorizeRequest;
+using KZ::zones::ParseApiReason;
+using KZ::zones::PlayerBySlotIfSame;
+
 // !zone show — временный показ всех зон вызвавшему. targetname слоёв — в kz_zones.h.
 #define KZ_ZONE_SHOW_SECONDS 12.0f
 // Раздутие бокса показа. У старта и финиша поверх лежит постоянный контур; ровно совпадающие
@@ -37,7 +44,9 @@
 // соврать про границу зоны.
 #define KZ_ZONE_SHOW_INFLATE 0.5f
 
-static_function std::string ApiBaseUrl()
+// Хелперы ниже объявлены в kz_zones.h (KZ::zones): ими пользуется и меню редактора
+// (kz_zones_menu.cpp) — курсы ходят в тот же api с той же авторизацией и разбором отказов.
+std::string KZ::zones::ApiBaseUrl()
 {
 	const char *url = KZOptionService::GetOptionStr("cybEmitUrl", "");
 	if (!url || url[0] == '\0')
@@ -52,7 +61,7 @@ static_function std::string ApiBaseUrl()
 	return base;
 }
 
-static_function void AuthorizeRequest(HTTP::Request &req)
+void KZ::zones::AuthorizeRequest(HTTP::Request &req)
 {
 	const char *token = KZOptionService::GetOptionStr("cybEmitToken", "");
 	if (token && token[0] != '\0')
@@ -63,7 +72,7 @@ static_function void AuthorizeRequest(HTTP::Request &req)
 
 // Причина отказа из тела ответа api ({"reason": "..."}). Пустая строка, если тела нет, оно не
 // разобралось или поля нет.
-static_function std::string ParseApiReason(const std::optional<std::string> &body)
+std::string KZ::zones::ParseApiReason(const std::optional<std::string> &body)
 {
 	if (!body.has_value())
 	{
@@ -82,7 +91,7 @@ static_function std::string ParseApiReason(const std::optional<std::string> &bod
 
 // Слот игрока, а не указатель: пока запрос летит, игрок может отключиться, и держать
 // KZPlayer* в лямбде значило бы обращаться к освобождённой памяти.
-static_function KZPlayer *PlayerBySlotIfSame(CPlayerSlot slot, u64 expectedSteamId)
+KZPlayer *KZ::zones::PlayerBySlotIfSame(CPlayerSlot slot, u64 expectedSteamId)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(slot);
 	if (!player || !player->IsAuthenticated() || player->GetSteamId64(false) != expectedSteamId)
@@ -553,7 +562,7 @@ void KZZonesService::BeginOrFinish(KzCyberZoneType type, f32 jumpFactor)
 	this->SubmitZone(zone);
 }
 
-void KZZonesService::SubmitZone(const KzCyberZone &zone)
+void KZZonesService::SubmitZone(const KzCyberZone &zone, const char *courseId)
 {
 	const std::string base = ApiBaseUrl();
 	if (base.empty())
@@ -575,22 +584,30 @@ void KZZonesService::SubmitZone(const KzCyberZone &zone)
 		return;
 	}
 
+	// Привязка к курсу — фрагментом, а не третьей копией всего тела: uuid приходит из ответа
+	// api (алфавит известен), эскейпить его не нужно.
+	char courseField[64] = "";
+	if (courseId && courseId[0] != '\0')
+	{
+		V_snprintf(courseField, sizeof(courseField), "\"courseId\":\"%s\",", courseId);
+	}
+
 	char body[768];
 	if (zone.type == KZ_CYBER_ZONE_MODIFIER)
 	{
 		V_snprintf(body, sizeof(body),
-				   "{\"steamId64\":\"%llu\",\"map\":\"%s\",\"triggerType\":\"%s\",\"mins\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},"
+				   "{\"steamId64\":\"%llu\",\"map\":\"%s\",%s\"triggerType\":\"%s\",\"mins\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},"
 				   "\"maxs\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},\"params\":{\"jumpFactor\":%.3f}}",
-				   steamId, KZ::zones::CurrentMapName(), KZ::zones::ZoneTypeToString(zone.type), zone.mins.x, zone.mins.y, zone.mins.z, zone.maxs.x,
-				   zone.maxs.y, zone.maxs.z, zone.jumpFactor);
+				   steamId, KZ::zones::CurrentMapName(), courseField, KZ::zones::ZoneTypeToString(zone.type), zone.mins.x, zone.mins.y, zone.mins.z,
+				   zone.maxs.x, zone.maxs.y, zone.maxs.z, zone.jumpFactor);
 	}
 	else
 	{
 		V_snprintf(body, sizeof(body),
-				   "{\"steamId64\":\"%llu\",\"map\":\"%s\",\"triggerType\":\"%s\",\"mins\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},"
+				   "{\"steamId64\":\"%llu\",\"map\":\"%s\",%s\"triggerType\":\"%s\",\"mins\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},"
 				   "\"maxs\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f}}",
-				   steamId, KZ::zones::CurrentMapName(), KZ::zones::ZoneTypeToString(zone.type), zone.mins.x, zone.mins.y, zone.mins.z, zone.maxs.x,
-				   zone.maxs.y, zone.maxs.z);
+				   steamId, KZ::zones::CurrentMapName(), courseField, KZ::zones::ZoneTypeToString(zone.type), zone.mins.x, zone.mins.y, zone.mins.z,
+				   zone.maxs.x, zone.maxs.y, zone.maxs.z);
 	}
 
 	HTTP::Request req(HTTP::Method::POST, base + "/ingest/v1/kz/zones");
@@ -647,6 +664,18 @@ void KZZonesService::SubmitZone(const KzCyberZone &zone)
 					if (id)
 					{
 						V_snprintf(stored.id, sizeof(stored.id), "%s", id->GetString(""));
+					}
+					// Дескриптор курса и номер стейджа — авторитетные из ответа (api пишет
+					// канонические значения курса); pending-копия остаётся фолбэком на старый api.
+					KeyValues3 *courseDesc = zoneMember ? zoneMember->FindMember("courseDescriptor") : nullptr;
+					if (courseDesc && courseDesc->GetString("")[0] != '\0')
+					{
+						V_snprintf(stored.courseDescriptor, sizeof(stored.courseDescriptor), "%s", courseDesc->GetString(""));
+					}
+					KeyValues3 *stageNumber = zoneMember ? zoneMember->FindMember("stageNumber") : nullptr;
+					if (stageNumber && stageNumber->GetType() != KV3_TYPE_NULL)
+					{
+						stored.stageNumber = (i32)stageNumber->GetDouble(0.0);
 					}
 					KeyValues3 *rev = kv.FindMember("revision");
 					if (rev)
@@ -869,9 +898,25 @@ void KZZonesService::RemoveZone(i32 humanIndex)
 	SendZoneDelete(this->player->GetPlayerSlot(), this->player->GetSteamId64(false), target.id, 1);
 }
 
+void KZZonesService::DeleteZoneById(const char *zoneId)
+{
+	if (!this->EnsureAllowed())
+	{
+		return;
+	}
+	if (!zoneId || zoneId[0] == '\0')
+	{
+		this->player->PrintChat(true, false, "{grey}Зоны:{default} у зоны нет id — удалить через api нельзя.");
+		return;
+	}
+	SendZoneDelete(this->player->GetPlayerSlot(), this->player->GetSteamId64(false), zoneId, 1);
+}
+
 static_function void PrintUsage(KZPlayer *player)
 {
-	player->PrintChat(true, false, "{grey}Зоны:{default} !zone start | end | booster <множитель> | cancel | list | show | remove <номер>");
+	player->PrintChat(true, false,
+					  "{grey}Зоны:{default} !zones (меню) | !zone start | end | booster <множитель> | cancel | list | show | remove <номер>");
+	player->PrintChat(true, false, "{grey}Курсы:{default} !zone course new <имя> | delete <имя> | disable <имя> | enable <имя>");
 }
 
 // SCFL_HIDDEN (то есть флагов нет вовсе) — команда не попадает НИ В ОДНУ таблицу !help:
@@ -937,9 +982,29 @@ SCMD(kz_zone, SCFL_HIDDEN)
 		}
 		player->zonesService->RemoveZone(atoi(args->Arg(2)));
 	}
+	else if (KZ_STREQI(sub, "menu"))
+	{
+		KZ::zones::OpenZonesMenu(player);
+	}
+	else if (KZ_STREQI(sub, "course"))
+	{
+		KZ::zones::CourseSubcommand(player, args);
+	}
 	else
 	{
 		PrintUsage(player);
 	}
+	return MRES_SUPERCEDE;
+}
+
+// Вход в игровой редактор зон и курсов. Тоже SCFL_HIDDEN — см. обоснование у kz_zone выше.
+SCMD(kz_zones, SCFL_HIDDEN)
+{
+	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
+	if (!player->zonesService)
+	{
+		return MRES_SUPERCEDE;
+	}
+	KZ::zones::OpenZonesMenu(player);
 	return MRES_SUPERCEDE;
 }

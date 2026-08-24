@@ -1,8 +1,16 @@
 #pragma once
 #include "../kz.h"
 
+#include <optional>
 #include <string>
 #include <vector>
+
+class CCommand;
+
+namespace HTTP
+{
+	class Request;
+}
 
 /*
 	Зоны KZ-карт из БД платформы (LAM-20).
@@ -110,6 +118,7 @@ enum KzCyberZoneType
 // гарантируют.
 struct KzCyberCourse
 {
+	char id[40] {};          // uuid курса в api; пустая строка = старый api без поля (мутации недоступны)
 	char descriptor[128] {}; // entityTargetname; у own — наш, у override — родной курс карты
 	bool own {};             // курс завели мы (kind=own), а не переопределяем родной
 	bool disabled {};        // курс «удалён» с нашего сервера
@@ -157,6 +166,19 @@ namespace KZ::zones
 
 	// Набор зон текущей карты (для !zone list и debug-draw).
 	const std::vector<KzCyberZone> &Loaded();
+
+	// Курсы карты по версии платформы (из того же ответа api, что и зоны).
+	const std::vector<KzCyberCourse> &Courses();
+
+	// Запись курса из набора платформы по дескриптору (KZ_STREQI — как везде, где дескриптор
+	// ищут по имени). nullptr = платформа про такой курс не знает (родной, ещё не заведённый).
+	const KzCyberCourse *FindCourseByDescriptor(const char *descriptor);
+
+	// Перечитать набор карты из api и переприменить (правки курсов делаются точечными
+	// PATCH/DELETE, и локальное состояние проще пересинхронизировать целиком, чем зеркалить
+	// каждую мутацию руками — второй набор правил разъехался бы с api первым же пропуском).
+	// reason — для лога. Действует только при известной карте и включённом источнике.
+	void RefreshFromApi(const char *reason);
 
 	// Добавить зону в набор и сразу заспавнить, не дожидаясь смены раунда: рестарт раунда
 	// срубил бы раны всем на сервере.
@@ -211,6 +233,29 @@ namespace KZ::zones
 	// keepEntities=true — только занулить хендлы: на смене карты мир перестраивается, прежние
 	// энтити уже не наши, и RemoveEntity по ним лез бы в перестраивающийся мир.
 	void RemoveBoxEdges(CEntityHandle *handles, i32 count, const char *targetname, bool keepEntities = false);
+
+	// --- Общие хелперы api-запросов (определены в kz_zones_editor.cpp; ими же пользуется меню) ---
+
+	// База платформенного api из опции cybEmitUrl, без хвостового «/». Пустая = источник выключен.
+	std::string ApiBaseUrl();
+	// Bearer-токен cybEmitToken, если задан.
+	void AuthorizeRequest(HTTP::Request &req);
+	// Причина отказа из тела ответа api ({"reason": "..."}); пустая строка, если не разобралось.
+	std::string ParseApiReason(const std::optional<std::string> &body);
+	// Игрок по слоту, если это всё ещё тот же человек: пока запрос летел, слот мог смениться.
+	KZPlayer *PlayerBySlotIfSame(CPlayerSlot slot, u64 expectedSteamId);
+
+	// --- Игровой редактор зон и курсов (kz_zones_menu.cpp) ---
+
+	// Корневое меню !zones (алиас !zone menu). Право проверяется ДО создания меню.
+	void OpenZonesMenu(KZPlayer *player);
+	// !zone course new|delete|disable|enable ... — управление курсами командой.
+	void CourseSubcommand(KZPlayer *player, const CCommand *args);
+	// Сброс per-slot состояния меню на смене карты (координаты привязаны к геометрии карты).
+	void ResetEditorMenuState();
+	// Снести все хэндлы меню редактора. Обязателен на выгрузке плагина: колбэки меню держат
+	// указатели в наш DLL, и живое меню после выгрузки — вызов в выгруженный код.
+	void DestroyEditorMenus();
 } // namespace KZ::zones
 
 // Состояние редактора — на игрока. В хуках движения не участвует: только команды и рисование.
@@ -290,10 +335,15 @@ public:
 	bool EnsureAllowed();
 
 	void BeginOrFinish(KzCyberZoneType type, f32 jumpFactor);
-	void SubmitZone(const KzCyberZone &zone);
+	// courseId — uuid курса в api ("" / nullptr = зона вне курсов, прежнее поведение).
+	// Дескриптор курса при этом обязан лежать в zone.courseDescriptor: локальная запись
+	// собирается из pending-копии, а api в ответе поле может и не прислать.
+	void SubmitZone(const KzCyberZone &zone, const char *courseId = nullptr);
 	void CancelPending();
 	void ListZones();
 	void RemoveZone(i32 humanIndex);
+	// Удаление по id зоны — для меню: там зона выбрана строкой списка, а не номером !zone list.
+	void DeleteZoneById(const char *zoneId);
 
 	// Показать все зоны карты этому игроку на KZ_ZONE_SHOW_SECONDS. Повторный вызов гасит показ.
 	void ShowAllZones();

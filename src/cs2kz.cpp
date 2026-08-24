@@ -33,6 +33,7 @@
 #include "kz/replays/kz_replaysystem.h"
 #include "kz/racing/kz_racing.h"
 #include "kz/misc/kz_customchangemap.h"
+#include "kz/zones/kz_zones.h"
 
 #include <vendor/MultiAddonManager/public/imultiaddonmanager.h>
 #include <vendor/ClientCvarValue/public/iclientcvarvalue.h>
@@ -139,6 +140,9 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 bool KZPlugin::Unload(char *error, size_t maxlen)
 {
 	this->unloading = true;
+	// Меню редактора зон — до всего остального: их колбэки держат указатели в наш DLL,
+	// и живой хэндл в cs2menus после выгрузки — вызов в выгруженный код.
+	KZ::zones::DestroyEditorMenus();
 	KZ::misc::UnrestrictTimeLimit();
 	KZRecordingService::Shutdown();
 	AsyncFileIO::Cleanup();

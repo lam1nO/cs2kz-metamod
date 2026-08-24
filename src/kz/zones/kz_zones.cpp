@@ -982,6 +982,13 @@ static_function void IngestZones(const char *body, const std::string &mapName)
 			}
 			KzCyberCourse course {};
 			V_snprintf(course.descriptor, sizeof(course.descriptor), "%s", desc);
+			// id — аддитивное поле: старый api его не отдаёт, тогда точечные мутации курса
+			// (PATCH/DELETE идут по /:id) из игры недоступны, а всё остальное работает как раньше.
+			KeyValues3 *courseIdMember = el->FindMember("id");
+			if (courseIdMember)
+			{
+				V_snprintf(course.id, sizeof(course.id), "%s", courseIdMember->GetString(""));
+			}
 			KeyValues3 *kindMember = el->FindMember("kind");
 			course.own = kindMember && KZ_STREQ(kindMember->GetString(""), "own");
 			KeyValues3 *disabledMember = el->FindMember("disabled");
@@ -1483,24 +1490,14 @@ void KZ::zones::ResetEditors()
 			player->zonesService->OnMapChanged();
 		}
 	}
+	// Состояние меню редактора — тоже координаты этой карты.
+	KZ::zones::ResetEditorMenuState();
 }
 
-void KZ::zones::OnMapLoaded()
+// Запросить набор карты у api (асинхронно). Общий путь загрузки на старте карты и
+// пересинхронизации после мутаций курсов (RefreshFromApi).
+static_function void FetchZones()
 {
-	KZ::zones::ResetEditors();
-	g_cybZones.mapGeneration++;
-	g_cybZones.worldReady = false;
-	DespawnAll();
-	g_cybZones.zones.clear();
-	g_cybZones.courses.clear();
-	g_cybZones.revision = 0;
-	g_cybZones.loaded = false;
-	// Дескрипторы курсов живут ровно одну карту: Hook_StartupServer зовёт KZ::mapapi::Init(),
-	// а тот обнуляет весь courseDescriptors. Значит и наша память о заведённом курсе обнуляется.
-	g_cybZones.localCoursesPending = false;
-	g_cybZones.createdCourses.clear();
-	g_cybZones.mapName = g_pKZUtils->GetCurrentMapName().Get();
-
 	const char *url = KZOptionService::GetOptionStr("cybEmitUrl", "");
 	if (!url || url[0] == '\0')
 	{
@@ -1551,6 +1548,37 @@ void KZ::zones::OnMapLoaded()
 			KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] zones_load_failed map=%s reason=network_error\n", mapName.c_str());
 		});
 	// clang-format on
+}
+
+void KZ::zones::OnMapLoaded()
+{
+	KZ::zones::ResetEditors();
+	g_cybZones.mapGeneration++;
+	g_cybZones.worldReady = false;
+	DespawnAll();
+	g_cybZones.zones.clear();
+	g_cybZones.courses.clear();
+	g_cybZones.revision = 0;
+	g_cybZones.loaded = false;
+	// Дескрипторы курсов живут ровно одну карту: Hook_StartupServer зовёт KZ::mapapi::Init(),
+	// а тот обнуляет весь courseDescriptors. Значит и наша память о заведённом курсе обнуляется.
+	g_cybZones.localCoursesPending = false;
+	g_cybZones.createdCourses.clear();
+	g_cybZones.mapName = g_pKZUtils->GetCurrentMapName().Get();
+
+	FetchZones();
+}
+
+void KZ::zones::RefreshFromApi(const char *reason)
+{
+	if (g_cybZones.mapName.empty())
+	{
+		return; // карта ещё не загружалась — синхронизировать нечего
+	}
+	// Смена состояния набора, инициированная нами: одна строка на запрос, ответ логируется
+	// самим IngestZones (zones_loaded / zones_load_failed).
+	KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] zones_refresh map=%s reason=%s\n", g_cybZones.mapName.c_str(), reason);
+	FetchZones();
 }
 
 void KZ::zones::OnRoundPreStart()
@@ -1614,6 +1642,27 @@ const char *KZ::zones::CurrentMapName()
 const std::vector<KzCyberZone> &KZ::zones::Loaded()
 {
 	return g_cybZones.zones;
+}
+
+const std::vector<KzCyberCourse> &KZ::zones::Courses()
+{
+	return g_cybZones.courses;
+}
+
+const KzCyberCourse *KZ::zones::FindCourseByDescriptor(const char *descriptor)
+{
+	if (!descriptor || !descriptor[0])
+	{
+		return nullptr;
+	}
+	for (const KzCyberCourse &course : g_cybZones.courses)
+	{
+		if (KZ_STREQI(course.descriptor, descriptor))
+		{
+			return &course;
+		}
+	}
+	return nullptr;
 }
 
 i32 KZ::zones::Revision()

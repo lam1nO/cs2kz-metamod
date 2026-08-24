@@ -1733,6 +1733,22 @@ const KZCourseDescriptor *KZ::course::GetCourseByCyberNumber(i32 n)
 	return nullptr;
 }
 
+u32 KZ::course::GetCourseDescriptorTotal()
+{
+	return (u32)g_mappingApi.courseDescriptors.Count();
+}
+
+const KZCourseDescriptor *KZ::course::GetCourseDescriptorByIndex(u32 index)
+{
+	// По courseDescriptors, а не g_sortedCourses: отключённый платформой курс из сортированного
+	// вектора убран, а меню редактора зон обязано видеть и его (см. объявление в kz_mappingapi.h).
+	if (index >= (u32)g_mappingApi.courseDescriptors.Count())
+	{
+		return nullptr;
+	}
+	return &g_mappingApi.courseDescriptors[index];
+}
+
 static void ListCourses(KZPlayer *player)
 {
 	if (player->timerService->GetCourse())
