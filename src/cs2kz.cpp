@@ -23,6 +23,7 @@
 #include "kz/ztopwatch/kz_ztopwatch.h"
 #include "kz/tip/kz_tip.h"
 #include "kz/option/kz_option.h"
+#include "kz/outbox/kz_outbox.h"
 #include "kz/language/kz_language.h"
 #include "kz/mappingapi/kz_mappingapi.h"
 #include "kz/global/kz_global.h"
@@ -106,6 +107,9 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 	KZInvisibleService::Init();
 	KZZtopwatchService::Init();
 	AsyncFileIO::Init();
+	// Дисковый outbox завершённых ранов: каталоги + таймер ретраера — при загрузке,
+	// чтобы после краша/рестарта дослать write-ahead файлы, оставшиеся с прошлой жизни.
+	KZOutboxService::Init();
 	KZRecordingService::Init();
 	if (!KZ::mode::CheckModeCvars())
 	{

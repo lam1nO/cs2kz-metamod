@@ -78,6 +78,7 @@ def configure_main(sdk_target, sdk, cxx):
     os.path.join(builder.sourcePath, 'src', 'movement', 'mv_manager.cpp'),
     os.path.join(builder.sourcePath, 'src', 'movement', 'mv_player.cpp'),
     
+    os.path.join(builder.sourcePath, 'src', 'kz', 'outbox', 'kz_outbox.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'misc', 'kz_misc.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'misc', 'block_radio.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'misc', 'time_limit.cpp'),
