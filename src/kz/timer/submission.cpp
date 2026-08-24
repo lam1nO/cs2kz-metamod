@@ -10,6 +10,7 @@
 #include "kz/option/kz_option.h"
 #include "kz/replays/kz_replay.h"
 #include "kz/replays/cyb_replay_upload.h"
+#include "kz/outbox/kz_outbox.h"
 #include "kz/mappingapi/kz_mappingapi.h"
 #include "utils/async_file_io.h"
 #include "utils/utils.h"
@@ -164,6 +165,7 @@ RunSubmission::RunSubmission(KZPlayer *player)
 		if (style.databaseID < 0)
 		{
 			this->local = false;
+			this->stylesLocalOk = false;
 		}
 		this->styleIDs |= (1ull << style.databaseID);
 	}
@@ -172,13 +174,25 @@ RunSubmission::RunSubmission(KZPlayer *player)
 	this->metadata = player->timerService->GetCurrentRunMetadata().Get();
 
 	// Cheaters and unauthenticated players do not submit
-	if (player->anticheatService->isBanned || !player->IsAuthenticated())
+	this->submitEligible = !player->anticheatService->isBanned && player->IsAuthenticated();
+	if (!this->submitEligible)
 	{
 		this->local = false;
 		this->global = false;
 	}
 
-	// Отправляем ран в Cyber-инджест (fail-open, не влияет на local/global submit)
+	// Write-ahead дискового outbox: INSERT в Times на диск ДО первой попытки
+	// отправки — при лежащей БД (IsReady()==false → local==false, SubmitLocal не
+	// вызовется вовсе) ран дошлёт ретраер. Пишем только когда локальные ID
+	// известны (БД хоть раз была доступна и настроила карту/режим) — без них
+	// INSERT отрендерить нечем; событие ingest ниже сохраняется в любом случае.
+	if (this->submitEligible && this->mode.localID > 0 && this->course.localID > 0 && this->stylesLocalOk)
+	{
+		KZOutboxService::EnqueueTimeInsert(this->localUUID.ToString(), this->player.steamid64, this->course.localID, this->mode.localID, this->time,
+										   this->teleports, this->styleIDs, this->metadata);
+	}
+
+	// Отправляем ран в Cyber-инджест (write-ahead + отправка внутри; не влияет на local/global submit)
 	CybEmitter::Emit(*this);
 
 	// Snapshot previous global PBs for diff display
@@ -354,6 +368,20 @@ void RunSubmission::OnReplayReady(std::vector<char> &&buffer)
 		TryFinalize();
 	}
 
+	// Write-ahead дискового outbox: метаданные центрального аплоада на диск ДО
+	// любой попытки отправки. unconfirmed_pb=true — локальная БД ещё не
+	// подтвердила PB; онлайн-путь ниже перепишет файл подтверждённым вариантом
+	// (или снимет его, если ран оказался не PB), а при лежащей БД мету дошлёт
+	// ретраер, сверив время рана с платформенным PB игрока.
+	if (this->submitEligible)
+	{
+		KZOutboxService::ReplayMeta meta;
+		if (CybReplayUpload::BuildMeta(*this, false, true, meta))
+		{
+			KZOutboxService::EnqueueReplayMeta(meta);
+		}
+	}
+
 	// Буфер реплея готов — если локальная БД уже успела ответить с результатом
 	// PB/ранга, аплоад в центральное хранилище можно запускать прямо сейчас.
 	// Если БД ещё не ответила, TryUploadCentralReplay() будет вызван повторно
@@ -443,6 +471,10 @@ void RunSubmission::DoLateAPIResponse(const std::string &apiUUID)
 	// Update DB row
 	KZDatabaseService::UpdateRunUUID(localUUID.ToString().c_str(), apiUUID.c_str(), nullptr, nullptr);
 
+	// Write-ahead мета центрального реплея (если ещё в очереди) ссылается на старый
+	// путь файла — переносим вместе с переименованием самого реплея.
+	KZOutboxService::RenameReplayMeta(localUUID.ToString(), apiFinalUUID.ToString());
+
 	// Keep finalUUID consistent with the authoritative API-assigned UUID
 	finalUUID = apiFinalUUID;
 
@@ -469,15 +501,14 @@ void RunSubmission::SubmitLocal(const char *uuid)
 {
 	this->localSubmitted = true;
 
-	// Styled runs use a fire-and-forget insert (save_time.cpp skips rank queries);
-	// mark local false now so CheckAll() doesn't wait for a response that will never arrive.
-	if (this->styleIDs != 0)
-	{
-		this->local = false;
-	}
+	// Ключ квитанции outbox — ВСЕГДА localUUID (им назван write-ahead файл,
+	// записанный в конструкторе), даже если сама вставка идёт под UUID от API.
+	std::string ackUuid = this->localUUID.ToString();
 
-	auto onFailure = [uid = this->uid](std::string, int)
+	auto onFailure = [uid = this->uid, ackUuid](std::string error, int)
 	{
+		// Квитанции нет — write-ahead .sql остаётся в outbox, ретраер довставит.
+		KZ_LOG_WARN(LogChannel::DB, "[cyb_outbox] save_time txn failed run=%s reason=%s\n", ackUuid.c_str(), error.c_str());
 		RunSubmission *sub = RunSubmission::Get(uid);
 		if (!sub)
 		{
@@ -486,8 +517,22 @@ void RunSubmission::SubmitLocal(const char *uuid)
 		sub->local = false;
 	};
 
-	auto onSuccess = [uid = this->uid](std::vector<ISQLQuery *> queries)
+	// Styled runs use a bare insert (save_time.cpp skips rank queries);
+	// mark local false now so CheckAll() doesn't wait for a response that will never arrive.
+	// Rank-колбэк ниже к такой транзакции неприменим (queries[1..] нет) — квитируем и только.
+	if (this->styleIDs != 0)
 	{
+		this->local = false;
+		auto onStyledSuccess = [ackUuid](std::vector<ISQLQuery *>) { KZOutboxService::AckSql(ackUuid, "db_txn_ok"); };
+		KZDatabaseService::SaveTime(uuid, this->player.steamid64, this->course.localID, this->mode.localID, this->time, this->teleports,
+									this->styleIDs, this->metadata, onStyledSuccess, onFailure);
+		return;
+	}
+
+	auto onSuccess = [uid = this->uid, ackUuid](std::vector<ISQLQuery *> queries)
+	{
+		// Вставка в Times доехала — write-ahead .sql больше не нужен.
+		KZOutboxService::AckSql(ackUuid, "db_txn_ok");
 		RunSubmission *sub = RunSubmission::Get(uid);
 		if (!sub)
 		{
@@ -576,22 +621,28 @@ void RunSubmission::TryUploadCentralReplay()
 	{
 		return;
 	}
-	// Нужен результат локальной БД (PB/ранг) — без него неизвестно, стоит ли
-	// вообще что-то грузить. Для styled-ранов SubmitLocal переиспользует
-	// generic-колбэк (см. save_time.cpp), localResponse не заполняется, и
-	// local сбрасывается в false — этот путь их естественно не затрагивает.
-	if (!local || !localResponse.received)
-	{
-		return;
-	}
 	// Нужен готовый в памяти буфер реплея.
 	if (!replayReady || replayBuffer.empty())
 	{
 		return;
 	}
+	// Онлайн-путь требует результата локальной БД (новый ли PB, ранг). Если БД
+	// лежит (local==false с самого начала или ответ так и не пришёл) — аплоад НЕ
+	// теряется: write-ahead .replay.meta с unconfirmed_pb=true уже записан в
+	// OnReplayReady(), и ретраер outbox дошлёт его, сверив время с платформенным
+	// PB. Для styled-ранов SubmitLocal не заполняет localResponse и сбрасывает
+	// local — их этот путь, как и раньше, не затрагивает (мета для них не пишется).
+	if (!local || !localResponse.received)
+	{
+		return;
+	}
 	if (!localResponse.overall.isNewPB)
 	{
-		return; // не новый личный рекорд — в центральное хранилище не шлём
+		// Не новый личный рекорд — в центральное хранилище не шлём; write-ahead
+		// мету снимаем, чтобы ретраер не гонял заведомо ненужную сверку.
+		centralReplayUploadAttempted = true;
+		KZOutboxService::DropReplay(finalUUID.ToString(), "not_pb");
+		return;
 	}
 
 	centralReplayUploadAttempted = true;

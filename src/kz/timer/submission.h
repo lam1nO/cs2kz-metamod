@@ -43,6 +43,14 @@ struct RunSubmission
 	bool global {}; // will an API submission be attempted?
 	bool local {};  // will a local DB insert be attempted?
 
+	// Игрок вправе сабмитить в принципе (не чит-бан, аутентифицирован) — гейт
+	// write-ahead записей дискового outbox (kz/outbox). Отличается от local тем,
+	// что НЕ зависит от доступности БД в момент финиша: недоступная БД — как раз
+	// тот случай, ради которого outbox и существует.
+	bool submitEligible {};
+	// У всех стилей рана есть локальные DB ID (иначе INSERT в Times не отрендерить).
+	bool stylesLocalOk {true};
+
 	// Set to true when SubmitRecord returns Queued so CheckAll() keeps this submission
 	// alive until the API reconnects and delivers the ack. Cleared on map change via Clear().
 	bool pendingQueuedSubmission {};
@@ -224,11 +232,13 @@ private:
 	// Insert the run into the local database using the provided UUID.
 	void SubmitLocal(const char *uuid);
 
-	// Аплоад PB/WR-реплея в центральное хранилище Cyber-платформы (fail-open).
-	// Идемпотентно: реально шлёт HTTP не более одного раза на объект (см.
-	// centralReplayUploadAttempted). Вызывается из двух мест — OnReplayReady()
+	// Аплоад PB/WR-реплея в центральное хранилище Cyber-платформы (fail-open
+	// для рана). Идемпотентно: реально шлёт HTTP не более одного раза на объект
+	// (см. centralReplayUploadAttempted). Вызывается из двух мест — OnReplayReady()
 	// и колбэка SubmitLocal() — так как оба асинхронных события (буфер реплея
 	// готов / локальная БД ответила с рангом) могут прийти в любом порядке.
+	// Если ответ локальной БД так и не пришёл (БД лежит), аплоад не теряется:
+	// его дошлёт ретраер дискового outbox по write-ahead мете из OnReplayReady().
 	void TryUploadCentralReplay();
 
 	// Update caches after receiving API / DB responses.

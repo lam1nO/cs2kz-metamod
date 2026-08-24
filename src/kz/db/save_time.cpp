@@ -25,7 +25,10 @@ void KZDatabaseService::SaveTime(const char *runUUID, u64 steamID, u32 courseID,
 	txn.queries.push_back(query);
 	if (styleIDs != 0)
 	{
-		KZDatabaseService::GetDatabaseConnection()->ExecuteTransaction(txn, OnGenericTxnSuccess, OnGenericTxnFailure);
+		// Стилевые раны — голая вставка без PB/rank-запросов, но колбэки прокидываем:
+		// квитанция дискового outbox (см. RunSubmission::SubmitLocal) должна получать
+		// подтверждение и здесь, иначе write-ahead .sql зависал бы до ретраера.
+		KZDatabaseService::GetDatabaseConnection()->ExecuteTransaction(txn, onSuccess, onFailure);
 	}
 	else
 	{
