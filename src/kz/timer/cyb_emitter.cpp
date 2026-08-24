@@ -1,9 +1,9 @@
 #include "cyb_emitter.h"
 
-#include "utils/http.h"
 #include "utils/utils.h"
 #include "utils/uuid.h"
 #include "kz/option/kz_option.h"
+#include "kz/outbox/kz_outbox.h"
 
 #include <chrono>
 #include <cstdio>
@@ -72,7 +72,6 @@ void CybEmitter::Emit(const RunSubmission &sub)
 	if (!url || url[0] == '\0')
 		return; // эмиттер выключен
 
-	const char *token = KZOptionService::GetOptionStr("cybEmitToken", "");
 	const char *serverId = KZOptionService::GetOptionStr("cybServerId", "");
 
 	// Маппинг режима
@@ -83,9 +82,9 @@ void CybEmitter::Emit(const RunSubmission &sub)
 		return;
 	}
 
-	// Генерируем event ID (UUIDv7)
-	UUID_t eventId;
-	std::string eventIdStr = eventId.ToString();
+	// Event ID = UUID рана: ключ идемпотентности на платформе — ретрай из outbox
+	// (kz/outbox) с тем же id не создаст дубликата события.
+	std::string eventIdStr = sub.localUUID.ToString();
 
 	// Timestamp
 	char atBuf[40];
@@ -127,32 +126,11 @@ void CybEmitter::Emit(const RunSubmission &sub)
 		timeMs,
 		(unsigned)sub.teleports);
 
-	// Строим URL: убираем trailing slash если есть
-	std::string fullUrl = std::string(url);
-	if (!fullUrl.empty() && fullUrl.back() == '/')
-		fullUrl.pop_back();
-	fullUrl += "/ingest/v1/events";
-
-	HTTP::Request req(HTTP::Method::POST, fullUrl);
-	req.SetHeader("Content-Type", "application/json");
-	if (token && token[0] != '\0')
-	{
-		std::string auth = std::string("Bearer ") + token;
-		req.SetHeader("Authorization", auth);
-	}
-	req.SetBody(std::string(body));
-
-	// Fire-and-forget: ошибка только в лог, ран не блокируется
-	req.Send(
-		[](HTTP::Response resp)
-		{
-			if (resp.status < 200 || resp.status >= 300)
-			{
-				KZ_LOG_INFO(LogChannel::Global, "[cyb_emit] ingest returned HTTP %u\n", (unsigned)resp.status);
-			}
-		},
-		[]()
-		{
-			KZ_LOG_INFO(LogChannel::Global, "[cyb_emit] ingest HTTP error (network/timeout)\n");
-		});
+	// Write-ahead: тело события на диск ДО первой попытки отправки — при обрыве
+	// сети до платформы ран не потеряется, ретраер outbox дошлёт его с тем же id.
+	// Отправка (URL, заголовки, обработка ответа) — общая с ретраером функция;
+	// 2xx удалит write-ahead файл, ран при любом исходе не блокируется.
+	std::string bodyStr(body);
+	KZOutboxService::EnqueueEvent(eventIdStr, bodyStr);
+	KZOutboxService::SendEvent(eventIdStr, bodyStr);
 }
