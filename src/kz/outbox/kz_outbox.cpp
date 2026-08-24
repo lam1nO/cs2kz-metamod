@@ -140,6 +140,7 @@ static_function std::string SerializeReplayMeta(const KZOutboxService::ReplayMet
 {
 	Json json;
 	json.Set("runUuid", meta.runUuid);
+	json.Set("replayUuid", meta.replayUuid);
 	json.Set("steamId64", meta.steamId64);
 	json.Set("map", meta.map);
 	json.Set("course", (u64)meta.course);
@@ -162,6 +163,7 @@ static_function bool ParseReplayMeta(const std::string &content, KZOutboxService
 	u64 course = 0;
 	// clang-format off
 	bool ok = json.Get("runUuid", out.runUuid)
+		&& json.Get("replayUuid", out.replayUuid)
 		&& json.Get("steamId64", out.steamId64)
 		&& json.Get("map", out.map)
 		&& json.Get("course", course)
@@ -279,29 +281,29 @@ void KZOutboxService::DropReplay(const std::string &runUuid, const char *reason)
 	FinishQueueFile("drop", "replay", runUuid, runUuid + ".replay.meta", reason);
 }
 
-void KZOutboxService::RenameReplayMeta(const std::string &oldUuid, const std::string &newUuid)
+void KZOutboxService::UpdateReplayMetaUuid(const std::string &runUuid, const std::string &newReplayUuid)
 {
-	std::string oldName = oldUuid + ".replay.meta";
-	if (!QueueFileExists(oldName))
+	std::string name = runUuid + ".replay.meta";
+	if (!QueueFileExists(name))
 	{
-		return;
+		return; // мета уже квитирована (или не писалась) — обновлять нечего
 	}
 	std::vector<char> buffer;
-	if (!utils::ReadBufferFromFile(QueueRelPath(oldName).c_str(), buffer))
+	if (!utils::ReadBufferFromFile(QueueRelPath(name).c_str(), buffer))
 	{
 		return;
 	}
 	ReplayMeta meta;
 	if (!ParseReplayMeta(std::string(buffer.begin(), buffer.end()), meta))
 	{
-		MoveToDead("replay", oldUuid, oldName, "bad_meta", 0);
+		MoveToDead("replay", runUuid, name, "bad_meta", 0);
 		return;
 	}
-	meta.runUuid = newUuid;
-	meta.replayPath = std::string(KZ_REPLAY_PATH "/") + newUuid + ".replay";
-	EnqueueReplayMeta(meta);
-	utils::RemoveFile(QueueRelPath(oldName).c_str());
-	KZ_LOG_INFO(LogChannel::General, "[cyb_outbox] rename kind=replay run=%s new=%s reason=late_api_uuid\n", oldUuid.c_str(), newUuid.c_str());
+	meta.replayUuid = newReplayUuid;
+	meta.replayPath = std::string(KZ_REPLAY_PATH "/") + newReplayUuid + ".replay";
+	EnqueueReplayMeta(meta); // перезапись содержимого; имя файла (runUuid) не меняется
+	KZ_LOG_INFO(LogChannel::General, "[cyb_outbox] update kind=replay run=%s replay_uuid=%s reason=late_api_uuid\n", runUuid.c_str(),
+				newReplayUuid.c_str());
 }
 
 // ---------------------------------------------------------------------------
@@ -401,7 +403,7 @@ static_function void PostReplay(const KZOutboxService::ReplayMeta &meta, const s
 	req.SetQuery("course", std::to_string(meta.course));
 	req.SetQuery("mode", meta.mode);
 	req.SetQuery("type", type);
-	req.SetQuery("replayUuid", meta.runUuid);
+	req.SetQuery("replayUuid", meta.replayUuid);
 	req.SetHeader("Content-Type", "application/octet-stream");
 	SetAuthHeader(req);
 	// std::string корректно хранит бинарные данные с внутренними '\0' — длина

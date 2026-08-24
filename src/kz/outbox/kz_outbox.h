@@ -40,7 +40,14 @@ public:
 	// одной строкой JSON.
 	struct ReplayMeta
 	{
-		std::string runUuid;    // UUID рана; он же имя файла реплея и replayUuid для api
+		// Идентичность рана = localUUID: им названы ВСЕ три write-ahead файла
+		// (event/sql/meta), по нему же работают квитанции, in-flight-учёт и гейт
+		// «онлайн-путь ещё жив» (RunSubmission::GetByUUID матчит только localUUID).
+		std::string runUuid;
+		// UUID файла реплея и параметр replayUuid для api. Равен runUuid, пока
+		// глобальный API не выдал свой recordId; поздний ответ обновляет это поле
+		// и replayPath (UpdateReplayMetaUuid), имя самого meta-файла не меняется.
+		std::string replayUuid;
 		u64 steamId64 {};
 		std::string map;        // имя карты (валидировано под api: [a-z0-9_-]{1,128})
 		i32 course {};          // номер курса по конвенции cyber (0 = main, N = bonus N)
@@ -80,9 +87,10 @@ public:
 	// Ран оказался не PB (или иная причина не грузить) — write-ahead реплея снимается как drop.
 	static void DropReplay(const std::string &runUuid, const char *reason);
 
-	// Поздний ответ глобального API переименовал ран localUUID → apiUUID (см.
-	// RunSubmission::DoLateAPIResponse): переносим write-ahead меты вместе с файлом реплея.
-	static void RenameReplayMeta(const std::string &oldUuid, const std::string &newUuid);
+	// Поздний ответ глобального API переименовал файл реплея localUUID → apiUUID (см.
+	// RunSubmission::DoLateAPIResponse): обновляем replayUuid/replayPath внутри меты.
+	// Имя самого meta-файла (runUuid = localUUID) не меняется.
+	static void UpdateReplayMetaUuid(const std::string &runUuid, const std::string &newReplayUuid);
 
 	// --- Отправка: ОБЩИЕ функции для онлайн-пути и ретраера (не копировать логику отправки!) ---
 

@@ -472,8 +472,8 @@ void RunSubmission::DoLateAPIResponse(const std::string &apiUUID)
 	KZDatabaseService::UpdateRunUUID(localUUID.ToString().c_str(), apiUUID.c_str(), nullptr, nullptr);
 
 	// Write-ahead мета центрального реплея (если ещё в очереди) ссылается на старый
-	// путь файла — переносим вместе с переименованием самого реплея.
-	KZOutboxService::RenameReplayMeta(localUUID.ToString(), apiFinalUUID.ToString());
+	// путь файла — обновляем replayUuid/replayPath внутри вместе с переименованием реплея.
+	KZOutboxService::UpdateReplayMetaUuid(localUUID.ToString(), apiFinalUUID.ToString());
 
 	// Keep finalUUID consistent with the authoritative API-assigned UUID
 	finalUUID = apiFinalUUID;
@@ -641,7 +641,7 @@ void RunSubmission::TryUploadCentralReplay()
 		// Не новый личный рекорд — в центральное хранилище не шлём; write-ahead
 		// мету снимаем, чтобы ретраер не гонял заведомо ненужную сверку.
 		centralReplayUploadAttempted = true;
-		KZOutboxService::DropReplay(finalUUID.ToString(), "not_pb");
+		KZOutboxService::DropReplay(localUUID.ToString(), "not_pb");
 		return;
 	}
 

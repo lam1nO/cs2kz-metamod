@@ -54,7 +54,10 @@ bool CybReplayUpload::BuildMeta(const RunSubmission &sub, bool isServerRecord, b
 		return false;
 	}
 
-	out.runUuid = sub.finalUUID.ToString();
+	// runUuid — стабильная идентичность рана (localUUID, симметрично event/sql);
+	// replayUuid — UUID файла реплея (finalUUID, может отличаться после позднего ответа API).
+	out.runUuid = sub.localUUID.ToString();
+	out.replayUuid = sub.finalUUID.ToString();
 	out.steamId64 = sub.player.steamid64;
 	out.map = sub.map.name;
 	out.course = sub.course.number;
@@ -62,7 +65,7 @@ bool CybReplayUpload::BuildMeta(const RunSubmission &sub, bool isServerRecord, b
 	out.isServerRecord = isServerRecord;
 	out.unconfirmedPb = unconfirmedPb;
 	out.timeMs = (u64)(sub.time * 1000.0 + 0.5);
-	out.replayPath = std::string(KZ_REPLAY_PATH "/") + out.runUuid + ".replay";
+	out.replayPath = std::string(KZ_REPLAY_PATH "/") + out.replayUuid + ".replay";
 	return true;
 }
 
