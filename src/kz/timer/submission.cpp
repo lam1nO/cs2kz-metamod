@@ -188,8 +188,10 @@ RunSubmission::RunSubmission(KZPlayer *player)
 	// INSERT отрендерить нечем; событие ingest ниже сохраняется в любом случае.
 	if (this->submitEligible && this->mode.localID > 0 && this->course.localID > 0 && this->stylesLocalOk)
 	{
-		KZOutboxService::EnqueueTimeInsert(this->localUUID.ToString(), this->player.steamid64, this->course.localID, this->mode.localID, this->time,
-										   this->teleports, this->styleIDs, this->metadata);
+		// Ключ файла и UUID вставки на момент финиша совпадают (localUUID); поздний
+		// recordId от глобального API поменяет UUID вставки через RewriteTimeInsert.
+		KZOutboxService::EnqueueTimeInsert(this->localUUID.ToString(), this->localUUID.ToString(), this->player.steamid64, this->course.localID,
+										   this->mode.localID, this->time, this->teleports, this->styleIDs, this->metadata);
 	}
 
 	// Отправляем ран в Cyber-инджест (write-ahead + отправка внутри; не влияет на local/global submit)
@@ -474,6 +476,15 @@ void RunSubmission::DoLateAPIResponse(const std::string &apiUUID)
 	// Write-ahead мета центрального реплея (если ещё в очереди) ссылается на старый
 	// путь файла — обновляем replayUuid/replayPath внутри вместе с переименованием реплея.
 	KZOutboxService::UpdateReplayMetaUuid(localUUID.ToString(), apiFinalUUID.ToString());
+
+	// Отложенная вставка Times (если ещё в очереди) перерендеривается под канонический
+	// apiUUID — иначе строка была бы несопоставима с платформой и файлом реплея.
+	// Если вставка уже прошла онлайн, её UUID правит UpdateRunUUID выше, а файла нет.
+	if (this->submitEligible && this->mode.localID > 0 && this->course.localID > 0 && this->stylesLocalOk)
+	{
+		KZOutboxService::RewriteTimeInsert(localUUID.ToString(), apiUUID, this->player.steamid64, this->course.localID, this->mode.localID,
+										   this->time, this->teleports, this->styleIDs, this->metadata);
+	}
 
 	// Keep finalUUID consistent with the authoritative API-assigned UUID
 	finalUUID = apiFinalUUID;

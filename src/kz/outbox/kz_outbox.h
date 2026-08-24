@@ -71,9 +71,19 @@ public:
 	static void EnqueueEvent(const std::string &runUuid, const std::string &body);
 
 	// Рендерит INSERT в Times по тому же шаблону, что save_time.cpp (sql_times_insert),
-	// но в IGNORE-семантике. Только вставка — без PB/rank-запросов (те нужны только худу в моменте).
-	static void EnqueueTimeInsert(const std::string &runUuid, u64 steamID64, u32 courseID, i32 modeID, f64 time, u64 teleports, u64 styleIDs,
-								  const std::string &metadata);
+	// но в IGNORE-семантике. Только вставка — без PB/rank-запросов (те нужны только худу
+	// в моменте). ackUuid — ключ файла/квитанции (localUUID), insertUuid — UUID строки
+	// Times (на момент финиша совпадает с ackUuid; поздний ответ API меняет его через
+	// RewriteTimeInsert ниже).
+	static void EnqueueTimeInsert(const std::string &ackUuid, const std::string &insertUuid, u64 steamID64, u32 courseID, i32 modeID, f64 time,
+								  u64 teleports, u64 styleIDs, const std::string &metadata);
+
+	// Поздний ответ глобального API выдал канонический UUID рана: перерендерить
+	// отложенную вставку под него, чтобы строка Times совпадала с платформой и файлом
+	// реплея. No-op, если файл уже квитирован (вставка прошла — её UUID правит
+	// UpdateRunUUID) или прямо сейчас исполняется ретраером (см. .cpp).
+	static void RewriteTimeInsert(const std::string &ackUuid, const std::string &insertUuid, u64 steamID64, u32 courseID, i32 modeID, f64 time,
+								  u64 teleports, u64 styleIDs, const std::string &metadata);
 
 	// Пишет (или перезаписывает — переход unconfirmed → confirmed) метаданные реплей-аплоада.
 	static void EnqueueReplayMeta(const ReplayMeta &meta);

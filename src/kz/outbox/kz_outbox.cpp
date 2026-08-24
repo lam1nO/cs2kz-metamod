@@ -223,12 +223,12 @@ void KZOutboxService::EnqueueEvent(const std::string &runUuid, const std::string
 	}
 }
 
-void KZOutboxService::EnqueueTimeInsert(const std::string &runUuid, u64 steamID64, u32 courseID, i32 modeID, f64 time, u64 teleports, u64 styleIDs,
-										const std::string &metadata)
+void KZOutboxService::EnqueueTimeInsert(const std::string &ackUuid, const std::string &insertUuid, u64 steamID64, u32 courseID, i32 modeID, f64 time,
+										u64 teleports, u64 styleIDs, const std::string &metadata)
 {
 	// Тот же рендер, что в save_time.cpp: единый шаблон sql_times_insert (queries/times.h).
 	char query[2048];
-	V_snprintf(query, sizeof(query), sql_times_insert, runUuid.c_str(), steamID64, courseID, modeID, styleIDs, time, teleports, metadata.c_str());
+	V_snprintf(query, sizeof(query), sql_times_insert, insertUuid.c_str(), steamID64, courseID, modeID, styleIDs, time, teleports, metadata.c_str());
 
 	// IGNORE-семантика: Times.ID — PRIMARY KEY, повторная вставка при ретрае
 	// (или после ретрая, догнанного онлайн-путём) должна быть безвредной.
@@ -236,16 +236,40 @@ void KZOutboxService::EnqueueTimeInsert(const std::string &runUuid, u64 steamID6
 	size_t pos = q.find("INSERT INTO");
 	if (pos == std::string::npos)
 	{
-		KZ_LOG_WARN(LogChannel::General, "[cyb_outbox] enqueue failed kind=sql run=%s reason=render_failed\n", runUuid.c_str());
+		KZ_LOG_WARN(LogChannel::General, "[cyb_outbox] enqueue failed kind=sql run=%s reason=render_failed\n", ackUuid.c_str());
 		return;
 	}
 	bool mysql = KZDatabaseService::GetDatabaseType() == KZ::Database::DatabaseType::MySQL;
 	q.replace(pos, strlen("INSERT INTO"), mysql ? "INSERT IGNORE INTO" : "INSERT OR IGNORE INTO");
 
-	if (WriteQueueFile(runUuid + ".sql", q))
+	if (WriteQueueFile(ackUuid + ".sql", q))
 	{
-		KZ_LOG_INFO(LogChannel::General, "[cyb_outbox] enqueue kind=sql run=%s\n", runUuid.c_str());
+		KZ_LOG_INFO(LogChannel::General, "[cyb_outbox] enqueue kind=sql run=%s insert_uuid=%s\n", ackUuid.c_str(), insertUuid.c_str());
 	}
+}
+
+void KZOutboxService::RewriteTimeInsert(const std::string &ackUuid, const std::string &insertUuid, u64 steamID64, u32 courseID, i32 modeID, f64 time,
+										u64 teleports, u64 styleIDs, const std::string &metadata)
+{
+	std::string name = ackUuid + ".sql";
+	if (!QueueFileExists(name))
+	{
+		return; // вставка уже прошла и квитирована — её UUID переименует UpdateRunUUID
+	}
+	if (g_outboxInFlight.count(name))
+	{
+		// Ретраер прямо сейчас исполняет старый вариант — перезапись под гонку только
+		// запутает. Успех: файл удалит квитанция, а строку localUUID переименует
+		// UpdateRunUUID (он поставлен в очередь соединения ПОЗЖЕ этой вставки и
+		// исполнится после неё). Отказ: файл со старым UUID останется до следующего
+		// тика — остаточный кейс «строка под localUUID» (ран не теряется), виден по логу.
+		KZ_LOG_WARN(LogChannel::General, "[cyb_outbox] rewrite skipped kind=sql run=%s reason=in_flight insert_uuid=%s\n", ackUuid.c_str(),
+					insertUuid.c_str());
+		return;
+	}
+	EnqueueTimeInsert(ackUuid, insertUuid, steamID64, courseID, modeID, time, teleports, styleIDs, metadata);
+	KZ_LOG_INFO(LogChannel::General, "[cyb_outbox] update kind=sql run=%s insert_uuid=%s reason=late_api_uuid\n", ackUuid.c_str(),
+				insertUuid.c_str());
 }
 
 void KZOutboxService::EnqueueReplayMeta(const ReplayMeta &meta)
