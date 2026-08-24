@@ -37,6 +37,12 @@ namespace HTTP
 			else
 			{
 				KZ_LOG_WARN(LogChannel::General, "[HTTP] Failed to send HTTP request as the steam API is not yet initialized.\n");
+				// Колбэк ответа не придёт никогда — сообщаем об отказе сразу, иначе
+				// вызывающий (например, in-flight-учёт outbox) зависнет навечно.
+				if (onError)
+				{
+					onError();
+				}
 				return;
 			}
 		}
@@ -80,6 +86,11 @@ namespace HTTP
 			if (!g_pHTTP->SetHTTPRequestRawPostBody(handle, bodyContentType.c_str(), (u8 *)body.data(), body.size()))
 			{
 				KZ_LOG_WARN(LogChannel::General, "[HTTP] Failed to set request body.\n");
+				g_pHTTP->ReleaseHTTPRequest(handle);
+				if (onError)
+				{
+					onError();
+				}
 				return;
 			}
 		}
@@ -100,7 +111,15 @@ namespace HTTP
 
 		if (!g_pHTTP->SendHTTPRequest(handle, &steamCallHandle))
 		{
+			// Steam отказал синхронно: CCallResult не сработает, InFlightRequest создавать
+			// нельзя (колбэки не придут никогда) — освобождаем хэндл и сообщаем об отказе.
 			KZ_LOG_WARN(LogChannel::General, "[HTTP] Failed to send HTTP request.\n");
+			g_pHTTP->ReleaseHTTPRequest(handle);
+			if (onError)
+			{
+				onError();
+			}
+			return;
 		}
 		// Log detailed HTTP requests for debugging.
 		if (LoggingSystem_IsChannelEnabled(GetServiceChannel(LogChannel::General), LS_DETAILED))
