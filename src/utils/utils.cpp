@@ -733,8 +733,19 @@ bool utils::WriteBufferToFile(const char *relativePath, const std::vector<char> 
 		KZ_LOG_WARN(LogChannel::General, "Failed to open file for writing: %s\n", tmpPath);
 		return false;
 	}
-	fwrite(buffer.data(), 1, buffer.size(), fp);
-	fclose(fp);
+	// Проверяем И fwrite, И fclose (тот доносит отложенную ошибку записи, например
+	// disk full) ДО rename — иначе опубликовали бы усечённый файл под финальным именем.
+	bool writeOk = fwrite(buffer.data(), 1, buffer.size(), fp) == buffer.size();
+	if (fclose(fp) != 0)
+	{
+		writeOk = false;
+	}
+	if (!writeOk)
+	{
+		KZ_LOG_WARN(LogChannel::General, "Failed to write file (disk full?): %s\n", tmpPath);
+		remove(tmpPath);
+		return false;
+	}
 
 #ifdef _WIN32
 	if (!MoveFileExA(tmpPath, absPath, MOVEFILE_REPLACE_EXISTING))
