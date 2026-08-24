@@ -47,18 +47,25 @@ KZPlugin g_KZPlugin;
 IMultiAddonManager *g_pMultiAddonManager;
 IClientCvarValue *g_pClientCvarValue;
 ICS2Menus *g_pMenus;
-// Умеет ли рядом стоящий cs2menus строку показаний под меню (SetSlotStatus, интерфейс 005).
-// Отдельный флаг, а не «g_pMenus != nullptr»: со СТАРОЙ сборкой cs2menus интерфейс 005 не
-// находится, и запрашивать только его нельзя — g_pMenus стал бы null и форк остался бы вообще
-// без меню (!options/!maps/!rpmenu) из-за одной строки худа. Поэтому откатываемся на 004 и
-// просто не зовём новый метод: у полученного по 004 указателя его нет в vtable.
+// Умеет ли рядом стоящий cs2menus строку показаний под меню (SetSlotStatus, интерфейс 005)
+// и E-захват adjustable-строк (SetAdjustCapture, интерфейс 006). Флаги по СЕКЦИЯМ, а не
+// «g_pMenus != nullptr»: со старой сборкой cs2menus свежий интерфейс не находится, и
+// запрашивать только его нельзя — g_pMenus стал бы null и форк остался бы вообще без меню
+// (!options/!maps/!rpmenu). Поэтому откатываемся по цепочке 006 → 005 → 004 и просто не зовём
+// методы, которых у полученного указателя нет в vtable.
 bool g_menusHasSlotStatus;
+bool g_menusHasAdjustCapture;
 CSteamGameServerAPIContext g_steamAPI;
 
-// Получить интерфейс меню: сначала актуальная ревизия, при неудаче — предыдущая.
+// Получить интерфейс меню: сначала актуальная ревизия, при неудаче — по цепочке вниз.
 static void AcquireMenusInterface()
 {
 	g_pMenus = (ICS2Menus *)g_SMAPI->MetaFactory(CS2MENUS_INTERFACE, nullptr, nullptr);
+	g_menusHasAdjustCapture = g_pMenus != nullptr;
+	if (!g_pMenus)
+	{
+		g_pMenus = (ICS2Menus *)g_SMAPI->MetaFactory(CS2MENUS_INTERFACE_005, nullptr, nullptr);
+	}
 	g_menusHasSlotStatus = g_pMenus != nullptr;
 	if (!g_pMenus)
 	{

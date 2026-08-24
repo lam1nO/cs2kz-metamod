@@ -1469,6 +1469,12 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 	}
 
 	SyncCoursesAfterApply();
+
+	// Обзорные экраны игрового редактора смотрят на этот же набор: применили — перерисовали.
+	// Зовётся ЗДЕСЬ, в единственной точке применения, а не из каждого http-колбэка: путей,
+	// меняющих набор, четыре (ответ api, round_start, постановка, удаление), и меню обязано
+	// догонять каждый.
+	KZ::zones::RefreshOpenEditorMenus();
 }
 
 void KZ::zones::ResetEditors()

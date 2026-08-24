@@ -11,7 +11,10 @@
 
 	Навигация: скелет корня (постановка/зоны/курсы) связан AddSubMenu — там работает бинд R
 	(назад). Экраны глубже зависят от выбранной строки и создаются по требованию через
-	DisplayMenu — R там не действует, выход — F, отмена/сохранение закрывают экран явно.
+	DisplayMenu — R там не действует, выход — F. Действия меню НЕ закрывают (решение
+	пользователя): отмена/сохранение/удаление возвращают в уместный экран, а когда позже
+	приходит ответ api, открытые обзорные экраны перестраивает RefreshOpenEditorMenus
+	(зовётся из kz_zones.cpp после каждого применения набора).
 */
 
 #include "kz_zones.h"
@@ -30,6 +33,9 @@
 #include <stdlib.h> // atoi — номер курса из info-тега
 
 extern ICS2Menus *g_pMenus;
+// Движок умеет E-захват adjustable-строк (интерфейс 006). Со старым движком редактор живёт
+// по-старому: стрелки всегда, A/D сразу, подсказка «(A/D …)» в тексте строки.
+extern bool g_menusHasAdjustCapture;
 
 // Все хелперы api-запросов — общие с kz_zones_editor.cpp (объявлены в kz_zones.h).
 using KZ::zones::ApiBaseUrl;
@@ -37,10 +43,12 @@ using KZ::zones::AuthorizeRequest;
 using KZ::zones::ParseApiReason;
 using KZ::zones::PlayerBySlotIfSame;
 
-// Геометрия панели постановки/правки. Минимальная высота — тот же порог, что у api по каждой
-// оси (checkZoneBox), иначе «Подтвердить» гонял бы заведомо отказной запрос.
+// Геометрия панели постановки/правки. Минимумы — те же пороги, что у api (checkZoneBox),
+// иначе «Подтвердить» гонял бы заведомо отказной запрос: по горизонтали KZ_ZONE_MIN_SIZE (8),
+// по высоте — 1 (решение пользователя: касание считается пересечением хитбоксов и работает
+// на плоском «коврике», запрещён только вырожденный ноль). Контракт: KZ_ZONE_MIN_HEIGHT.
 #define KZ_ZONEMENU_HEIGHT_STEP 8.0f
-#define KZ_ZONEMENU_HEIGHT_MIN  KZ_ZONE_MIN_SIZE
+#define KZ_ZONEMENU_HEIGHT_MIN  1.0f
 #define KZ_ZONEMENU_HEIGHT_MAX  2048.0f
 // Множитель бустера — границы контракта (params.jumpFactor: >0, <=10).
 #define KZ_ZONEMENU_FACTOR_STEP 0.05f
@@ -87,6 +95,13 @@ struct ZoneMenuState
 	bool courseDisabled {};
 	i32 courseNumber {};
 
+	// Фильтр открытого сейчас списка зон (пустой = все зоны карты) — чтобы наблюдатель
+	// перестроил список с тем же фильтром, когда придёт ответ api.
+	char lastListFilter[128] {};
+	// Куда возвращаться после Сохранить/Удалить из правки зоны: фильтр списка, из которого
+	// зашли (пустой = список всех зон карты).
+	char returnFilter[128] {};
+
 	void ResetEdit()
 	{
 		this->type = {};
@@ -103,6 +118,8 @@ struct ZoneMenuState
 		this->idxFactor = -1;
 		this->courseOwn = this->courseDisabled = false;
 		this->courseNumber = 0;
+		this->lastListFilter[0] = '\0';
+		this->returnFilter[0] = '\0';
 	}
 };
 
@@ -247,6 +264,62 @@ static_function bool JsonEscape(const char *in, char *out, i32 outSize)
 	}
 	out[w] = '\0';
 	return true;
+}
+
+// Подписи регулируемых строк. С захватом (006) подсказка клавиш живёт в футере движка
+// (E Настроить / A/D Настр.), и хвост «(A/D …)» в тексте только шумел бы — по решению
+// пользователя незахваченная строка выглядит как обычный пункт. На старом движке хвост
+// остаётся: там стрелки постоянные и другой подсказки про шаг нет.
+static_function std::string HeightRowText(f32 height)
+{
+	char text[64];
+	if (g_menusHasAdjustCapture)
+	{
+		V_snprintf(text, sizeof(text), "Высота: %.0f", height);
+	}
+	else
+	{
+		V_snprintf(text, sizeof(text), "Высота: %.0f (A/D ±%.0f)", height, KZ_ZONEMENU_HEIGHT_STEP);
+	}
+	return text;
+}
+
+static_function std::string FactorRowText(f32 factor)
+{
+	char text[64];
+	if (g_menusHasAdjustCapture)
+	{
+		V_snprintf(text, sizeof(text), "Множитель: x%.2f", factor);
+	}
+	else
+	{
+		V_snprintf(text, sizeof(text), "Множитель: x%.2f (A/D)", factor);
+	}
+	return text;
+}
+
+static_function std::string StepRowText(f32 step)
+{
+	char text[32];
+	if (g_menusHasAdjustCapture)
+	{
+		V_snprintf(text, sizeof(text), "Шаг: %.0f", step);
+	}
+	else
+	{
+		V_snprintf(text, sizeof(text), "Шаг: %.0f (A/D)", step);
+	}
+	return text;
+}
+
+// Включить E-захват для меню с регулируемыми строками, если движок умеет (006). У наших
+// adjustable-строк нет действий на E — контракт SetAdjustCapture это и требует.
+static_function void EnableAdjustCapture(MenuHandle menu)
+{
+	if (g_menusHasAdjustCapture)
+	{
+		g_pMenus->SetAdjustCapture(menu, true);
+	}
 }
 
 // --- Геометрия из состояния ---
@@ -568,8 +641,11 @@ static_function void EnsureCourseRegistered(KZPlayer *player, const char *descri
 
 // --- HTTP: замена бустера (DELETE старого + POST нового одним действием) ---
 
+// submittedMap — карта на момент ПЕРВОГО вызова, протаскивается через рекурсию повтора 409:
+// перезахват CurrentMapName() внутри повтора обнулял бы сверку «карта сменилась, пока летели
+// запросы» (map-guard ниже стоит ПОСЛЕ ветки повтора, и повтор с новой картой считал бы её той же).
 static_function void DeleteZoneThenSubmit(CPlayerSlot slot, u64 steamId, std::string oldZoneId, KzCyberZone newZone, std::string courseId,
-										  i32 attempt)
+										  i32 attempt, std::string submittedMap)
 {
 	const std::string base = ApiBaseUrl();
 	if (base.empty())
@@ -589,10 +665,9 @@ static_function void DeleteZoneThenSubmit(CPlayerSlot slot, u64 steamId, std::st
 	V_snprintf(steamIdStr, sizeof(steamIdStr), "%llu", steamId);
 	req.SetQuery("steamId64", steamIdStr);
 
-	// Карта на момент отправки: пока DELETE летит, карта может смениться, а слот и steam_id
-	// останутся теми же — PlayerBySlotIfSame это не поймает. Без сверки SubmitZone ниже собрал
-	// бы тело уже с НОВОЙ картой и координатами старой, и его собственный stale-чек промолчал бы.
-	const std::string submittedMap = KZ::zones::CurrentMapName();
+	// Пока DELETE летит, карта может смениться, а слот и steam_id останутся теми же —
+	// PlayerBySlotIfSame это не поймает. Без сверки с submittedMap (карта первого вызова)
+	// SubmitZone ниже собрал бы тело уже с НОВОЙ картой и координатами старой.
 
 	// clang-format off
 	req.Send(
@@ -604,7 +679,7 @@ static_function void DeleteZoneThenSubmit(CPlayerSlot slot, u64 steamId, std::st
 			{
 				KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] zone_replace_retry steam_id=%llu id=%s attempt=%d reason=zone_moved\n", steamId,
 							oldZoneId.c_str(), attempt);
-				DeleteZoneThenSubmit(slot, steamId, oldZoneId, newZone, courseId, attempt + 1);
+				DeleteZoneThenSubmit(slot, steamId, oldZoneId, newZone, courseId, attempt + 1, submittedMap);
 				return;
 			}
 			if (resp.status < 200 || resp.status >= 300)
@@ -682,12 +757,44 @@ static_function void DeleteZoneThenSubmit(CPlayerSlot slot, u64 steamId, std::st
 
 // --- Экраны ---
 
+// Какой экран скелета показать после перестройки (см. OpenSkeleton).
+enum class ZmScreen
+{
+	Root,
+	ZonesList,
+	CoursesList,
+};
+
+static_function void OpenSkeleton(KZPlayer *player, ZmScreen show);
 static_function void OpenPlacement(KZPlayer *player);
 static_function void OpenZoneEdit(KZPlayer *player, const KzCyberZone &zone);
 static_function void OpenZonesList(KZPlayer *player, const char *filterDescriptor);
 static_function void OpenWizardCourseSelect(KZPlayer *player);
 static_function void OpenCreateCourse(KZPlayer *player, bool fromWizard);
 static_function void OpenCourseActions(KZPlayer *player);
+static_function bool FillCourseContext(ZoneMenuState &state, const char *descriptor);
+
+// После Сохранить/Удалить из правки зоны — назад в список, из которого зашли: курсовый
+// (фильтр запомнен в returnFilter) или общий список зон карты.
+static_function void ReturnToZonesList(KZPlayer *player)
+{
+	const i32 slot = player->GetPlayerSlot().Get();
+	if (slot < 0 || slot >= MAXPLAYERS)
+	{
+		return;
+	}
+	// Фильтр копируем заранее: ветка OpenSkeleton чистит состояние слота (ResetEdit).
+	char filter[128];
+	V_snprintf(filter, sizeof(filter), "%s", s_zmState[slot].returnFilter);
+	if (filter[0])
+	{
+		OpenZonesList(player, filter);
+	}
+	else
+	{
+		OpenSkeleton(player, ZmScreen::ZonesList);
+	}
+}
 
 // Свободный номер бонуса: наименьший из 1..99, не занятый ни живыми курсами карты, ни
 // записями платформы. -1 = свободных нет.
@@ -788,7 +895,8 @@ static_function void OnPlacementSelect(MenuHandle menu, int slot, int item)
 	if (KZ_STREQ(tag, "cancel"))
 	{
 		player->zonesService->ClearPreview();
-		g_pMenus->CancelMenu(slot);
+		// Меню не закрываем (решение пользователя): постановка отменена — назад в корень.
+		OpenSkeleton(player, ZmScreen::Root);
 		return;
 	}
 	if (KZ_STREQ(tag, "a") || KZ_STREQ(tag, "b"))
@@ -833,14 +941,16 @@ static_function void OnPlacementSelect(MenuHandle menu, int slot, int item)
 		{
 			// Правка бустера: у него нет штатной замены на стороне api — DELETE + POST.
 			DeleteZoneThenSubmit(player->GetPlayerSlot(), player->GetSteamId64(false), state.editZoneId, zone,
-								 state.courseId[0] ? state.courseId : "", 1);
+								 state.courseId[0] ? state.courseId : "", 1, KZ::zones::CurrentMapName());
 		}
 		else
 		{
 			// Постановка и правка start/end: POST того же типа и курса, api вернёт replaced[].
 			player->zonesService->SubmitZone(zone, state.courseId[0] ? state.courseId : nullptr);
 		}
-		g_pMenus->CancelMenu(slot);
+		// Меню не закрываем: назад в корень. Счётчики зон там пока прежние — ответ api ещё
+		// летит; когда набор применится, открытый корень перестроит RefreshOpenEditorMenus.
+		OpenSkeleton(player, ZmScreen::Root);
 		return;
 	}
 }
@@ -858,20 +968,17 @@ static_function void OnPlacementAdjust(MenuHandle menu, int slot, int item, f32 
 	{
 		return;
 	}
-	char text[64];
 	if (KZ_STREQ(tag, "height"))
 	{
 		state.height = MIN(MAX(state.height + delta, minValue), maxValue);
-		V_snprintf(text, sizeof(text), "Высота: %.0f (A/D ±%.0f)", state.height, KZ_ZONEMENU_HEIGHT_STEP);
-		g_pMenus->SetItemText(menu, item, text);
+		g_pMenus->SetItemText(menu, item, HeightRowText(state.height).c_str());
 		RedrawPreview(player, state);
 		return;
 	}
 	if (KZ_STREQ(tag, "factor"))
 	{
 		state.jumpFactor = MIN(MAX(state.jumpFactor + delta, minValue), maxValue);
-		V_snprintf(text, sizeof(text), "Множитель: x%.2f (A/D)", state.jumpFactor);
-		g_pMenus->SetItemText(menu, item, text);
+		g_pMenus->SetItemText(menu, item, FactorRowText(state.jumpFactor).c_str());
 		return;
 	}
 }
@@ -900,19 +1007,19 @@ static_function void OpenPlacement(KZPlayer *player)
 
 	state.idxA = g_pMenus->AddItem(m, PointRowText("Точка A", state.hasA, state.a).c_str(), "a", false);
 	state.idxB = g_pMenus->AddItem(m, PointRowText("Точка B", state.hasB, state.b).c_str(), "b", false);
-	char text[64];
-	V_snprintf(text, sizeof(text), "Высота: %.0f (A/D ±%.0f)", state.height, KZ_ZONEMENU_HEIGHT_STEP);
-	state.idxHeight = g_pMenus->AddAdjustableItem(m, text, "height", KZ_ZONEMENU_HEIGHT_STEP, KZ_ZONEMENU_HEIGHT_MIN, KZ_ZONEMENU_HEIGHT_MAX);
+	state.idxHeight = g_pMenus->AddAdjustableItem(m, HeightRowText(state.height).c_str(), "height", KZ_ZONEMENU_HEIGHT_STEP, KZ_ZONEMENU_HEIGHT_MIN,
+												  KZ_ZONEMENU_HEIGHT_MAX);
 	state.idxFactor = -1;
 	if (state.type == KZ_CYBER_ZONE_MODIFIER)
 	{
-		V_snprintf(text, sizeof(text), "Множитель: x%.2f (A/D)", state.jumpFactor);
-		state.idxFactor = g_pMenus->AddAdjustableItem(m, text, "factor", KZ_ZONEMENU_FACTOR_STEP, KZ_ZONEMENU_FACTOR_MIN, KZ_ZONEMENU_FACTOR_MAX);
+		state.idxFactor = g_pMenus->AddAdjustableItem(m, FactorRowText(state.jumpFactor).c_str(), "factor", KZ_ZONEMENU_FACTOR_STEP,
+													  KZ_ZONEMENU_FACTOR_MIN, KZ_ZONEMENU_FACTOR_MAX);
 	}
 	state.idxConfirm = g_pMenus->AddItem(m, "✓ Подтвердить", "confirm", !(state.hasA && state.hasB));
 	g_pMenus->AddItem(m, "Отмена", "cancel", false);
 
 	g_pMenus->SetAdjustCallback(m, &OnPlacementAdjust);
+	EnableAdjustCapture(m);
 	g_pMenus->SetCloseOnSelect(m, false);
 	handles.placement = m;
 	g_pMenus->DisplayMenu(m, slot, 0);
@@ -923,7 +1030,14 @@ static_function void OpenPlacement(KZPlayer *player)
 static_function std::string CoordRowText(const char *axis, f32 value)
 {
 	char text[48];
-	V_snprintf(text, sizeof(text), "%s: %.0f (A/D ±шаг)", axis, value);
+	if (g_menusHasAdjustCapture)
+	{
+		V_snprintf(text, sizeof(text), "%s: %.0f", axis, value);
+	}
+	else
+	{
+		V_snprintf(text, sizeof(text), "%s: %.0f (A/D ±шаг)", axis, value);
+	}
 	return text;
 }
 
@@ -934,12 +1048,10 @@ static_function void RefreshPointMenuTexts(MenuHandle menu, const Vector &point,
 	g_pMenus->SetItemText(menu, 1, CoordRowText("X", point.x).c_str());
 	g_pMenus->SetItemText(menu, 2, CoordRowText("Y", point.y).c_str());
 	g_pMenus->SetItemText(menu, 3, CoordRowText("Z", point.z).c_str());
-	char text[32];
-	V_snprintf(text, sizeof(text), "Шаг: %.0f (A/D)", step);
-	g_pMenus->SetItemText(menu, 4, text);
+	g_pMenus->SetItemText(menu, 4, StepRowText(step).c_str());
 }
 
-// Сохранение правки: start/end — штатная замена, бустер — DELETE + POST. Закрывает меню.
+// Сохранение правки: start/end — штатная замена, бустер — DELETE + POST. Возвращает в список зон.
 static_function void SaveZoneEdit(KZPlayer *player)
 {
 	const i32 slot = player->GetPlayerSlot().Get();
@@ -963,14 +1075,15 @@ static_function void SaveZoneEdit(KZPlayer *player)
 
 	if (state.type == KZ_CYBER_ZONE_MODIFIER)
 	{
-		DeleteZoneThenSubmit(player->GetPlayerSlot(), player->GetSteamId64(false), state.editZoneId, zone, state.courseId[0] ? state.courseId : "",
-							 1);
+		DeleteZoneThenSubmit(player->GetPlayerSlot(), player->GetSteamId64(false), state.editZoneId, zone, state.courseId[0] ? state.courseId : "", 1,
+							 KZ::zones::CurrentMapName());
 	}
 	else
 	{
 		player->zonesService->SubmitZone(zone, state.courseId[0] ? state.courseId : nullptr);
 	}
-	g_pMenus->CancelMenu(slot);
+	// Меню не закрываем: назад в список зон; свежие данные доедут через RefreshOpenEditorMenus.
+	ReturnToZonesList(player);
 }
 
 static_function void OnPointSelect(MenuHandle menu, int slot, int item)
@@ -1085,11 +1198,10 @@ static_function MenuHandle BuildPointMenu(const char *title, const Vector &point
 	g_pMenus->AddAdjustableItem(m, CoordRowText("X", point.x).c_str(), "x", 1.0f, -KZ_ZONE_WORLD_LIMIT, KZ_ZONE_WORLD_LIMIT);
 	g_pMenus->AddAdjustableItem(m, CoordRowText("Y", point.y).c_str(), "y", 1.0f, -KZ_ZONE_WORLD_LIMIT, KZ_ZONE_WORLD_LIMIT);
 	g_pMenus->AddAdjustableItem(m, CoordRowText("Z", point.z).c_str(), "z", 1.0f, -KZ_ZONE_WORLD_LIMIT, KZ_ZONE_WORLD_LIMIT);
-	char text[32];
-	V_snprintf(text, sizeof(text), "Шаг: %.0f (A/D)", step);
-	g_pMenus->AddAdjustableItem(m, text, "step", 1.0f, s_stepPresets[0], s_stepPresets[KZ_ARRAYSIZE(s_stepPresets) - 1]);
+	g_pMenus->AddAdjustableItem(m, StepRowText(step).c_str(), "step", 1.0f, s_stepPresets[0], s_stepPresets[KZ_ARRAYSIZE(s_stepPresets) - 1]);
 	g_pMenus->AddItem(m, "Сохранить", "save", false);
 	g_pMenus->SetAdjustCallback(m, &OnPointAdjust);
+	EnableAdjustCapture(m);
 	g_pMenus->SetCloseOnSelect(m, false);
 	return m;
 }
@@ -1122,7 +1234,9 @@ static_function void OnZoneEditSelect(MenuHandle menu, int slot, int item)
 	if (KZ_STREQ(tag, "delete"))
 	{
 		player->zonesService->DeleteZoneById(state.editZoneId);
-		g_pMenus->CancelMenu(slot);
+		// Меню не закрываем: назад в список зон; зона исчезнет из него, когда api подтвердит
+		// удаление (RemoveById -> ApplyLoadedZones -> RefreshOpenEditorMenus).
+		ReturnToZonesList(player);
 		return;
 	}
 }
@@ -1141,9 +1255,7 @@ static_function void OnZoneEditAdjust(MenuHandle menu, int slot, int item, f32 d
 		return;
 	}
 	state.height = MIN(MAX(state.height + delta, minValue), maxValue);
-	char text[64];
-	V_snprintf(text, sizeof(text), "Высота: %.0f (A/D ±%.0f)", state.height, KZ_ZONEMENU_HEIGHT_STEP);
-	g_pMenus->SetItemText(menu, item, text);
+	g_pMenus->SetItemText(menu, item, HeightRowText(state.height).c_str());
 	RedrawPreview(player, state);
 }
 
@@ -1211,9 +1323,8 @@ static_function void OpenZoneEdit(KZPlayer *player, const KzCyberZone &zone)
 		{
 			g_pMenus->AddSubMenu(m, "Точка B ▸", handles.pointB, "");
 		}
-		char text[64];
-		V_snprintf(text, sizeof(text), "Высота: %.0f (A/D ±%.0f)", state.height, KZ_ZONEMENU_HEIGHT_STEP);
-		state.idxHeight = g_pMenus->AddAdjustableItem(m, text, "height", KZ_ZONEMENU_HEIGHT_STEP, KZ_ZONEMENU_HEIGHT_MIN, KZ_ZONEMENU_HEIGHT_MAX);
+		state.idxHeight = g_pMenus->AddAdjustableItem(m, HeightRowText(state.height).c_str(), "height", KZ_ZONEMENU_HEIGHT_STEP,
+													  KZ_ZONEMENU_HEIGHT_MIN, KZ_ZONEMENU_HEIGHT_MAX);
 	}
 	g_pMenus->AddItem(m, "Показать превью", "preview", false);
 	if (!numbered)
@@ -1225,6 +1336,7 @@ static_function void OpenZoneEdit(KZPlayer *player, const KzCyberZone &zone)
 	g_pMenus->AddItem(m, "Удалить", "delete", false);
 
 	g_pMenus->SetAdjustCallback(m, &OnZoneEditAdjust);
+	EnableAdjustCapture(m);
 	g_pMenus->SetCloseOnSelect(m, false);
 	handles.zoneEdit = m;
 	g_pMenus->DisplayMenu(m, slot, 0);
@@ -1270,11 +1382,19 @@ static_function void OnZonesListSelect(MenuHandle menu, int slot, int item)
 	{
 		return;
 	}
+	// Откуда зашли в правку — до OpenZoneEdit (он чистит состояние слота). Курсовый список =
+	// хэндл courseZonesList с непустым фильтром; общий список зон карты даёт пустой возврат.
+	char returnFilter[128] = "";
+	if (menu == s_zmMenus[slot].courseZonesList)
+	{
+		V_snprintf(returnFilter, sizeof(returnFilter), "%s", s_zmState[slot].lastListFilter);
+	}
 	for (const KzCyberZone &zone : KZ::zones::Loaded())
 	{
 		if (KZ_STREQ(zone.id, zoneId))
 		{
 			OpenZoneEdit(player, zone);
+			V_snprintf(s_zmState[slot].returnFilter, sizeof(s_zmState[slot].returnFilter), "%s", returnFilter);
 			return;
 		}
 	}
@@ -1324,6 +1444,8 @@ static_function void OpenZonesList(KZPlayer *player, const char *filterDescripto
 	const i32 slot = player->GetPlayerSlot().Get();
 	ZoneMenuHandles &handles = s_zmMenus[slot];
 	DestroyHandle(handles.courseZonesList);
+	// Фильтр запоминаем для наблюдателя: придёт ответ api — список перестроится с ним же.
+	V_snprintf(s_zmState[slot].lastListFilter, sizeof(s_zmState[slot].lastListFilter), "%s", filterDescriptor ? filterDescriptor : "");
 	MenuHandle m = BuildZonesList(filterDescriptor);
 	if (m == kInvalidMenuHandle)
 	{
@@ -1453,7 +1575,9 @@ static_function void CreateCourseFromMenu(KZPlayer *player, MenuHandle menu, int
 						 }
 						 else
 						 {
-							 g_pMenus->CancelMenu(slot);
+							 // Меню не закрываем: назад в список курсов. Новый курс появится в нём,
+							 // когда доедет RefreshFromApi (RefreshOpenEditorMenus).
+							 OpenSkeleton(player, ZmScreen::CoursesList);
 						 }
 					 });
 }
@@ -1625,7 +1749,8 @@ static_function void OnCourseActSelect(MenuHandle menu, int slot, int item)
 			return;
 		}
 		SendCourseDelete(player->GetPlayerSlot(), player->GetSteamId64(false), state.courseId, 1);
-		g_pMenus->CancelMenu(slot);
+		// Меню не закрываем: назад в список курсов; курс исчезнет из него после ответа api.
+		OpenSkeleton(player, ZmScreen::CoursesList);
 		return;
 	}
 	if (KZ_STREQ(tag, "disable") || KZ_STREQ(tag, "enable"))
@@ -1646,7 +1771,9 @@ static_function void OnCourseActSelect(MenuHandle menu, int slot, int item)
 								   [disable](KZPlayer *player, const std::string &courseId, const std::string &)
 								   { SendCoursePatch(player, courseId, disable); });
 		}
-		g_pMenus->CancelMenu(slot);
+		// Меню не закрываем и никуда не уходим: экран курса перестроит RefreshOpenEditorMenus,
+		// когда PATCH подтвердится и набор пересинхронизируется (пункт «Отключить» сменится
+		// на «Включить обратно» сам).
 		return;
 	}
 }
@@ -1811,35 +1938,17 @@ static_function void OnRootSelect(MenuHandle menu, int slot, int item)
 	}
 }
 
-void KZ::zones::OpenZonesMenu(KZPlayer *player)
+// Перестроить весь скелет (корень + статичные подсписки) и показать выбранный экран.
+// Общий путь и для !zones, и для возвратов после действий, и для наблюдателя: данные списков
+// живут в наборе, а не в меню, поэтому каждая перестройка читает свежие (паттерн kz_option_menu).
+static_function void OpenSkeleton(KZPlayer *player, ZmScreen show)
 {
-	if (!player || !player->zonesService)
-	{
-		return;
-	}
-	// Гейт ДО создания меню: у не-админов команда не рисует ничего.
-	if (!player->zonesService->EnsureAllowed())
-	{
-		return;
-	}
-	if (g_pMenus == nullptr)
-	{
-		player->PrintChat(true, false, "{grey}Зоны:{default} движок меню не загружен.");
-		return;
-	}
-	if (!KZ::zones::IsReady())
-	{
-		player->PrintChat(true, false, "{grey}Зоны:{default} набор карты ещё не загружен из api.");
-		return;
-	}
 	const i32 slot = player->GetPlayerSlot().Get();
 	if (slot < 0 || slot >= MAXPLAYERS)
 	{
 		return;
 	}
 
-	// Пересоздаём весь куст на каждое открытие (паттерн kz_option_menu): данные списков живут
-	// в наборе, а не в меню.
 	DestroySlotMenus(slot);
 	ZoneMenuState &state = s_zmState[slot];
 	state.ResetEdit();
@@ -1886,7 +1995,103 @@ void KZ::zones::OpenZonesMenu(KZPlayer *player)
 
 	g_pMenus->AddItem(root, "Показать все зоны", "showall", false);
 	g_pMenus->SetCloseOnSelect(root, false);
-	g_pMenus->DisplayMenu(root, slot, 0);
+
+	// Подсписок мог не создаться (движок не отдал хэндл) — корень остаётся честным фолбэком.
+	MenuHandle target = root;
+	if (show == ZmScreen::ZonesList && handles.zonesList != kInvalidMenuHandle)
+	{
+		target = handles.zonesList; // parent = root (AddSubMenu), R возвращает в корень
+	}
+	else if (show == ZmScreen::CoursesList && handles.coursesList != kInvalidMenuHandle)
+	{
+		target = handles.coursesList;
+	}
+	g_pMenus->DisplayMenu(target, slot, 0);
+}
+
+void KZ::zones::OpenZonesMenu(KZPlayer *player)
+{
+	if (!player || !player->zonesService)
+	{
+		return;
+	}
+	// Гейт ДО создания меню: у не-админов команда не рисует ничего.
+	if (!player->zonesService->EnsureAllowed())
+	{
+		return;
+	}
+	if (g_pMenus == nullptr)
+	{
+		player->PrintChat(true, false, "{grey}Зоны:{default} движок меню не загружен.");
+		return;
+	}
+	if (!KZ::zones::IsReady())
+	{
+		player->PrintChat(true, false, "{grey}Зоны:{default} набор карты ещё не загружен из api.");
+		return;
+	}
+	OpenSkeleton(player, ZmScreen::Root);
+}
+
+// Ответ api пришёл и набор применён (зовёт kz_zones.cpp из ApplyLoadedZones): перестроить
+// ОБЗОРНЫЕ экраны редактора у всех, кто их сейчас смотрит, — списки и счётчики обязаны
+// показывать применённое состояние, а не снимок на момент открытия. Экраны правки
+// (постановка, правка зоны, точки, мастер) не трогаем: там незакрытая работа игрока, и
+// перерисовка данными сервера снесла бы несохранённые значения.
+void KZ::zones::RefreshOpenEditorMenus()
+{
+	if (g_pMenus == nullptr)
+	{
+		return;
+	}
+	for (i32 slot = 0; slot < MAXPLAYERS; slot++)
+	{
+		// MenuPlayer сверяет карту состояния с текущей: меню, пережившее смену карты, не трогаем
+		// (его колбэки и так молчат по той же сверке).
+		KZPlayer *player = MenuPlayer(slot);
+		if (!player)
+		{
+			continue;
+		}
+		ZoneMenuHandles &handles = s_zmMenus[slot];
+		ZoneMenuState &state = s_zmState[slot];
+		const MenuHandle active = g_pMenus->GetActiveMenu(slot);
+		if (active == kInvalidMenuHandle)
+		{
+			continue;
+		}
+		if (active == handles.root)
+		{
+			OpenSkeleton(player, ZmScreen::Root);
+		}
+		else if (active == handles.zonesList)
+		{
+			OpenSkeleton(player, ZmScreen::ZonesList);
+		}
+		else if (active == handles.coursesList)
+		{
+			OpenSkeleton(player, ZmScreen::CoursesList);
+		}
+		else if (active == handles.courseZonesList)
+		{
+			// Свой список (курсовый или общий после возврата) — перестроить с тем же фильтром.
+			char filter[128];
+			V_snprintf(filter, sizeof(filter), "%s", state.lastListFilter);
+			OpenZonesList(player, filter[0] ? filter : nullptr);
+		}
+		else if (active == handles.courseAct)
+		{
+			// Контекст курса перечитываем из свежего набора; курс мог исчезнуть целиком.
+			if (FillCourseContext(state, state.courseDescriptor))
+			{
+				OpenCourseActions(player);
+			}
+			else
+			{
+				OpenSkeleton(player, ZmScreen::CoursesList);
+			}
+		}
+	}
 }
 
 // --- Команды управления курсами: !zone course new|delete|disable|enable <имя> ---

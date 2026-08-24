@@ -253,6 +253,9 @@ namespace KZ::zones
 	void CourseSubcommand(KZPlayer *player, const CCommand *args);
 	// Сброс per-slot состояния меню на смене карты (координаты привязаны к геометрии карты).
 	void ResetEditorMenuState();
+	// Набор применён (ApplyLoadedZones) — перестроить обзорные экраны редактора у тех, кто их
+	// смотрит: действия меню асинхронные, и списки обязаны догнать ответ api сами.
+	void RefreshOpenEditorMenus();
 	// Снести все хэндлы меню редактора. Обязателен на выгрузке плагина: колбэки меню держат
 	// указатели в наш DLL, и живое меню после выгрузки — вызов в выгруженный код.
 	void DestroyEditorMenus();
