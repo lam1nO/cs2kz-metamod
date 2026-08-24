@@ -152,7 +152,10 @@ void KZZonesService::RequestPermission()
 			if (resp.status < 200 || resp.status >= 300)
 			{
 				player->zonesService->perm = KZZonesService::PERM_DENIED;
-				KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] zone_perm_failed steam_id=%llu reason=http_%u\n", steamId, (unsigned)resp.status);
+				// Запрос теперь уходит на КАЖДОМ коннекте (OnAuthorized), и http-отказ по игроку
+				// без прав — фон, а не отказ пользователю: warn на каждого засорял бы Loki.
+				// warn остаётся только у транспорта (ветка ошибки ниже) — это «сломалось у нас».
+				KZ_LOG_DEBUG(LogChannel::MappingAPI, "[cyb] zone_perm_failed steam_id=%llu reason=http_%u\n", steamId, (unsigned)resp.status);
 				return;
 			}
 			std::optional<std::string> body = resp.Body();

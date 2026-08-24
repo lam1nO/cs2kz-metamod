@@ -208,6 +208,10 @@ void KZPlayer::OnAuthorized()
 	// скипается гейтом IsInGame внутри эмита, а мост уходит из OnPlayerActive.
 	this->profileService->EmitGG1Bridge();
 	this->globalService->OnPlayerAuthorized();
+	// Право редактора зон — заранее, а не лениво на первой команде: иначе первый !zones
+	// отвечал «проверяю права, повтори» и команду приходилось писать дважды. PERM_PENDING
+	// внутри защищает от дублей, у 99% игроков ответ просто осядет в кэш DENIED.
+	this->zonesService->RequestPermission();
 }
 
 void KZPlayer::OnPhysicsSimulate()
