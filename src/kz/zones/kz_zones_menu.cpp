@@ -114,8 +114,8 @@ struct ZoneMenuHandles
 	MenuHandle wizardCourseSel {}, createCourse {}, placement {}, courseAct {}, zoneEdit {}, pointA {}, pointB {}, courseZonesList {};
 };
 
-static_global ZoneMenuState s_zmState[MAXPLAYERS + 1] = {};
-static_global ZoneMenuHandles s_zmMenus[MAXPLAYERS + 1] = {};
+static_global ZoneMenuState s_zmState[MAXPLAYERS] = {};
+static_global ZoneMenuHandles s_zmMenus[MAXPLAYERS] = {};
 
 static_function void DestroyHandle(MenuHandle &handle)
 {
@@ -139,7 +139,7 @@ static_function void DestroySlotMenus(i32 slot)
 
 void KZ::zones::ResetEditorMenuState()
 {
-	for (i32 slot = 0; slot <= MAXPLAYERS; slot++)
+	for (i32 slot = 0; slot < MAXPLAYERS; slot++)
 	{
 		s_zmState[slot].ResetEdit();
 		s_zmState[slot].map.clear();
@@ -148,7 +148,7 @@ void KZ::zones::ResetEditorMenuState()
 
 void KZ::zones::DestroyEditorMenus()
 {
-	for (i32 slot = 0; slot <= MAXPLAYERS; slot++)
+	for (i32 slot = 0; slot < MAXPLAYERS; slot++)
 	{
 		DestroySlotMenus(slot);
 	}
@@ -589,9 +589,14 @@ static_function void DeleteZoneThenSubmit(CPlayerSlot slot, u64 steamId, std::st
 	V_snprintf(steamIdStr, sizeof(steamIdStr), "%llu", steamId);
 	req.SetQuery("steamId64", steamIdStr);
 
+	// Карта на момент отправки: пока DELETE летит, карта может смениться, а слот и steam_id
+	// останутся теми же — PlayerBySlotIfSame это не поймает. Без сверки SubmitZone ниже собрал
+	// бы тело уже с НОВОЙ картой и координатами старой, и его собственный stale-чек промолчал бы.
+	const std::string submittedMap = KZ::zones::CurrentMapName();
+
 	// clang-format off
 	req.Send(
-		[slot, steamId, oldZoneId, newZone, courseId, attempt](HTTP::Response resp)
+		[slot, steamId, oldZoneId, newZone, courseId, attempt, submittedMap](HTTP::Response resp)
 		{
 			KZPlayer *player = PlayerBySlotIfSame(slot, steamId);
 			std::optional<std::string> body = resp.Body();
@@ -615,6 +620,21 @@ static_function void DeleteZoneThenSubmit(CPlayerSlot slot, u64 steamId, std::st
 				{
 					player->PrintChat(true, false, "{grey}Зоны:{default} api отказал в удалении старого бустера: {darkred}%s{default}. Зона не изменена.",
 									  reason.c_str());
+				}
+				return;
+			}
+			// Карта сменилась, пока DELETE летел: локальный набор уже от новой карты, а POST ниже
+			// уехал бы с именем новой карты и координатами старой. В api старый бустер удалён —
+			// это честно логируем как оборванную замену с данными для повтора.
+			if (!KZ_STREQ(submittedMap.c_str(), KZ::zones::CurrentMapName()))
+			{
+				KZ_LOG_WARN(LogChannel::MappingAPI,
+							"[cyb] zone_replace_orphaned steam_id=%llu old_id=%s map=%s reason=map_changed mins=(%.0f %.0f %.0f) maxs=(%.0f %.0f %.0f) factor=%.2f\n",
+							steamId, oldZoneId.c_str(), submittedMap.c_str(), newZone.mins.x, newZone.mins.y, newZone.mins.z, newZone.maxs.x,
+							newZone.maxs.y, newZone.maxs.z, newZone.jumpFactor);
+				if (player)
+				{
+					player->PrintChat(true, false, "{grey}Зоны:{default} карта сменилась — старый бустер удалён, новый НЕ поставлен.");
 				}
 				return;
 			}
@@ -907,6 +927,8 @@ static_function std::string CoordRowText(const char *axis, f32 value)
 	return text;
 }
 
+// Индексы строк здесь жёстко связаны с порядком AddItem/AddAdjustableItem в BuildPointMenu:
+// 0=aim, 1=X, 2=Y, 3=Z, 4=шаг, 5=save. Меняя порядок там — менять и здесь.
 static_function void RefreshPointMenuTexts(MenuHandle menu, const Vector &point, f32 step)
 {
 	g_pMenus->SetItemText(menu, 1, CoordRowText("X", point.x).c_str());
@@ -1017,7 +1039,14 @@ static_function void OnPointAdjust(MenuHandle menu, int slot, int item, f32 delt
 		idx += delta > 0.0f ? 1 : -1;
 		idx = MIN(MAX(idx, 0), (i32)KZ_ARRAYSIZE(s_stepPresets) - 1);
 		state.step = s_stepPresets[idx];
+		// Шаг общий на обе точки — обновляем строку «Шаг» и в соседнем меню, иначе там
+		// остаётся устаревшее число до первого действия.
 		RefreshPointMenuTexts(menu, point, state.step);
+		const MenuHandle sibling = isA ? handles.pointB : handles.pointA;
+		if (sibling != kInvalidMenuHandle)
+		{
+			RefreshPointMenuTexts(sibling, isA ? state.b : state.a, state.step);
+		}
 		return;
 	}
 	// Координаты: строка создана со step=1, реальный шаг — состояние (движок фиксирует step
@@ -1886,6 +1915,29 @@ static_function std::string JoinArgs(const CCommand *args, i32 from)
 	return name;
 }
 
+// Курс по аргументу команды: сначала как дескриптор (targetname), затем как видимое имя —
+// в !courses и меню игрок видит именно имя, и «Bonus 1» обязан находиться, даже если
+// targetname у него другой. Имена не уникальны (см. GetCourseLocalDatabaseId) — при
+// дубликатах берётся первый по списку, это осознанная цена адресации по имени.
+static_function const KZCourseDescriptor *FindLiveCourseByArg(const char *arg)
+{
+	const KZCourseDescriptor *byDescriptor = FindLiveCourse(arg);
+	if (byDescriptor)
+	{
+		return byDescriptor;
+	}
+	const u32 total = KZ::course::GetCourseDescriptorTotal();
+	for (u32 i = 0; i < total; i++)
+	{
+		const KZCourseDescriptor *course = KZ::course::GetCourseDescriptorByIndex(i);
+		if (course && KZ_STREQI(course->name, arg))
+		{
+			return course;
+		}
+	}
+	return nullptr;
+}
+
 void KZ::zones::CourseSubcommand(KZPlayer *player, const CCommand *args)
 {
 	if (!player || !player->zonesService)
@@ -1940,7 +1992,9 @@ void KZ::zones::CourseSubcommand(KZPlayer *player, const CCommand *args)
 	}
 	if (KZ_STREQI(sub, "delete"))
 	{
-		const KzCyberCourse *record = KZ::zones::FindCourseByDescriptor(name.c_str());
+		// Аргумент — дескриптор или видимое имя; запись api ищем по каноническому targetname.
+		const KZCourseDescriptor *live = FindLiveCourseByArg(name.c_str());
+		const KzCyberCourse *record = KZ::zones::FindCourseByDescriptor(live ? live->entityTargetname : name.c_str());
 		if (!record || record->id[0] == '\0')
 		{
 			player->PrintChat(true, false, "{grey}Курсы:{default} курс {yellow}%s{default} в api не найден.", name.c_str());
@@ -1957,8 +2011,9 @@ void KZ::zones::CourseSubcommand(KZPlayer *player, const CCommand *args)
 	if (KZ_STREQI(sub, "disable") || KZ_STREQI(sub, "enable"))
 	{
 		const bool disable = KZ_STREQI(sub, "disable");
-		const KZCourseDescriptor *live = FindLiveCourse(name.c_str());
-		const KzCyberCourse *record = KZ::zones::FindCourseByDescriptor(name.c_str());
+		// Аргумент — дескриптор или видимое имя (см. FindLiveCourseByArg).
+		const KZCourseDescriptor *live = FindLiveCourseByArg(name.c_str());
+		const KzCyberCourse *record = KZ::zones::FindCourseByDescriptor(live ? live->entityTargetname : name.c_str());
 		if (!live && !record)
 		{
 			player->PrintChat(true, false, "{grey}Курсы:{default} курс {yellow}%s{default} не найден на карте.", name.c_str());
