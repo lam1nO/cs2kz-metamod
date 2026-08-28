@@ -40,6 +40,21 @@
 		"en"		"{grey}That slot is busy and could not be cleared. Drop your current weapon with {default}G{grey} and try again."
 		"ru"		"{grey}Слот занят и освободить его не вышло. Выброси текущее оружие на {default}G{grey} и повтори."
 	}
+	"Knife Given"
+	{
+		"en"		"{grey}Knife returned. Press {default}G{grey} to drop it again."
+		"ru"		"{grey}Нож возвращён. {default}G{grey} — выбросить снова."
+	}
+	"Knife Already Held"
+	{
+		"en"		"{grey}You already have a knife."
+		"ru"		"{grey}Нож и так у тебя в руках."
+	}
+	"Command Description - kz_knife"
+	{
+		"en"		"Get your knife back after dropping it."
+		"ru"		"Вернуть нож, если ты его выбросил."
+	}
 	"Weapon Give Failed"
 	{
 		"en"		"{grey}You have to be alive to get a weapon."

@@ -2,10 +2,18 @@
 #include "kz/language/kz_language.h"
 
 #include "utils/simplecmds.h"
+#include "utils/ctimer.h"
 #include "sdk/usercmd.h"
 #include "sdk/entity/cbaseplayerweapon.h"
 
 #include "tier0/memdbgon.h"
+
+// Период уборки брошенного оружия, сек. 0 — уборщик выключен. Запрос владельца 28.08:
+// «дропнутое оружие надо сразу подчищать, чтобы не заспамливать землю». Раунд в KZ не
+// кончается, посмертной уборки нет — без этого земля копит стволы до смены карты.
+CConVar<float> kz_weapon_ground_cleanup(
+	"kz_weapon_ground_cleanup", FCVAR_NONE,
+	"Seconds between sweeps that delete dropped (ownerless) weapons. 0 disables (мусор снова копится). Ниже 0.5 не опускается.", 2.0f);
 
 CConVar<bool> kz_weapon_commands("kz_weapon_commands", FCVAR_NONE,
 								 "Enable weapon chat commands (!ak, !m4, !he, ...). Grenades can be held but not thrown.", true);
@@ -85,6 +93,109 @@ void KZWeaponService::Reset()
 		this->RemoveDroppedEntity(i);
 	}
 	this->givenWeapons.RemoveAll();
+}
+
+const char *KZWeaponService::KnifeClassNameForTeam(i32 teamNum)
+{
+	return teamNum == CS_TEAM_CT ? "weapon_knife" : "weapon_knife_t";
+}
+
+// Накопительный счётчик снесённого. Нужен инварианту: без него сломанный уборщик
+// неотличим от чистого мира, и проверка стала бы тождественно зелёной — то есть
+// охраняла бы пустоту. Печатается kz_weapons_orphan_count.
+static_global i32 g_sweptWeapons = 0;
+
+// Собрать всё оружие, которое реально лежит у игроков в инвентаре.
+// IsInGame здесь НЕ проверяем сознательно: отключённый слот и так отсекается пустой
+// пешкой, а клиент в переходном состоянии (догружается, нештатный бот) с пешкой и
+// стволами выпал бы из защиты — а цена промаха тут несимметричная.
+static_function void CollectHeldWeapons(CUtlVector<CBaseEntity *> &held)
+{
+	for (i32 i = 0; i < MAXPLAYERS + 1; i++)
+	{
+		KZPlayer *player = g_pKZPlayerManager->ToPlayer(i);
+		if (!player)
+		{
+			continue;
+		}
+		auto pawn = player->GetPlayerPawn();
+		auto weaponServices = pawn ? pawn->m_pWeaponServices() : nullptr;
+		if (!weaponServices)
+		{
+			continue;
+		}
+		auto weapons = weaponServices->m_hMyWeapons();
+		FOR_EACH_VEC(*weapons, j)
+		{
+			CBaseEntity *weapon = (CBaseEntity *)(*weapons)[j].Get();
+			if (weapon)
+			{
+				held.AddToTail(weapon);
+			}
+		}
+	}
+}
+
+// ЕДИНЫЙ предикат «эту сущность сносим». Обязан быть один на уборщик и на счётчик:
+// иначе метрика меряет не то, что делает уборщик, инвариант вечно красный, и его
+// научатся игнорировать.
+//
+// ДВА гейта, а не один. Пустой m_hOwnerEntity — признак необходимый, но не достаточный:
+// цена промаха несимметрична. Лишние две секунды мусора на полу — ничто; вырванный из
+// рук ствол посреди рана — катастрофа. Поэтому второе условие: сущности нет ни у кого
+// в m_hMyWeapons.
+static_function bool ShouldSweep(CBaseEntity *entity, const CUtlVector<CBaseEntity *> &held)
+{
+	return entity && !entity->m_hOwnerEntity().Get() && !held.HasElement(entity);
+}
+
+// Уборщик: раз в kz_weapon_ground_cleanup секунд сносит брошенное оружие с земли.
+// Именно всё бесхозное, а не только выданное командой: дефолтные пистолет и нож выдаёт
+// KZPistolService мимо givenWeapons, и раньше их не убирал никто.
+// Безопасно, потому что на KZ на земле не бывает легитимного оружия: карты его не
+// кладут (mp_weapons_allow_map_placed false в cfg профиля), гранаты у нас не бросаются.
+static_function f64 CleanupDroppedWeapons()
+{
+	f32 interval = kz_weapon_ground_cleanup.Get();
+	if (interval <= 0.0f)
+	{
+		return 1.0; // выключено — дремлем, чтобы cvar можно было вернуть по RCON
+	}
+	if (interval < 0.5f)
+	{
+		interval = 0.5f; // полный обход списка сущностей чаще двух раз в секунду не нужен
+	}
+
+	CUtlVector<CBaseEntity *> held;
+	CollectHeldWeapons(held);
+
+	CBaseEntity *entity = nullptr;
+	CUtlVector<CBaseEntity *> orphans;
+	while ((entity = (CBaseEntity *)g_pKZUtils->FindEntityByClassname(entity, "weapon_*")) != nullptr)
+	{
+		if (ShouldSweep(entity, held))
+		{
+			orphans.AddToTail(entity);
+		}
+	}
+	// Собираем и только потом удаляем: удаление во время обхода ломает итератор.
+	FOR_EACH_VEC(orphans, i)
+	{
+		g_pKZUtils->RemoveEntity(orphans[i]);
+	}
+	if (orphans.Count() > 0)
+	{
+		g_sweptWeapons += orphans.Count();
+		// Смена состояния мира, не восстановимая из БД, — логируем. Только на непустом
+		// сносе, не на каждый тик.
+		KZ_LOG_INFO(LogChannel::Misc, "[cyb] weapons_swept count=%i total=%i\n", orphans.Count(), g_sweptWeapons);
+	}
+	return interval;
+}
+
+void KZWeaponService::Init()
+{
+	StartTimer(CleanupDroppedWeapons, kz_weapon_ground_cleanup.Get(), true, true);
 }
 
 bool KZWeaponService::Enabled()
@@ -566,16 +677,71 @@ CON_COMMAND_F(kz_weapons_orphan_count, "Print the number of ownerless weapon ent
 		KZ_LOG_WARN(LogChannel::Misc, "[cyb] orphan_count_denied reason=not_server slot=%d\n", context.GetPlayerSlot().Get());
 		return;
 	}
+	CUtlVector<CBaseEntity *> held;
+	CollectHeldWeapons(held);
 	i32 orphans = 0;
 	CBaseEntity *entity = nullptr;
 	while ((entity = (CBaseEntity *)g_pKZUtils->FindEntityByClassname(entity, "weapon_*")) != nullptr)
 	{
-		if (!entity->m_hOwnerEntity().Get())
+		if (ShouldSweep(entity, held))
 		{
 			orphans++;
 		}
 	}
-	Msg("orphan_weapons=%i\n", orphans);
+	Msg("orphan_weapons=%i swept_total=%i\n", orphans, g_sweptWeapons);
+}
+
+// Вернуть нож. Нужен именно как команда: нож теперь выбрасывается на G
+// (mp_drop_knife_enable true), а уборщик выше сносит брошенное — без !knife игрок
+// остался бы без мелее до респавна, которого в KZ может не быть часами.
+// Имя свободно: cyber-skins регистрирует конкретные модели (!karambit, !butterfly, ...)
+// и !default, но самого !knife у него нет.
+SCMD(kz_knife, SCFL_MISC | SCFL_PLAYER | SCFL_HELP)
+{
+	// Тумблером kz_weapon_commands НЕ гейтим сознательно: он выключает выдачу оружия,
+	// а нож на kz выбрасывается на G независимо от него — без !knife игрок остался бы
+	// без мелее с выключенным тумблером и не понял бы почему.
+	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
+	if (!player->IsAlive() || !player->IsInGame())
+	{
+		player->languageService->PrintChat(true, false, "Weapon Give Failed");
+		return MRES_SUPERCEDE;
+	}
+	auto pawn = player->GetPlayerPawn();
+	auto weaponServices = pawn ? pawn->m_pWeaponServices() : nullptr;
+	auto itemServices = pawn ? pawn->m_pItemServices() : nullptr;
+	if (!weaponServices || !itemServices)
+	{
+		player->languageService->PrintChat(true, false, "Weapon Give Internal Error");
+		return MRES_SUPERCEDE;
+	}
+	// Уже есть — молча ничего не делаем: вторая выдача положила бы нож на землю
+	// (слот занят), и уборщик тут же его снёс бы. Сверяемся по classname, как это
+	// делает KZPistolService::NeedWeaponStripping.
+	auto weapons = weaponServices->m_hMyWeapons();
+	FOR_EACH_VEC(*weapons, i)
+	{
+		CBaseModelEntity *weapon = (*weapons)[i].Get();
+		if (weapon && (KZ_STREQI(weapon->GetClassname(), "weapon_knife") || KZ_STREQI(weapon->GetClassname(), "weapon_knife_t")))
+		{
+			player->languageService->PrintChat(true, false, "Knife Already Held");
+			return MRES_SUPERCEDE;
+		}
+	}
+	// Модель и скин ставит хук лоадаута (cyber-skins) поверх выдачи — здесь только
+	// команднo-правильный базовый classname.
+	const char *className = KZWeaponService::KnifeClassNameForTeam(player->GetController()->m_iTeamNum());
+	if (!itemServices->GiveNamedItem(className))
+	{
+		// Отказ — с машинно-читаемым reason (CLAUDE.md). Без этого игрок получал бы
+		// «Нож возвращён» с пустыми руками и без следа в логах.
+		KZ_LOG_ERROR(LogChannel::Misc, "[cyb] knife_give_failed steam_id=%llu weapon=%s reason=give_returned_null\n", player->GetSteamId64(false),
+					 className);
+		player->languageService->PrintChat(true, false, "Weapon Give Internal Error");
+		return MRES_SUPERCEDE;
+	}
+	player->languageService->PrintChat(true, false, "Knife Given");
+	return MRES_SUPERCEDE;
 }
 
 // Список доступного оружия. Единственная видимая в !help команда этого сервиса.

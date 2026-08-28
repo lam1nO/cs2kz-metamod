@@ -29,6 +29,7 @@
 #include "kz/global/kz_global.h"
 #include "kz/beam/kz_beam.h"
 #include "kz/pistol/kz_pistol.h"
+#include "kz/weapon/kz_weapon.h"
 #include "kz/prac/kz_prac.h"
 #include "kz/recording/kz_recording.h"
 #include "kz/replays/kz_replaysystem.h"
@@ -108,6 +109,7 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 	KZLanguageService::Init();
 	KZBeamService::Init();
 	KZPistolService::Init();
+	KZWeaponService::Init();
 	KZ::misc::Init();
 	KZ::misc::customchangemap::Init();
 	KZQuietService::Init();

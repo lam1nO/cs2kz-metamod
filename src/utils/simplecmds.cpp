@@ -169,7 +169,7 @@ static_global const char *helpMode[]       = {"kz_kzt", "kz_ckz", "kz_vnl"};
 static_global const char *helpSpec[]       = {"kz_spec", "kz_goto"};
 static_global const char *helpMeasure[]    = {"kz_measure", "kz_measurestart", "kz_measureend", "kz_measureblock", "kz_ztopwatch"};
 static_global const char *helpSafeguard[]  = {"kz_sg", "kz_pro"};
-static_global const char *helpMisc[]       = {"kz_fov", "kz_beam", "kz_options", "kz_language", "kz_globalcheck", "kz_guns", "kz_help"};
+static_global const char *helpMisc[]       = {"kz_fov", "kz_beam", "kz_options", "kz_language", "kz_globalcheck", "kz_guns", "kz_knife", "kz_help"};
 
 struct HelpCategory
 {

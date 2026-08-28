@@ -541,15 +541,14 @@ void KZ::misc::JoinTeam(KZPlayer *player, int newTeam, bool restorePos, bool sav
 			// после замера: при 0 игрок не может выбросить оружие на G вообще) смерть
 			// роняет ствол на пол, а прибрать его некому: KZWeaponService чистит только
 			// выданное командой, дефолтный пистолет выдаёт KZPistolService мимо списка,
-			// и раунд в KZ не кончается. Это единственный регулярный источник смерти на
-			// На KZ god mode переставляется каждый тик (KZPlayer::EnableGodMode), а урон
-			// от падения обнулён — от урона игрок не умирает вовсе.
-			// ЧТО ЭТА СТРОКА НЕ ЗАКРЫВАЕТ (не переоценивать): (1) оружие, выброшенное
-			// игроком на G, — дефолтные пистолет и нож выдаёт KZPistolService мимо
-			// givenWeapons, и убирать их некому вообще; (2) консольные kill/explode —
-			// CommitSuicide не спрашивает m_bTakesDamage. Остаток описан открытой ценой
-			// в cfg профиля; наблюдаемость — RCON-команда kz_weapons_orphan_count
-			// (src/kz/weapon/kz_weapon.cpp).
+			// и раунд в KZ не кончается. Вход в команду — единственный РЕГУЛЯРНЫЙ источник
+			// смерти на KZ: god mode переставляется каждый тик (KZPlayer::EnableGodMode),
+			// а урон от падения обнулён, то есть от урона игрок не умирает вовсе.
+			// ЧТО ЭТА СТРОКА НЕ ЗАКРЫВАЕТ: консольные kill/explode — CommitSuicide не
+			// спрашивает m_bTakesDamage. Оружие, выброшенное игроком на G, закрыто
+			// отдельно — уборщиком CleanupDroppedWeapons (src/kz/weapon/kz_weapon.cpp,
+			// период cvar kz_weapon_ground_cleanup); наблюдаемость там же,
+			// kz_weapons_orphan_count печатает orphan_weapons и swept_total.
 			// Перевыдавать нож и пистолет не нужно: ниже OnPlayerJoinTeam →
 			// UpdatePistol(force) выдаёт их сам. Выданное командой (!ak и т.п.) смену
 			// команды НЕ переживает — ни до этой правки, ни после: SyncFromHeld внутри

@@ -74,7 +74,11 @@ class KZWeaponService : public KZBaseService
 	using KZBaseService::KZBaseService;
 
 public:
+	// Стартует уборщик брошенного оружия. Зовётся один раз из cs2kz.cpp.
+	static void Init();
 	static bool Enabled();
+	// Нож, правильный для команды игрока. weapon_knife у CT, weapon_knife_t у T.
+	static const char *KnifeClassNameForTeam(i32 teamNum);
 	// nullptr, если такой команды нет.
 	static const WeaponInfo_t *FindByCommand(const char *cmd);
 	static bool IsGrenadeClassName(const char *className);
