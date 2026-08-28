@@ -97,16 +97,16 @@ bool KZWeaponService::IsGrenadeClassName(const char *className)
 	return false;
 }
 
-bool KZWeaponService::GiveWeapon(const WeaponInfo_t &info)
+GiveResult KZWeaponService::GiveWeapon(const WeaponInfo_t &info)
 {
 	if (!KZWeaponService::Enabled() || !this->player->IsAlive() || !this->player->IsInGame())
 	{
-		return false;
+		return GiveResult::NotAlive;
 	}
 	auto itemServices = this->player->GetPlayerPawn()->m_pItemServices();
 	if (!itemServices)
 	{
-		return false;
+		return GiveResult::Internal;
 	}
 
 	// Синхронизация ПЕРВЫМ делом. Без неё дедуп ниже сверяется со списком, а не с
@@ -117,58 +117,38 @@ bool KZWeaponService::GiveWeapon(const WeaponInfo_t &info)
 	// m_hMyWeapons дешёвый и не в горячем пути.
 	this->SyncFromHeld();
 
-	// Дедуп ДО выдачи, а не после: GiveNamedItem уже имеющегося оружия плодит вторую
-	// сущность в мире, и список от этого не спасает. Повтор команды — no-op.
+	// Дедуп по ЗАПРОШЕННОМУ имени и ДО выдачи. По запрошенному — потому что движок
+	// подменяет предмет по команде (CT: weapon_molotov → weapon_incgrenade), и сверка по
+	// фактическому промахивалась бы каждый раз. До выдачи — потому что GiveNamedItem уже
+	// имеющегося оружия плодит вторую сущность в мире, и список от этого не спасает.
 	FOR_EACH_VEC(this->givenWeapons, i)
 	{
-		if (KZ_STREQI(this->givenWeapons[i].Get(), info.className))
+		if (KZ_STREQI(this->givenWeapons[i].requested.Get(), info.className))
 		{
-			return true;
+			return GiveResult::Ok; // повтор команды — no-op
 		}
 	}
 	// Потолок: в KZ раунд не кончается, выброшенное на G лежит до смены карты. Без капа
 	// «выдал → выбросил → выдал» растит число энтити без предела.
 	if (this->givenWeapons.Count() >= KZ_MAX_GIVEN_WEAPONS)
 	{
-		return false; // отличается от «мёртв» — см. GiveByCommand
+		return GiveResult::LimitHit;
 	}
 
-	itemServices->GiveNamedItem(info.className);
-	this->givenWeapons.AddToTail(CUtlString(info.className));
-	return true;
-}
-
-void KZWeaponService::SyncFromHeld()
-{
-	if (this->givenWeapons.Count() == 0 || !this->player->IsAlive() || !this->player->IsInGame())
+	CBasePlayerWeapon *weapon = itemServices->GiveNamedItem(info.className);
+	if (!weapon)
 	{
-		return;
+		return GiveResult::Internal;
 	}
-	auto weaponServices = this->player->GetPlayerPawn()->m_pWeaponServices();
-	if (!weaponServices)
-	{
-		return;
-	}
-	auto weapons = weaponServices->m_hMyWeapons();
-	// Идём с хвоста: удаление элемента сдвигает индексы.
-	for (i32 i = this->givenWeapons.Count() - 1; i >= 0; i--)
-	{
-		bool held = false;
-		FOR_EACH_VEC(*weapons, j)
-		{
-			CBaseModelEntity *weapon = (*weapons)[j].Get();
-			if (weapon && KZ_STREQI(weapon->GetClassname(), this->givenWeapons[i].Get()))
-			{
-				held = true;
-				break;
-			}
-		}
-		if (!held)
-		{
-			// Игрок выбросил его на G — значит и перевыдавать нечего.
-			this->givenWeapons.Remove(i);
-		}
-	}
+	CBaseModelEntity *entity = weapon;
+	GivenWeapon_t given;
+	given.requested = info.className;
+	// Фактический classname может отличаться от запрошенного — см. комментарий у
+	// GivenWeapon_t. Берём его с САМОЙ сущности, а не из таблицы подмен: таблица
+	// протухнет на следующем апдейте Valve, сущность — нет.
+	given.actual = entity->GetClassname();
+	this->givenWeapons.AddToTail(given);
+	return GiveResult::Ok;
 }
 
 void KZWeaponService::RegiveGiven()
@@ -188,7 +168,7 @@ void KZWeaponService::RegiveGiven()
 	}
 	FOR_EACH_VEC(this->givenWeapons, i)
 	{
-		itemServices->GiveNamedItem(this->givenWeapons[i].Get());
+		itemServices->GiveNamedItem(this->givenWeapons[i].requested.Get());
 	}
 }
 
@@ -269,12 +249,23 @@ static_function META_RES GiveByCommand(CCSPlayerController *controller, const ch
 	{
 		return MRES_SUPERCEDE;
 	}
-	if (!player->weaponService->GiveWeapon(*info))
+	switch (player->weaponService->GiveWeapon(*info))
 	{
-		// Причины разные, и «ты мёртв» живому игроку, упёршемуся в потолок, — враньё.
-		player->languageService->PrintChat(true, false,
-										   player->IsAlive() && player->IsInGame() ? "Weapon Limit Reached" : "Weapon Give Failed");
-		return MRES_SUPERCEDE;
+		case GiveResult::Ok:
+			break;
+		case GiveResult::LimitHit:
+			player->languageService->PrintChat(true, false, "Weapon Limit Reached");
+			return MRES_SUPERCEDE;
+		case GiveResult::Internal:
+			// Отказ по нашей вине — в лог с машинно-читаемым reason (CLAUDE.md).
+			KZ_LOG_ERROR(LogChannel::Misc, "[cyb] weapon_give_failed steam_id=%llu weapon=%s reason=give_internal\n", player->GetSteamId64(false),
+						 info->className);
+			player->languageService->PrintChat(true, false, "Weapon Give Failed");
+			return MRES_SUPERCEDE;
+		case GiveResult::NotAlive:
+		default:
+			player->languageService->PrintChat(true, false, "Weapon Give Failed");
+			return MRES_SUPERCEDE;
 	}
 	if (info->grenade)
 	{

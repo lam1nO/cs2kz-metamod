@@ -24,6 +24,27 @@ struct WeaponInfo_t
 	bool grenade;          // гранаты держим, но не даём бросить
 };
 
+// Результат выдачи. Не bool: причины отказа игроку показываются разными строками, а
+// «сломался движок» обязан ещё и попасть в лог с reason.
+enum class GiveResult
+{
+	Ok,
+	NotAlive,   // мёртв, не в игре или сервис выключен
+	LimitHit,   // упёрся в KZ_MAX_GIVEN_WEAPONS
+	Internal,   // нет itemServices или GiveNamedItem вернул nullptr — should-never-happen
+};
+
+// Одна выданная запись. Хранятся ДВА имени, и это не избыточность: движок подменяет
+// предмет по команде игрока (CT просит weapon_molotov — получает weapon_incgrenade, за T
+// зеркально с !inc). Дедуп обязан сверяться с ЗАПРОШЕННЫМ именем, иначе повторная команда
+// его не узнает; сверка «ещё в руках?» — с ФАКТИЧЕСКИМ, иначе запись вычищается каждый
+// раз, дедуп промахивается, и потолок не достигается никогда.
+struct GivenWeapon_t
+{
+	CUtlString requested;
+	CUtlString actual;
+};
+
 class KZWeaponService : public KZBaseService
 {
 	using KZBaseService::KZBaseService;
@@ -43,9 +64,9 @@ public:
 		this->givenWeapons.RemoveAll();
 	}
 
-	// Выдать оружие игроку. false — отказ (мёртв, не в игре, сервис выключен);
-	// причину игроку печатает вызывающая команда.
-	bool GiveWeapon(const WeaponInfo_t &info);
+	// Выдать оружие игроку. Отказы: мёртв/не в игре/сервис выключен, упёрся в потолок
+	// KZ_MAX_GIVEN_WEAPONS, внутренняя ошибка движка. Причину печатает вызывающая команда.
+	GiveResult GiveWeapon(const WeaponInfo_t &info);
 
 	// Синхронизировать список с тем, что реально в руках. Зовётся ДО RemoveAllItems:
 	// так выброшенное на G оружие выпадает из списка и не возвращается обратно.
@@ -61,5 +82,5 @@ public:
 private:
 	bool HoldingGrenade();
 
-	CUtlVector<CUtlString> givenWeapons {};
+	CUtlVector<GivenWeapon_t> givenWeapons {};
 };
