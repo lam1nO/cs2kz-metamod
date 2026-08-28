@@ -167,9 +167,10 @@ GiveResult KZWeaponService::GiveWeapon(const WeaponInfo_t &info)
 	// Освободить слот ДО выдачи: иначе новый ствол не заменит текущий, а упадёт на землю
 	// и не поднимется — слот-то занят. Симптом с канарейки: «!glock с usp в руках →
 	// glock падает передо мной, остаюсь с usp».
-	if (!this->ClearSlot(info.slot))
+	GiveResult cleared = this->ClearSlot(info.slot);
+	if (cleared != GiveResult::Ok)
 	{
-		return GiveResult::SlotBusy;
+		return cleared;
 	}
 
 	CBasePlayerWeapon *weapon = itemServices->GiveNamedItem(info.className);
@@ -177,6 +178,28 @@ GiveResult KZWeaponService::GiveWeapon(const WeaponInfo_t &info)
 	{
 		return GiveResult::Internal;
 	}
+	// Ствол мог не встать в слот и упасть на пол — например, если слот занимало оружие
+	// ВНЕ нашего каталога (taser, C4, выданное чужим плагином), которое ClearSlot не
+	// классифицировал и потому не снял. Дешёвый общий детектор этого класса: проверяем,
+	// что сущность реально попала в m_hMyWeapons. Ловит и будущие случаи, и даёт
+	// наблюдаемость на канарейке.
+	bool held = false;
+	auto myWeapons = this->player->GetPlayerPawn()->m_pWeaponServices()->m_hMyWeapons();
+	FOR_EACH_VEC(*myWeapons, i)
+	{
+		if ((*myWeapons)[i].Get() == weapon)
+		{
+			held = true;
+			break;
+		}
+	}
+	if (!held)
+	{
+		KZ_LOG_WARN(LogChannel::Misc, "[cyb] weapon_given_not_held steam_id=%llu weapon=%s reason=slot_occupied\n", this->player->GetSteamId64(false),
+					info.className);
+		return GiveResult::SlotBusy;
+	}
+
 	CBaseModelEntity *entity = weapon;
 	GivenWeapon_t given;
 	given.requested = info.className;
@@ -189,19 +212,22 @@ GiveResult KZWeaponService::GiveWeapon(const WeaponInfo_t &info)
 	return GiveResult::Ok;
 }
 
-bool KZWeaponService::ClearSlot(WeaponSlotKind slot)
+GiveResult KZWeaponService::ClearSlot(WeaponSlotKind slot)
 {
 	// Гранаты не трогаем: слотов под них несколько, he+flash+smoke держатся вместе.
 	if (slot == WeaponSlotKind::Grenade || !this->player->IsAlive() || !this->player->IsInGame())
 	{
-		return true;
+		return GiveResult::Ok;
 	}
 	auto pawn = this->player->GetPlayerPawn();
 	auto weaponServices = pawn->m_pWeaponServices();
 	auto itemServices = pawn->m_pItemServices();
 	if (!weaponServices || !itemServices)
 	{
-		return false;
+		// Слот ни при чём: сломалась пешка. Игроку «выброси оружие на G» тут было бы
+		// враньём — повтор не поможет.
+		KZ_LOG_ERROR(LogChannel::Misc, "[cyb] weapon_slot_clear_failed steam_id=%llu reason=no_services\n", this->player->GetSteamId64(false));
+		return GiveResult::Internal;
 	}
 	// Сначала СОБИРАЕМ, потом снимаем: удаление во время обхода m_hMyWeapons ломает
 	// итерацию (тот же приём, что в KZPistolService::NeedWeaponStripping).
@@ -224,7 +250,7 @@ bool KZWeaponService::ClearSlot(WeaponSlotKind slot)
 		}
 	}
 
-	bool freed = true;
+	GiveResult result = GiveResult::Ok;
 	FOR_EACH_VEC(victims, i)
 	{
 		CBasePlayerWeapon *weapon = victims[i];
@@ -249,7 +275,7 @@ bool KZWeaponService::ClearSlot(WeaponSlotKind slot)
 		{
 			KZ_LOG_WARN(LogChannel::Misc, "[cyb] weapon_slot_not_freed steam_id=%llu weapon=%s reason=drop_no_op\n",
 						this->player->GetSteamId64(false), ((CBaseModelEntity *)weapon)->GetClassname());
-			freed = false;
+			result = GiveResult::SlotBusy;
 			continue;
 		}
 
@@ -263,7 +289,7 @@ bool KZWeaponService::ClearSlot(WeaponSlotKind slot)
 		}
 		g_pKZUtils->RemoveEntity(weapon);
 	}
-	return freed;
+	return result;
 }
 
 void KZWeaponService::SyncFromHeld()
@@ -357,18 +383,20 @@ void KZWeaponService::RegiveGiven()
 			needPistol = true;
 		}
 	}
-	if (needRifle)
-	{
-		this->ClearSlot(WeaponSlotKind::Rifle);
-	}
-	if (needPistol)
-	{
-		this->ClearSlot(WeaponSlotKind::Pistol);
-	}
+	bool rifleFree = !needRifle || this->ClearSlot(WeaponSlotKind::Rifle) == GiveResult::Ok;
+	bool pistolFree = !needPistol || this->ClearSlot(WeaponSlotKind::Pistol) == GiveResult::Ok;
 
 	// С хвоста: неудачную выдачу удаляем на месте, а Remove сдвигает индексы.
 	for (i32 i = this->givenWeapons.Count() - 1; i >= 0; i--)
 	{
+		// Слот не освободился — выдавать нельзя: ствол упал бы на пол молча, без команды
+		// в чате и без шанса объяснить игроку, что произошло. Запись сохраняем: следующая
+		// перевыдача попробует снова.
+		const WeaponInfo_t *info = KZWeaponService::FindByClassName(this->givenWeapons[i].requested.Get());
+		if (info && ((info->slot == WeaponSlotKind::Rifle && !rifleFree) || (info->slot == WeaponSlotKind::Pistol && !pistolFree)))
+		{
+			continue;
+		}
 		CBasePlayerWeapon *weapon = itemServices->GiveNamedItem(this->givenWeapons[i].requested.Get());
 		if (!weapon)
 		{

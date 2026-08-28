@@ -106,8 +106,9 @@ private:
 	// Убрать из мира выброшенную нами и никем не подобранную сущность записи i.
 	void RemoveDroppedEntity(i32 index);
 	// Освободить слот перед выдачей: снять с игрока оружие того же слота.
-	// false — что-то из этого слота отцепить НЕ удалось; выдавать нельзя.
-	bool ClearSlot(WeaponSlotKind slot);
+	// Ok — слот свободен; SlotBusy — отцепить не вышло (выдавать нельзя, ствол упадёт
+	// на пол); Internal — сломались сервисы пешки, слот тут ни при чём.
+	GiveResult ClearSlot(WeaponSlotKind slot);
 
 	CUtlVector<GivenWeapon_t> givenWeapons {};
 };
