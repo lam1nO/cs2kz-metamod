@@ -151,6 +151,42 @@ GiveResult KZWeaponService::GiveWeapon(const WeaponInfo_t &info)
 	return GiveResult::Ok;
 }
 
+void KZWeaponService::SyncFromHeld()
+{
+	if (this->givenWeapons.Count() == 0 || !this->player->IsAlive() || !this->player->IsInGame())
+	{
+		return;
+	}
+	auto weaponServices = this->player->GetPlayerPawn()->m_pWeaponServices();
+	if (!weaponServices)
+	{
+		return;
+	}
+	auto weapons = weaponServices->m_hMyWeapons();
+	// Идём с хвоста: удаление элемента сдвигает индексы.
+	for (i32 i = this->givenWeapons.Count() - 1; i >= 0; i--)
+	{
+		bool held = false;
+		FOR_EACH_VEC(*weapons, j)
+		{
+			CBaseModelEntity *weapon = (*weapons)[j].Get();
+			// Сверка по ФАКТИЧЕСКОМУ имени: движок подменяет предмет по команде игрока
+			// (CT просит weapon_molotov — в руках weapon_incgrenade), и сверка по
+			// запрошенному вычищала бы запись каждый раз. См. GivenWeapon_t.
+			if (weapon && KZ_STREQI(weapon->GetClassname(), this->givenWeapons[i].actual.Get()))
+			{
+				held = true;
+				break;
+			}
+		}
+		if (!held)
+		{
+			// Игрок выбросил его на G — значит и перевыдавать нечего.
+			this->givenWeapons.Remove(i);
+		}
+	}
+}
+
 void KZWeaponService::RegiveGiven()
 {
 	if (!KZWeaponService::Enabled() || this->givenWeapons.Count() == 0)
