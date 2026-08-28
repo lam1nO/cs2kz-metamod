@@ -357,8 +357,7 @@ bool scmd::LinkCmd(const char *name, const char *linkedName, u64 extraFlags)
 	{
 		if (!V_stricmp(g_cmdManager.cmds[i].name, linkedName))
 		{
-			return scmd::RegisterCmd(name, g_cmdManager.cmds[i].callback, g_cmdManager.cmds[i].descKey,
-									 g_cmdManager.cmds[i].flags | extraFlags);
+			return scmd::RegisterCmd(name, g_cmdManager.cmds[i].callback, g_cmdManager.cmds[i].descKey, g_cmdManager.cmds[i].flags | extraFlags);
 		}
 	}
 	return false;
@@ -441,10 +440,10 @@ static_function bool RemapCyrillicToLatin(const char *in, char *out, int outSize
 {
 	// Таблица для строчных а(U+0430)..я(U+044F) по позиции клавиши в QWERTY.
 	static const char kLayout[32] = {
-		/* а */ 'f',  /* б */ ',', /* в */ 'd', /* г */ 'u', /* д */ 'l',  /* е */ 't', /* ж */ ';', /* з */ 'p',
-		/* и */ 'b',  /* й */ 'q', /* к */ 'r', /* л */ 'k', /* м */ 'v',  /* н */ 'y', /* о */ 'j', /* п */ 'g',
-		/* р */ 'h',  /* с */ 'c', /* т */ 'n', /* у */ 'e', /* ф */ 'a',  /* х */ '[', /* ц */ 'w', /* ч */ 'x',
-		/* ш */ 'i',  /* щ */ 'o', /* ъ */ ']', /* ы */ 's', /* ь */ 'm',  /* э */ '\'', /* ю */ '.', /* я */ 'z',
+		/* а */ 'f', /* б */ ',', /* в */ 'd', /* г */ 'u', /* д */ 'l', /* е */ 't',  /* ж */ ';', /* з */ 'p',
+		/* и */ 'b', /* й */ 'q', /* к */ 'r', /* л */ 'k', /* м */ 'v', /* н */ 'y',  /* о */ 'j', /* п */ 'g',
+		/* р */ 'h', /* с */ 'c', /* т */ 'n', /* у */ 'e', /* ф */ 'a', /* х */ '[',  /* ц */ 'w', /* ч */ 'x',
+		/* ш */ 'i', /* щ */ 'o', /* ъ */ ']', /* ы */ 's', /* ь */ 'm', /* э */ '\'', /* ю */ '.', /* я */ 'z',
 	};
 
 	bool hadCyrillic = false;
@@ -584,8 +583,8 @@ META_RES scmd::OnDispatchConCommand(ConCommandRef cmd, const CCommandContext &ct
 					char c = (u8)src[i] < 0x20 ? ' ' : src[i];
 					text[i] = c == '"' ? '\'' : c;
 				}
-				KZ_LOG_WARN(LogChannel::Player, "[cyb] chat_dropped steam_id=%llu slot=%d reason=not_in_game text=\"%s\"\n",
-							claimedId, (i32)slot.Get(), text);
+				KZ_LOG_WARN(LogChannel::Player, "[cyb] chat_dropped steam_id=%llu slot=%d reason=not_in_game text=\"%s\"\n", claimedId,
+							(i32)slot.Get(), text);
 			}
 			return MRES_SUPERCEDE;
 		}
