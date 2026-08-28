@@ -26,6 +26,7 @@ struct WeaponInfo_t
 
 // Результат выдачи. Не bool: причины отказа игроку показываются разными строками, а
 // «сломался движок» обязан ещё и попасть в лог с reason.
+// clang-format off
 enum class GiveResult
 {
 	Ok,
@@ -33,6 +34,7 @@ enum class GiveResult
 	LimitHit,   // упёрся в KZ_MAX_GIVEN_WEAPONS
 	Internal,   // нет itemServices или GiveNamedItem вернул nullptr — should-never-happen
 };
+// clang-format on
 
 // Одна выданная запись. Хранятся ДВА имени, и это не избыточность: движок подменяет
 // предмет по команде игрока (CT просит weapon_molotov — получает weapon_incgrenade, за T
@@ -65,10 +67,7 @@ public:
 	// Хука спавна у сервиса нет, поэтому чистится он не «на спавне», а при первом же
 	// обращении: и GiveWeapon, и UpdatePistol начинают с SyncFromHeld, а после смены карты
 	// в руках выданного нет — записи выпадают там.
-	virtual void Reset() override
-	{
-		this->givenWeapons.RemoveAll();
-	}
+	virtual void Reset() override;
 
 	// Выдать оружие игроку. Отказы: мёртв/не в игре/сервис выключен, упёрся в потолок
 	// KZ_MAX_GIVEN_WEAPONS, внутренняя ошибка движка. Причину печатает вызывающая команда.
@@ -89,6 +88,8 @@ public:
 
 private:
 	bool HoldingGrenade();
+	// Убрать из мира выброшенную нами и никем не подобранную сущность записи i.
+	void RemoveDroppedEntity(i32 index);
 
 	CUtlVector<GivenWeapon_t> givenWeapons {};
 };

@@ -12,6 +12,7 @@ CConVar<bool> kz_weapon_commands("kz_weapon_commands", FCVAR_NONE,
 
 // Каталог команд. weapon_taser сюда сознательно НЕ входит: это единственное, чем можно
 // достать другого игрока, а вся затея — про реквизит для себя, а не про бой.
+// clang-format off
 static_global const WeaponInfo_t s_weapons[] = {
 	// винтовки
 	{"ak",		 "weapon_ak47",			 false},
@@ -62,6 +63,29 @@ static_global const WeaponInfo_t s_weapons[] = {
 	{ "inc",	   "weapon_incgrenade",	 true },
 	{ "decoy",	 "weapon_decoy",		   true },
 };
+// clang-format on
+
+void KZWeaponService::RemoveDroppedEntity(i32 index)
+{
+	// Трогаем ТОЛЬКО ничейное: у оружия, подобранного другим игроком, владелец не пуст.
+	// Ошибиться здесь — значит вынуть ствол из чужих рук, поэтому гард обязателен.
+	CBaseEntity *dropped = this->givenWeapons[index].entity.Get();
+	if (dropped && !dropped->m_hOwnerEntity().Get())
+	{
+		g_pKZUtils->RemoveEntity(dropped);
+	}
+}
+
+void KZWeaponService::Reset()
+{
+	// Дисконнект. Всё, что игрок успел выбросить и что не прошло через SyncFromHeld,
+	// иначе осталось бы в мире до смены карты — а реконнекты это множат.
+	for (i32 i = 0; i < this->givenWeapons.Count(); i++)
+	{
+		this->RemoveDroppedEntity(i);
+	}
+	this->givenWeapons.RemoveAll();
+}
 
 bool KZWeaponService::Enabled()
 {
@@ -167,13 +191,26 @@ void KZWeaponService::SyncFromHeld()
 	for (i32 i = this->givenWeapons.Count() - 1; i >= 0; i--)
 	{
 		bool held = false;
+		CBaseEntity *tracked = this->givenWeapons[i].entity.Get();
 		FOR_EACH_VEC(*weapons, j)
 		{
 			CBaseModelEntity *weapon = (*weapons)[j].Get();
-			// Сверка по ФАКТИЧЕСКОМУ имени: движок подменяет предмет по команде игрока
-			// (CT просит weapon_molotov — в руках weapon_incgrenade), и сверка по
-			// запрошенному вычищала бы запись каждый раз. См. GivenWeapon_t.
-			if (weapon && KZ_STREQI(weapon->GetClassname(), this->givenWeapons[i].actual.Get()))
+			if (!weapon)
+			{
+				continue;
+			}
+			// Сверка по ХЭНДЛУ, а не по имени: имена не уникальны. Игрок мог выбросить
+			// свой AK и поднять чужой — по classname запись считалась бы «в руках», её
+			// сущность никогда не убралась бы, и поле entity перестало бы работать.
+			// Хэндл всегда актуален: RegiveGiven переписывает его при каждой перевыдаче.
+			if (tracked && weapon == tracked)
+			{
+				held = true;
+				break;
+			}
+			// Фолбэк по фактическому имени — на случай, если хэндл протух, а оружие с тем
+			// же classname в руках есть (перевыдача чужим кодом). Лучше не убрать лишнего.
+			if (!tracked && KZ_STREQI(weapon->GetClassname(), this->givenWeapons[i].actual.Get()))
 			{
 				held = true;
 				break;
@@ -185,11 +222,7 @@ void KZWeaponService::SyncFromHeld()
 			// сущность из мира: в KZ раунд не кончается, посмертной уборки нет, и без
 			// этого спам «выдал → выбросил» копил бы энтити без предела. Трогаем ТОЛЬКО
 			// ничейное: у подобранного другим игроком владелец не пуст.
-			CBaseEntity *dropped = this->givenWeapons[i].entity.Get();
-			if (dropped && !dropped->m_hOwnerEntity().Get())
-			{
-				g_pKZUtils->RemoveEntity(dropped);
-			}
+			this->RemoveDroppedEntity(i);
 			this->givenWeapons.Remove(i);
 		}
 	}
