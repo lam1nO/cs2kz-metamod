@@ -5,6 +5,7 @@
 #include "../kz/kz.h"
 #include "../kz/language/kz_language.h"
 #include "../kz/option/kz_option.h"
+#include "../kz/weapon/kz_weapon.h"
 #include "utils/tables.h"
 
 #include <cctype>
@@ -401,6 +402,14 @@ META_RES scmd::OnClientCommand(CPlayerSlot &slot, const CCommand &args)
 	if (!controller || !player)
 	{
 		return MRES_IGNORED;
+	}
+
+	// Игрок нажал G. Ловим здесь, потому что игрового события дропа форк не слушает, а
+	// эта точка — единственная, где команда видна ДО того, как движок её исполнит.
+	// Слепок инвентаря разбирается на первом же usercmd после дропа (SweepDropped).
+	if (args.ArgC() > 0 && !V_stricmp(args[0], "drop") && player->weaponService)
+	{
+		player->weaponService->OnDropCommand();
 	}
 
 	for (i32 i = 0; i < g_cmdManager.cmdCount; i++)
