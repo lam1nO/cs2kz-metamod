@@ -1,4 +1,5 @@
 #include "kz/pistol/kz_pistol.h"
+#include "kz/weapon/kz_weapon.h"
 #include "kz/quiet/kz_quiet.h"
 #include "kz/option/kz_option.h"
 #include "kz/language/kz_language.h"
@@ -61,6 +62,11 @@ void KZPistolService::UpdatePistol(bool force)
 	{
 		return;
 	}
+
+	// Выданное через !ak/!he оружие обязано пережить RemoveAllItems ниже. Сначала
+	// выбрасываем из списка то, чего в руках уже нет (игрок выкинул на G), — иначе
+	// перевыдача вернула бы выброшенное обратно и дроп выглядел бы сломанным.
+	this->player->weaponService->SyncFromHeld();
 	if (preferredPistol == 0)
 	{
 		if (this->NeedWeaponStripping())
@@ -68,6 +74,7 @@ void KZPistolService::UpdatePistol(bool force)
 			this->player->GetPlayerPawn()->m_pItemServices()->RemoveAllItems(false);
 			auto weapon = this->player->GetPlayerPawn()->m_pItemServices()->GiveNamedItem(
 				this->player->GetController()->m_iTeamNum() == CS_TEAM_CT ? "weapon_knife" : "weapon_knife_t");
+			this->player->weaponService->RegiveGiven();
 		}
 		return;
 	}
@@ -127,6 +134,8 @@ void KZPistolService::UpdatePistol(bool force)
 	{
 		player->GetPlayerPawn()->m_iTeamNum(originalTeam);
 	}
+
+	this->player->weaponService->RegiveGiven();
 }
 
 bool KZPistolService::NeedWeaponStripping()

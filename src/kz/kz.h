@@ -18,7 +18,11 @@ enum KzModeCvars : int; // defined in mode/kz_mode.h
 #define KZ_WORKSHOP_ADDON_ID            "3469155349"
 #define KZ_WORKSHOP_ADDON_SNDEVENT_FILE "soundevents/soundevents_cs2kz.vsndevts"
 
-#define KZ_DEFAULT_CHAT_PREFIX  "{lime}KZ {grey}|{default}"
+// Бренд «Качалка»/GYMSTRIKE. Циана в чате CS2 не существует: ConvertColorStringToByte
+// (utils_print.cpp) — закрытая таблица из 16 цветов, {blue} в ней ближайший к голубому.
+// Реально сервер читает опцию chatPrefix из cs2kz-server-config.txt; это значение —
+// фолбэк на случай потери конфига, и оно обязано совпадать с профилем.
+#define KZ_DEFAULT_CHAT_PREFIX  "{blue}GYMSTRIKE {grey}|{default}"
 #define KZ_DEFAULT_TIP_INTERVAL 75.0
 #define KZ_DEFAULT_LANGUAGE     "en"
 #define KZ_DEFAULT_STYLE        "Normal"
@@ -58,6 +62,7 @@ class KZTelemetryService;
 class KZTimerService;
 class KZTipService;
 class KZTriggerService;
+class KZWeaponService;
 class KZPistolService;
 class KZRecordingService;
 class KZFOVService;
@@ -185,6 +190,7 @@ public:
 	KZTipService *tipService {};
 	KZTriggerService *triggerService {};
 	KZPistolService *pistolService {};
+	KZWeaponService *weaponService {};
 	KZRecordingService *recordingService {};
 	KZFOVService *fovService {};
 	KZZtopwatchService *ztopwatchService {};

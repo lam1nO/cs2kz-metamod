@@ -1,0 +1,18 @@
+"Phrases"
+{
+	"Weapon Given"
+	{
+		"en"		"{grey}Weapon given. Press {default}G{grey} to drop it."
+		"ru"		"{grey}Оружие выдано. {default}G{grey} — выбросить."
+	}
+	"Weapon Given Grenade"
+	{
+		"en"		"{grey}Grenade given. You cannot throw it — press {default}G{grey} to drop it."
+		"ru"		"{grey}Граната выдана. Бросить её нельзя, {default}G{grey} — выбросить."
+	}
+	"Weapon Give Failed"
+	{
+		"en"		"{grey}You have to be alive to get a weapon."
+		"ru"		"{grey}Оружие выдаётся только живому игроку."
+	}
+}

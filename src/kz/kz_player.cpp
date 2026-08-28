@@ -27,6 +27,7 @@
 #include "savedrun/kz_savedrun.h"
 #include "replays/kz_replaysystem.h"
 #include "racing/kz_racing.h"
+#include "weapon/kz_weapon.h"
 #include "global/kz_global.h"
 #include "profile/kz_profile.h"
 #include "pistol/kz_pistol.h"
@@ -73,6 +74,7 @@ void KZPlayer::Init()
 	delete this->zonesService;
 	delete this->profileService;
 	delete this->pistolService;
+	delete this->weaponService;
 	delete this->fovService;
 	delete this->ztopwatchService;
 
@@ -103,6 +105,7 @@ void KZPlayer::Init()
 	this->zonesService = new KZZonesService(this);
 	this->profileService = new KZProfileService(this);
 	this->pistolService = new KZPistolService(this);
+	this->weaponService = new KZWeaponService(this);
 	this->fovService = new KZFOVService(this);
 	this->ztopwatchService = new KZZtopwatchService(this);
 
@@ -140,6 +143,7 @@ void KZPlayer::Reset()
 	this->profileService->Reset();
 	this->ztopwatchService->Reset();
 	this->savedRunService->Reset();
+	this->weaponService->Reset();
 
 	g_pKZModeManager->SwitchToMode(this, KZOptionService::GetOptionStr("defaultMode", KZ_DEFAULT_MODE), true, true, false);
 	g_pKZStyleManager->ClearStyles(this, true, false);
@@ -278,6 +282,7 @@ void KZPlayer::OnProcessUsercmds(PlayerCommand *cmds, int numcmds)
 {
 	VPROF_BUDGET(__func__, "CS2KZ");
 	this->recordingService->OnProcessUsercmds(cmds, numcmds);
+	this->weaponService->OnProcessUsercmds(cmds, numcmds);
 	// this->anticheatService->OnProcessUsercmds(cmds, numcmds);
 	this->modeService->OnProcessUsercmds(cmds, numcmds);
 	FOR_EACH_VEC(this->styleServices, i)
