@@ -1,6 +1,5 @@
 #include "kz/weapon/kz_weapon.h"
 #include "kz/language/kz_language.h"
-#include "kz/pistol/kz_pistol.h"
 
 #include "utils/simplecmds.h"
 #include "sdk/usercmd.h"
@@ -147,6 +146,7 @@ GiveResult KZWeaponService::GiveWeapon(const WeaponInfo_t &info)
 	// GivenWeapon_t. Берём его с САМОЙ сущности, а не из таблицы подмен: таблица
 	// протухнет на следующем апдейте Valve, сущность — нет.
 	given.actual = entity->GetClassname();
+	given.entity = weapon;
 	this->givenWeapons.AddToTail(given);
 	return GiveResult::Ok;
 }
@@ -181,7 +181,15 @@ void KZWeaponService::SyncFromHeld()
 		}
 		if (!held)
 		{
-			// Игрок выбросил его на G — значит и перевыдавать нечего.
+			// Игрок выбросил его на G — значит и перевыдавать нечего. Заодно убираем
+			// сущность из мира: в KZ раунд не кончается, посмертной уборки нет, и без
+			// этого спам «выдал → выбросил» копил бы энтити без предела. Трогаем ТОЛЬКО
+			// ничейное: у подобранного другим игроком владелец не пуст.
+			CBaseEntity *dropped = this->givenWeapons[i].entity.Get();
+			if (dropped && !dropped->m_hOwnerEntity().Get())
+			{
+				g_pKZUtils->RemoveEntity(dropped);
+			}
 			this->givenWeapons.Remove(i);
 		}
 	}
@@ -202,9 +210,27 @@ void KZWeaponService::RegiveGiven()
 	{
 		return;
 	}
-	FOR_EACH_VEC(this->givenWeapons, i)
+	// С хвоста: неудачную выдачу удаляем на месте, а Remove сдвигает индексы.
+	for (i32 i = this->givenWeapons.Count() - 1; i >= 0; i--)
 	{
-		itemServices->GiveNamedItem(this->givenWeapons[i].requested.Get());
+		CBasePlayerWeapon *weapon = itemServices->GiveNamedItem(this->givenWeapons[i].requested.Get());
+		if (!weapon)
+		{
+			// Отказ — с машинно-читаемым reason (CLAUDE.md). Мёртвую запись убираем сразу:
+			// иначе она висела бы до следующего sync и обещала несуществующее оружие.
+			KZ_LOG_ERROR(LogChannel::Misc, "[cyb] weapon_regive_failed steam_id=%llu weapon=%s reason=give_returned_null\n",
+						 this->player->GetSteamId64(false), this->givenWeapons[i].requested.Get());
+			this->givenWeapons.Remove(i);
+			continue;
+		}
+		// ОБЯЗАТЕЛЬНО обновлять: движок подменяет предмет по КОМАНДЕ игрока, а команда с
+		// прошлой выдачи могла смениться (за T просили weapon_molotov и получали его же,
+		// после jointeam CT тот же запрос отдаёт weapon_incgrenade). Не обновив actual,
+		// мы бы разошлись с реальностью: ближайший SyncFromHeld выбросил бы запись, дедуп
+		// перестал бы её узнавать, а следующий страйп потерял бы гранату молча.
+		CBaseModelEntity *entity = weapon;
+		this->givenWeapons[i].actual = entity->GetClassname();
+		this->givenWeapons[i].entity = weapon;
 	}
 }
 
@@ -293,10 +319,11 @@ static_function META_RES GiveByCommand(CCSPlayerController *controller, const ch
 			player->languageService->PrintChat(true, false, "Weapon Limit Reached");
 			return MRES_SUPERCEDE;
 		case GiveResult::Internal:
-			// Отказ по нашей вине — в лог с машинно-читаемым reason (CLAUDE.md).
+			// Отказ по нашей вине — в лог с машинно-читаемым reason (CLAUDE.md), и игроку
+			// не «ты мёртв»: он жив, сломалось у нас.
 			KZ_LOG_ERROR(LogChannel::Misc, "[cyb] weapon_give_failed steam_id=%llu weapon=%s reason=give_internal\n", player->GetSteamId64(false),
 						 info->className);
-			player->languageService->PrintChat(true, false, "Weapon Give Failed");
+			player->languageService->PrintChat(true, false, "Weapon Give Internal Error");
 			return MRES_SUPERCEDE;
 		case GiveResult::NotAlive:
 		default:

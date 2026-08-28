@@ -282,6 +282,9 @@ void KZPlayer::OnProcessUsercmds(PlayerCommand *cmds, int numcmds)
 {
 	VPROF_BUDGET(__func__, "CS2KZ");
 	this->recordingService->OnProcessUsercmds(cmds, numcmds);
+	// ПОСЛЕ recordingService осознанно: в реплей пишется исходное нажатие атаки, а
+	// применяется погашенное. При воспроизведении бот гейтится тем же хуком, так что
+	// расхождения не видно; менять порядок без этой мысли — не косметика.
 	this->weaponService->OnProcessUsercmds(cmds, numcmds);
 	// this->anticheatService->OnProcessUsercmds(cmds, numcmds);
 	this->modeService->OnProcessUsercmds(cmds, numcmds);

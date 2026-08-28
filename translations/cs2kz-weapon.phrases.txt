@@ -30,6 +30,11 @@
 		"en"		"List the weapons you can request in chat."
 		"ru"		"Показать список оружия, которое можно взять командой."
 	}
+	"Weapon Give Internal Error"
+	{
+		"en"		"{grey}Could not give the weapon — tell the admins."
+		"ru"		"{grey}Не получилось выдать оружие — скажи админам."
+	}
 	"Weapon Give Failed"
 	{
 		"en"		"{grey}You have to be alive to get a weapon."
