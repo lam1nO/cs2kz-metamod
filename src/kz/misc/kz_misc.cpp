@@ -537,6 +537,27 @@ void KZ::misc::JoinTeam(KZPlayer *player, int newTeam, bool restorePos, bool sav
 		player->invisibleService->OnObserveEnd();
 		if (player->GetPlayerPawn())
 		{
+			// Раздеваем ПЕРЕД суицидом. С mp_death_drop_gun 1 (профиль 0.161.1, поставлен
+			// после замера: при 0 игрок не может выбросить оружие на G вообще) смерть
+			// роняет ствол на пол, а прибрать его некому: KZWeaponService чистит только
+			// выданное командой, дефолтный пистолет выдаёт KZPistolService мимо списка,
+			// и раунд в KZ не кончается. Это единственный регулярный источник смерти на
+			// На KZ god mode переставляется каждый тик (KZPlayer::EnableGodMode), а урон
+			// от падения обнулён — от урона игрок не умирает вовсе.
+			// ЧТО ЭТА СТРОКА НЕ ЗАКРЫВАЕТ (не переоценивать): (1) оружие, выброшенное
+			// игроком на G, — дефолтные пистолет и нож выдаёт KZPistolService мимо
+			// givenWeapons, и убирать их некому вообще; (2) консольные kill/explode —
+			// CommitSuicide не спрашивает m_bTakesDamage. Остаток описан открытой ценой
+			// в cfg профиля; наблюдаемость — RCON-команда kz_weapons_orphan_count
+			// (src/kz/weapon/kz_weapon.cpp).
+			// Перевыдавать нож и пистолет не нужно: ниже OnPlayerJoinTeam →
+			// UpdatePistol(force) выдаёт их сам. Выданное командой (!ak и т.п.) смену
+			// команды НЕ переживает — ни до этой правки, ни после: SyncFromHeld внутри
+			// UpdatePistol видит после респавна пустые руки и законно чистит записи.
+			if (player->GetPlayerPawn()->m_pItemServices())
+			{
+				player->GetPlayerPawn()->m_pItemServices()->RemoveAllItems(false);
+			}
 			player->GetPlayerPawn()->CommitSuicide(false, true);
 		}
 		player->GetController()->SwitchTeam(newTeam);

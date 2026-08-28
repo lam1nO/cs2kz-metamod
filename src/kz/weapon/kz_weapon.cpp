@@ -258,6 +258,7 @@ GiveResult KZWeaponService::ClearSlot(WeaponSlotKind slot)
 		// Замерено владельцем на канарейке: с AK в руках команда !r8 выбрасывала AK, а не
 		// usp, и снятие пистолета «не удавалось». Поэтому жертву сперва делаем активной —
 		// ровно так это делает проверенный прод-код cyber-35hp (Cyber35hp.cs:809).
+		CBasePlayerWeapon *activeBefore = weaponServices->m_hActiveWeapon().Get();
 		weaponServices->m_hActiveWeapon(weapon);
 		itemServices->DropActiveWeapon(weapon);
 
@@ -276,10 +277,20 @@ GiveResult KZWeaponService::ClearSlot(WeaponSlotKind slot)
 				break;
 			}
 		}
-		if (stillHeld)
+		// Проверяем ОБЕ ссылки, а не одну: активной жертву сделали мы сами, и если движок
+		// отцепил её от m_hMyWeapons, но активную не переключил, удаление убило бы
+		// сущность, на которую указывает поле, выставленное нашей же рукой.
+		if (stillHeld || weaponServices->m_hActiveWeapon().Get() == weapon)
 		{
 			KZ_LOG_WARN(LogChannel::Misc, "[cyb] weapon_slot_not_freed steam_id=%llu weapon=%s reason=drop_no_op\n",
 						this->player->GetSteamId64(false), ((CBaseModelEntity *)weapon)->GetClassname());
+			// Откат: дропа не было, состояние между нашими записями не менялось, поэтому
+			// симметричная запись возвращает РОВНО исходное — Deploy тут не подделывается.
+			// Без отката игрок получил бы «слот занят», держа в руках чужой ствол.
+			if (activeBefore)
+			{
+				weaponServices->m_hActiveWeapon(activeBefore);
+			}
 			result = GiveResult::SlotBusy;
 			continue;
 		}
@@ -294,6 +305,7 @@ GiveResult KZWeaponService::ClearSlot(WeaponSlotKind slot)
 		}
 		g_pKZUtils->RemoveEntity(weapon);
 	}
+
 	// Активное оружие после дропа НЕ восстанавливаем сырой записью в m_hActiveWeapon:
 	// она не проходит через Deploy/Holster, и у движка осталась бы вьюмодель прошлого
 	// ствола (в этом же форке playback.cpp для реального переключения идёт через
@@ -536,6 +548,34 @@ static_function META_RES GiveByCommand(CCSPlayerController *controller, const ch
 		player->languageService->PrintChat(true, false, "Weapon Given");
 	}
 	return MRES_SUPERCEDE;
+}
+
+// Счётчик осиротевших стволов в мире — наблюдаемость под утечку от mp_death_drop_gun 1.
+// Правило проекта: закрытие инцидента = новая проверка. Уборка при входе в команду
+// (kz_misc.cpp) закрывает только суицид; брошенное игроком на G дефолтное оружие не
+// убирает никто, а раунд в KZ не кончается. Готовой RCON-пробы для этого нет
+// (ent_dump требует sv_cheats, A2S счётчиков энтити не отдаёт), поэтому считаем сами.
+// Дальше — 5 шагов docs/runbooks/fleet-invariants.md: orchctl rcon по инстансам →
+// метрика cyb_invariant_orphan_weapons → violated при превышении порога.
+CON_COMMAND_F(kz_weapons_orphan_count, "Print the number of ownerless weapon entities in the world.", FCVAR_NONE)
+{
+	// Полный обход активного списка сущностей в главном потоке: игрокам не отдаём, как и
+	// прочие настоящие ConCommand форка (канон — kz_invisible.cpp:453).
+	if (utils::GetController(context.GetPlayerSlot()))
+	{
+		KZ_LOG_WARN(LogChannel::Misc, "[cyb] orphan_count_denied reason=not_server slot=%d\n", context.GetPlayerSlot().Get());
+		return;
+	}
+	i32 orphans = 0;
+	CBaseEntity *entity = nullptr;
+	while ((entity = (CBaseEntity *)g_pKZUtils->FindEntityByClassname(entity, "weapon_*")) != nullptr)
+	{
+		if (!entity->m_hOwnerEntity().Get())
+		{
+			orphans++;
+		}
+	}
+	Msg("orphan_weapons=%i\n", orphans);
 }
 
 // Список доступного оружия. Единственная видимая в !help команда этого сервиса.
