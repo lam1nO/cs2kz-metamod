@@ -109,6 +109,14 @@ bool KZWeaponService::GiveWeapon(const WeaponInfo_t &info)
 		return false;
 	}
 
+	// Синхронизация ПЕРВЫМ делом. Без неё дедуп ниже сверяется со списком, а не с
+	// реальностью: игрок выбросил AK на G (а дроп мы сами и включили, и фраза про «G —
+	// выбросить» это прямо обещает) — в списке AK остался, повторный !ak стал бы no-op,
+	// и игрок остался бы без оружия при бодром «Оружие выдано» в чате. SyncFromHeld
+	// зовётся ещё и из UpdatePistol, но тот на !r и телепорте не срабатывает. Обход
+	// m_hMyWeapons дешёвый и не в горячем пути.
+	this->SyncFromHeld();
+
 	// Дедуп ДО выдачи, а не после: GiveNamedItem уже имеющегося оружия плодит вторую
 	// сущность в мире, и список от этого не спасает. Повтор команды — no-op.
 	FOR_EACH_VEC(this->givenWeapons, i)
@@ -122,7 +130,7 @@ bool KZWeaponService::GiveWeapon(const WeaponInfo_t &info)
 	// «выдал → выбросил → выдал» растит число энтити без предела.
 	if (this->givenWeapons.Count() >= KZ_MAX_GIVEN_WEAPONS)
 	{
-		return false;
+		return false; // отличается от «мёртв» — см. GiveByCommand
 	}
 
 	itemServices->GiveNamedItem(info.className);
@@ -263,7 +271,9 @@ static_function META_RES GiveByCommand(CCSPlayerController *controller, const ch
 	}
 	if (!player->weaponService->GiveWeapon(*info))
 	{
-		player->languageService->PrintChat(true, false, "Weapon Give Failed");
+		// Причины разные, и «ты мёртв» живому игроку, упёршемуся в потолок, — враньё.
+		player->languageService->PrintChat(true, false,
+										   player->IsAlive() && player->IsInGame() ? "Weapon Limit Reached" : "Weapon Give Failed");
 		return MRES_SUPERCEDE;
 	}
 	if (info->grenade)
@@ -288,9 +298,17 @@ SCMD(kz_guns, SCFL_MISC | SCFL_PLAYER | SCFL_HELP)
 	}
 	player->languageService->PrintChat(true, false, "Weapon List Chat");
 	player->PrintConsole(false, false, "");
+	std::string note = player->languageService->PrepareMessage("Weapon List Grenade Note");
 	for (u32 i = 0; i < KZ_ARRAYSIZE(s_weapons); i++)
 	{
-		player->PrintConsole(false, false, "!%s%s", s_weapons[i].cmd, s_weapons[i].grenade ? "  (граната: держать можно, кинуть нельзя)" : "");
+		if (s_weapons[i].grenade)
+		{
+			player->PrintConsole(false, false, "!%s  %s", s_weapons[i].cmd, note.c_str());
+		}
+		else
+		{
+			player->PrintConsole(false, false, "!%s", s_weapons[i].cmd);
+		}
 	}
 	return MRES_SUPERCEDE;
 }

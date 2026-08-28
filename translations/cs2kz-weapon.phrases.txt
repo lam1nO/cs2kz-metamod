@@ -15,6 +15,21 @@
 		"en"		"{grey}Weapon list printed to your console ({default}~{grey})."
 		"ru"		"{grey}Список оружия выведен в консоль ({default}~{grey})."
 	}
+	"Weapon Limit Reached"
+	{
+		"en"		"{grey}You are already carrying the maximum number of requested weapons. Drop one with {default}G{grey}."
+		"ru"		"{grey}Больше выданного оружия нести нельзя. Выбрось лишнее на {default}G{grey}."
+	}
+	"Weapon List Grenade Note"
+	{
+		"en"		"(grenade: can be held, cannot be thrown)"
+		"ru"		"(граната: держать можно, кинуть нельзя)"
+	}
+	"Command Description - kz_guns"
+	{
+		"en"		"List the weapons you can request in chat."
+		"ru"		"Показать список оружия, которое можно взять командой."
+	}
 	"Weapon Give Failed"
 	{
 		"en"		"{grey}You have to be alive to get a weapon."
