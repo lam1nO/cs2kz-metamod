@@ -9,7 +9,7 @@
 #include "tier0/memdbgon.h"
 
 CConVar<bool> kz_weapon_commands("kz_weapon_commands", FCVAR_NONE,
-								 "Разрешить чат-команды выдачи оружия (!ak, !m4, !he, ...). Гранаты выдаются, но бросить их нельзя.", true);
+								 "Enable weapon chat commands (!ak, !m4, !he, ...). Grenades can be held but not thrown.", true);
 
 // Каталог команд. weapon_taser сюда сознательно НЕ входит: это единственное, чем можно
 // достать другого игрока, а вся затея — про реквизит для себя, а не про бой.
@@ -108,10 +108,9 @@ bool KZWeaponService::GiveWeapon(const WeaponInfo_t &info)
 	{
 		return false;
 	}
-	itemServices->GiveNamedItem(info.className);
 
-	// Дубли в списке не нужны: перевыдача одного и того же оружия дважды оставила бы
-	// вторую сущность висеть без слота.
+	// Дедуп ДО выдачи, а не после: GiveNamedItem уже имеющегося оружия плодит вторую
+	// сущность в мире, и список от этого не спасает. Повтор команды — no-op.
 	FOR_EACH_VEC(this->givenWeapons, i)
 	{
 		if (KZ_STREQI(this->givenWeapons[i].Get(), info.className))
@@ -119,6 +118,14 @@ bool KZWeaponService::GiveWeapon(const WeaponInfo_t &info)
 			return true;
 		}
 	}
+	// Потолок: в KZ раунд не кончается, выброшенное на G лежит до смены карты. Без капа
+	// «выдал → выбросил → выдал» растит число энтити без предела.
+	if (this->givenWeapons.Count() >= KZ_MAX_GIVEN_WEAPONS)
+	{
+		return false;
+	}
+
+	itemServices->GiveNamedItem(info.className);
 	this->givenWeapons.AddToTail(CUtlString(info.className));
 	return true;
 }
@@ -199,23 +206,35 @@ bool KZWeaponService::HoldingGrenade()
 
 void KZWeaponService::OnProcessUsercmds(PlayerCommand *cmds, int numcmds)
 {
-	if (!KZWeaponService::Enabled() || this->givenWeapons.Count() == 0)
-	{
-		return;
-	}
-	if (!this->HoldingGrenade())
+	// Гейт — ТОЛЬКО «в руках граната». Проверять givenWeapons здесь нельзя: гранату можно
+	// подобрать с земли (её выбросили на G — а дроп мы сами и включили), и у подобравшего
+	// список пуст. Иначе запрет обходился бы «выбросил → поднял → кинул», в том числе
+	// чужую гранату любым игроком.
+	if (!KZWeaponService::Enabled() || !this->HoldingGrenade())
 	{
 		return;
 	}
 	// Гасим на уровне ВВОДА, до ProcessUsercmds: снаряд не рождается вообще. Удалять
 	// уже брошенный снаряд было бы поздно — звук вырывания чеки и бросок клиент бы
 	// уже показал, а другим игрокам граната успела бы помешать.
+	const u64 attack = (u64)IN_ATTACK | (u64)IN_ATTACK2;
 	for (i32 i = 0; i < numcmds; i++)
 	{
 		PlayerCommand *pc = &cmds[i];
 		CBaseUserCmdPB *base = pc->mutable_base();
 		CInButtonStatePB *buttons = base->mutable_buttons_pb();
-		buttons->set_buttonstate1(buttons->buttonstate1() & ~((u64)IN_ATTACK | (u64)IN_ATTACK2));
+		// ВСЕ ТРИ слова, а не только первое: CInButtonState::IsButtonPressed
+		// (sdk/cinbuttonstate.h) считает кнопку нажатой при keyState > IN_BUTTON_DOWN_UP,
+		// то есть по битам из [1]/[2] даже при нулевом [0]. Плюс зеркало в собственную
+		// копию PlayerCommand::buttonstates — из неё форк читает напрямую, и туда же
+		// пишет playback.cpp:556-568, когда ему нужен реальный эффект.
+		buttons->set_buttonstate1(buttons->buttonstate1() & ~attack);
+		buttons->set_buttonstate2(buttons->buttonstate2() & ~attack);
+		buttons->set_buttonstate3(buttons->buttonstate3() & ~attack);
+		for (i32 w = 0; w < 3; w++)
+		{
+			pc->buttonstates.m_pButtonStates[w] &= ~attack;
+		}
 
 		// Атака приходит и субтиковыми шагами — там бит в buttonstate1 может быть уже
 		// снят, а нажатие всё равно отработает. Превращаем нажатие в отпускание.
@@ -258,10 +277,30 @@ static_function META_RES GiveByCommand(CCSPlayerController *controller, const ch
 	return MRES_SUPERCEDE;
 }
 
+// Список доступного оружия. Единственная видимая в !help команда этого сервиса.
+// Печатаем в КОНСОЛЬ: 42 строки в чат — это спам, который вытеснит всё остальное.
+SCMD(kz_guns, SCFL_MISC | SCFL_PLAYER | SCFL_HELP)
+{
+	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
+	if (!KZWeaponService::Enabled())
+	{
+		return MRES_SUPERCEDE;
+	}
+	player->languageService->PrintChat(true, false, "Weapon List Chat");
+	player->PrintConsole(false, false, "");
+	for (u32 i = 0; i < KZ_ARRAYSIZE(s_weapons); i++)
+	{
+		player->PrintConsole(false, false, "!%s%s", s_weapons[i].cmd, s_weapons[i].grenade ? "  (граната: держать можно, кинуть нельзя)" : "");
+	}
+	return MRES_SUPERCEDE;
+}
+
 // Одна команда на каждую строку каталога. Имя callback'а обязано совпадать с именем
 // команды (макрос SCMD склеивает name##_callback), поэтому пишем их списком, а не циклом.
+// SCFL_HIDDEN (= 0, без категории): 42 команды в категории Misc распухли бы вчетверо
+// таблицу !help. Обнаруживаются через !guns ниже — он в !help есть.
 #define KZ_WEAPON_CMD(shortName) \
-	SCMD(kz_##shortName, SCFL_MISC | SCFL_PLAYER) \
+	SCMD(kz_##shortName, SCFL_HIDDEN) \
 	{ \
 		return GiveByCommand(controller, #shortName); \
 	}

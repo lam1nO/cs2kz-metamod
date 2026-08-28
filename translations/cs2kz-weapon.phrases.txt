@@ -10,6 +10,11 @@
 		"en"		"{grey}Grenade given. You cannot throw it — press {default}G{grey} to drop it."
 		"ru"		"{grey}Граната выдана. Бросить её нельзя, {default}G{grey} — выбросить."
 	}
+	"Weapon List Chat"
+	{
+		"en"		"{grey}Weapon list printed to your console ({default}~{grey})."
+		"ru"		"{grey}Список оружия выведен в консоль ({default}~{grey})."
+	}
 	"Weapon Give Failed"
 	{
 		"en"		"{grey}You have to be alive to get a weapon."

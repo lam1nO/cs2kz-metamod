@@ -12,6 +12,11 @@
 //   3. переживает RemoveAllItems из KZPistolService::UpdatePistol — иначе выданное
 //      слетало бы на каждой смене команды и на !hideweapon.
 
+// Потолок одновременно отслеживаемых выданных стволов на игрока. Не «сколько влезет в
+// слоты», а страховка от роста числа энтити в бесконечном KZ-раунде: выброшенное на G
+// лежит до смены карты, а команда выдаёт снова.
+#define KZ_MAX_GIVEN_WEAPONS 8
+
 struct WeaponInfo_t
 {
 	const char *cmd;       // имя команды без префикса kz_ (в чате: !<cmd>)
@@ -29,6 +34,10 @@ public:
 	static const WeaponInfo_t *FindByCommand(const char *cmd);
 	static bool IsGrenadeClassName(const char *className);
 
+	// На выделенном сервере KZPlayer::Reset() зовётся с ДИСКОННЕКТА, а не со смены карты
+	// (player_manager.cpp; ветка hooks.cpp — listen-server). Смену карты список переживает,
+	// и фактически чистится на первом же спавне через SyncFromHeld: в руках после спавна
+	// выданного нет, значит из списка оно выпадает.
 	virtual void Reset() override
 	{
 		this->givenWeapons.RemoveAll();
@@ -45,7 +54,8 @@ public:
 	// Перевыдать всё выданное. Зовётся ПОСЛЕ RemoveAllItems из UpdatePistol.
 	void RegiveGiven();
 
-	// Гасим IN_ATTACK/IN_ATTACK2, пока активное оружие — граната.
+	// Гасим IN_ATTACK/IN_ATTACK2, пока активное оружие — граната. Гейт только по
+	// активному оружию: подобранная с земли граната тоже не должна бросаться.
 	void OnProcessUsercmds(PlayerCommand *cmds, int numcmds);
 
 private:
