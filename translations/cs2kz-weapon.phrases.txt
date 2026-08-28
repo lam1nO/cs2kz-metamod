@@ -35,6 +35,11 @@
 		"en"		"{grey}Could not give the weapon — tell the admins."
 		"ru"		"{grey}Не получилось выдать оружие — скажи админам."
 	}
+	"Weapon Slot Busy"
+	{
+		"en"		"{grey}That slot is busy and could not be cleared. Drop your current weapon with {default}G{grey} and try again."
+		"ru"		"{grey}Слот занят и освободить его не вышло. Выброси текущее оружие на {default}G{grey} и повтори."
+	}
 	"Weapon Give Failed"
 	{
 		"en"		"{grey}You have to be alive to get a weapon."

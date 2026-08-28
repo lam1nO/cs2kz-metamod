@@ -44,6 +44,7 @@ enum class GiveResult
 	Ok,
 	NotAlive,   // мёртв, не в игре или сервис выключен
 	LimitHit,   // упёрся в KZ_MAX_GIVEN_WEAPONS
+	SlotBusy,   // слот занят и освободить его безопасно не вышло
 	Internal,   // нет itemServices или GiveNamedItem вернул nullptr — should-never-happen
 };
 // clang-format on
@@ -105,7 +106,8 @@ private:
 	// Убрать из мира выброшенную нами и никем не подобранную сущность записи i.
 	void RemoveDroppedEntity(i32 index);
 	// Освободить слот перед выдачей: снять с игрока оружие того же слота.
-	void ClearSlot(WeaponSlotKind slot);
+	// false — что-то из этого слота отцепить НЕ удалось; выдавать нельзя.
+	bool ClearSlot(WeaponSlotKind slot);
 
 	CUtlVector<GivenWeapon_t> givenWeapons {};
 };

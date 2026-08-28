@@ -122,18 +122,8 @@ const WeaponInfo_t *KZWeaponService::FindByClassName(const char *className)
 
 bool KZWeaponService::IsGrenadeClassName(const char *className)
 {
-	if (!className)
-	{
-		return false;
-	}
-	for (u32 i = 0; i < KZ_ARRAYSIZE(s_weapons); i++)
-	{
-		if (s_weapons[i].slot == WeaponSlotKind::Grenade && KZ_STREQI(s_weapons[i].className, className))
-		{
-			return true;
-		}
-	}
-	return false;
+	const WeaponInfo_t *info = KZWeaponService::FindByClassName(className);
+	return info && info->slot == WeaponSlotKind::Grenade;
 }
 
 GiveResult KZWeaponService::GiveWeapon(const WeaponInfo_t &info)
@@ -177,7 +167,10 @@ GiveResult KZWeaponService::GiveWeapon(const WeaponInfo_t &info)
 	// Освободить слот ДО выдачи: иначе новый ствол не заменит текущий, а упадёт на землю
 	// и не поднимется — слот-то занят. Симптом с канарейки: «!glock с usp в руках →
 	// glock падает передо мной, остаюсь с usp».
-	this->ClearSlot(info.slot);
+	if (!this->ClearSlot(info.slot))
+	{
+		return GiveResult::SlotBusy;
+	}
 
 	CBasePlayerWeapon *weapon = itemServices->GiveNamedItem(info.className);
 	if (!weapon)
@@ -196,19 +189,19 @@ GiveResult KZWeaponService::GiveWeapon(const WeaponInfo_t &info)
 	return GiveResult::Ok;
 }
 
-void KZWeaponService::ClearSlot(WeaponSlotKind slot)
+bool KZWeaponService::ClearSlot(WeaponSlotKind slot)
 {
 	// Гранаты не трогаем: слотов под них несколько, he+flash+smoke держатся вместе.
 	if (slot == WeaponSlotKind::Grenade || !this->player->IsAlive() || !this->player->IsInGame())
 	{
-		return;
+		return true;
 	}
 	auto pawn = this->player->GetPlayerPawn();
 	auto weaponServices = pawn->m_pWeaponServices();
 	auto itemServices = pawn->m_pItemServices();
 	if (!weaponServices || !itemServices)
 	{
-		return;
+		return false;
 	}
 	// Сначала СОБИРАЕМ, потом снимаем: удаление во время обхода m_hMyWeapons ломает
 	// итерацию (тот же приём, что в KZPistolService::NeedWeaponStripping).
@@ -230,16 +223,36 @@ void KZWeaponService::ClearSlot(WeaponSlotKind slot)
 			victims.AddToTail(weapon);
 		}
 	}
+
+	bool freed = true;
 	FOR_EACH_VEC(victims, i)
 	{
 		CBasePlayerWeapon *weapon = victims[i];
-		if (!weapon)
+		itemServices->DropActiveWeapon(weapon);
+
+		// ТРЕТИЙ ШАГ, без которого этот код — тот самый краш 21.08. DropActiveWeapon
+		// может оказаться пустышкой (дроп на профиле запрещён cvar'ом), и тогда
+		// RemoveEntity убьёт сущность, на которую ещё смотрят m_hMyWeapons и
+		// m_hActiveWeapon клиента. Поэтому УДАЛЯЕМ ТОЛЬКО ОТЦЕПЛЁННОЕ, а если
+		// отцепить не вышло — честно отказываем в выдаче, а не роняем игрока.
+		bool stillHeld = false;
+		auto held = weaponServices->m_hMyWeapons();
+		FOR_EACH_VEC(*held, j)
 		{
+			if ((*held)[j].Get() == weapon)
+			{
+				stillHeld = true;
+				break;
+			}
+		}
+		if (stillHeld)
+		{
+			KZ_LOG_WARN(LogChannel::Misc, "[cyb] weapon_slot_not_freed steam_id=%llu weapon=%s reason=drop_no_op\n",
+						this->player->GetSteamId64(false), ((CBaseModelEntity *)weapon)->GetClassname());
+			freed = false;
 			continue;
 		}
-		// Отцепить, потом удалить. Порядок тот же, что в cyber-skins RegiveKnife, и по той
-		// же причине: Remove() ещё привязанной сущности оставляет висячую ссылку у клиента.
-		itemServices->DropActiveWeapon(weapon);
+
 		// Своя запись о нём больше не нужна — иначе RegiveGiven вернёт снятое обратно.
 		for (i32 j = this->givenWeapons.Count() - 1; j >= 0; j--)
 		{
@@ -250,6 +263,7 @@ void KZWeaponService::ClearSlot(WeaponSlotKind slot)
 		}
 		g_pKZUtils->RemoveEntity(weapon);
 	}
+	return freed;
 }
 
 void KZWeaponService::SyncFromHeld()
@@ -320,6 +334,38 @@ void KZWeaponService::RegiveGiven()
 	{
 		return;
 	}
+	// Слоты освобождаем ОДНИМ проходом ДО выдачи. Два повода: UpdatePistol только что
+	// выдал предпочтительный пистолет (строка 131), и перевыдача нашего glock'а ушла бы
+	// в занятый слот — тот же «падает передо мной, остаюсь с usp», только молча, без
+	// команды в чате. И второй: ClearSlot мутирует givenWeapons, поэтому звать его
+	// внутри цикла по этому же вектору нельзя — собьётся индексация.
+	bool needRifle = false;
+	bool needPistol = false;
+	FOR_EACH_VEC(this->givenWeapons, i)
+	{
+		const WeaponInfo_t *info = KZWeaponService::FindByClassName(this->givenWeapons[i].requested.Get());
+		if (!info)
+		{
+			continue;
+		}
+		if (info->slot == WeaponSlotKind::Rifle)
+		{
+			needRifle = true;
+		}
+		else if (info->slot == WeaponSlotKind::Pistol)
+		{
+			needPistol = true;
+		}
+	}
+	if (needRifle)
+	{
+		this->ClearSlot(WeaponSlotKind::Rifle);
+	}
+	if (needPistol)
+	{
+		this->ClearSlot(WeaponSlotKind::Pistol);
+	}
+
 	// С хвоста: неудачную выдачу удаляем на месте, а Remove сдвигает индексы.
 	for (i32 i = this->givenWeapons.Count() - 1; i >= 0; i--)
 	{
@@ -425,6 +471,9 @@ static_function META_RES GiveByCommand(CCSPlayerController *controller, const ch
 	{
 		case GiveResult::Ok:
 			break;
+		case GiveResult::SlotBusy:
+			player->languageService->PrintChat(true, false, "Weapon Slot Busy");
+			return MRES_SUPERCEDE;
 		case GiveResult::LimitHit:
 			player->languageService->PrintChat(true, false, "Weapon Limit Reached");
 			return MRES_SUPERCEDE;
