@@ -254,10 +254,15 @@ GiveResult KZWeaponService::ClearSlot(WeaponSlotKind slot)
 	FOR_EACH_VEC(victims, i)
 	{
 		CBasePlayerWeapon *weapon = victims[i];
+		// DropActiveWeapon бросает АКТИВНОЕ оружие, а параметр реального выбора не делает.
+		// Замерено владельцем на канарейке: с AK в руках команда !r8 выбрасывала AK, а не
+		// usp, и снятие пистолета «не удавалось». Поэтому жертву сперва делаем активной —
+		// ровно так это делает проверенный прод-код cyber-35hp (Cyber35hp.cs:809).
+		weaponServices->m_hActiveWeapon(weapon);
 		itemServices->DropActiveWeapon(weapon);
 
 		// ТРЕТИЙ ШАГ, без которого этот код — тот самый краш 21.08. DropActiveWeapon
-		// может оказаться пустышкой (дроп на профиле запрещён cvar'ом), и тогда
+		// может оказаться пустышкой по пока не известной нам причине, и тогда
 		// RemoveEntity убьёт сущность, на которую ещё смотрят m_hMyWeapons и
 		// m_hActiveWeapon клиента. Поэтому УДАЛЯЕМ ТОЛЬКО ОТЦЕПЛЁННОЕ, а если
 		// отцепить не вышло — честно отказываем в выдаче, а не роняем игрока.
@@ -289,6 +294,11 @@ GiveResult KZWeaponService::ClearSlot(WeaponSlotKind slot)
 		}
 		g_pKZUtils->RemoveEntity(weapon);
 	}
+	// Активное оружие после дропа НЕ восстанавливаем сырой записью в m_hActiveWeapon:
+	// она не проходит через Deploy/Holster, и у движка осталась бы вьюмодель прошлого
+	// ствола (в этом же форке playback.cpp для реального переключения идёт через
+	// set_weaponselect, а сырой записью пользуется только чтобы обнулить). Движок сам
+	// выберет следующее оружие штатным путём — это корректнее и не наша забота.
 	return result;
 }
 
