@@ -15,53 +15,53 @@ CConVar<bool> kz_weapon_commands("kz_weapon_commands", FCVAR_NONE,
 // clang-format off
 static_global const WeaponInfo_t s_weapons[] = {
 	// винтовки
-	{"ak",		 "weapon_ak47",			 false},
-	{ "m4",		"weapon_m4a1",			false},
-	{ "m4s",	   "weapon_m4a1_silencer", false},
-	{ "aug",	   "weapon_aug",			 false},
+	{ "ak", "weapon_ak47", WeaponSlotKind::Rifle},
+	{ "m4", "weapon_m4a1", WeaponSlotKind::Rifle},
+	{ "m4s", "weapon_m4a1_silencer", WeaponSlotKind::Rifle},
+	{ "aug", "weapon_aug", WeaponSlotKind::Rifle},
 	// !sg занят таймерным kz_safeguard — берём разговорные имена SG 553.
-	{ "sg553",	 "weapon_sg556",		   false},
-	{ "krieg",	 "weapon_sg556",		   false},
-	{ "galil",	 "weapon_galilar",		 false},
-	{ "famas",	 "weapon_famas",		   false},
-	{ "awp",	   "weapon_awp",			 false},
-	{ "scout",	 "weapon_ssg08",		   false},
-	{ "ssg",	   "weapon_ssg08",		   false},
-	{ "scar",	  "weapon_scar20",		  false},
-	{ "g3",		"weapon_g3sg1",		   false},
+	{ "sg553", "weapon_sg556", WeaponSlotKind::Rifle},
+	{ "krieg", "weapon_sg556", WeaponSlotKind::Rifle},
+	{ "galil", "weapon_galilar", WeaponSlotKind::Rifle},
+	{ "famas", "weapon_famas", WeaponSlotKind::Rifle},
+	{ "awp", "weapon_awp", WeaponSlotKind::Rifle},
+	{ "scout", "weapon_ssg08", WeaponSlotKind::Rifle},
+	{ "ssg", "weapon_ssg08", WeaponSlotKind::Rifle},
+	{ "scar", "weapon_scar20", WeaponSlotKind::Rifle},
+	{ "g3", "weapon_g3sg1", WeaponSlotKind::Rifle},
 	// пистолеты-пулемёты
-	{ "mp9",	   "weapon_mp9",			 false},
-	{ "mac10",	 "weapon_mac10",		   false},
-	{ "mp7",	   "weapon_mp7",			 false},
-	{ "mp5",	   "weapon_mp5sd",		   false},
-	{ "ump",	   "weapon_ump45",		   false},
-	{ "p90",	   "weapon_p90",			 false},
-	{ "bizon",	 "weapon_bizon",		   false},
+	{ "mp9", "weapon_mp9", WeaponSlotKind::Rifle},
+	{ "mac10", "weapon_mac10", WeaponSlotKind::Rifle},
+	{ "mp7", "weapon_mp7", WeaponSlotKind::Rifle},
+	{ "mp5", "weapon_mp5sd", WeaponSlotKind::Rifle},
+	{ "ump", "weapon_ump45", WeaponSlotKind::Rifle},
+	{ "p90", "weapon_p90", WeaponSlotKind::Rifle},
+	{ "bizon", "weapon_bizon", WeaponSlotKind::Rifle},
 	// тяжёлое
-	{ "nova",	  "weapon_nova",			false},
-	{ "xm",		"weapon_xm1014",		  false},
-	{ "mag7",	  "weapon_mag7",			false},
-	{ "sawedoff",  "weapon_sawedoff",		false},
-	{ "m249",	  "weapon_m249",			false},
-	{ "negev",	 "weapon_negev",		   false},
+	{ "nova", "weapon_nova", WeaponSlotKind::Rifle},
+	{ "xm", "weapon_xm1014", WeaponSlotKind::Rifle},
+	{ "mag7", "weapon_mag7", WeaponSlotKind::Rifle},
+	{ "sawedoff", "weapon_sawedoff", WeaponSlotKind::Rifle},
+	{ "m249", "weapon_m249", WeaponSlotKind::Rifle},
+	{ "negev", "weapon_negev", WeaponSlotKind::Rifle},
 	// пистолеты
-	{ "deagle",	"weapon_deagle",		  false},
-	{ "r8",		"weapon_revolver",		false},
-	{ "glock",	 "weapon_glock",		   false},
-	{ "usp",	   "weapon_usp_silencer",  false},
-	{ "p2000",	 "weapon_hkp2000",		 false},
-	{ "p250",	  "weapon_p250",			false},
-	{ "tec9",	  "weapon_tec9",			false},
-	{ "fiveseven", "weapon_fiveseven",	   false},
-	{ "cz",		"weapon_cz75a",		   false},
-	{ "elite",	 "weapon_elite",		   false},
+	{ "deagle", "weapon_deagle", WeaponSlotKind::Pistol},
+	{ "r8", "weapon_revolver", WeaponSlotKind::Pistol},
+	{ "glock", "weapon_glock", WeaponSlotKind::Pistol},
+	{ "usp", "weapon_usp_silencer", WeaponSlotKind::Pistol},
+	{ "p2000", "weapon_hkp2000", WeaponSlotKind::Pistol},
+	{ "p250", "weapon_p250", WeaponSlotKind::Pistol},
+	{ "tec9", "weapon_tec9", WeaponSlotKind::Pistol},
+	{ "fiveseven", "weapon_fiveseven", WeaponSlotKind::Pistol},
+	{ "cz", "weapon_cz75a", WeaponSlotKind::Pistol},
+	{ "elite", "weapon_elite", WeaponSlotKind::Pistol},
 	// гранаты — держать можно, кинуть нельзя
-	{ "he",		"weapon_hegrenade",	   true },
-	{ "flash",	 "weapon_flashbang",	   true },
-	{ "smoke",	 "weapon_smokegrenade",   true },
-	{ "molo",	  "weapon_molotov",		 true },
-	{ "inc",	   "weapon_incgrenade",	 true },
-	{ "decoy",	 "weapon_decoy",		   true },
+	{ "he", "weapon_hegrenade", WeaponSlotKind::Grenade},
+	{ "flash", "weapon_flashbang", WeaponSlotKind::Grenade},
+	{ "smoke", "weapon_smokegrenade", WeaponSlotKind::Grenade},
+	{ "molo", "weapon_molotov", WeaponSlotKind::Grenade},
+	{ "inc", "weapon_incgrenade", WeaponSlotKind::Grenade},
+	{ "decoy", "weapon_decoy", WeaponSlotKind::Grenade},
 };
 // clang-format on
 
@@ -104,6 +104,22 @@ const WeaponInfo_t *KZWeaponService::FindByCommand(const char *cmd)
 	return nullptr;
 }
 
+const WeaponInfo_t *KZWeaponService::FindByClassName(const char *className)
+{
+	if (!className)
+	{
+		return nullptr;
+	}
+	for (u32 i = 0; i < KZ_ARRAYSIZE(s_weapons); i++)
+	{
+		if (KZ_STREQI(s_weapons[i].className, className))
+		{
+			return &s_weapons[i];
+		}
+	}
+	return nullptr;
+}
+
 bool KZWeaponService::IsGrenadeClassName(const char *className)
 {
 	if (!className)
@@ -112,7 +128,7 @@ bool KZWeaponService::IsGrenadeClassName(const char *className)
 	}
 	for (u32 i = 0; i < KZ_ARRAYSIZE(s_weapons); i++)
 	{
-		if (s_weapons[i].grenade && KZ_STREQI(s_weapons[i].className, className))
+		if (s_weapons[i].slot == WeaponSlotKind::Grenade && KZ_STREQI(s_weapons[i].className, className))
 		{
 			return true;
 		}
@@ -158,6 +174,11 @@ GiveResult KZWeaponService::GiveWeapon(const WeaponInfo_t &info)
 		return GiveResult::LimitHit;
 	}
 
+	// Освободить слот ДО выдачи: иначе новый ствол не заменит текущий, а упадёт на землю
+	// и не поднимется — слот-то занят. Симптом с канарейки: «!glock с usp в руках →
+	// glock падает передо мной, остаюсь с usp».
+	this->ClearSlot(info.slot);
+
 	CBasePlayerWeapon *weapon = itemServices->GiveNamedItem(info.className);
 	if (!weapon)
 	{
@@ -173,6 +194,62 @@ GiveResult KZWeaponService::GiveWeapon(const WeaponInfo_t &info)
 	given.entity = weapon;
 	this->givenWeapons.AddToTail(given);
 	return GiveResult::Ok;
+}
+
+void KZWeaponService::ClearSlot(WeaponSlotKind slot)
+{
+	// Гранаты не трогаем: слотов под них несколько, he+flash+smoke держатся вместе.
+	if (slot == WeaponSlotKind::Grenade || !this->player->IsAlive() || !this->player->IsInGame())
+	{
+		return;
+	}
+	auto pawn = this->player->GetPlayerPawn();
+	auto weaponServices = pawn->m_pWeaponServices();
+	auto itemServices = pawn->m_pItemServices();
+	if (!weaponServices || !itemServices)
+	{
+		return;
+	}
+	// Сначала СОБИРАЕМ, потом снимаем: удаление во время обхода m_hMyWeapons ломает
+	// итерацию (тот же приём, что в KZPistolService::NeedWeaponStripping).
+	CUtlVector<CBasePlayerWeapon *> victims;
+	auto weapons = weaponServices->m_hMyWeapons();
+	FOR_EACH_VEC(*weapons, i)
+	{
+		CBasePlayerWeapon *weapon = (*weapons)[i].Get();
+		if (!weapon)
+		{
+			continue;
+		}
+		CBaseModelEntity *entity = weapon;
+		// Классифицируем по НАШЕМУ каталогу. Чего в нём нет — не наше дело: нож
+		// (weapon_knife/_t) в каталог не входит и потому никогда сюда не попадёт.
+		const WeaponInfo_t *held = KZWeaponService::FindByClassName(entity->GetClassname());
+		if (held && held->slot == slot)
+		{
+			victims.AddToTail(weapon);
+		}
+	}
+	FOR_EACH_VEC(victims, i)
+	{
+		CBasePlayerWeapon *weapon = victims[i];
+		if (!weapon)
+		{
+			continue;
+		}
+		// Отцепить, потом удалить. Порядок тот же, что в cyber-skins RegiveKnife, и по той
+		// же причине: Remove() ещё привязанной сущности оставляет висячую ссылку у клиента.
+		itemServices->DropActiveWeapon(weapon);
+		// Своя запись о нём больше не нужна — иначе RegiveGiven вернёт снятое обратно.
+		for (i32 j = this->givenWeapons.Count() - 1; j >= 0; j--)
+		{
+			if (this->givenWeapons[j].entity.Get() == (CBaseEntity *)weapon)
+			{
+				this->givenWeapons.Remove(j);
+			}
+		}
+		g_pKZUtils->RemoveEntity(weapon);
+	}
 }
 
 void KZWeaponService::SyncFromHeld()
@@ -363,7 +440,7 @@ static_function META_RES GiveByCommand(CCSPlayerController *controller, const ch
 			player->languageService->PrintChat(true, false, "Weapon Give Failed");
 			return MRES_SUPERCEDE;
 	}
-	if (info->grenade)
+	if (info->slot == WeaponSlotKind::Grenade)
 	{
 		player->languageService->PrintChat(true, false, "Weapon Given Grenade");
 	}
@@ -388,7 +465,7 @@ SCMD(kz_guns, SCFL_MISC | SCFL_PLAYER | SCFL_HELP)
 	std::string note = player->languageService->PrepareMessage("Weapon List Grenade Note");
 	for (u32 i = 0; i < KZ_ARRAYSIZE(s_weapons); i++)
 	{
-		if (s_weapons[i].grenade)
+		if (s_weapons[i].slot == WeaponSlotKind::Grenade)
 		{
 			player->PrintConsole(false, false, "!%s  %s", s_weapons[i].cmd, note.c_str());
 		}

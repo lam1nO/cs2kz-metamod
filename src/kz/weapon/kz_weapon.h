@@ -17,11 +17,23 @@
 // лежит до смены карты, а команда выдаёт снова.
 #define KZ_MAX_GIVEN_WEAPONS 8
 
+// Слот нужен не для красоты: в CS2 выдача второго предмета в ЗАНЯТЫЙ слот не заменяет
+// текущий — новый предмет падает на землю, и поднять его нельзя, потому что слот всё ещё
+// занят. Отсюда «пишу !glock, передо мной падает glock, остаюсь с usp». Поэтому перед
+// выдачей ствол того же слота снимаем. Гранаты — исключение: их слотов несколько, и
+// держать he+flash+smoke одновременно можно и нужно.
+enum class WeaponSlotKind
+{
+	Rifle,
+	Pistol,
+	Grenade,
+};
+
 struct WeaponInfo_t
 {
 	const char *cmd;       // имя команды без префикса kz_ (в чате: !<cmd>)
 	const char *className; // classname сущности для GiveNamedItem
-	bool grenade;          // гранаты держим, но не даём бросить
+	WeaponSlotKind slot;
 };
 
 // Результат выдачи. Не bool: причины отказа игроку показываются разными строками, а
@@ -61,6 +73,8 @@ public:
 	// nullptr, если такой команды нет.
 	static const WeaponInfo_t *FindByCommand(const char *cmd);
 	static bool IsGrenadeClassName(const char *className);
+	// nullptr, если такого classname нет в каталоге (значит выдавали не мы).
+	static const WeaponInfo_t *FindByClassName(const char *className);
 
 	// На выделенном сервере KZPlayer::Reset() зовётся с ДИСКОННЕКТА, а не со смены карты
 	// (player_manager.cpp; ветка hooks.cpp — listen-server). Смену карты список переживает.
@@ -90,6 +104,8 @@ private:
 	bool HoldingGrenade();
 	// Убрать из мира выброшенную нами и никем не подобранную сущность записи i.
 	void RemoveDroppedEntity(i32 index);
+	// Освободить слот перед выдачей: снять с игрока оружие того же слота.
+	void ClearSlot(WeaponSlotKind slot);
 
 	CUtlVector<GivenWeapon_t> givenWeapons {};
 };
