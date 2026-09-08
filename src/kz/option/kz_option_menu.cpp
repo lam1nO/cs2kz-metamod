@@ -464,16 +464,12 @@ void KZ::option::InitOptionsMenu()
 	KZTimerService::RegisterEventListener(&s_optionsMenuTimerListener);
 }
 
-// Корень реестра настроек (panorama) — тот же вход, тот же захват ввода, что у
-// `kz_hudmenu` ниже (layout/menu.cpp): OpenLayoutMenu() без аргументов открывает дерево с
-// его текущего верхнего уровня. Сейчас (до вызовов KZMiscMenu_Register/
-// KZJumpstatsMenu_Register/KZLocalOptionsMenu_Register — они существуют, но в общий Init-
-// порядок ещё не включены, см. их же комментарии) в дереве только HUD-категории, поэтому
-// корень и первая HUD-категория физически совпадают — !options и !hudmenu ведут в одно и
-// то же место. Развести их (root без предвыбранной категории отдельно от явной HUD-
-// категории) — сигнатурная правка OpenLayoutMenu в layout/menu.cpp/kz_hud.h, то есть
-// изменение файла вне периметра этой задачи; делать это стоит вместе с включением трёх
-// Register() выше, когда в дереве появятся не-HUD категории и разница станет видна игроку.
+// Корень реестра настроек (panorama) — тот же вход, тот же захват ввода, что у `kz_hudmenu`
+// ниже (layout/menu.cpp), но БЕЗ ключа категории: OpenLayoutMenu(NULL) ставит menuCategory=-1 —
+// список всех категорий (HUD + Misc + Jumpstats + наши локальные ветки, все четыре Register()
+// включены в Init-порядок, Task 15), ни одна не выбрана. `kz_hudmenu` ниже, напротив, передаёт
+// ключ HUD-категории и садится сразу на неё (R8) — с этой правки !options и !hudmenu
+// физически разные экраны, а не совпадают на индексе 0.
 // Если panorama-сущность не создалась (аддон не доехал), OpenLayoutMenu сам сообщает об
 // этом игроку в чат ("MHUD - Unavailable") — тишины на команду не остаётся.
 SCMD(kz_options, SCFL_PLAYER | SCFL_PREFERENCE | SCFL_HELP)

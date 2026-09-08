@@ -456,7 +456,12 @@ public:
 	// зовётся один раз из Init(), см. kz_hud.cpp. Реализация — hud/prefs/hud_prefs.cpp.
 	static void InitMenuPrefs();
 
-	void OpenLayoutMenu();
+	// categoryKey=NULL — корень дерева (menuCategory=-1, список категорий без предвыбранной
+	// панели пунктов, RenderMenuItems/GetMenuItem уже умеют этот индекс, см. layout/menu.cpp).
+	// categoryKey задан — открыть СРАЗУ эту категорию (поиск по KZOptNode::phraseKey, не по
+	// числовому индексу: он едет при первой же смене порядка Register(), см. cs2kz.cpp Task 15);
+	// категория не найдена (ещё не зарегистрирована/опечатка) — тот же root, не тишина и не крэш.
+	void OpenLayoutMenu(const char *categoryKey = NULL);
 
 	// Прячет корневую панель и снимает курсорный захват. Дополнительно зовётся (НЕ только по
 	// клику "Закрыть") из точек, где персистентный худ-стейт уже гасится по тем же причинам:

@@ -62,9 +62,11 @@
 #define KZ_MENU_DEFAULT_TITLE "HUD Settings"
 
 // === Обход реестра (KZ::menu::GetTree(), Task 1) ============================================
-// Состав меню (категории/пункты) зарегистрирован в hud/prefs/hud_prefs.cpp — наше дерево без
-// подкатегорий (плоский список, как и раньше: 7 категорий, максимум ~10 пунктов), поэтому
-// menuCategory индексирует ПРЯМО верхний уровень GetTree(), subs не используются.
+// Состав меню (категории/пункты) собирается из ЧЕТЫРЁХ Register() (hud/prefs/hud_prefs.cpp —
+// 7 категорий, misc/jumpstats/local_prefs — ещё 7, включены в Init-порядок Task 15) — дерево
+// без подкатегорий (плоский список), поэтому menuCategory индексирует ПРЯМО верхний уровень
+// GetTree(), subs не используются. menuCategory == -1 — root (список категорий, ни одна не
+// выбрана, панель пунктов пуста): использует OpenLayoutMenu(NULL), см. ниже.
 
 static_function const KZOptItem *GetMenuItem(i32 category, i32 itemIndex)
 {
@@ -502,7 +504,8 @@ void KZHUDService::RenderMenuItems(CCSCustomHudLayout *layout)
 			{
 				case KZOptItemType::Toggle:
 					on = this->player->optionService->GetPreferenceBool(it.prefKey, it.idef != 0);
-					value = on ? "On" : "Off";
+					// Ключи существуют с задачи 12 (particles.cpp), код их не читал — Task 15.
+					value = KZLanguageService::PrepareMessageWithLang(lang, on ? "HUD - Menu On" : "HUD - Menu Off");
 					break;
 				case KZOptItemType::Choice:
 					value = GetChoiceValueLabel(this->player, it);
@@ -1021,7 +1024,28 @@ void KZHUDService::OnLayoutMenuClick(uint32 packedHandle, const char *panelId)
 	}
 }
 
-void KZHUDService::OpenLayoutMenu()
+// Индекс категории по её phraseKey (Task 15: развести !options/root от !hudmenu/HUD, не завязываясь
+// на числовой индекс — он плывёт при первой же смене порядка регистрации в cs2kz.cpp). NULL или
+// ключ не найден в дереве — root (-1): RenderMenuCategories/RenderMenuItems/GetMenuItem уже трактуют
+// -1 как «список категорий без предвыбранной», ничего дополнительно заводить не пришлось.
+static_function i32 FindCategoryIndex(const char *categoryKey)
+{
+	if (!categoryKey)
+	{
+		return -1;
+	}
+	const std::vector<KZOptNode *> &tree = KZ::menu::GetTree();
+	for (i32 i = 0; i < (i32)tree.size(); i++)
+	{
+		if (tree[i]->phraseKey && V_strcmp(tree[i]->phraseKey, categoryKey) == 0)
+		{
+			return i;
+		}
+	}
+	return -1;
+}
+
+void KZHUDService::OpenLayoutMenu(const char *categoryKey)
 {
 	if (this->menuOpen)
 	{
@@ -1036,7 +1060,7 @@ void KZHUDService::OpenLayoutMenu()
 		return;
 	}
 	this->menuOpen = true;
-	this->menuCategory = 0;
+	this->menuCategory = FindCategoryIndex(categoryKey);
 	this->menuPopup = MenuPopup::None;
 	this->menuPopupItem = -1;
 	// Переводит игрока в режим курсора — симметричное false обязано случиться на КАЖДОМ пути
@@ -1069,6 +1093,10 @@ void KZHUDService::CloseLayoutMenu()
 
 // === Точка входа: чат-команда (проводка клика от движка — отдельная задача, см. шапку файла) ==
 
+// R8: !hudmenu годами открывал настройки худа напрямую — регресс был бы лишний клик через
+// список категорий. Ключ ("HUD - Menu Cat General") — первая категория, которую регистрирует
+// KZHUDService::InitMenuPrefs() (hud/prefs/hud_prefs.cpp), а не жёсткий индекс 0: индекс сам
+// поехал бы при первой же смене порядка Register() в cs2kz.cpp (Task 15), ключ — нет.
 SCMD(kz_hudmenu, SCFL_HUD | SCFL_PREFERENCE)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
@@ -1082,7 +1110,7 @@ SCMD(kz_hudmenu, SCFL_HUD | SCFL_PREFERENCE)
 	}
 	else
 	{
-		player->hudService->OpenLayoutMenu();
+		player->hudService->OpenLayoutMenu("HUD - Menu Cat General");
 	}
 	return MRES_SUPERCEDE;
 }
