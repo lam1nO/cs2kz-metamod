@@ -92,8 +92,9 @@ static_function void OutlineOnActivate(KZPlayer *player, i64 tag)
 // колбэком (AddActionToggle сервисов в misc_prefs/local_prefs) он оставил бы кэш сервиса
 // рассинхронизированным — ровно тот дефект, из-за которого сломались тумблеры до этого
 // фикс-раунда. Обводка исключением не является: её кэш — layoutPrefs, а ActivateMenuItem
-// зовёт RefreshLayoutPrefs сразу после onActivate кнопки. В General сбрасывать нечего
-// (единственный пункт — HudType, у него нет своего префа), кнопки там нет.
+// зовёт RefreshLayoutPrefs сразу после onActivate кнопки. В General своей кнопки «сбросить
+// страницу» нет: там лежит общий Reset All (ниже), а HudType не сбрасывается вовсе — у его
+// Choice-пункта нет префа, и ResetNode такие пункты пропускает.
 static_global KZOptNode *s_resettableNodes[(i32)LayoutElement::Count + 1] {};
 
 static_function void ResetPageOnActivate(KZPlayer *player, i64 tag)
@@ -110,6 +111,25 @@ static_function void AddResetButton(KZOptNode *node, i32 slot)
 {
 	s_resettableNodes[slot] = node;
 	KZ::menu::AddButton(node, "HUD - Menu Label Reset", &ResetPageOnActivate, slot);
+}
+
+// === Сброс ВСЕХ настроек худа (апстримный "Reset All" на странице General) ====================
+// У апстрима такая кнопка есть (origin/master hud_prefs.cpp, General) — при порте потерялась.
+// Живёт в General, а не на родительской категории «Худ»: у категории с подкатегориями своих
+// пунктов не бывает вовсе (ActiveMenuNode, layout/menu.cpp — родитель возвращает NULL, пока не
+// выбрана подкатегория), так что пункт на ней был бы недостижим для игрока.
+// Сбрасывает страницы всех пяти элементов + прицел (s_resettableNodes) и саму General.
+// HudType при этом НЕ сбрасывается: его Choice-пункт зарегистрирован без prefKey, а ResetNode
+// пункты без префа пропускает — иначе «сбросить оформление» могло бы выключить игроку худ.
+static_global KZOptNode *s_hudGeneralNode {};
+
+static_function void ResetAllOnActivate(KZPlayer *player, i64 tag)
+{
+	for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(s_resettableNodes); i++)
+	{
+		KZ::menu::ResetNode(player, s_resettableNodes[i]);
+	}
+	KZ::menu::ResetNode(player, s_hudGeneralNode);
 }
 
 // === Пять полей элемента, общих для Timer/Speed/Prespeed/Keys/Checkpoint — ключи из
@@ -147,13 +167,41 @@ void KZHUDService::InitMenuPrefs()
 	KZOptNode *hud = KZ::menu::AddCategory("HUD - Menu Cat Hud");
 
 	KZOptNode *general = KZ::menu::AddSub(hud, "HUD - Menu Cat General");
+	s_hudGeneralNode = general;
 	KZ::menu::AddChoice(general, "HUD - Menu Label HudType", GetHudTypeChoices, GetHudTypeCurrent, OnHudTypePick);
 	// Общий пункт "Outline" убран (задача 4): обводка стала поэлементной
 	// (LAYOUT_ELEMENTS[*].outlineKey у каждого элемента свой, пункт — в AddHudElementItems),
 	// два источника одной и той же настройки — прямой путь к рассинхрону.
+	//
+	// Пункта под апстримный showPanel здесь НЕТ, и это решение, а не пропуск: его тумблер
+	// KZHUDService::TogglePanel() не вызывается ниоткуда (git grep — только объявление и
+	// определение), панорама преф вообще не читает (layout/mhud.cpp:367), а роль «показывать
+	// худ или нет» с задачи 12 у типа Off — то есть у пункта HudType строкой выше. Пункт на
+	// showPanel звал бы мёртвый метод, а пункт «Панель» поверх HudType дал бы ДВА источника
+	// одного состояния — тот же рассинхрон, из-за которого убран общий Outline (строкой выше).
+	//
+	// mhudMimicSpec — мимикрия под настройки наблюдаемого (layout/prefs.cpp:GetLayoutPrefs).
+	// Дефолт false = тот же, что читает RefreshLayoutPrefs (layout/prefs.cpp:129).
+	KZ::menu::AddToggle(general, "HUD - Menu Label MimicSpec", "mhudMimicSpec", false);
+	KZ::menu::SetItemSubtext(general, "HUD - Menu Label MimicSpec Sub");
+	// compactPanel — СТАНДАРТНЫЙ (HTML) худ, не MHUD: две строки вместо полной панели
+	// (KZHUDService::IsCompactPanel, kz_hud.cpp). Преф жив и до этой задачи переключался только
+	// командой `!panel compact` — пункта в меню у него не было. Голый AddToggle, а не
+	// AddActionToggle: IsCompactPanel() кэша не держит, читает преф заново каждый раз.
+	// Дефолт false = дефолт GetPreferenceBool("compactPanel") без второго аргумента.
+	KZ::menu::AddToggle(general, "HUD - Menu Label CompactPanel", "compactPanel", false);
+	KZ::menu::SetItemSubtext(general, "HUD - Menu Label CompactPanel Sub");
+	// Сброс всех страниц худа разом — единственный пункт General со своим действием, поэтому
+	// стоит последним (см. ResetAllOnActivate выше).
+	KZ::menu::AddButton(general, "HUD - Menu Label ResetAll", &ResetAllOnActivate);
 
 	KZOptNode *timer = KZ::menu::AddSub(hud, "HUD - Menu Cat Timer");
 	AddHudElementItems(timer, LayoutElement::Timer);
+	// hudTimerDetail — сотые доли и часы в таймере (layout/prefs.cpp:108, timerDetailed).
+	// Преф читался кодом, а тронуть его игрок не мог вообще: ни пункта, ни команды. Ключ НАШ
+	// (апстримный называется mhudTimerDetailed) — не переименовываем, иначе у всех игроков
+	// настройка сбросилась бы на дефолт. Дефолт true = тот же, что читает RefreshLayoutPrefs.
+	KZ::menu::AddToggle(timer, "HUD - Menu Label TimerDetail", "hudTimerDetail", true);
 	KZ::menu::AddColor(timer, "HUD - Menu Label ProColor", "mhudTimerProColor", MHUD_DEF_TIMER_PRO_COLOR);
 	KZ::menu::AddColor(timer, "HUD - Menu Label TpColor", "mhudTimerTpColor", MHUD_DEF_TIMER_TP_COLOR);
 	KZ::menu::AddColor(timer, "HUD - Menu Label PausedColor", "mhudTimerPausedColor", MHUD_DEF_TIMER_PAUSED_COLOR);
@@ -162,12 +210,21 @@ void KZHUDService::InitMenuPrefs()
 
 	KZOptNode *speed = KZ::menu::AddSub(hud, "HUD - Menu Cat Speed");
 	AddHudElementItems(speed, LayoutElement::Speed);
+	// mhudSpeedPrecise — "%.2f" вместо "%.0f" (layout/prefs.cpp:121, применяется в
+	// layout/mhud.cpp:UpdateSpeedElement). Преф читался, доступа у игрока не было.
+	KZ::menu::AddToggle(speed, "HUD - Menu Label Decimal", "mhudSpeedPrecise", false);
 	KZ::menu::AddColor(speed, "HUD - Menu Label Color", "mhudSpeedColor", MHUD_DEF_BASE_COLOR);
 	KZ::menu::AddColor(speed, "HUD - Menu Label CjColor", "mhudSpeedCjColor", MHUD_DEF_CJ_COLOR);
 	AddResetButton(speed, (i32)LayoutElement::Speed);
 
 	KZOptNode *prespeed = KZ::menu::AddSub(hud, "HUD - Menu Cat Prespeed");
 	AddHudElementItems(prespeed, LayoutElement::Prespeed);
+	// Три префа престрейфа, портированные соседней задачей (layout/prefs.cpp:124-126,
+	// применяются в layout/mhud.cpp:UpdatePrespeedElement) — дефолты те же, что там читаются.
+	KZ::menu::AddToggle(prespeed, "HUD - Menu Label Decimal", "mhudPrespeedPrecise", false);
+	KZ::menu::AddToggle(prespeed, "HUD - Menu Label PrespeedBrackets", "mhudPrespeedBrackets", false);
+	KZ::menu::AddToggle(prespeed, "HUD - Menu Label PrespeedHideWalkOff", "mhudPrespeedHideWalkOff", false);
+	KZ::menu::SetItemSubtext(prespeed, "HUD - Menu Label PrespeedHideWalkOff Sub");
 	KZ::menu::AddColor(prespeed, "HUD - Menu Label Color", "mhudPrespeedColor", MHUD_DEF_BASE_COLOR);
 	KZ::menu::AddColor(prespeed, "HUD - Menu Label PerfColor", "mhudPrespeedPerfColor", MHUD_DEF_PERF_COLOR);
 	KZ::menu::AddColor(prespeed, "HUD - Menu Label JumpbugColor", "mhudPrespeedJumpbugColor", MHUD_DEF_JUMPBUG_COLOR);
