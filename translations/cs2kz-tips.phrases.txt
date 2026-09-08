@@ -1,22 +1,6 @@
 "Phrases"
 {
 	// =====[ CHAT MESSAGES ]=====
-	"Option - Tips - Enable"
-	{
-		"en"		"{grey}You will now see random tips in chat periodically."
-		"chi"		"{grey}你现在会定期在聊天栏中看到随机提示."
-		"ru"		"{grey}Теперь иногда вы будете видеть подсказки в чате."
-		"pl"		"{grey}Od teraz na czacie będą się czasami wyświetlać wskazówki."
-		"fi"		"{grey}Näet nyt satunnaisia vihjeitä chatissäsi määräajoin."
-		"sv"		"{grey}Nu kommer du att se tips i chatten med jämna mellanrum."
-		"ua"		"{grey}Тепер ви періодично будете бачити випадкові поради та підказки в чаті."
-		"tr"		"{grey}Periyodik olarak sohbette rastgele öneriler göreceksin."
-		"it"		"{grey}Ogni tanto riceverai dei consigli casuali."
-		"es"		"{grey}Ahora verás periódicamente consejos aleatorios en el chat."
-		"de"		"{grey}Du wirst jetzt regelmäßig zufällige Tipps im Chat sehen."
-		"ko"		"{grey}이제 주기적으로 채팅에서 랜덤 팁을 볼 수 있습니다."
-		"lv"		"{grey}Tagad tu regulāri redzēsi nejaušus padomus čatā."
-	}
 	"Option - Tips - Disable"
 	{
 		"en"		"{grey}You will no longer see random tips in chat periodically."

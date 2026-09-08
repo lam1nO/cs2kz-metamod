@@ -1,5 +1,5 @@
 // Меню настроек panorama-худа и крестика (Task 11, обход реестра — задача 2, типы Choice/Vector/
-// Button + enabledBy/solidOnly/unit/scale/subtext/divider — задача 3). Урезанный перенос
+// Button + enabledBy/solidOnly/unit/scale/subtext — задача 3). Урезанный перенос
 // апстримного src/kz/option/menu/{kz_menu,model,tables}.cpp — расхождения с ним:
 //   - Состав меню (категории/пункты) больше НЕ зашит статическими таблицами прямо тут —
 //     регистрируется в hud/prefs/hud_prefs.cpp через общий реестр (KZOptNode/KZOptItem,
@@ -635,13 +635,10 @@ void KZHUDService::RenderMenuItems(CCSCustomHudLayout *layout)
 			const std::string itemSub = it.subKey ? KZLanguageService::PrepareMessageWithLang(lang, it.subKey) : "";
 			this->SetMenuVar(layout, ItemSub(i), ItemSubVar(i), itemSub.c_str());
 			this->SetMenuBoolClass(layout, ItemPanel(i), "has-sub", this->menuApplied.itemHasSub[i], it.subKey != NULL);
-			// divider (dividerAfter/SetItemDivider модели) НЕ проводим: в разметке чужого аддона
-			// панель item_div%i несёт класс .item-divider, а правила ни для .item-divider.hidden,
-			// ни для безусловного .hidden в menu.css нет (проверено по несжатым исходникам
-			// апстрима) — класс применялся молча и без эффекта, разделитель виден под каждым
-			// пунктом в любом случае, зато 20 id панелей интернировались впустую. Апстрим кладёт
-			// на этом месте класс "divider" на сам пункт — правила под него в CSS тоже нет,
-			// поэтому и его не повторяем.
+			// Разделителей под пунктами не проводим: панель item_div%i чужого аддона несёт
+			// класс .item-divider, а правил ни для .item-divider.hidden, ни для безусловного
+			// .hidden в menu.css нет — разделитель виден под каждым пунктом в любом случае.
+			// Апстримный класс "divider" на самом пункте правила в CSS тоже не имеет.
 			// enabledBy — серый и клики мимо (клик гасится в ActivateMenuItem, здесь только цвет).
 			this->SetMenuBoolClass(layout, ItemPanel(i), "disabled", this->menuApplied.itemDisabled[i], !IsMenuItemEnabled(this->player, it));
 
@@ -1363,7 +1360,7 @@ SCMD_LINK(kz_hm, kz_hudmenu);
 // menuPopupShift) не читались вообще ни одной строкой форка, а шрифт и цвет меню были зашиты
 // классами в RenderMenu. Читатель заведён выше (RenderMenu), здесь — сами пункты.
 // Отличия от апстримной функции:
-//   - SetItemDivider/KZ::prefs::RegisterMenu не переносим: подсистемы экспорта настроек
+//   - Разделитель пункта/KZ::prefs::RegisterMenu не переносим: подсистемы экспорта настроек
 //     (prefs_transfer) у нас нет, а класс divider на пункте не имеет правила в menu.css чужого
 //     аддона (тот же вывод, что в RenderMenuItems) — применялся бы молча и без эффекта.
 //   - Категория — ЛИСТОВАЯ (без AddSub), как Misc и Jumpstats: четыре пункта на подкатегории

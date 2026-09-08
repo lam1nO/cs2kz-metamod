@@ -1,12 +1,11 @@
 // Регистрация НАШИХ уникальных веток в реестре настроек (kz/option/menu/model.h) —
 // Checkpoint/Visibility/Sound/Messages/Paint. У апстрима прямого образца нет: чекпоинты,
 // paint и часть звуковых тумблеров — свои модули, апстримного дерева под них не существует
-// (см. docs/design/2026-09-08-hud-options-diff.md §3/§6). Состав и ключи взяты ровно из
-// текущего !options (kz_option_menu.cpp, таблицы s_cpItems/s_visItems/s_sndItems/s_msgItems/
-// s_paintItems) — расхождение имени префа тут означало бы потерянную настройку игрока.
+// (см. docs/design/2026-09-08-hud-options-diff.md §3/§6). Состав и ключи префов взяты
+// ровно из старого cs2menus-меню !options (уже удалено) — расхождение имени
+// префа тут означало бы потерянную настройку игрока.
 // Фразы для пунктов и категорий — те же "Options - Menu Cat *"/"Options - Menu Label *",
-// уже локализованные под старое меню (translations/cs2kz-options-menu.phrases.txt),
-// переиспользуем один в один.
+// локализованные ещё под старое меню (translations/cs2kz-options-menu.phrases.txt).
 //
 // Три пункта (HidePlayers/HideWeapon/TimerStopSound) регистрируем через AddActionToggle,
 // не AddToggle: их Toggle*()-функции держат приватный кэш-член сервиса в синхроне с префом
@@ -18,9 +17,7 @@
 // не оставался prefKey == NULL: запись по такому ключу заводит в префах игрока член с ПУСТЫМ
 // именем и флашит его в БД (см. фикс-раунд ревью, находка 1).
 //
-// Старое меню !options (kz_option_menu.cpp) не трогаем — оно остаётся рабочим до отдельной
-// задачи переноса на реестр (см. docs/design диф §6 и брифы транша). Вызов регистрации
-// (KZLocalOptionsMenu_Register) — в общем Init-порядке (cs2kz.cpp::Load, Task 15), между Misc
+// Вызов регистрации (KZLocalOptionsMenu_Register) — в общем Init-порядке (cs2kz.cpp::Load, Task 15), между Misc
 // и Jumpstats: пять per-run веток (чекпоинты/видимость/звук/сообщения/paint), используются
 // часто, но не так вездесуще, как Misc.
 #include "kz/option/kz_option.h"
@@ -100,7 +97,7 @@ void KZLocalOptionsMenu_Register()
 	KZ::menu::SetItemPref(visibility, "hideOtherPlayers", KZOptStorage::Bool, 0);
 	KZ::menu::AddActionToggle(visibility, "Options - Menu Label HideWeapon", &HideWeaponGetCurrent, &HideWeaponOnActivate);
 	KZ::menu::SetItemPref(visibility, "hideWeapon", KZOptStorage::Bool, 0);
-	// hideLegs дефолт НАШ: true (kz_option_menu.cpp/kz_player.cpp), апстримный false НЕ
+	// hideLegs дефолт НАШ: true (kz_player.cpp), апстримный false НЕ
 	// переносим — см. docs/design диф §4, task-8-brief.md.
 	KZ::menu::AddToggle(visibility, "Options - Menu Label HideLegs", "hideLegs", true);
 

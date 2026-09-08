@@ -46,7 +46,6 @@ struct KZOptItem
 	// Greyed out and unclickable while any of these bool preferences is off. Two is enough for the
 	// HUD, where an element's own toggle gates the whole page and a row can gate itself on top.
 	const char *enabledBy[2] {};
-	bool dividerAfter {}; // draw a horizontal rule under this item
 	bool solidOnly {};    // Color: hide the gradients, for a consumer that cannot render one
 	KZOptItemType type {};
 	KZOptStorage storage {};         // how prefKey (and yKey) are stored; None: nothing to export
@@ -105,7 +104,6 @@ namespace KZ::menu
 				   i64 (*getCurrent)(KZPlayer *, i64), void (*onPick)(KZPlayer *, i64, i64), i64 tag = 0);
 
 	void SetItemSubtext(KZOptNode *node, const char *phraseKey);
-	void SetItemDivider(KZOptNode *node);
 	// Declares the preference an action toggle or a choice persists to, for export and import.
 	void SetItemPref(KZOptNode *node, const char *prefKey, KZOptStorage storage, i32 idef = 0, const char *sdef = NULL);
 	// Greys the item out and ignores clicks on it while the named bool preference is off. Call it
