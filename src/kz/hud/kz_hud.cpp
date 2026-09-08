@@ -117,6 +117,12 @@ static_global class KZOptionServiceEventListener_HUD : public KZOptionServiceEve
 	virtual void OnPlayerPreferencesLoaded(KZPlayer *player)
 	{
 		player->hudService->ResetShowPanel();
+		// Одноразовая перезапись настроек худа новыми дефолтами (layout/defaults.cpp) —
+		// СТРОГО до RefreshLayoutPrefs: иначе кэш набрался бы старыми значениями и новый худ
+		// игрок увидел бы только после перезахода. Повторные вызовы этого события (LOCAL,
+		// затем GLOBAL, затем OnPlayerActive) миграцию не перезапускают — её гасит маркер
+		// ревизии в префах.
+		player->hudService->ApplyHudDefaults();
 		// Кэш префов layout-худа (Task 5): без обновления здесь правка настройки не видна
 		// до перезахода — ровно тот класс багов, что уже был в этом худе.
 		player->hudService->RefreshLayoutPrefs();
