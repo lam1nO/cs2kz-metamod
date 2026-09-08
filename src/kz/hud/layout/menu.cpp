@@ -11,7 +11,7 @@
 //   - Позиция/размер/прозрачность используют ПОПАП-СТЕППЕР (+-1/+-5), как у апстрима, —
 //     без него эти пункты были бы нередактируемы, а спека прямо требует «для каждого элемента
 //     — позиция X/Y, размер, шрифт, прозрачность».
-//   - GetPreferenceColor/SetPreferenceColor в базе нет (R2, base-facts.md): цвет читается
+//   - GetPreferenceColor/SetPreferenceColor в базе нет (R2, журнал решений задачи): цвет читается
 //     GetMHUDColorPref (уже в кэше) и пишется симметричным KZHUDService::SetMHUDColorPref
 //     (тут же, ниже) — преф хранит упакованный int, как у particles.cpp/SetColorPref.
 //   - Позиция/размер элемента ЧИТАЮТСЯ ЧЕРЕЗ Float (см. layout/prefs.cpp — GetPreferenceFloat
@@ -37,7 +37,7 @@
 // (не по сущности из сообщения) и зовёт
 // player->hudService->OnLayoutMenuClick(...) — OnLayoutMenuClick ниже сам сверяет присланный
 // handle с ownedMenuLayout ИМЕННО этого hudService, так что клик одного игрока физически не
-// может применить настройку другому (см. utils/hooks.cpp и base-facts.md).
+// может применить настройку другому (см. utils/hooks.cpp и журнал решений задачи).
 #include "kz/hud/layout/layout.h"
 #include "kz/hud/layout/menu.h"
 #include "kz/hud/layout/panorama_tables.h"
@@ -546,7 +546,13 @@ void KZHUDService::RenderMenuColorPopup(CCSCustomHudLayout *layout)
 	{
 		curIdx = panorama::FindColorEntry(this->GetMHUDColorPref(it->prefKey, *it->cdef));
 	}
-	const i32 total = panorama::GetColorEntryCount();
+	// Попап показывает ТОЛЬКО сплошные цвета (panorama::GetColorEntryCount() включает и 40
+	// градиентов — particle-путь их понимает, panorama выбором тут не даём, см. правку
+	// финального ревью): иначе выбравший градиент в particle-худе и открывший этот попап
+	// увидел бы урезанный/несовпадающий список без объяснения. Если у игрока в префе уже
+	// сохранён градиент (curIdx >= total), ни один свотч просто не подсветится — резолвится
+	// корректно, без выхода за границы.
+	const i32 total = panorama::GetSolidColorCount();
 	const i32 pages = MAX(1, (total + KZ_MENU_SWATCH - 1) / KZ_MENU_SWATCH);
 	this->menuPopupPage = Clamp(this->menuPopupPage, 0, pages - 1);
 
@@ -702,7 +708,8 @@ void KZHUDService::MenuPopupPageStep(i32 delta)
 		// Степпер (+-1/+-5) — не постраничный попап; страницы есть только у выбора цвета.
 		return;
 	}
-	const i32 total = panorama::GetColorEntryCount();
+	// Только сплошные цвета (см. RenderMenuColorPopup): градиенты в попап не попадают.
+	const i32 total = panorama::GetSolidColorCount();
 	const i32 pages = MAX(1, (total + KZ_MENU_SWATCH - 1) / KZ_MENU_SWATCH);
 	this->menuPopupPage = Clamp(this->menuPopupPage + delta, 0, pages - 1);
 	this->RenderMenu();
@@ -720,13 +727,28 @@ void KZHUDService::MenuPopupPick(i32 slot)
 		return;
 	}
 	const i32 idx = this->menuPopupPage * KZ_MENU_SWATCH + slot;
-	if (idx < 0 || idx >= panorama::GetColorEntryCount())
+	// Тот же список, что и в попапе (только сплошные) — иначе клик мог бы выбрать градиент,
+	// которого свотч не показывает.
+	if (idx < 0 || idx >= panorama::GetSolidColorCount())
 	{
 		return;
 	}
 	this->SetMHUDColorPref(it->prefKey, panorama::GetColorEntryValue(idx));
 	this->RefreshLayoutPrefs();
 	this->RenderMenu();
+}
+
+// panorama::SnapToStep снапит к кратным 5 везде вне ±100 (ограничение классов схемы) — шаг
+// ±1 там становится no-op (напр. 151 снапится обратно в 150). Кнопки ±1 обязаны реально
+// двигать значение, поэтому вне ±100 подменяем шаг 1 на 5 того же знака; шаг ±5 уже
+// совпадает с гранулярностью снапа и не нуждается в подмене.
+static_function i32 StepDelta(i32 current, i32 delta)
+{
+	if ((current > 100 || current < -100) && (delta == 1 || delta == -1))
+	{
+		return delta > 0 ? 5 : -5;
+	}
+	return delta;
 }
 
 void KZHUDService::MenuStep(i32 axis, i32 delta)
@@ -744,12 +766,14 @@ void KZHUDService::MenuStep(i32 axis, i32 delta)
 	{
 		const char *key = axis == 1 ? it->yKey : it->prefKey;
 		const i32 def = axis == 1 ? it->iydef : it->idef;
-		const i32 value = panorama::SnapToStep(GetIntPref(this->player, key, def, it->isFloat) + delta, it->lo, it->hi);
+		const i32 current = GetIntPref(this->player, key, def, it->isFloat);
+		const i32 value = panorama::SnapToStep(current + StepDelta(current, delta), it->lo, it->hi);
 		SetIntPref(this->player, key, value, it->isFloat);
 	}
 	else
 	{
-		const i32 value = panorama::SnapToStep(GetIntPref(this->player, it->prefKey, it->idef, it->isFloat) + delta, it->lo, it->hi);
+		const i32 current = GetIntPref(this->player, it->prefKey, it->idef, it->isFloat);
+		const i32 value = panorama::SnapToStep(current + StepDelta(current, delta), it->lo, it->hi);
 		SetIntPref(this->player, it->prefKey, value, it->isFloat);
 	}
 	this->RefreshLayoutPrefs();
