@@ -262,6 +262,13 @@ void KZPlayer::OnPhysicsSimulatePost()
 	if (this->specService->GetSpectatedPlayer())
 	{
 		KZHUDService::DrawPanels(this->specService->GetSpectatedPlayer(), this);
+		// Меню (Task 11) — уход в спектейт другого игрока по смыслу та же ситуация, что
+		// смерть без цели наблюдения ниже: игрок больше не управляет своей пешкой напрямую,
+		// а открытое меню держит захват курсора и не даёт нормально переключать спектейт.
+		if (this->hudService->IsLayoutMenuOpen())
+		{
+			this->hudService->CloseLayoutMenu();
+		}
 	}
 	else if (this->IsAlive())
 	{
