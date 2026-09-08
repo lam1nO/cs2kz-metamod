@@ -564,12 +564,12 @@ void KZHUDService::RenderMenuColorPopup(CCSCustomHudLayout *layout)
 	{
 		curIdx = panorama::FindColorEntry(this->GetMHUDColorPref(it->prefKey, *it->cdef));
 	}
-	// Попап показывает ТОЛЬКО сплошные цвета (panorama::GetColorEntryCount() включает и 40
-	// градиентов — panorama выбором тут не даём, см. правку финального ревью). Если у игрока
-	// в префе уже сохранён градиент из старого particle-MHUD (curIdx >= total, путь удалён
-	// в задаче 12), ни один свотч просто не подсветится — резолвится корректно, без выхода
-	// за границы.
-	const i32 total = panorama::GetSolidColorCount();
+	// Градиенты в попапе РАЗРЕШЕНЫ (задача 14): ограничение до сплошных заводилось из-за
+	// particle-MHUD (там же градиент был маркер-цветом с alpha==1, который particle-путь
+	// понимал как реальную прозрачность — почти невидимый худ). Particle удалён в задаче 12,
+	// а panorama (ResolveColorClass/FindColorEntry) и так резолвит маркер в свою CSS-палитру
+	// правильно — прятать от игрока рабочую опцию незачем.
+	const i32 total = panorama::GetColorEntryCount();
 	const i32 pages = MAX(1, (total + KZ_MENU_SWATCH - 1) / KZ_MENU_SWATCH);
 	this->menuPopupPage = Clamp(this->menuPopupPage, 0, pages - 1);
 
@@ -713,8 +713,8 @@ void KZHUDService::MenuPopupPageStep(i32 delta)
 		// Степпер (+-1/+-5) — не постраничный попап; страницы есть только у выбора цвета.
 		return;
 	}
-	// Только сплошные цвета (см. RenderMenuColorPopup): градиенты в попап не попадают.
-	const i32 total = panorama::GetSolidColorCount();
+	// Тот же список, что и в попапе (см. RenderMenuColorPopup) — сплошные + градиенты.
+	const i32 total = panorama::GetColorEntryCount();
 	const i32 pages = MAX(1, (total + KZ_MENU_SWATCH - 1) / KZ_MENU_SWATCH);
 	this->menuPopupPage = Clamp(this->menuPopupPage + delta, 0, pages - 1);
 	this->RenderMenu();
@@ -732,9 +732,8 @@ void KZHUDService::MenuPopupPick(i32 slot)
 		return;
 	}
 	const i32 idx = this->menuPopupPage * KZ_MENU_SWATCH + slot;
-	// Тот же список, что и в попапе (только сплошные) — иначе клик мог бы выбрать градиент,
-	// которого свотч не показывает.
-	if (idx < 0 || idx >= panorama::GetSolidColorCount())
+	// Тот же список, что и в попапе (см. RenderMenuColorPopup) — сплошные + градиенты.
+	if (idx < 0 || idx >= panorama::GetColorEntryCount())
 	{
 		return;
 	}

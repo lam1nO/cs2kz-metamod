@@ -212,7 +212,7 @@ bool KZHUDService::IsMHUDPbWrEnabled()
 }
 
 // Единственная точка расчёта SpeedInfo (Task 6/R3): ветвей показа скорости несколько
-// (BuildVersionCHud, GetSpeedText, ComputeBottomState, panorama-layout в layout/mhud.cpp) —
+// (BuildVersionCHud, ComputeBottomState, panorama-layout в layout/mhud.cpp) —
 // считать её обязана КАЖДАЯ одинаково, иначе баг вида «0 на паузе» лечится в одном стиле худа
 // и остаётся в остальных. Данные — из MHUDDataSource() (this->player, если mhudSource не
 // задан спектейтом) — та же развязка data/settings, что и у остального худа.
@@ -475,67 +475,6 @@ Vector KZHUDService::GetDisplayVelocity(KZPlayer *src)
 		}
 	}
 	return velocity;
-}
-
-std::string KZHUDService::GetSpeedText(const char *language, KZPlayer *dataSource)
-{
-	// dataSource — источник ДАННЫХ (скорость/перф/крауч-джамп), settings (цвета, через
-	// GetMHUDColorPref/MHUDSettingsSource) — всегда this (получатель). При вызове со
-	// спектатора: cfg->GetSpeedText(language, player) — тот же контракт, что в BuildVersionCHud.
-	KZPlayer *src = dataSource ? dataSource : this->player;
-	Vector velocity = KZHUDService::GetDisplayVelocity(src);
-	// Keep the takeoff velocity on for a while after landing so the speed values flicker less.
-	if ((src->GetPlayerPawn()->m_fFlags & FL_ONGROUND
-		 && g_pKZUtils->GetServerGlobals()->curtime - src->landingTime > KZ_HUD_ON_GROUND_THRESHOLD)
-		|| (src->GetPlayerPawn()->m_MoveType == MOVETYPE_LADDER && !src->IsButtonPressed(IN_JUMP)))
-	{
-		return KZLanguageService::PrepareMessageWithLang(language, "HUD - Speed Text", velocity.Length2D());
-	}
-	const Color baseCol = this->GetMHUDColorPref("mhudSpeedColor", Color(0xFF, 0xFF, 0xFF, 0xFF));
-	const Color perfCol = this->GetMHUDColorPref("mhudPrespeedPerfColor", Color(0x40, 0xFF, 0x40, 0xFF));
-	const Color jumpbugCol = this->GetMHUDColorPref("mhudPrespeedJumpbugColor", Color(0xFF, 0xFF, 0x20, 0xFF));
-	const Color cjCol = this->GetMHUDColorPref("mhudSpeedCjColor", Color(0x71, 0xEE, 0xB8, 0xFF));
-	Color tintCol = baseCol;
-	if (src->IsPerfing() && !src->possibleLadderHop && !src->takeoffFromLadder)
-	{
-		tintCol = src->hudService->fromDuckbug ? jumpbugCol : perfCol;
-	}
-	char colorBuf[24];
-	V_snprintf(colorBuf, sizeof(colorBuf), "<font color='#%02x%02x%02x'>", tintCol.r(), tintCol.g(), tintCol.b());
-	char cjBuf[24];
-	V_snprintf(cjBuf, sizeof(cjBuf), "<font color='#%02x%02x%02x'>", cjCol.r(), cjCol.g(), cjCol.b());
-	// JB против C: строгая классификация jumpbug'а — тип последнего прыжка (jumps.Tail() —
-	// текущий, если ещё в воздухе; Jump::End() на приземлении может дотюнить тип, поэтому
-	// перечитываем, пока индикатор виден) — та же ветка, что в BuildVersionCHud. JB
-	// приоритетнее приписки C; красится тем же фиксированным жёлтым бейджа JB, что и в
-	// BuildVersionCHud (KZ_HUD_C_JUMPBUG), — канал html, цвет легален (сосед C цветной).
-	bool isJumpbug = src->jumpstatsService->jumps.Count() > 0 && src->jumpstatsService->jumps.Tail().GetJumpType() == JumpType_Jumpbug;
-	std::string suffixText;
-	if (isJumpbug)
-	{
-		suffixText = " <font color='" KZ_HUD_C_JUMPBUG "'>JB</font>";
-	}
-	else if (src->hudService->crouchJumping)
-	{
-		suffixText = std::string(" ") + cjBuf + "C</font>";
-	}
-	return KZLanguageService::PrepareMessageWithLang(language, "HUD - Speed Text (Takeoff)", velocity.Length2D(), colorBuf,
-													 src->takeoffVelocity.Length2D(), suffixText.c_str());
-}
-
-std::string KZHUDService::GetKeyText(const char *language)
-{
-	// clang-format off
-	return KZLanguageService::PrepareMessageWithLang(language, "HUD - Key Text",
-		this->player->IsButtonPressed(IN_MOVELEFT) ? 'A' : '_',
-		this->player->IsButtonPressed(IN_FORWARD) ? 'W' : '_',
-		this->player->IsButtonPressed(IN_BACK) ? 'S' : '_',
-		this->player->IsButtonPressed(IN_MOVERIGHT) ? 'D' : '_',
-		this->player->IsButtonPressed(IN_DUCK) ? 'C' : '_',
-		this->jumpedThisTick ? 'J' : '_'
-	);
-
-	// clang-format on
 }
 
 std::string KZHUDService::GetCheckpointText(const char *language)
@@ -1482,8 +1421,9 @@ void KZHUDService::ComputeBottomState(KZPlayer *player, KZPlayer *target, Bottom
 		{
 			Vector velocity = KZHUDService::GetDisplayVelocity(player);
 			out.speed = RoundFloatToInt(velocity.Length2D());
-			// Точка отрыва в скобках — то же условие, что в GetSpeedText: в воздухе либо сразу
-			// после приземления (сглаживание мерцания); на лестнице — только с зажатым прыжком.
+			// Точка отрыва в скобках — то же условие, что в GetSpeedInfo/hasPrespeed: в воздухе
+			// либо сразу после приземления (сглаживание мерцания); на лестнице — только с
+			// зажатым прыжком.
 			const bool onGround = player->GetPlayerPawn()->m_fFlags & FL_ONGROUND
 								  && g_pKZUtils->GetServerGlobals()->curtime - player->landingTime > KZ_HUD_ON_GROUND_THRESHOLD;
 			const bool ladderIdle = player->GetPlayerPawn()->m_MoveType == MOVETYPE_LADDER && !player->IsButtonPressed(IN_JUMP);
@@ -1878,13 +1818,13 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	}
 	const char *language = target->languageService->GetLanguage();
 
-	// HTML fallback: Standard type is selected, OR no addons are available at all
-	// (no MultiAddonManager/assets), OR panorama isn't active for some other reason.
-	// needHtml и usePanorama обязаны быть взаимоисключающими, иначе получатель либо ловит два
-	// худа разом, либо не получает ни одного. (Off и живой panorama-путь уже отсеяны ранними
-	// return'ами выше; здесь usePanorama=true остаться не может — либо он вернул true и
-	// функция уже вышла, либо сброшен в false строкой выше.)
-	bool needHtml = !available || cfg->GetHudType() == HUD_TYPE_STANDARD || !usePanorama;
+	// К этой строке Off и живой panorama-путь уже отсеяны ранними return'ами выше, а
+	// usePanorama, если panorama отказала, сброшен в false — значит здесь он ГАРАНТИРОВАННО
+	// false, и единственный оставшийся путь ниже — HTML. До удаления particle-MHUD (задача 12)
+	// needHtml реально мог быть false на этом месте (particle рисовал свою сущность и не
+	// нуждался в HTML) — с его уходом два первых условия ниже стали недостижимым слоем поверх
+	// константы; оставляем именованную переменную ради читаемости остального кода функции.
+	bool needHtml = true;
 
 	std::string htmlText;
 
@@ -1918,10 +1858,10 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	// --- Нижняя панель (обычный centre-канал): строка CP/TP — ТОЛЬКО при kz_hud_cptp_in_panel 0.
 	//        По умолчанию CP/TP уже нарисован последней строкой HTML-панели выше (там кегль
 	//        фиксированный и накрыть себя панель не может), а этот канал остаётся пустым.
-	//        Ниже — про прежнюю раскладку (cvar 0): СОПРОВОЖДАЕТ
-	//        HTML-панель (needHtml): преф hudCpTp всегда был про HTML-путь — поэтому и
-	//        спектатор (всегда HTML), и мёртвый видят низ. Не шлём только на живом
-	//        panorama-пути (needHtml=false): там centre-канал остаётся свободным.
+	//        Ниже — про прежнюю раскладку (cvar 0): СОПРОВОЖДАЕТ HTML-панель — преф hudCpTp
+	//        всегда был про HTML-путь, а до этой точки в функции живой panorama и Off уже
+	//        вышли своими return'ами (needHtml здесь всегда true, см. её объявление выше) —
+	//        поэтому и спектатор (всегда HTML), и мёртвый видят низ.
 	//        Отправка/пересборка — по изменению слепка + heartbeat (см. UpdateBottomPanel);
 	//        переход «был текст → стало нечего» стирает остаток одноразовым клиром. Каждый
 	//        получатель (владелец/спектатор) получает свой вызов DrawPanels →
@@ -1936,7 +1876,7 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	{
 		// CP/TP уехал последней строкой В САМУ панель (деф.) — centre-канал свободен, остаток
 		// прежней нижней панели стирает одноразовый клир (в т.ч. при смене cvar'а на живом
-		// сервере). На panorama-пути (needHtml=false) — тот же клир, что и раньше.
+		// сервере).
 		cfg->ClearBottomPanel();
 	}
 }

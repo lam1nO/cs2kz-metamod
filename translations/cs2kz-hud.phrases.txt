@@ -127,26 +127,9 @@
 		"ko"		"속도: {speed}"
 		"lv"		"Ātrums: {speed}"
 	}
-	"HUD - Speed Text (Takeoff)"
-	{
-		// Speed: 234 (200) C
-		"#format"	"speed:.0f,color:s,takeoff_speed:.0f,crouch_jump:s"
-		"en"		"Speed: {speed} ({color}{takeoff_speed}</font>){crouch_jump}"
-		"chi"		"速度: {speed} ({color}{takeoff_speed}</font>){crouch_jump}"
-		"pl"		"Prędkość: {speed} ({color}{takeoff_speed}</font>){crouch_jump}"
-		"ru"		"Скорость: {speed} ({color}{takeoff_speed}</font>){crouch_jump}"
-		"fi"		"Nopeus: {speed} ({color}{takeoff_speed}</font>){crouch_jump}"
-		"sv"		"Hastighet: {speed} ({color}{takeoff_speed}</font>){crouch_jump}"
-		"ua"		"Швидкість: {speed} ({color}{takeoff_speed}</font>){crouch_jump}"
-		"tr"		"Hız: {speed} ({color}{takeoff_speed}</font>){crouch_jump}"
-		"it"		"Vel: {speed} ({color}{takeoff_speed}</font>){crouch_jump}"
-		"es"		"Velocidad: {speed} ({color}{takeoff_speed}</font>){crouch_jump}"
-		"de"		"Geschwindigkeit: {speed} ({color}{takeoff_speed}</font>){crouch_jump}"
-		"ko"		"속도: {speed} ({color}{takeoff_speed}</font>){crouch_jump}"
-		"lv"		"Ātrums: {speed} ({color}{takeoff_speed}</font>){crouch_jump}"
-	}
 	// Плайн-вариант взлётной скорости для нижней панели (худ спектатора под открытым меню,
-	// канал plain-text): апстримная «HUD - Speed Text (Takeoff)» содержит font-теги.
+	// канал plain-text, без font-тегов); версия с font-тегами (GetSpeedText) удалена в
+	// задаче 14 как мёртвый код — она нигде не вызывалась.
 	"HUD - Bottom Speed Text (Takeoff)"
 	{
 		// Speed: 234 (200)

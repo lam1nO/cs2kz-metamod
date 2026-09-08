@@ -252,7 +252,7 @@ private:
 	}
 
 	// Игрок, чьи НАСТРОЙКИ (тумблеры/цвета/раскладка) читает MHUD — ВСЕГДА сам игрок.
-	// Та же развязка data/settings живёт в HTML-пути (BuildVersionCHud/GetSpeedText):
+	// Та же развязка data/settings живёт в HTML-пути (BuildVersionCHud):
 	// там спектатор реально рисует чужие данные своей раскладкой.
 	KZPlayer *MHUDSettingsSource()
 	{
@@ -384,9 +384,9 @@ public:
 	// Единственный источник скорости для ЛЮБЫХ показаний худа: velocity + baseVelocity,
 	// а у реплей-бота на паузе — скорость кадра записи (у замороженного бота velocity
 	// принудительно обнулена, чтобы физика его не унесла, — см. replays/playback.cpp).
-	// Веток показа скорости три (BuildVersionCHud, GetSpeedText, ComputeBottomState), и
-	// считать её каждая обязана одинаково — иначе «0 на паузе» чинится в одном стиле худа
-	// и остаётся в других.
+	// Веток показа скорости несколько (BuildVersionCHud, ComputeBottomState, panorama-layout
+	// в layout/mhud.cpp), и считать её каждая обязана одинаково — иначе «0 на паузе» чинится
+	// в одном стиле худа и остаётся в других.
 	static Vector GetDisplayVelocity(KZPlayer *src);
 
 	// === Layout-худ (custom_hud_layout, Task 4) ======================================
@@ -475,13 +475,8 @@ public:
 	void DestroyOwnedMenuLayout();
 
 private:
-	// dataSource = источник данных (наблюдаемый при спектировании); nullptr → сам игрок.
-	// Настройки (цвета perf/CJ) всегда идут с this (получателя) — см. GetMHUDColorPref.
-	std::string GetSpeedText(const char *language = KZ_DEFAULT_LANGUAGE, KZPlayer *dataSource = nullptr);
-	std::string GetKeyText(const char *language = KZ_DEFAULT_LANGUAGE);
-
 	// Единственная точка расчёта SpeedInfo (Task 6/R3, см. комментарий у struct SpeedInfo):
-	// HTML-путь (BuildVersionCHud/GetSpeedText) и panorama-layout (layout/mhud.cpp)
+	// HTML-путь (BuildVersionCHud) и panorama-layout (layout/mhud.cpp)
 	// обязаны звать ИМЕННО его, копировать расчёт во вторую ветку запрещено. Данные — из
 	// MHUDDataSource() (this->player, если mhudSource не задан) — та же развязка data/settings,
 	// что у остального худа.

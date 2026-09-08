@@ -14,7 +14,6 @@ namespace panorama
 	// Позиции: шаг 1 внутри +-100, шаг 5 до +-500. Размеры: шаг 1 до 100, дальше 5.
 	i32 SnapToStep(i32 value, i32 lo, i32 hi);
 	i32 GetColorEntryCount();
-	i32 GetSolidColorCount();
 	const char *GetColorEntryBgClass(i32 entry);
 	Color GetColorEntryValue(i32 entry);
 	i32 FindColorEntry(const Color &color);
