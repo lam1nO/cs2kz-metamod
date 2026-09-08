@@ -191,6 +191,11 @@ void KZHUDService::DestroyOwnedLayout()
 	// выставлен как надо, — крестик молча не появится (тот же баг, что ревью поймало для
 	// клавиш в задаче 6).
 	this->layoutCrosshair = LayoutCrosshairState();
+	// Сами значения cl_crosshair* (и флаг confirmed) — та же ловушка наизнанку: без сброса
+	// новый игрок в этом слоте унаследовал бы «подтверждённые» cl_crosshair* ПРЕДЫДУЩЕГО
+	// (Reset() зовёт DestroyOwnedLayout на дисконнекте), и ApplyCrosshair нарисовал бы ему
+	// чужой крестик как настоящий — ревью прямо просило исключить этот сценарий.
+	this->crosshair = MHUDCrosshairSettings();
 }
 
 void KZHUDService::LayoutCleanup()

@@ -85,6 +85,11 @@ struct MHUDCrosshairSettings
 	bool drawOutline {true};
 	bool dot {false};
 	bool tStyle {false};
+	// false — клиент ещё ни разу не ответил (или ClientCvarValue на сервере нет): поля выше —
+	// хардкод-дефолты игры, НЕ настройки этого игрока. ApplyCrosshair обязан читать их только
+	// когда true, иначе крестик красится «чужими» cl_crosshair* — тот же класс бага, что
+	// fail-open в CyberSkins (пустой ответ приняли за настоящее значение).
+	bool confirmed {};
 };
 
 // Кэш префов layout-худа (реализация — Task 5, GetLayoutPrefs/RefreshLayoutPrefs);

@@ -151,6 +151,10 @@ void KZHUDService::OnCrosshairCvarValue(const char *name, const char *value)
 		if (V_strcmp(cvar.name, name) == 0)
 		{
 			cvar.apply(this->crosshair, value);
+			// Первый живой ответ клиента — с этого момента this->crosshair это НАСТОЯЩИЕ
+			// cl_crosshair* игрока, а не хардкод-дефолты конструктора; ApplyCrosshair до этого
+			// флага крестик не рисует вовсе (см. комментарий у MHUDCrosshairSettings::confirmed).
+			this->crosshair.confirmed = true;
 			return;
 		}
 	}
@@ -234,7 +238,12 @@ void KZHUDService::ApplyCrosshair(CCSCustomHudLayout *layout, bool show, bool fo
 		state = LayoutCrosshairState();
 	}
 
-	const bool enabled = show && this->GetLayoutPrefs().crosshair;
+	// this->crosshair.confirmed — клиент ещё не ответил ни на один cl_crosshair* (нет
+	// ClientCvarValue на сервере, свежий коннект, ответ в пути): без гейта крестик красился бы
+	// хардкод-дефолтами конструктора MHUDCrosshairSettings, выдавая их за настройки игрока —
+	// «чужой» крестик хуже отсутствующего, поэтому до подтверждения ведём себя как при
+	// выключенном префе (ни классов, ни панелей не трогаем).
+	const bool enabled = show && this->GetLayoutPrefs().crosshair && this->crosshair.confirmed;
 	ApplyFlagClass(layout, "mhud_crosshair", "hidden", state.shown, !enabled);
 	if (!enabled)
 	{
