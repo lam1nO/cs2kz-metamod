@@ -13,7 +13,9 @@ const MHUDLayoutPrefs &KZHUDService::GetLayoutPrefs()
 
 void KZHUDService::RefreshLayoutPrefs()
 {
-	// Источник настроек — как у остального худа: наблюдаемый при спектейте, иначе сам игрок.
+	// Источник настроек — ВСЕГДА сам игрок (MHUDSettingsSource() не смотрит на спектейт,
+	// см. её объявление в kz_hud.h): тумблеры/цвета/раскладка панорама-худа — не то, что
+	// наблюдается за другим игроком, в отличие от источника ДАННЫХ (MHUDDataSource()).
 	auto *opts = this->MHUDSettingsSource()->optionService;
 	for (i32 e = 0; e < (i32)LayoutElement::Count; e++)
 	{

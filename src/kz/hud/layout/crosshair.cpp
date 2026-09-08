@@ -1,8 +1,8 @@
 // Panorama-реплика собственного прицела игрока (Task 10). Перенесено с апстрима
 // (origin/master:src/kz/hud/layout/crosshair.cpp), расхождения — см.
-// docs/superpowers/sdd/2026-09-08-panorama-hud/base-facts.md (R1/R2/R4) и ниже:
+// журнал решений задачи (планинг-доки этой ветки, разделы R1/R2/R4) и ниже:
 //   - апстрим читает cl_crosshair* через свой cvarquery (введён ПОЗЖЕ, чем наша база branch'
-//     нулась от апстрима, — base-facts.md этого расхождения не описывал); у нас клиентский
+//     нулась от апстрима, — журнал решений этого расхождения не описывал); у нас клиентский
 //     cvar читается тем же механизмом, что anticheat/detectors/cvars.cpp и kz_language.cpp:
 //     IClientCvarValue (g_pClientCvarValue) с колбэком ECvarValueStatus/CvarValueCallback.
 //   - GetPreferenceColor/ResolveSwatchClass в базе нет — цвет резолвится panorama::ResolveColorClass
@@ -120,13 +120,20 @@ void KZHUDService::QueryCrosshairCvars()
 static_function f64 PollCrosshairCvars(CPlayerUserId userID)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
-	if (!player)
+	// Игрок разрешился (userID валиден), но уже не в игре (дисконнект/смена слота) — та же
+	// база (anticheat/detectors/cvars.cpp) в этом случае гасит таймер через 0.0f, а не крутит
+	// его вхолостую до конца карты. Без этого таймеры-сироты копятся на каждый дисконнект.
+	if (!player || !player->IsInGame())
 	{
 		return 0.0f;
 	}
-	// Настройки никто не читает, пока крестик выключен, но таймер держим взведённым всё
-	// равно — включение обязано подхватить актуальные cl_crosshair* без нового коннекта.
-	if (player->IsInGame() && player->optionService->GetPreferenceBool("mhudCrosshair", false))
+	// Крестик — panorama-настройка (см. ApplyCrosshair): на любом другом типе худа опрашивать
+	// клиентские cvar незачем — 13 запросов каждые MHUD_XH_POLL_INTERVAL секунд впустую.
+	if (player->hudService->GetHudType() != KZHUDService::HUD_TYPE_PANORAMA)
+	{
+		return MHUD_XH_POLL_INTERVAL;
+	}
+	if (player->optionService->GetPreferenceBool("mhudCrosshair", false))
 	{
 		player->hudService->QueryCrosshairCvars();
 	}

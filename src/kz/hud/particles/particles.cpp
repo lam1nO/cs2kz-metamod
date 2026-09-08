@@ -217,7 +217,8 @@ void KZHUDService::OnClientDisconnect()
 
 // === Тип худа (hudType) ============================================================
 // 0 = Standard (классическая HTML-панель по центру), 1 = MHUD (particle-оверлей),
-// 2 = Off (не рисуется ничего). Цикл в меню: MHUD → Standard → Off (см. HudTypeNext).
+// 2 = Off (не рисуется ничего), 3 = Panorama (custom_hud_layout). Цикл в меню:
+// MHUD → Panorama → Standard → Off (см. HudTypeNext).
 // Нарисованный cyberkz-HUD выпилен в cyb.27 — Standard теперь всегда HTML-путь.
 
 int KZHUDService::GetHudType()
@@ -954,6 +955,10 @@ static_function void ResetElementPrefs(KZPlayer *p, MHUDElement element)
 			p->optionService->SetPreferenceBool("hudCpTp", true);
 			break;
 	}
+	// Общие ключи (hudSpeed/hudTimer/hudTimerDetail/hudKeys/hudKeysOverlap/hudCpTp и цвета) —
+	// тот же кэш, что и у SetColorPref/MHUDToggle выше: без обновления panorama держит
+	// устаревшие значения до перезахода (тот же класс бага, уже закрытый там).
+	p->hudService->RefreshLayoutPrefs();
 }
 
 // Фраза-ключ отображаемого имени стиля худа (пункт меню и сводка).
@@ -1146,7 +1151,7 @@ static_function void OnHUDMenuSelect(MenuHandle menu, int slot, int item)
 		return;
 	}
 
-	// Переключение hudType по циклу MHUD → Standard → Off.
+	// Переключение hudType по циклу MHUD → Panorama → Standard → Off.
 	if (KZ_STREQ(key, HUD_MENU_TYPE_TAG))
 	{
 		int next = HudTypeNext(p->hudService->GetHudType());
