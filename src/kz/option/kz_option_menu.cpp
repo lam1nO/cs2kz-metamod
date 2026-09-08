@@ -1,10 +1,21 @@
-// Интерактивное меню !options (cs2menus) — корень с подменю по категориям:
+// Построение старого меню !options на cs2menus — корень с подменю по категориям:
 // чекпоинты/старт, видимость, звуки, джампстаты, paint. Подменю джампстатов строит свой
 // модуль (CreateJumpstatsMenu) — там же живёт его per-slot хэндл; здесь только локальные
 // подменю и корень. Категория HUD (particle-MHUD, cs2menus) убрана в задаче 12 вместе с
 // particles.cpp — настройки худа теперь в panorama-меню (`kz_hudmenu`/`kz_hm`).
 // Навигация: пункт корня → подменю (AddSubMenu); назад — бинд R движка меню
 // (возврат по parent), выход — бинд F. Пунктов «← Назад» больше нет (решение 23.07).
+//
+// Задача 10 (транш реестра): команда `kz_options`/`kz_o` СНЯТА с этого построения — она
+// открывает panorama-меню (KZHUDService::OpenLayoutMenu, layout/menu.cpp) тем же путём, что
+// `kz_hudmenu`/`kz_hm`, на корне дерева KZ::menu::GetTree(), а не на KZ::option::OpenOptionsMenu
+// ниже (подробнее о том, что сейчас означает «корень» — комментарий над SCMD(kz_options)).
+// Само построение НЕ вырезано (правило транша — снять с команды, не удалять код):
+// OpenOptionsMenu/BuildOptionsSubmenu/OnOptionsSubmenu*/таблицы s_*Items ниже стали мёртвым
+// кодом, уборка — отдельной задачей (см. отчёт task-10).
+// InitOptionsMenu()/её таймер-слушатель ОСТАЮТСЯ рабочими: слушатель гасит ЛЮБОЕ открытое
+// cs2menus-меню на старте забега (!zones/!rpmenu/!prac/!goto/джампстаты/реплеи), не только
+// это — снимать его нельзя.
 #include "kz/option/kz_option.h"
 #include "kz/language/kz_language.h"
 #include "kz/checkpoint/kz_checkpoint.h"
@@ -12,6 +23,7 @@
 #include "kz/jumpstats/kz_jumpstats.h"
 #include "kz/paint/kz_paint.h"
 #include "kz/timer/kz_timer.h"
+#include "kz/hud/kz_hud.h"
 #include "utils/utils.h"
 #include "utils/simplecmds.h"
 
@@ -452,10 +464,33 @@ void KZ::option::InitOptionsMenu()
 	KZTimerService::RegisterEventListener(&s_optionsMenuTimerListener);
 }
 
+// Корень реестра настроек (panorama) — тот же вход, тот же захват ввода, что у
+// `kz_hudmenu` ниже (layout/menu.cpp): OpenLayoutMenu() без аргументов открывает дерево с
+// его текущего верхнего уровня. Сейчас (до вызовов KZMiscMenu_Register/
+// KZJumpstatsMenu_Register/KZLocalOptionsMenu_Register — они существуют, но в общий Init-
+// порядок ещё не включены, см. их же комментарии) в дереве только HUD-категории, поэтому
+// корень и первая HUD-категория физически совпадают — !options и !hudmenu ведут в одно и
+// то же место. Развести их (root без предвыбранной категории отдельно от явной HUD-
+// категории) — сигнатурная правка OpenLayoutMenu в layout/menu.cpp/kz_hud.h, то есть
+// изменение файла вне периметра этой задачи; делать это стоит вместе с включением трёх
+// Register() выше, когда в дереве появятся не-HUD категории и разница станет видна игроку.
+// Если panorama-сущность не создалась (аддон не доехал), OpenLayoutMenu сам сообщает об
+// этом игроку в чат ("MHUD - Unavailable") — тишины на команду не остаётся.
 SCMD(kz_options, SCFL_PLAYER | SCFL_PREFERENCE | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
-	KZ::option::OpenOptionsMenu(player);
+	if (!player)
+	{
+		return MRES_SUPERCEDE;
+	}
+	if (player->hudService->IsLayoutMenuOpen())
+	{
+		player->hudService->CloseLayoutMenu();
+	}
+	else
+	{
+		player->hudService->OpenLayoutMenu();
+	}
 	return MRES_SUPERCEDE;
 }
 
