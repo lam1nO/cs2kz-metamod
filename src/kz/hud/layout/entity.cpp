@@ -207,7 +207,7 @@ CCSCustomHudLayout *KZHUDService::EnsureOwnedLayout(bool &created)
 		// custom_hud_layout ХУДА никогда не получает SetInputCaptureEnabled(true) — это
 		// свойство только окна настроек. Проверено: `git grep SetInputCaptureEnabled` внутри
 		// src/kz/hud/ даёт три попадания, и все три — на layout из EnsureMenuLayout
-		// (layout/menu.cpp:358,1249,1281), ни одного на ownedLayout. Значит DestroyOwnedLayout
+		// (layout/menu.cpp: 380, 1294, 1330), ни одного на ownedLayout. Значит DestroyOwnedLayout
 		// не может оставить игрока в режиме курсора, и седьмого пути снятия захвата не
 		// требуется — уже существующие шесть (см. журнал menu.cpp) остаются исчерпывающими.
 		//

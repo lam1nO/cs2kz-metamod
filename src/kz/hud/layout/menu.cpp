@@ -159,10 +159,22 @@ static_function i32 BuildMenuLeft(i32 selectedCategory, MenuLeftEntry (&slots)[K
 // нашёл бы текущий и вернул MENU_FONTS[0]). KZ_MENU_DEFAULT_FONT здесь по той же причине: цикл
 // один на все Font-пункты, а у нового пункта menuFont дефолт СВОЙ (stratum2-medium-tf) — без
 // него первый клик по «Шрифт меню» терял бы текущее значение вместо шага на следующее.
+// clang-format off
+// Раскладка зафиксирована руками: локальный clang-format (22) и CI-канон (18) переносят этот
+// массив по-разному, и любая правка состава давала красный check-code-quality.
 static_global const char *const MENU_FONTS[] = {
-	LAYOUT_DEFAULT_FONT,      "stratum2-bold-monodigit", "stratum2-regular-monodigit", "stratum2-bold", "stratum2-medium",
-	"stratum2-mono-bold",     "noto-sans-bold",          "arial",                      "forcestratum2", KZ_MENU_DEFAULT_FONT,
+	LAYOUT_DEFAULT_FONT,
+	"stratum2-bold-monodigit",
+	"stratum2-regular-monodigit",
+	"stratum2-bold",
+	"stratum2-medium",
+	"stratum2-mono-bold",
+	"noto-sans-bold",
+	"arial",
+	"forcestratum2",
+	KZ_MENU_DEFAULT_FONT,
 };
+// clang-format on
 
 static_function const char *NextFontSlug(const char *current)
 {
@@ -839,17 +851,21 @@ void KZHUDService::SelectMenuCategory(i32 index)
 		return;
 	}
 	const MenuLeftEntry &e = slots[index];
+	if (this->menuPopup != MenuPopup::None)
+	{
+		// Закрываем ДО любых ранних выходов (порядок апстрима, kz_menu.cpp): клик по левой
+		// колонке с открытым попапом обязан его закрыть, даже если сам клик ничего не выбирает.
+		// CloseMenuPopup зовёт onEdit(begin=false) для пункта ещё СТАРОГО узла — поэтому до
+		// смены menuCategory/menuSub ниже.
+		this->CloseMenuPopup();
+	}
 	// Шапка уже раскрытой категории инертна (тот же класс disabled, что и в рендере): её
 	// подкатегории и так видны, а сама она пунктов не имеет — клик по ней сбросил бы выбранную
 	// подкатегорию в первую без причины.
 	if (!e.isSub && !e.node->subs.empty() && e.category == this->menuCategory)
 	{
+		this->RenderMenu();
 		return;
-	}
-	if (this->menuPopup != MenuPopup::None)
-	{
-		// До смены узла: CloseMenuPopup зовёт onEdit(begin=false) для пункта СТАРОГО узла.
-		this->CloseMenuPopup();
 	}
 	this->menuCategory = e.category;
 	// Клик по подкатегории — показать её пункты; клик по категории — раскрыть её и показать

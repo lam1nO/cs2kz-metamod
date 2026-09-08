@@ -672,10 +672,10 @@
 	}
 	"HUD - Menu Label MimicSpec Sub"
 	{
-		"en"		"Use their HUD settings while spectating them, crosshair included"
-		"ru"		"В спектейте брать настройки худа того, за кем смотришь — включая его прицел"
-		"chi"		"观察他人时使用对方的 HUD 设置，包括准星"
-		"ua"		"У спостереженні брати налаштування худу того, за ким дивишся — разом із прицілом"
+		"en"		"Use their HUD settings while spectating them"
+		"ru"		"В спектейте брать настройки худа того, за кем смотришь"
+		"chi"		"观察他人时使用对方的 HUD 设置"
+		"ua"		"У спостереженні брати налаштування худу того, за ким дивишся"
 	}
 	"HUD - Menu Label CompactPanel"
 	{
