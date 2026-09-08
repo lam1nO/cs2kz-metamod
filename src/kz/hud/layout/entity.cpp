@@ -182,6 +182,10 @@ void KZHUDService::DestroyOwnedLayout()
 	{
 		this->layoutElements[i] = LayoutElementState();
 	}
+	// Кэш классов клавиш (Task 6) — та же ловушка: живёт вместе с сущностью, иначе следующий
+	// владелец слота (реконнект/новый игрок) унаследует чужие классы кнопок и клавиши останутся
+	// пустыми (кэш решит, что менять уже нечего).
+	this->layoutKeys = LayoutKeysState();
 }
 
 void KZHUDService::LayoutCleanup()

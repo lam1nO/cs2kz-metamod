@@ -388,6 +388,34 @@ static_function void LayoutDigitPair(i32 value, f32 size, f32 baseOffsetX, f32 b
 	}
 }
 
+// Единственная точка расчёта SpeedInfo (Task 6/R3): ветвей показа скорости пять
+// (BuildVersionCHud, GetSpeedText, ComputeBottomState, particle-MHUD ниже, panorama-layout в
+// layout/mhud.cpp) — считать её обязана КАЖДАЯ одинаково, иначе баг вида «0 на паузе» лечится
+// в одном стиле худа и остаётся в остальных. Данные — из MHUDDataSource() (this->player, если
+// mhudSource не задан спектейтом) — та же развязка data/settings, что и у остального худа.
+SpeedInfo KZHUDService::GetSpeedInfo()
+{
+	KZPlayer *src = this->MHUDDataSource();
+	SpeedInfo info {};
+	info.velocity = KZHUDService::GetDisplayVelocity(src);
+
+	// На взлёте (не отлежался KZ_HUD_ON_GROUND_THRESHOLD после приземления и не стоит на
+	// лестнице без прыжка) престрейф валиден; иначе показывать нечего — hasPrespeed=false.
+	info.hasPrespeed = !((src->GetPlayerPawn()->m_fFlags() & FL_ONGROUND
+						  && g_pKZUtils->GetServerGlobals()->curtime - src->landingTime > KZ_HUD_ON_GROUND_THRESHOLD)
+						 || (src->GetPlayerPawn()->m_MoveType() == MOVETYPE_LADDER && !src->IsButtonPressed(IN_JUMP)));
+	if (info.hasPrespeed)
+	{
+		info.prespeed = src->takeoffVelocity;
+	}
+	info.perfing = src->IsPerfing() && !src->possibleLadderHop && !src->takeoffFromLadder;
+	info.jumpbug = src->hudService->fromDuckbug;
+	// Crouch-jump имеет смысл только на взлёте (см. useTakeoff у апстрима) — вне hasPrespeed
+	// красить скорость в CJ-цвет было бы враньём (взлёта уже/ещё нет).
+	info.crouchJump = info.hasPrespeed && src->hudService->crouchJumping;
+	return info;
+}
+
 void KZHUDService::UpdateMHUDSpeed()
 {
 	bool speedEnabled    = this->IsMHUDSpeedEnabled();
@@ -441,22 +469,19 @@ void KZHUDService::UpdateMHUDSpeed()
 				this->upstreamPrespeedParticles[i] = CreateMHUDParticle(numbersPath, prespeedBaseColor, 0.0f, prespeedScale, prespeedOffsetX, prespeedOffsetY);
 	}
 
-	KZPlayer *src = this->MHUDDataSource();
-	Vector velocity = KZHUDService::GetDisplayVelocity(src);
+	// Единственный источник показаний скорости (Task 6/R3, см. GetSpeedInfo в kz_hud.h) —
+	// раньше здесь считалось inline, теперь и panorama-layout (layout/mhud.cpp) читает те же
+	// числа отсюда же, а не копией: иначе получаем пятую расходящуюся ветку показа скорости.
+	const SpeedInfo info = this->GetSpeedInfo();
 
-	bool useTakeoff = !((src->GetPlayerPawn()->m_fFlags() & FL_ONGROUND
-						 && g_pKZUtils->GetServerGlobals()->curtime - src->landingTime > KZ_HUD_ON_GROUND_THRESHOLD)
-						|| (src->GetPlayerPawn()->m_MoveType() == MOVETYPE_LADDER && !src->IsButtonPressed(IN_JUMP)));
-
-	this->SetMHUDSpeedParticleVelocity(velocity, useTakeoff ? &src->takeoffVelocity : nullptr);
+	this->SetMHUDSpeedParticleVelocity(info.velocity, info.hasPrespeed ? &info.prespeed : nullptr);
 
 	const Color perfColor    = this->GetMHUDColorPref("mhudPrespeedPerfColor",  MHUD_DEF_PERF_COLOR);
 	const Color jumpbugColor = this->GetMHUDColorPref("mhudPrespeedJumpbugColor", MHUD_DEF_JUMPBUG_COLOR);
 	const Color cjColor      = this->GetMHUDColorPref("mhudSpeedCjColor",       MHUD_DEF_CJ_COLOR);
-	bool perfing = src->IsPerfing() && !src->possibleLadderHop && !src->takeoffFromLadder;
 
-	const Color speedColor    = useTakeoff && src->hudService->crouchJumping ? cjColor : baseColor;
-	const Color prespeedColor = perfing ? (src->hudService->fromDuckbug ? jumpbugColor : perfColor) : prespeedBaseColor;
+	const Color speedColor    = info.crouchJump ? cjColor : baseColor;
+	const Color prespeedColor = info.perfing ? (info.jumpbug ? jumpbugColor : perfColor) : prespeedBaseColor;
 
 	for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(this->upstreamSpeedParticles); i++)
 	{

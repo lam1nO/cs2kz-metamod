@@ -54,6 +54,20 @@ struct LayoutElementDef
 
 extern const LayoutElementDef LAYOUT_ELEMENTS[(i32)LayoutElement::Count];
 
+// Показания скорости — общий результат для ЛЮБОГО худа (Task 6/R3): particle-путь и
+// panorama-layout читают его из ОДНОГО метода (KZHUDService::GetSpeedInfo), а не считают
+// каждый по-своему — иначе это пятая расходящаяся ветка вдобавок к четырём, которые уже
+// обязаны совпадать (см. комментарий у GetDisplayVelocity).
+struct SpeedInfo
+{
+	Vector velocity {};  // GetDisplayVelocity(src) — полная (2D берёт вызывающий сам)
+	Vector prespeed {};  // takeoffVelocity; валиден, только если hasPrespeed
+	bool hasPrespeed {}; // false — игрок давно на земле/на лестнице без прыжка (useTakeoff)
+	bool perfing {};     // src->IsPerfing() && !possibleLadderHop && !takeoffFromLadder
+	bool jumpbug {};     // fromDuckbug — красит преф в отдельный цвет
+	bool crouchJump {};  // crouchJumping НА ВЗЛЁТЕ (см. hasPrespeed) — красит саму скорость
+};
+
 // Кэш префов layout-худа (реализация — Task 5, GetLayoutPrefs/RefreshLayoutPrefs);
 // UpdateLayoutElement (Task 4) читает уже этот тип, объявление обязано быть раньше реализации.
 struct MHUDLayoutPrefs
@@ -444,11 +458,24 @@ public:
 	void RefreshLayoutPrefs();
 	bool IsLayoutElementEnabled(LayoutElement element);
 
+	// Точка сборки panorama-худа (Task 6): true — сущность есть и худ обновлён (даже если
+	// весь спрятан — это тоже валидное обновление); false — сущность создать не удалось,
+	// вызывающий обязан уйти на HTML-путь. source — источник ДАННЫХ (наблюдаемый при
+	// спектейте), настройки/язык/сама сущность — за this->player (см. MHUDSettingsSource).
+	bool UpdateHudLayout(KZPlayer *source);
+
 private:
 	// dataSource = источник данных (наблюдаемый при спектировании); nullptr → сам игрок.
 	// Настройки (цвета perf/CJ) всегда идут с this (получателя) — см. GetMHUDColorPref.
 	std::string GetSpeedText(const char *language = KZ_DEFAULT_LANGUAGE, KZPlayer *dataSource = nullptr);
 	std::string GetKeyText(const char *language = KZ_DEFAULT_LANGUAGE);
+
+	// Единственная точка расчёта SpeedInfo (Task 6/R3, см. комментарий у struct SpeedInfo):
+	// particle-путь (particles.cpp/UpdateMHUDSpeed) и panorama-layout (layout/mhud.cpp)
+	// обязаны звать ИМЕННО его, копировать расчёт во вторую ветку запрещено. Данные — из
+	// MHUDDataSource() (this->player, если mhudSource не задан) — та же развязка data/settings,
+	// что у остального худа.
+	SpeedInfo GetSpeedInfo();
 	std::string GetCheckpointText(const char *language = KZ_DEFAULT_LANGUAGE);
 	std::string GetTimerText(const char *language = KZ_DEFAULT_LANGUAGE);
 
@@ -560,4 +587,33 @@ private:
 	// Кэш префов (Task 5 наполняет); объявление поля — здесь, чтобы UpdateLayoutElement (Task 4)
 	// уже мог читать this->GetLayoutPrefs().
 	MHUDLayoutPrefs layoutPrefs {};
+
+	// Кэш классов клавиш (Task 6): апстрим адресует не одну панель, а 16 отдельных глифов
+	// (KEY_GLYPHS в layout/mhud.cpp) поверх 6 кнопок (KEY_PANELS) — своё состояние, отдельное
+	// от layoutElements[Keys] (тот кэширует общий контейнер: цвет/позицию/размер/шрифт-класс
+	// панели целиком). Живёт ТОЛЬКО вместе с сущностью — обнулять вместе с layoutElements[]
+	// в DestroyOwnedLayout, иначе следующий владелец слота унаследует чужие классы кнопок и
+	// решит, что клавиши уже выставлены (та же ловушка, что и с layoutElements).
+	// В отличие от апстрима здесь НЕТ per-key idle/border/glow/fill/letters/square тумблеров —
+	// в нашей базе таких префов не существует (Task 5 их не заводил), поэтому кэшируем только
+	// то, что реально показываем: нажатие, размер клавиш и шрифт-класс глифов.
+	struct LayoutKeysState
+	{
+		bool pressed[KZHUDService::MHUD_KEY_COUNT] {};
+		i32 boxSize {INT_MIN};
+		i32 fontSize {INT_MIN};
+		const char *fontClass {};
+	};
+	LayoutKeysState layoutKeys {};
+
+	// === Пять элементов panorama-худа (Task 6) — перенесены с апстрима, адаптации: наши
+	// геттеры текста (GetTimerText/GetCheckpointText), this->GetLayoutPrefs() вместо GetPrefs(),
+	// this->IsLayoutElementEnabled() вместо IsMHUDElementEnabled(). source — источник ДАННЫХ
+	// (наблюдаемый при спектейте), this->player — настройки/язык/цвета (тот же контракт, что у
+	// BuildVersionCHud/UpdateBottomPanel).
+	void UpdateTimerElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force);
+	void UpdateSpeedElement(CCSCustomHudLayout *layout, const SpeedInfo &info, bool force);
+	void UpdatePrespeedElement(CCSCustomHudLayout *layout, const SpeedInfo &info, bool force);
+	void UpdateKeysElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force);
+	void UpdateCheckpointElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force);
 };
