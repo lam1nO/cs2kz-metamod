@@ -233,7 +233,11 @@ bool KZHUDService::UpdateHudLayout(KZPlayer *source)
 	// (см. LayoutElementState/LayoutKeysState), поэтому первый проход обязан выставить всё
 	// принудительно (иначе первый кадр уедет с дефолтными классами схемы).
 	const bool force = created;
-	const bool show = this->IsShowingPanel();
+	// IsShowingPanel() здесь НЕ читаем: преф showPanel выведен из оборота (TogglePanel()
+	// не вызывается ниоткуда, !panel переключает hudType Off↔Standard) — у игрока со старым
+	// showPanel=false в БД panorama иначе гасла бы целиком и молча, без лога и без способа
+	// включить обратно. Единственный переключатель видимости panorama — сам hudType.
+	const bool show = true;
 
 	// Крестик независим от элементов ниже: у него свой тумблер (mhudCrosshair), и он обязан
 	// применяться, даже когда вся панель худа спрятана (show=false) — иначе игрок с hudType
