@@ -1,12 +1,12 @@
 // Panorama-реплика собственного прицела игрока (Task 10). Перенесено с апстрима
 // (origin/master:src/kz/hud/layout/crosshair.cpp), расхождения — см.
 // журнал решений задачи (планинг-доки этой ветки, разделы R1/R2/R4) и ниже:
-//   - апстрим читает cl_crosshair* через свой cvarquery (введён ПОЗЖЕ, чем наша база branch'
-//     нулась от апстрима, — журнал решений этого расхождения не описывал); у нас клиентский
-//     cvar читается тем же механизмом, что anticheat/detectors/cvars.cpp и kz_language.cpp:
-//     IClientCvarValue (g_pClientCvarValue) с колбэком ECvarValueStatus/CvarValueCallback.
-//   - GetPreferenceColor/ResolveSwatchClass в базе нет — цвет резолвится panorama::ResolveColorClass
-//     (см. entity.cpp/UpdateLayoutElement, тот же резолвер).
+//   - чтение cl_crosshair* идёт через свой utils/cvarquery.h (порт с апстрима, 08.09): прежний
+//     путь через внешний metamod-плагин ClientCvarValue молча не работал — на флоте этого
+//     плагина нет ни в одном профиле, указатель был nullptr и опрос не уходил вовсе
+//     (.superpowers/sdd/2026-09-08-options-registry/recon-crosshair.md).
+//   - цвет плеч резолвится panorama::ResolveSwatchClass (`background-color`), НЕ ResolveColorClass:
+//     плечи — пустые <Panel> без текста, `color:` на них не рисует ничего.
 //   - this->GetLayoutPrefs() вместо GetPrefs() (R4), mhudCrosshair/mhudCrosshairScale читаются
 //     в prefs.cpp (RefreshLayoutPrefs), не здесь.
 
@@ -24,12 +24,10 @@
 #include "kz/option/kz_option.h"
 #include "sdk/entity/ccscustomhudlayout.h"
 #include "utils/ctimer.h"
+#include "utils/cvarquery.h"
 #include "utils/logging.h"
-#include <vendor/ClientCvarValue/public/iclientcvarvalue.h>
 
 #include "tier0/memdbgon.h"
-
-extern IClientCvarValue *g_pClientCvarValue;
 
 // Panorama's 1080px reference over the client's 480px crosshair scale. Exact at 1080p; elsewhere
 // mhudCrosshairScale carries the correction, since no convar reports the client's resolution.
@@ -49,6 +47,8 @@ extern IClientCvarValue *g_pClientCvarValue;
 // Opacity classes are 5% steps.
 #define MHUD_XH_OPACITY_STEPS 20
 #define MHUD_XH_POLL_INTERVAL 2.5f
+// Сколько кругов опроса без единого ответа считаем отказом «клиент не отвечает» (~10 с).
+#define MHUD_XH_UNANSWERED_LIMIT 4
 
 // Alpha goes on each painted panel, not the container: parent opacity does not reach children. The
 // border carrying the outline is part of the same panel, so it fades with the bar as the game does.
@@ -93,32 +93,32 @@ static_global const MHUDCrosshairCvar CROSSHAIR_CVARS[] = {
 };
 // clang-format on
 
-// Строка причины отказа ClientCvarValue — machine-readable reason для лога ниже.
-static_function const char *CvarValueStatusReason(ECvarValueStatus eStatus)
+// Строка причины отказа клиента — machine-readable reason для лога ниже.
+static_function const char *CvarValueStatusReason(cvarquery::Status status)
 {
-	switch (eStatus)
+	switch (status)
 	{
-		case ECvarValueStatus::CvarNotFound:
+		case cvarquery::Status::CvarNotFound:
 			return "cvar_not_found";
-		case ECvarValueStatus::NotACvar:
+		case cvarquery::Status::NotACvar:
 			return "not_a_cvar";
-		case ECvarValueStatus::CvarProtected:
+		case cvarquery::Status::CvarProtected:
 			return "cvar_protected";
 		default:
 			return "unknown";
 	}
 }
 
-static_function void OnCrosshairCvarQueried(CPlayerSlot nSlot, ECvarValueStatus eStatus, const char *pszCvarName, const char *pszCvarValue)
+static_function void OnCrosshairCvarQueried(CPlayerSlot nSlot, cvarquery::Status status, const char *pszCvarName, const char *pszCvarValue)
 {
-	if (eStatus != ECvarValueStatus::ValueIntact)
+	if (status != cvarquery::Status::ValueIntact)
 	{
-		// Отказ клиента отдать cl_crosshair* (нет вендорного плагина у клиента, cvar
-		// запротекчен и т.п.) — до подтверждения крестик просто не рисуется (см. ApplyCrosshair/
-		// confirmed), но САМ отказ раньше проходил тихо. Канон проекта требует reason на любой
-		// отказ.
-		KZ_LOG_WARN(LogChannel::General, "[cyb] crosshair_cvar_query_failed reason=%s cvar=%s slot=%i\n",
-					CvarValueStatusReason(eStatus), pszCvarName, nSlot.Get());
+		// Отказ клиента отдать cl_crosshair* (cvar запротекчен, переименован и т.п.) — до
+		// подтверждения крестик просто не рисуется (см. ApplyCrosshair/confirmed), но САМ отказ
+		// проходил бы тихо. Канон проекта требует reason на любой отказ.
+		KZPlayer *rejected = g_pKZPlayerManager->ToPlayer(nSlot);
+		KZ_LOG_WARN(LogChannel::General, "[cyb] crosshair_cvar_query_failed reason=%s cvar=%s steam_id=%llu slot=%i\n",
+					CvarValueStatusReason(status), pszCvarName, rejected ? rejected->GetSteamId64(false) : 0, nSlot.Get());
 		return;
 	}
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(nSlot);
@@ -130,33 +130,39 @@ static_function void OnCrosshairCvarQueried(CPlayerSlot nSlot, ECvarValueStatus 
 
 void KZHUDService::QueryCrosshairCvars()
 {
-	if (!g_pClientCvarValue || this->player->IsFakeClient() || this->player->IsCSTV())
+	if (this->player->IsFakeClient() || this->player->IsCSTV())
 	{
 		return;
 	}
+	// «Клиент не отвечает» — отдельный класс отказа: гейт confirmed молча держит крестик
+	// невидимым, поэтому после MHUD_XH_UNANSWERED_LIMIT кругов опроса без единого ответа
+	// говорим об этом один раз с машинно-читаемым reason.
+	if (!this->crosshair.confirmed && ++this->crosshairUnansweredPolls == MHUD_XH_UNANSWERED_LIMIT)
+	{
+		KZ_LOG_WARN(LogChannel::General, "[cyb] crosshair_cvar_query_failed reason=no_client_response polls=%i steam_id=%llu slot=%i\n",
+					this->crosshairUnansweredPolls, this->player->GetSteamId64(false), this->player->GetPlayerSlot().Get());
+	}
 	for (const MHUDCrosshairCvar &cvar : CROSSHAIR_CVARS)
 	{
-		g_pClientCvarValue->QueryCvarValue(this->player->GetPlayerSlot(), cvar.name, OnCrosshairCvarQueried);
+		cvarquery::Query(this->player->GetPlayerSlot(), cvar.name, OnCrosshairCvarQueried);
 	}
 }
 
 static_function f64 PollCrosshairCvars(CPlayerUserId userID)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
-	// Игрок разрешился (userID валиден), но уже не в игре (дисконнект/смена слота) — та же
-	// база (anticheat/detectors/cvars.cpp) в этом случае гасит таймер через 0.0f, а не крутит
-	// его вхолостую до конца карты. Без этого таймеры-сироты копятся на каждый дисконнект.
-	if (!player || !player->IsInGame())
+	// Гасим таймер ТОЛЬКО когда игрока больше нет (как апстрим). !IsInGame — это ОКНО (смена
+	// карты, переход спавна), а StartCrosshairPolling зовётся один раз за коннект
+	// (KZPlayer::OnPlayerFullyConnect): прежний ранний return 0.0f на !IsInGame убивал опрос до
+	// реконнекта, и после первой же смены карты крестик замирал на старых cl_crosshair*.
+	if (!player)
 	{
 		return 0.0f;
 	}
-	// Крестик — panorama-настройка (см. ApplyCrosshair): на любом другом типе худа опрашивать
-	// клиентские cvar незачем — 13 запросов каждые MHUD_XH_POLL_INTERVAL секунд впустую.
-	if (player->hudService->GetHudType() != KZHUDService::HUD_TYPE_PANORAMA)
-	{
-		return MHUD_XH_POLL_INTERVAL;
-	}
-	if (player->optionService->GetPreferenceBool("mhudCrosshair", false))
+	// Настройки никто не читает, пока игрок вне игры, крестик выключен или худ не panorama
+	// (см. ApplyCrosshair) — но таймер в этих окнах остаётся заряжен, иначе он не переживёт их.
+	if (player->IsInGame() && player->hudService->GetHudType() == KZHUDService::HUD_TYPE_PANORAMA
+		&& player->optionService->GetPreferenceBool("mhudCrosshair", false))
 	{
 		player->hudService->QueryCrosshairCvars();
 	}
@@ -170,6 +176,7 @@ void KZHUDService::StartCrosshairPolling()
 		return;
 	}
 	this->crosshair = MHUDCrosshairSettings();
+	this->crosshairUnansweredPolls = 0;
 	this->QueryCrosshairCvars();
 	StartTimer<CPlayerUserId>(PollCrosshairCvars, this->player->GetClient()->GetUserID(), MHUD_XH_POLL_INTERVAL, true, true);
 }
@@ -279,8 +286,8 @@ void KZHUDService::ApplyCrosshair(CCSCustomHudLayout *layout, bool show, bool fo
 		state = LayoutCrosshairState();
 	}
 
-	// this->crosshair.confirmed — клиент ещё не ответил ни на один cl_crosshair* (нет
-	// ClientCvarValue на сервере, свежий коннект, ответ в пути): без гейта крестик красился бы
+	// this->crosshair.confirmed — клиент ещё не ответил ни на один cl_crosshair* (свежий
+	// коннект, ответ в пути, клиент молчит): без гейта крестик красился бы
 	// хардкод-дефолтами конструктора MHUDCrosshairSettings, выдавая их за настройки игрока —
 	// «чужой» крестик хуже отсутствующего, поэтому до подтверждения ведём себя как при
 	// выключенном префе (ни классов, ни панелей не трогаем).
@@ -315,7 +322,9 @@ void KZHUDService::ApplyCrosshair(CCSCustomHudLayout *layout, bool show, bool fo
 	// Игра красит обводку тем же альфа-каналом, что и сами бары.
 	const i32 alpha = Clamp(settings.useAlpha ? settings.alpha : 200, 0, 255);
 	const i32 opacity = alpha * MHUD_XH_OPACITY_STEPS / 255;
-	const char *colorClass = panorama::ResolveColorClass(GetCrosshairColor(settings));
+	// ResolveSwatchClass, а НЕ ResolveColorClass: плечи и точка — пустые <Panel>, у .xh-arm своего
+	// фона нет (crosshair.css), поэтому красит только `background-color` (pal-bg-N/gbg-N).
+	const char *colorClass = panorama::ResolveSwatchClass(GetCrosshairColor(settings));
 
 	ApplyValueClass(this->player, layout, XH_HORIZONTAL, KZ_ARRAYSIZE(XH_HORIZONTAL), "xh-w--", state.armLength, boxLength);
 	ApplyValueClass(this->player, layout, XH_VERTICAL, KZ_ARRAYSIZE(XH_VERTICAL), "xh-h--", state.armLength, boxLength);

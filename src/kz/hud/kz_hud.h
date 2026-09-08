@@ -71,9 +71,8 @@ struct SpeedInfo
 };
 
 // Собственные cl_crosshair* значения игрока (Task 10): дефолты игры, пока не ответит клиент
-// на запрос через ClientCvarValue — наша база (пин cyb.149) ещё не тянет апстримный
-// cvarquery (введён апстримом позже слияния, журнал решений задачи это не покрывал), читаем тем же
-// механизмом, что anticheat/detectors/cvars.cpp и kz_language.cpp (g_pClientCvarValue).
+// на запрос через utils/cvarquery.h (порт с апстрима 08.09 — прежний путь через внешний
+// metamod-плагин ClientCvarValue на флоте не работал вовсе, плагина там нет).
 struct MHUDCrosshairSettings
 {
 	f32 size {5.0f};
@@ -87,7 +86,7 @@ struct MHUDCrosshairSettings
 	bool drawOutline {true};
 	bool dot {false};
 	bool tStyle {false};
-	// false — клиент ещё ни разу не ответил (или ClientCvarValue на сервере нет): поля выше —
+	// false — клиент ещё ни разу не ответил на cvarquery::Query: поля выше —
 	// хардкод-дефолты игры, НЕ настройки этого игрока. ApplyCrosshair обязан читать их только
 	// когда true, иначе крестик красится «чужими» cl_crosshair* — тот же класс бага, что
 	// fail-open в CyberSkins (пустой ответ приняли за настоящее значение).
@@ -648,9 +647,13 @@ private:
 		const char *colorClass {};
 	};
 
-	// Собственные cl_crosshair* игрока — наполняется OnCrosshairCvarValue по ответам
-	// ClientCvarValue, ApplyCrosshair читает как есть (дефолты игры, пока клиент не ответил).
+	// Собственные cl_crosshair* игрока — наполняется OnCrosshairCvarValue по ответам клиента на
+	// cvarquery::Query, ApplyCrosshair читает как есть (дефолты игры, пока клиент не ответил).
 	MHUDCrosshairSettings crosshair {};
+	// Круги опроса, на которые клиент не ответил НИ РАЗУ (сбрасывается в StartCrosshairPolling):
+	// гейт confirmed держит крестик невидимым молча, поэтому по достижении лимита пишем warn с
+	// reason=no_client_response — см. QueryCrosshairCvars.
+	i32 crosshairUnansweredPolls {};
 	LayoutCrosshairState layoutCrosshair {};
 
 	// === Пять элементов panorama-худа (Task 6) — перенесены с апстрима, адаптации: наши
