@@ -162,7 +162,9 @@ static_function f64 PollCrosshairCvars(CPlayerUserId userID)
 	// Настройки никто не читает, пока игрок вне игры, крестик выключен или худ не panorama
 	// (см. ApplyCrosshair) — но таймер в этих окнах остаётся заряжен, иначе он не переживёт их.
 	if (player->IsInGame() && player->hudService->GetHudType() == KZHUDService::HUD_TYPE_PANORAMA
-		&& player->optionService->GetPreferenceBool("mhudCrosshair", false))
+		// Дефолт true — тот же, что у читателя в layout/prefs.cpp: с false опрос конваров не
+		// стартовал у игрока, которому худ прицел уже рисует (два источника одного дефолта).
+		&& player->optionService->GetPreferenceBool("mhudCrosshair", true))
 	{
 		player->hudService->QueryCrosshairCvars();
 	}

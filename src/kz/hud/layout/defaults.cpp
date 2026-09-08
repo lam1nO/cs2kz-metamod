@@ -78,7 +78,9 @@ void KZHUDService::ApplyHudDefaults()
 			written += 7;
 		}
 
-		// Тумблеры худа вне LAYOUT_ELEMENTS — дефолты те же, что читает RefreshLayoutPrefs
+		// mhudMimicSpec в набор НЕ входит: это поведение спектейта, а не вид худа —
+// перезаписывать чужой выбор им незачем.
+// Тумблеры худа вне LAYOUT_ELEMENTS — дефолты те же, что читает RefreshLayoutPrefs
 		// (layout/prefs.cpp) и показывают пункты меню (hud/prefs/hud_prefs.cpp).
 		const struct
 		{
@@ -97,7 +99,6 @@ void KZHUDService::ApplyHudDefaults()
 			{"mhudPrespeedPrecise", false},     // престрейф с двумя знаками
 			{"mhudPrespeedBrackets", false},    // престрейф в скобках
 			{"mhudPrespeedHideWalkOff", false}, // не показывать престрейф при уходе с края
-			{"mhudMimicSpec", false},           // мимикрия под настройки наблюдаемого
 			{"mhudCrosshair", true},            // реплика прицела игрока панелями худа
 		};
 
