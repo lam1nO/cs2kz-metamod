@@ -68,6 +68,25 @@ struct SpeedInfo
 	bool crouchJump {};  // crouchJumping НА ВЗЛЁТЕ (см. hasPrespeed) — красит саму скорость
 };
 
+// Собственные cl_crosshair* значения игрока (Task 10): дефолты игры, пока не ответит клиент
+// на запрос через ClientCvarValue — наша база (пин cyb.149) ещё не тянет апстримный
+// cvarquery (введён апстримом позже слияния, base-facts.md это не покрывал), читаем тем же
+// механизмом, что anticheat/detectors/cvars.cpp и kz_language.cpp (g_pClientCvarValue).
+struct MHUDCrosshairSettings
+{
+	f32 size {5.0f};
+	f32 thickness {0.5f};
+	f32 gap {-2.0f};
+	f32 outlineThickness {1.0f};
+	i32 color {1};
+	i32 r {50}, g {250}, b {50};
+	i32 alpha {200};
+	bool useAlpha {true};
+	bool drawOutline {true};
+	bool dot {false};
+	bool tStyle {false};
+};
+
 // Кэш префов layout-худа (реализация — Task 5, GetLayoutPrefs/RefreshLayoutPrefs);
 // UpdateLayoutElement (Task 4) читает уже этот тип, объявление обязано быть раньше реализации.
 struct MHUDLayoutPrefs
@@ -101,6 +120,11 @@ struct MHUDLayoutPrefs
 	bool timerDetailed {};
 	bool speedPrecise {};
 	bool keysOverlapEnabled {};
+
+	// Крестик (Task 10) — независим от элементов худа выше, но живёт в той же структуре
+	// префов: ключи те же, что читает RefreshLayoutPrefs.
+	bool crosshair {};
+	i32 crosshairScale {100}; // единиц раскладки на девайс-пиксель, в процентах
 };
 
 class KZHUDService : public KZBaseService
@@ -465,6 +489,17 @@ public:
 	// спектейте), настройки/язык/сама сущность — за this->player (см. MHUDSettingsSource).
 	bool UpdateHudLayout(KZPlayer *source);
 
+	// Крестик (Task 10): реплика cl_crosshair* игрока панелями xh_* той же сущности —
+	// отдельной сущности не заводим (панель одна на слот, EnsureOwnedLayout). Не MHUDElement:
+	// у крестика нет текста, вся текстово-шрифтовая машинерия UpdateLayoutElement не подходит.
+	void ApplyCrosshair(CCSCustomHudLayout *layout, bool show, bool force);
+	// Первый опрос — сразу на коннекте (см. kz_player.cpp/OnPlayerFullyConnect), дальше сам
+	// себя переставляет таймером (StartCrosshairPolling), чтобы игрок, сменивший
+	// cl_crosshair* посреди карты, увидел актуальную копию без реконнекта.
+	void QueryCrosshairCvars();
+	void OnCrosshairCvarValue(const char *name, const char *value);
+	void StartCrosshairPolling();
+
 private:
 	// dataSource = источник данных (наблюдаемый при спектировании); nullptr → сам игрок.
 	// Настройки (цвета perf/CJ) всегда идут с this (получателя) — см. GetMHUDColorPref.
@@ -606,6 +641,31 @@ private:
 		const char *fontClass {};
 	};
 	LayoutKeysState layoutKeys {};
+
+	// Кэш класс-суффиксов крестика (Task 10) — та же ловушка, что у layoutElements[]/
+	// layoutKeys: живёт ТОЛЬКО вместе с сущностью, обнулять в DestroyOwnedLayout, иначе
+	// следующий владелец слота (реконнект/новый игрок) унаследует чужие xh-* классы, и
+	// ApplyCrosshair решит, что менять уже нечего — крестик молча не появится.
+	// -1 — класс ещё не выставлен ни разу (в отличие от size-полей выше INT_MIN здесь не
+	// нужен: любое реальное значение крестика неотрицательно).
+	struct LayoutCrosshairState
+	{
+		i32 shown {-1};
+		i32 armLength {-1};
+		i32 thickness {-1};
+		i32 margin {-1};
+		i32 marginFar {-1};
+		i32 outline {-1};
+		i32 opacity {-1};
+		i32 dot {-1};
+		i32 noTopArm {-1};
+		const char *colorClass {};
+	};
+
+	// Собственные cl_crosshair* игрока — наполняется OnCrosshairCvarValue по ответам
+	// ClientCvarValue, ApplyCrosshair читает как есть (дефолты игры, пока клиент не ответил).
+	MHUDCrosshairSettings crosshair {};
+	LayoutCrosshairState layoutCrosshair {};
 
 	// === Пять элементов panorama-худа (Task 6) — перенесены с апстрима, адаптации: наши
 	// геттеры текста (GetTimerText/GetCheckpointText), this->GetLayoutPrefs() вместо GetPrefs(),

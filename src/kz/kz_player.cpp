@@ -195,6 +195,10 @@ void KZPlayer::OnPlayerActive()
 void KZPlayer::OnPlayerFullyConnect()
 {
 	this->anticheatService->OnPlayerFullyConnect();
+	// Крестик (Task 10): первый опрос cl_crosshair* и запуск само-переставляющегося таймера
+	// (StartCrosshairPolling гейтит фейков/CSTV сама) — без вызова опрос никогда бы не начался
+	// и панорама-крестик красился бы дефолтами игры, игнорируя настройки игрока.
+	this->hudService->StartCrosshairPolling();
 }
 
 void KZPlayer::OnAuthorized()

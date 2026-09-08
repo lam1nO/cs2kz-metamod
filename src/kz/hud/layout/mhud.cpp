@@ -11,7 +11,7 @@
 //     Task 5 не заводил (в нашей базе их нет). Оставлено то, что опирается на существующие
 //     префы: нажатие клавиши, общий цвет/оверлап (hudKeysOverlap/mhudKeysOverlapColor),
 //     размер и шрифт-класс контейнера Keys.
-//   - ApplyCrosshair НЕ переносим — крестик отдельная задача (10), место оставлено комментарием.
+//   - ApplyCrosshair (Task 10) — реализация в отдельном layout/crosshair.cpp, вызов отсюда.
 #include "kz/hud/layout/layout.h"
 #include "kz/language/kz_language.h"
 #include "kz/checkpoint/kz_checkpoint.h"
@@ -235,8 +235,12 @@ bool KZHUDService::UpdateHudLayout(KZPlayer *source)
 	const bool force = created;
 	const bool show = this->IsShowingPanel();
 
-	// Крестик — задача 10, независим от коллапса элементов ниже. Место для
-	// ApplyCrosshair(layout, show, force) оставлено здесь намеренно, вызов не добавляем.
+	// Крестик независим от элементов ниже: у него свой тумблер (mhudCrosshair), и он обязан
+	// применяться, даже когда вся панель худа спрятана (show=false) — иначе игрок с hudType
+	// Off/спрятанной панелью терял бы крестик вместе с таймером/скоростью, хотя по спеке это
+	// самостоятельная настройка. Технически крестик всё равно доступен только на типе
+	// Panorama (та же сущность, что и у элементов худа) — это ожидаемое ограничение, не баг.
+	this->ApplyCrosshair(layout, show, force);
 
 	if (!show)
 	{

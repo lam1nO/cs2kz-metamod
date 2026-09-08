@@ -51,6 +51,11 @@ void KZHUDService::RefreshLayoutPrefs()
 	this->layoutPrefs.timerDetailed = opts->GetPreferenceBool("hudTimerDetail", true);
 	this->layoutPrefs.keysOverlapEnabled = opts->GetPreferenceBool("hudKeysOverlap", true);
 	this->layoutPrefs.speedPrecise = opts->GetPreferenceBool("mhudSpeedPrecise", false);
+
+	// Крестик (Task 10) — самостоятельный тумблер, не элемент LAYOUT_ELEMENTS: у него нет
+	// текста/шрифта/позиции в процентах, только масштаб (crosshairScale, доли device-пикселя).
+	this->layoutPrefs.crosshair = opts->GetPreferenceBool("mhudCrosshair", false);
+	this->layoutPrefs.crosshairScale = panorama::SnapToStep((i32)opts->GetPreferenceInt("mhudCrosshairScale", 100), 0, 500);
 }
 
 bool KZHUDService::IsLayoutElementEnabled(LayoutElement element)
