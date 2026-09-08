@@ -1866,7 +1866,8 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	KZHUDService *cfg = target->hudService;
 
 	bool available = KZHUDService::IsMHUDAvailable();
-	// hudType: 0 = Standard (HTML-панель), 1 = MHUD (particle-оверлей), 2 = Off (ничего).
+	// hudType: 0 = Standard (HTML-панель), 1 = MHUD (particle-оверлей), 2 = Off (ничего),
+	// 3 = Panorama (custom_hud_layout сущность).
 	//
 	// Particle-путь — ТОЛЬКО для живого владельца (player == target && target->IsAlive()).
 	// Причина не в правах, а в движке: у CS2 нет честного screen-space API для HUD поверх
@@ -1894,8 +1895,42 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 		target->hudService->DestroyAllParticles();
 	}
 
+	// Panorama-путь: сущность custom_hud_layout (Task 6). В отличие от particle-пути, здесь
+	// НЕТ гейта «только живой владелец» — текст в неё пишет СЕРВЕР по конкретному слоту
+	// (UpdateLayoutElement/SetPanelText по классам схемы), а не клиентский оператор, считающий
+	// экранную позицию по взгляду владельца. Поэтому panorama одинаково пригодна и владельцу,
+	// и спектатору (cfg — всегда settings/entity ПОЛУЧАТЕЛЯ, т.е. target, а данные берутся у
+	// player — наблюдаемого при спектейте, иначе он же сам); опасность гонки данных того же
+	// рода, что и у particle-пути (cyb.36), тут не возникает.
+	// Сущность рисуется независимо от HTML-центр-канала (как и particle'ы) — поэтому она
+	// обязана жить и обновляться и под открытым cs2menus-меню, и в минимал-стиле: ниже мы
+	// уходим с раннего return'а ДО проверки Off/меню/needHtml, чтобы не завести второй путь
+	// показаний тех же данных поверх panorama.
+	bool usePanorama = available && cfg->GetHudType() == HUD_TYPE_PANORAMA;
+	if (usePanorama)
+	{
+		if (cfg->UpdateHudLayout(player))
+		{
+			// needHtml ниже никогда не увидит usePanorama=true — html и panorama обязаны
+			// оставаться взаимоисключающими (иначе получатель ловит оба худа разом).
+			cfg->ClearBottomPanel();
+			cfg->ClearMinimalHud();
+			return;
+		}
+		// Сущность не создалась (см. reason в логе UpdateHudLayout) — это ОТКАЗ, а не выбор
+		// игрока. Падать в тишину нельзя: усыновляем needHtml-фолбэк ниже, а не return'им.
+		usePanorama = false;
+	}
+	else
+	{
+		// Ушли с panorama-типа (или он никогда не был выбран) — сущность и её кэши классов
+		// не должны переживать смену типа, иначе на экране останется застывший худ.
+		cfg->DestroyOwnedLayout();
+	}
+
 	// Тип Off — единственный рычаг «выключить худ целиком»: не рисуем ни particle (уже
-	// погашены выше), ни HTML-панель, ни нижнюю панель, ни минимал (клир остатков —
+	// погашены выше), ни panorama (уже обработана выше — не выбрана либо отвалилась в
+	// HTML-фолбэк), ни HTML-панель, ни нижнюю панель, ни минимал (клир остатков —
 	// одноразовый).
 	if (cfg->GetHudType() == HUD_TYPE_OFF)
 	{
@@ -1935,9 +1970,11 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	// HTML fallback: Standard type is selected, OR no addons are available at all
 	// (no MultiAddonManager/assets), OR the particle path isn't active for some other
 	// reason — target is dead, or this is a spectator (player != target, see the gate
-	// above). needHtml and useParticles must stay mutually exclusive, otherwise the
-	// recipient ends up with no HUD at all. (Off уже отсеян ранним return выше.)
-	bool needHtml = !available || cfg->GetHudType() == HUD_TYPE_STANDARD || !useParticles;
+	// above). needHtml, useParticles и usePanorama обязаны быть взаимоисключающими, иначе
+	// получатель либо ловит два худа разом, либо не получает ни одного. (Off и живой
+	// panorama-путь уже отсеяны ранними return'ами выше; здесь usePanorama=true остаться не
+	// может — либо он вернул true и функция уже вышла, либо сброшен в false строкой выше.)
+	bool needHtml = !available || cfg->GetHudType() == HUD_TYPE_STANDARD || (!useParticles && !usePanorama);
 
 	// --- Минималистичный стиль: весь худ = апстрим-композиция cs2kz (см. UpdateMinimalHud).
 	//        Кибершоковская HTML-панель и нижняя панель не рисуются вовсе; их остаток при

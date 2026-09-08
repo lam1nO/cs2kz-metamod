@@ -1,6 +1,6 @@
 // Пять элементов panorama-худа + точка сборки (Task 6). Перенесено с апстрима
-// (origin/master:src/kz/hud/layout/mhud.cpp), расхождения с ним — см.
-// docs/superpowers/sdd/2026-09-08-panorama-hud/base-facts.md (R1-R4):
+// (origin/master:src/kz/hud/layout/mhud.cpp), расхождения с ним — см. заметки планирования
+// задачи в отдельном (не этом) репозитории, кратко (R1-R4):
 //   - MHUDElement/MHUD_ELEMENTS -> LayoutElement/LAYOUT_ELEMENTS (R1, имя занято particles.cpp);
 //   - GetPrefs()/IsMHUDElementEnabled -> GetLayoutPrefs()/IsLayoutElementEnabled (R4);
 //   - GetPreferenceColor -> GetMHUDColorPref, дефолтные цвета уже подняты в kz_hud.h (R2);

@@ -918,6 +918,14 @@
 		"chi"		"MHUD"
 		"ua"		"MHUD"
 	}
+	// Отображаемое имя типа Panorama в пункте меню. Имя технологии, не бренд — латиницей везде.
+	"HUD - Menu Type Panorama"
+	{
+		"en"		"Panorama"
+		"ru"		"Panorama"
+		"chi"		"Panorama"
+		"ua"		"Panorama"
+	}
 	// Отображаемое имя типа Off (худ выключен полностью) в пункте меню.
 	"HUD - Menu Type Off"
 	{

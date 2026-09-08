@@ -1040,12 +1040,14 @@ static constexpr const char *HUD_MENU_COMPACT_TAG = "__compactPanel__";
 static constexpr const char *HUD_MENU_FONT_TAG = "__mhudFont__";
 static constexpr const char *HUD_MENU_TIMERSTYLE_TAG = "__hudTimerStyle__";
 
-// Следующий тип в цикле меню: MHUD → Standard → Off → MHUD.
+// Следующий тип в цикле меню: MHUD → Panorama → Standard → Off → MHUD.
 static_function int HudTypeNext(int current)
 {
 	switch (current)
 	{
 		case KZHUDService::HUD_TYPE_MHUD:
+			return KZHUDService::HUD_TYPE_PANORAMA;
+		case KZHUDService::HUD_TYPE_PANORAMA:
 			return KZHUDService::HUD_TYPE_STANDARD;
 		case KZHUDService::HUD_TYPE_STANDARD:
 			return KZHUDService::HUD_TYPE_OFF;
@@ -1061,6 +1063,8 @@ static_function const char *HudTypePhrase(int type)
 	{
 		case KZHUDService::HUD_TYPE_MHUD:
 			return "HUD - Menu Type MHUD";
+		case KZHUDService::HUD_TYPE_PANORAMA:
+			return "HUD - Menu Type Panorama";
 		case KZHUDService::HUD_TYPE_OFF:
 			return "HUD - Menu Type Off";
 		default:
