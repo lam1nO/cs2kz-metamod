@@ -42,6 +42,7 @@
 #include "kz/hud/layout/menu.h"
 #include "kz/hud/layout/panorama_tables.h"
 #include "kz/option/kz_option.h"
+#include "kz/language/kz_language.h"
 #include "sdk/entity/ccscustomhudlayout.h"
 #include "entitykeyvalues.h"
 #include "utils/utils.h"

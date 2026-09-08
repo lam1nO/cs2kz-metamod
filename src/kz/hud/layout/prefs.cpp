@@ -3,6 +3,7 @@
 // символа сломало бы линковку, она уже определена в entity.cpp и объявлена extern в kz_hud.h.
 #include "kz/hud/layout/layout.h"
 #include "kz/hud/layout/panorama_tables.h"
+#include "kz/option/kz_option.h"
 
 #include "tier0/memdbgon.h"
 
