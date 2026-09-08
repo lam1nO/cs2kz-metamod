@@ -373,6 +373,11 @@ void KZHUDService::Reset()
 	// OnPlayerPreferencesLoaded, а спектатор с mhudMimicSpec мимикрировал бы под чужой набор
 	// (loaded остался бы true — см. MHUDLayoutPrefs::loaded в kz_hud.h).
 	this->layoutPrefs = MHUDLayoutPrefs();
+	// Слот последней применённой цели mhudMimicSpec (entity.cpp/EnsureOwnedLayout) — слот
+	// освобождается, оставленное здесь значение не влияло бы на корректность (запись выше уже
+	// снесла сущность), но живёт по тому же правилу, что и остальные поля этого блока: кэш
+	// сбрасывается там же, где реально освобождается владение слотом.
+	this->layoutMimicSource = CPlayerSlot(-1);
 	// Меню (Task 11) — своя сущность с курсорным захватом (см. layout/menu.cpp): дисконнект
 	// обязан снять его так же, как ownedLayout выше, иначе следующий игрок в этом слоте
 	// унаследует чужой menuOpen/diff-кэш, а у отключившегося сам захват уйдёт вместе с

@@ -630,6 +630,15 @@ private:
 	CHandle<CBaseEntity> ownedLayout {};
 	LayoutElementState layoutElements[(i32)LayoutElement::Count] {};
 
+	// Слот эффективного источника mhudMimicSpec на МОМЕНТ последней проверки EnsureOwnedLayout:
+	// -1 (невалидный CPlayerSlot) — мимикрия не активна, используются свои префы; иначе слот
+	// наблюдаемого. Сравнение с текущим слотом (entity.cpp/EnsureOwnedLayout) решает, пересоздавать
+	// ли ownedLayout — интерн-таблицы сущности (HUD_LAYOUT_MAX_INTERNED_STRINGS) растут за весь
+	// сеанс наблюдателя и не освобождаются, а долгий спектейт-марафон с разными раскладками цели
+	// исчерпал бы лимит (T5a-отчёт, раздел 5). Отдельно от layoutPrefs.mimicSpec: тот — сырой
+	// СВОЙ переключатель, этот — какая цель фактически применена сейчас.
+	CPlayerSlot layoutMimicSource {-1};
+
 	// Кэш префов (Task 5 наполняет); объявление поля — здесь, чтобы UpdateLayoutElement (Task 4)
 	// уже мог читать this->GetLayoutPrefs().
 	MHUDLayoutPrefs layoutPrefs {};
