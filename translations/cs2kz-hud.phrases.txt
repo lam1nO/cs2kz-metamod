@@ -423,12 +423,14 @@
 		"chi"		"标准"
 		"ua"		"Стандартний"
 	}
+	// Игроку этот худ известен как MHUD (так он назывался с particle-эры) — техническое имя
+	// panorama остаётся в коде, ключах префов и классах разметки, меняется только видимое.
 	"HUD - HudType Panorama"
 	{
-		"en"		"Panorama"
-		"ru"		"Панорама"
-		"chi"		"Panorama"
-		"ua"		"Панорама"
+		"en"		"MHUD"
+		"ru"		"MHUD"
+		"chi"		"MHUD"
+		"ua"		"MHUD"
 	}
 	"HUD - HudType Off"
 	{

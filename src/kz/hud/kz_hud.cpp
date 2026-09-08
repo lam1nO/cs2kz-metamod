@@ -1441,7 +1441,7 @@ void KZHUDService::PrintPanelDiagnostics()
 		// Штатных причин две, обе с ранним return в DrawPanels: hudType Off, открытое
 		// Html-меню (либо hudType Panorama — тогда HTML-путь не строится вовсе).
 		// Валить это на cvar — врать.
-		utils::PrintConsole(controller, "[KZ]  SENT: пусто — панель не отправляется (hudType Off / Panorama / открытое меню)\n");
+		utils::PrintConsole(controller, "[KZ]  SENT: пусто — панель не отправляется (hudType Off / MHUD / открытое меню)\n");
 	}
 
 	// Пересобранное сейчас. Пешка обязательна: сборщик читает её флаги/скорость напрямую, а
