@@ -205,6 +205,22 @@ namespace
 		player->optionService->SetPreferenceInt("desiredBeamType", player->beamService->desiredBeamType);
 	}
 
+	// beamOffset рисуется из кэша KZBeamService::playerBeamOffset (kz_beam.h), который иначе
+	// обновляется только в OnPlayerPreferencesLoaded (kz_beam.cpp:22-23) — на коннекте. Generic
+	// Vector-пункт пишет прямо в преф через prefKey/storage, кэш не трогая: без досинка правка
+	// в меню осела бы в БД, но луч не сдвинулся бы до реконнекта — тот же класс бага, что решён
+	// в Task 8 для HidePlayers/HideWeapon/TimerStopSound через колбэк на запись. У Vector нет
+	// AddActionToggle-аналога, но есть onEdit (открытие/закрытие попапа) — используем его как тот
+	// же по смыслу колбэк: на закрытии (begin=false) перечитываем свежезаписанный преф в кэш.
+	void BeamOffsetOnEdit(KZPlayer *player, i64 tag, bool begin)
+	{
+		if (begin)
+		{
+			return;
+		}
+		player->beamService->playerBeamOffset = player->optionService->GetPreferenceVector("beamOffset", KZBeamService::defaultOffset);
+	}
+
 	// -------------------------------------------------------------- Language (Choice) ---
 	// Список курируем, как MENU_FONTS в hud/layout/menu.cpp курирует шрифты: реальных
 	// переводов у форка не 32 (весь translations/config.txt — таблица автоопределения по
@@ -263,8 +279,9 @@ namespace
 	}
 
 	// ------------------------------------------------------------ Show tips (toggle) ----
-	// showTips — сессионный член KZTipService, не преф optionService (см. kz_tip.h/cpp:
-	// Reset() всегда true, ToggleTips() пишет только память) — колбэки, не AddToggle+prefKey.
+	// showTips персистентен (правка ревью задачи 7: до неё Reset() жёстко ставил true, теперь
+	// читает/пишет optionService, см. kz_tip.cpp) — колбэки, а не голый AddToggle, потому что
+	// запись обязана попасть и в кэш-член KZTipService, и в преф разом (ToggleTips() делает оба).
 	i64 ShowTipsGetCurrent(KZPlayer *player, i64 tag)
 	{
 		return player->tipService->GetShowTips() ? 1 : 0;
@@ -343,13 +360,14 @@ void KZMiscMenu_Register()
 	KZ::menu::SetItemPref(cat, "desiredBeamType", KZOptStorage::Int, KZBeamService::BEAM_NONE);
 
 	// Границы — наши (код не проверяет offset вообще, см. kz_beamoffset); диапазон с запасом
-	// вокруг дефолта (0, 0, 1.75).
-	KZ::menu::AddVector(cat, "Options - Menu Label BeamOffset", "beamOffset", KZBeamService::defaultOffset, -64, 64);
+	// вокруг дефолта (0, 0, 1.75). onEdit — досинк кэша луча на закрытии попапа, см. выше.
+	KZ::menu::AddVector(cat, "Options - Menu Label BeamOffset", "beamOffset", KZBeamService::defaultOffset, -64, 64, 0, &BeamOffsetOnEdit);
 
 	KZ::menu::AddChoice(cat, "Options - Menu Label Language", &LanguageGetChoices, &LanguageGetCurrent, &LanguageOnPick);
 	KZ::menu::SetItemPref(cat, "preferredLanguage", KZOptStorage::Str);
 
 	KZ::menu::AddActionToggle(cat, "Options - Menu Label ShowTips", &ShowTipsGetCurrent, &ShowTipsOnActivate);
+	KZ::menu::SetItemPref(cat, "showTips", KZOptStorage::Bool, 1);
 
 	KZ::menu::AddSize(cat, "Options - Menu Label FOV", "fov", (i32)KZFOVService::GetDefaultFOV(), (i32)KZFOVService::GetMinFOV(),
 					  (i32)KZFOVService::GetMaxFOV());
@@ -357,7 +375,9 @@ void KZMiscMenu_Register()
 
 	// safeguard: два независимых префа, не единый Choice — см. комментарий в шапке файла.
 	KZ::menu::AddActionToggle(cat, "Options - Menu Label SafeguardReset", &SgResetGetCurrent, &SgResetOnActivate);
+	KZ::menu::SetItemPref(cat, "sgReset", KZOptStorage::Int, 0);
 	KZ::menu::AddActionToggle(cat, "Options - Menu Label SafeguardTeleport", &SgTeleportGetCurrent, &SgTeleportOnActivate);
+	KZ::menu::SetItemPref(cat, "sgTeleport", KZOptStorage::Int, 0);
 
 	KZ::menu::AddChoice(cat, "Options - Menu Label CompareType", &CompareTypeGetChoices, &CompareTypeGetCurrent, &CompareTypeOnPick);
 	KZ::menu::SetItemPref(cat, "preferredCompareType", KZOptStorage::Int, KZTimerService::CompareType::COMPARE_GPB);

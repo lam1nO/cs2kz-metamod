@@ -24,8 +24,9 @@ public:
 	void OnPlayerJoinTeam(i32 team);
 	void OnTimerStartPost();
 
-	// Для реестра настроек (Task 7, AddActionToggle): showTips — сессионный флаг, не преф
-	// optionService, поэтому пункту меню нужен именно колбэк, а не сырой prefKey.
+	// Для реестра настроек (Task 7, AddActionToggle): читает и пишет через колбэки, а не
+	// сырой prefKey, потому что запись должна попасть и в кэш-член (this->showTips), и в
+	// optionService (см. Reset()/ToggleTips() — showTips персистентен с ревью задачи 7).
 	bool GetShowTips() const
 	{
 		return this->showTips;

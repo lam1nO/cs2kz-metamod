@@ -25,13 +25,18 @@ void KZTipService::Init()
 
 void KZTipService::Reset()
 {
-	this->showTips = true;
+	// Раньше showTips был чисто сессионным (жёстко true на каждый коннект) — с появлением
+	// пункта в реестре настроек (Task 7) выбор игрока обязан переживать реконнект, поэтому
+	// теперь читаем из optionService, как это уже делает KZQuietService::Reset() для
+	// hideOtherPlayers/hideWeapon. Дефолт true — как было, для тех, кто ключ не трогал.
+	this->showTips = this->player->optionService->GetPreferenceBool("showTips", true);
 	this->teamJoinedAtLeastOnce = false;
 }
 
 void KZTipService::ToggleTips()
 {
 	this->showTips = !this->showTips;
+	this->player->optionService->SetPreferenceBool("showTips", this->showTips);
 	player->languageService->PrintChat(true, false, this->showTips ? "Option - Tips - Enable" : "Option - Tips - Disable");
 }
 

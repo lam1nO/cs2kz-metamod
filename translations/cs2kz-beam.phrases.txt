@@ -69,20 +69,39 @@
 		"es"		"{grey}El ajuste de la posición de tu haz de luz es: {default}{x} {y} {z}"
 	}
 
-	// Простые имена значений для Choice-пункта Beam в реестре настроек (задача 7).
+	// Простые имена значений для Choice-пункта Beam в реестре настроек (задача 7). 8 языков —
+	// норма файла (см. "Beam Changed (...)" выше), термины Ground/Feet взяты оттуда же.
 	"Misc - Beam Type None"
 	{
 		"en"	"Off"
+		"chi"	"关闭"
+		"pl"	"Wyłączony"
+		"sv"	"Av"
+		"ua"	"Вимкнено"
+		"de"	"Aus"
 		"ru"	"Выкл"
+		"es"	"Desactivado"
 	}
 	"Misc - Beam Type Ground"
 	{
 		"en"	"Ground"
+		"chi"	"地面"
+		"pl"	"Ziemia"
+		"sv"	"Mark"
+		"ua"	"По землі"
+		"de"	"Boden"
 		"ru"	"По земле"
+		"es"	"Suelo"
 	}
 	"Misc - Beam Type Feet"
 	{
 		"en"	"Feet"
+		"chi"	"脚下"
+		"pl"	"Stopy"
+		"sv"	"Fötter"
+		"ua"	"Від ніг"
+		"de"	"Füße"
 		"ru"	"От ступней"
+		"es"	"Pies"
 	}
 }
