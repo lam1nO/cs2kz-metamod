@@ -220,16 +220,17 @@ void KZHUDService::UpdateKeysElement(CCSCustomHudLayout *layout, KZPlayer *sourc
 	}
 
 	// key-glow-N (keys.css, 160 записей) — та же палитра, что pal-fg-N/pal-bg-N в
-	// panorama_tables.cpp (значения сверены построчно, см. отчёт задачи): индекс через
-	// FindColorEntry и клэмп в [0, 159] — тот же приём, что и остальной проект (fallback на
-	// дефолт при "нашёл, но не туда"); градиент сюда не долетает — SetItemSolidOnly (hud_prefs.cpp)
-	// не даёт выбрать его в пикере обоих цветов ниже.
-	auto resolveGlowIndex = [](const Color &c)
+	// panorama_tables.cpp. Градиентов в keys.css нет: у градиента FindColorEntry отдаёт запись
+	// за хвостом сплошных (или -1), и такой преф уводим на дефолт опции — как апстрим. Клэмп в
+	// последнюю сплошную покрасил бы клавишу чужим цветом. Пикер градиент не даёт (SetItemSolidOnly
+	// в hud_prefs.cpp), но преф мог прийти из БД, от импорта или мимо меню.
+	auto resolveGlowIndex = [](const Color &c, const Color &fallback)
 	{
-		return Clamp(panorama::FindColorEntry(c), 0, 159);
+		const i32 entry = panorama::FindColorEntry(c);
+		return (entry >= 0 && entry < panorama::GetSolidColorCount()) ? entry : panorama::FindColorEntry(fallback);
 	};
-	const i32 glow = resolveGlowIndex(prefs.keysPressed);
-	const i32 glowOverlap = overlap ? resolveGlowIndex(prefs.keysOverlapGlow) : glow;
+	const i32 glow = resolveGlowIndex(prefs.keysPressed, MHUD_DEF_KEYS_PRESSED_COLOR);
+	const i32 glowOverlap = overlap ? resolveGlowIndex(prefs.keysOverlapGlow, MHUD_DEF_KEYS_OVERLAP_GLOW_COLOR) : glow;
 	const char *overlapClass = prefs.keysOverlapAxis ? panorama::ResolveColorClass(prefs.keysOverlap) : NULL;
 	for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(KEY_PANELS); i++)
 	{

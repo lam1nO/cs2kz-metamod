@@ -202,8 +202,9 @@ static_function bool IsMenuItemEnabled(KZPlayer *player, const KZOptItem &it)
 // entry<PANORAMA_COLOR_COUNT — сплошной), поэтому достаточно отрезать хвост без нового
 // экспорта из panorama_tables (panorama::GetSolidColorCount убрана в задаче 14 как мёртвая) —
 // маркер градиента читаем через уже публичный GetColorEntryValue(...).a() (255 — сплошной,
-// 1 — маркер градиента, см. panorama_tables.cpp:IsGradient). Флаг никто из состава не ставит
-// (задача 14: "заводить не нужно") — при solidOnly=false это ровно GetColorEntryCount().
+// 1 — маркер градиента, см. panorama_tables.cpp:IsGradient). Флаг ставят цвета клавиш
+// (hud_prefs.cpp: key-glow-N в keys.css градиентов не знает); при solidOnly=false это ровно
+// GetColorEntryCount().
 static_function i32 GetColorPopupTotal(const KZOptItem *it)
 {
 	i32 total = panorama::GetColorEntryCount();
