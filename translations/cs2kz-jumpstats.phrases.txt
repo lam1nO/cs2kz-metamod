@@ -1165,10 +1165,22 @@
 		"en"		"Broadcast minimum tier (sound)"
 		"ru"		"Мин. тир трансляции (звук)"
 	}
+	// Новый пункт (реестр настроек, задача 6) — был преф без пункта меню, см. диф-документ.
+	"Jumpstats - Menu Label BroadcastMinTierConsole"
+	{
+		"en"		"Broadcast minimum tier (console)"
+		"ru"		"Мин. тир трансляции (консоль)"
+	}
 	"Jumpstats - Menu Label Failstats"
 	{
 		"en"		"Failstats"
 		"ru"		"Провальные прыжки"
+	}
+	// Новый пункт (реестр настроек, задача 6) — был преф без пункта меню, см. диф-документ.
+	"Jumpstats - Menu Label FailstatsConsole"
+	{
+		"en"		"Failstats (console)"
+		"ru"		"Провальные прыжки (консоль)"
 	}
 	"Jumpstats - Menu Label ExtendedChatStats"
 	{
