@@ -193,6 +193,20 @@ SchemaCollectionManipulatorFn_t schema::GetCollectionManipulator(const char *cla
 	return NULL;
 }
 
+bool schema::GetClassLayout(const char *className, int &size, int &fieldCount)
+{
+	size = 0;
+	fieldCount = 0;
+	SchemaClassInfoData_t *pClassInfo = FindClassInfo(className);
+	if (!pClassInfo)
+	{
+		return false;
+	}
+	size = pClassInfo->m_nSize;
+	fieldCount = pClassInfo->m_nFieldCount;
+	return true;
+}
+
 int16_t schema::FindChainOffset(const char *className, uint32_t classNameHash)
 {
 	return schema::GetOffset(className, classNameHash, "__m_pChainEntity", g_ChainKey).offset;

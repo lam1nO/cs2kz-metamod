@@ -16,6 +16,41 @@ CConVar<bool> kz_prac_enable("kz_prac_enable", FCVAR_NONE, "Whether the !prac pr
 CConVar<i32> kz_prac_run_policy("kz_prac_run_policy", FCVAR_NONE,
 								"What happens to a run that went through !prac: 0 = becomes NUB (counted), 1 = not counted at all.", 0);
 
+bool KZPracService::mapContextsSupported = false;
+
+// Контексты сравниваем по строкам, а не по символам: пул движка не гарантирует один символ на
+// одинаковый текст, а карте важен именно текст (`filter_activator_context` сравнивает строки).
+static_function bool SameContext(const ResponseContext_t &a, const ResponseContext_t &b)
+{
+	// String() у пустого символа — "", не NULL (utlsymbollarge.h), проверять указатели незачем.
+	return !strcmp(a.m_iszName.String(), b.m_iszName.String()) && !strcmp(a.m_iszValue.String(), b.m_iszValue.String());
+}
+
+static_function bool ContainsContext(const CUtlVector<ResponseContext_t> &vec, const ResponseContext_t &ctx)
+{
+	FOR_EACH_VEC(vec, i)
+	{
+		if (SameContext(vec[i], ctx))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+// То же для живой коллекции пешки. count поднят наружу: каждый доступ — вызов в игру.
+static_function bool ContainsContext(const CSchemaCollection<ResponseContext_t> &col, int count, const ResponseContext_t &ctx)
+{
+	for (int i = 0; i < count; i++)
+	{
+		if (SameContext(*col.ElementUnchecked(i), ctx))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
 // Канонический вид «режим + стили» для сверки на выходе из prac. Строим через тот же
 // BuildStylesString, что и ключ SavedRuns, чтобы «те же стили» значило одно и то же во всём форке.
 static_function void SnapshotModeStyles(KZPlayer *player, char *modeOut, int modeSize, char *stylesOut, int stylesSize)
@@ -45,6 +80,98 @@ void KZPracService::Reset()
 	this->frozen = {};
 	this->ClearPoints();
 	this->ResetPracTime();
+	this->entryContexts.RemoveAll();
+	this->entryContextsValid = false;
+}
+
+void KZPracService::SnapshotMapContexts()
+{
+	this->entryContexts.RemoveAll();
+	this->entryContextsValid = false;
+	if (!KZPracService::mapContextsSupported)
+	{
+		return;
+	}
+	CCSPlayerPawn *pawn = this->player->GetPlayerPawn();
+	if (!pawn)
+	{
+		return;
+	}
+	const CSchemaCollection<ResponseContext_t> contexts = pawn->m_ResponseContexts();
+	if (!contexts.IsValid())
+	{
+		return;
+	}
+	const int count = contexts.Count();
+	for (int i = 0; i < count; i++)
+	{
+		this->entryContexts.AddToTail(*contexts.ElementUnchecked(i));
+	}
+	this->entryContextsValid = true;
+}
+
+void KZPracService::RestoreMapContexts()
+{
+	if (!this->entryContextsValid)
+	{
+		return;
+	}
+	this->entryContextsValid = false;
+	// Живость НЕ проверяем: в CS2 пешка переживает смерть (респавн идёт на ту же CCSPlayerPawn —
+	// kz_misc.cpp зовёт pawn->Respawn()), и ключ, взятый в prac, уехал бы с ней на респавн.
+	// Вектор на мёртвой пешке тот же, запись от живости не зависит.
+	CCSPlayerPawn *pawn = this->player->GetPlayerPawn();
+	if (!pawn)
+	{
+		this->entryContexts.RemoveAll();
+		return;
+	}
+	const CSchemaCollection<ResponseContext_t> contexts = pawn->m_ResponseContexts();
+	if (!contexts.IsValid())
+	{
+		this->entryContexts.RemoveAll();
+		return;
+	}
+	// Считаем разницу ДО перезаписи: «сколько взято в prac» и «сколько карта сняла в prac» — это и
+	// сообщение игроку (иначе закрытые ворота выглядят как баг карты), и след в логе.
+	const int liveCount = contexts.Count();
+	i32 collected = 0, restored = 0;
+	for (int i = 0; i < liveCount; i++)
+	{
+		if (!ContainsContext(this->entryContexts, *contexts.ElementUnchecked(i)))
+		{
+			collected++;
+		}
+	}
+	FOR_EACH_VEC(this->entryContexts, i)
+	{
+		if (!ContainsContext(contexts, liveCount, this->entryContexts[i]))
+		{
+			restored++;
+		}
+	}
+	if (collected || restored)
+	{
+		// Перезаписываем целиком, а не точечно: порядок и дубли в векторе — дело движка, наш инвариант
+		// «как на входе» проще всего держать буквально. Размер меняет манипулятор схемы (SET_COUNT):
+		// память и конструкторы элементов — движка, не наши; мы только заполняем элементы.
+		const int count = this->entryContexts.Count();
+		if (!contexts.SetCount(count))
+		{
+			KZ_LOG_ERROR(LogChannel::Timer, "[cyb] prac_map_contexts_restore_failed steam_id=%llu reason=set_count want=%d have=%d\n",
+						 this->player->GetSteamId64(false), count, contexts.Count());
+			this->entryContexts.RemoveAll();
+			return;
+		}
+		for (int i = 0; i < count; i++)
+		{
+			*contexts.ElementUnchecked(i) = this->entryContexts[i];
+		}
+		this->player->languageService->PrintChat(true, false, "Prac - Map Keys Reset");
+		KZ_LOG_INFO(LogChannel::Timer, "[cyb] prac_map_contexts_restored steam_id=%llu collected=%d restored=%d\n",
+					this->player->GetSteamId64(false), collected, restored);
+	}
+	this->entryContexts.RemoveAll();
 }
 
 void KZPracService::ClearPoints()
@@ -316,6 +443,8 @@ void KZPracService::EnterPrac()
 		this->frozen = {};
 	}
 
+	// Все отказы позади: с этой точки вход состоится, снимаем «как было на карте».
+	this->SnapshotMapContexts();
 	this->inPrac = true;
 	this->ClearPoints();
 	// Ноуклип НЕ включаем (решение пользователя 25.07): вход в prac только замораживает ран,
@@ -362,6 +491,9 @@ void KZPracService::ExitPrac()
 
 	this->player->noclipService->DisableNoclip();
 	this->player->noclipService->HandleNoclip();
+	// Ключи карты — к состоянию входа, в любом исходе ниже (свободный prac, возврат в ран, потеря
+	// рана из-за смены режима — DropFrozenRun повторит вызов, он идемпотентен).
+	this->RestoreMapContexts();
 
 	if (!this->frozen.active)
 	{
@@ -436,6 +568,10 @@ void KZPracService::DropFrozenRun(const char *reason, const char *phrase)
 		return;
 	}
 	const bool hadRun = this->frozen.active;
+	// `!r`/смена режима/смерть из prac оставляют игрока на той же пешке (респавн CS2 пешку не
+	// пересоздаёт) — ключи, взятые в prac, вернулись бы с ним на старт. Смена карты — пешки нет,
+	// внутри no-op.
+	this->RestoreMapContexts();
 	// Курс запоминаем ДО сброса frozen ниже — иначе в лог уйдёт уже обнулённый GUID.
 	const u32 lostCourseGUID = this->frozen.courseGUID;
 	this->inPrac = false;

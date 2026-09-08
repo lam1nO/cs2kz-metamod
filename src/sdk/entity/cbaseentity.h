@@ -73,6 +73,21 @@ public:
 	DECLARE_SCHEMA_CLASS_ENTITY(CNetworkTransmitComponent)
 };
 
+// Response-контекст сущности — то, что карты пишут через `AddContext !activator name:value`
+// и читают `filter_activator_context`: на KZ-картах так устроены «ключи» (kz_niche `ProCP1`,
+// kz_angina_x `pro_N`/`antiresurf_N`). Раскладка по схеме CS2: name 0x00, value 0x08,
+// expiration 0x10, размер 0x18 — KZPracService::Init сверяет её с живой схемой.
+struct ResponseContext_t
+{
+	CUtlSymbolLarge m_iszName;
+	CUtlSymbolLarge m_iszValue;
+	GameTime_t m_fExpirationTime;
+};
+
+static_assert(offsetof(ResponseContext_t, m_iszValue) == 0x08, "ResponseContext_t::m_iszValue offset is incorrect");
+static_assert(offsetof(ResponseContext_t, m_fExpirationTime) == 0x10, "ResponseContext_t::m_fExpirationTime offset is incorrect");
+static_assert(sizeof(ResponseContext_t) == 0x18, "ResponseContext_t size is incorrect");
+
 class CBaseEntity : public CEntityInstance
 {
 public:
@@ -100,6 +115,10 @@ public:
 	SCHEMA_FIELD(float, m_flActualGravityScale)
 	SCHEMA_FIELD(float, m_flWaterLevel)
 	SCHEMA_FIELD(int, m_fEffects)
+	// Контексты живут на пешке независимо от таймера — см. KZPracService::SnapshotMapContexts.
+	// Коллекция, а не указатель на CUtlVector: размер меняем движковым манипулятором схемы
+	// (SET_COUNT), а не своим CUtlMemory поверх чужой памяти.
+	SCHEMA_FIELD_COLLECTION(ResponseContext_t, m_ResponseContexts)
 
 	int entindex()
 	{

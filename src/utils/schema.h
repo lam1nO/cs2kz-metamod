@@ -40,6 +40,10 @@ namespace schema
 	SchemaKey GetOffset(const char *className, uint32_t classKey, const char *memberName, uint32_t memberKey);
 	// Manipulator for a CUtlVector/CNetworkUtlVectorBase field, NULL if the field is not a collection.
 	SchemaCollectionManipulatorFn_t GetCollectionManipulator(const char *className, const char *fieldName);
+	// Размер класса по живой схеме сервера (m_nSize) и число его полей; 0/0 — класс не найден.
+	// Нужно тому, кто пишет в движковые контейнеры сырыми структурами: одних офсетов полей мало,
+	// поле, добавленное Valve в хвост, офсетов не сдвинет, а шаг элемента в векторе изменит.
+	bool GetClassLayout(const char *className, int &size, int &fieldCount);
 } // namespace schema
 
 // Opaque stand-in for the game's schema collection fields like CNetworkUtlVectorBase<T> and CUtlVectorEmbeddedNetworkVar<T>

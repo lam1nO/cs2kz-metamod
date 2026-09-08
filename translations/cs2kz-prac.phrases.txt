@@ -33,6 +33,12 @@
 		"en"		"{grey}Practice mode off."
 		"ru"		"{grey}Режим отработки выключен."
 	}
+	"Prac - Map Keys Reset"
+	{
+		// Контексты карты («ключи») вернулись к состоянию на момент входа в prac.
+		"en"		"{grey}Map triggers collected in practice (keys) were reset to how they were when you entered practice."
+		"ru"		"{grey}Собранные в отработке триггеры карты (ключи) сброшены к состоянию на момент входа в отработку."
+	}
 	"Prac - Run Lost"
 	{
 		"en"		"{grey}Frozen run lost."

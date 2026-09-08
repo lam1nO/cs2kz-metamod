@@ -96,6 +96,18 @@ private:
 	// curtime обнуляется на смене карты, а это поле её переживает).
 	// Пер-игроковое состояние, см. KZ_PRAC_REJECT_HINT_COOLDOWN.
 	f32 lastRejectHintTime {};
+	// Response-контексты пешки на момент входа в prac — «ключи» карт (kz_niche, kz_angina_x
+	// ставят их триггерами `AddContext !activator` и читают `filter_activator_context`). Контексты
+	// живут на пешке и таймера не знают, поэтому ключ, взятый в prac ноуклипом, переживал бы
+	// возврат в ран и `!r`. Правило: prac не оставляет следов на карте — на выходе контексты
+	// возвращаются РОВНО к состоянию входа (не стираются: честно взятый до prac ключ остаётся).
+	// Сырые структуры, а не строки: символы пулятся движком на всю карту, снапшот валиден до её
+	// смены, а смена карты сбрасывает prac целиком (Reset).
+	CUtlVector<ResponseContext_t> entryContexts;
+	bool entryContextsValid {};
+	// Схема живого сервера совпала с нашей раскладкой ResponseContext_t (сверка в Init). Иначе в
+	// вектор не пишем вовсе — лучше старый абуз, чем порча памяти пешки после апдейта Valve.
+	static bool mapContextsSupported;
 
 public:
 	static void Init();
@@ -140,6 +152,12 @@ public:
 	// изобретаем (nullptr = не логировать, смена карты); phrase — ключ чат-фразы
 	// (nullptr = молча, когда вызывающий уже напечатал свою причину).
 	void DropFrozenRun(const char *reason, const char *phrase = "Prac - Run Lost");
+
+	// Снапшот/возврат контекстов карты (см. entryContexts). Restore идемпотентен: после первого
+	// применения снапшот гасится, второй вызов на том же входе — no-op. Пешки нет — no-op (смена
+	// карты). Мёртвая пешка — НЕ исключение: CS2 респавнит ту же пешку, контексты едут с ней.
+	void SnapshotMapContexts();
+	void RestoreMapContexts();
 
 	void SetPoint();
 	void TpToPoint();

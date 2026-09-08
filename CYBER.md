@@ -620,6 +620,15 @@ cs2kz-linux-builder .`, иначе компилируется КОПИЯ ИЗ О
   (`TimerStop` выходит по `!timerRunning` до листенеров) — поэтому свой `DropFrozenRunAll` в
   `OnRoundStart`; `TryRestoreOnSpawn` гейтится в АСИНХРОННОМ колбэке, а не на входе (у неё два
   вызывающих, второй — `db/setup_client.cpp`).
+  **Ключи карт (ревизия 3):** карты (kz_niche `ProCP1`, kz_angina_x `pro_N`/`antiresurf_N`)
+  хранят прогресс в response-контекстах пешки (`AddContext !activator` +
+  `filter_activator_context`), таймер их не знает. Вход в prac снимает снапшот
+  `CBaseEntity::m_ResponseContexts` (сырые `ResponseContext_t`, символы пулятся на карту; размер
+  коллекции меняется движковым манипулятором через `CSchemaCollection`, не своим CUtlVector),
+  выход/`!r`/смена режима/смерть возвращают РОВНО его (не стирают — честно взятое до prac живёт;
+  на мёртвую пешку тоже пишем — CS2 респавнит ту же пешку).
+  Раскладка структуры сверяется с живой схемой в `KZPracService::Init`; не сошлась — фича
+  выключена (лог `prac_map_contexts_disabled`), а не запись в чужую память.
   **prac строгий (решение пользователя 07.08):** в prac по карте двигаются ТОЛЬКО по своим
   prac-точкам, всё остальное запрещено явным отказом (`KZPracService::RejectMapTeleport`, фраза
   `Prac - No Teleport`, лог `[cyb] prac_teleport_rejected reason=…`). Закрыты: `!r`/`!restart`,
