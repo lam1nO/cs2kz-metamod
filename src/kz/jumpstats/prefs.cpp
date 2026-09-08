@@ -522,8 +522,9 @@ static_function void OnJSMenuSelect(MenuHandle menu, int slot, int item)
 	}
 }
 
-// Один хэндл JS-меню на слот — пересоздаётся при каждом построении
-// (и из !js, и из подменю !options — экземпляр всегда один).
+// Один хэндл JS-меню на слот — пересоздаётся при каждом построении. Вход теперь один (!js):
+// подменю старого cs2menus-меню !options убрано вместе с ним, настройки джампстатов живут в
+// panorama-реестре.
 static_global MenuHandle s_jsMenu[MAXPLAYERS + 1] = {};
 
 u32 KZJumpstatsService::CreateJumpstatsMenu()

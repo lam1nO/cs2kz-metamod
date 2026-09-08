@@ -1940,7 +1940,7 @@ static_function void OnRootSelect(MenuHandle menu, int slot, int item)
 
 // Перестроить весь скелет (корень + статичные подсписки) и показать выбранный экран.
 // Общий путь и для !zones, и для возвратов после действий, и для наблюдателя: данные списков
-// живут в наборе, а не в меню, поэтому каждая перестройка читает свежие (паттерн kz_option_menu).
+// живут в наборе, а не в меню, поэтому каждая перестройка читает свежие (паттерн см. replays/menu.cpp).
 static_function void OpenSkeleton(KZPlayer *player, ZmScreen show)
 {
 	const i32 slot = player->GetPlayerSlot().Get();

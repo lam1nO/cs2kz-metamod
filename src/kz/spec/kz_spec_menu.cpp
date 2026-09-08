@@ -53,7 +53,7 @@ void KZ::spec::OpenSpectateMenu(KZPlayer *player, KZPlayer **candidates, i32 cou
 		return;
 	}
 
-	// Один хэндл на слот — пересоздаём при повторном вызове (паттерн kz_option_menu).
+	// Один хэндл на слот — пересоздаём при повторном вызове (паттерн см. replays/menu.cpp).
 	static MenuHandle s_specMenu[MAXPLAYERS + 1] = {};
 	if (s_specMenu[slot] != kInvalidMenuHandle)
 	{

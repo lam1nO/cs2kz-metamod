@@ -1811,7 +1811,7 @@ static_function void OpenCoursesMenu(KZPlayer *player)
 		return;
 	}
 
-	// Один хэндл на слот — пересоздаём при повторном вызове (паттерн kz_option_menu).
+	// Один хэндл на слот — пересоздаём при повторном вызове (паттерн см. replays/menu.cpp).
 	static MenuHandle s_coursesMenu[MAXPLAYERS + 1] = {};
 	if (s_coursesMenu[slot] != kInvalidMenuHandle)
 	{

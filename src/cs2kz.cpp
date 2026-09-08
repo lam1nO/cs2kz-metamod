@@ -53,7 +53,8 @@ ICS2Menus *g_pMenus;
 // и E-захват adjustable-строк (SetAdjustCapture, интерфейс 006). Флаги по СЕКЦИЯМ, а не
 // «g_pMenus != nullptr»: со старой сборкой cs2menus свежий интерфейс не находится, и
 // запрашивать только его нельзя — g_pMenus стал бы null и форк остался бы вообще без меню
-// (!options/!maps/!rpmenu). Поэтому откатываемся по цепочке 006 → 005 → 004 и просто не зовём
+// (!maps/!rpmenu/!zones — !options с cs2menus снят). Поэтому откатываемся по цепочке
+// 006 → 005 → 004 и просто не зовём
 // методы, которых у полученного указателя нет в vtable.
 bool g_menusHasSlotStatus;
 bool g_menusHasAdjustCapture;

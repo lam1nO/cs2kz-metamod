@@ -1,4 +1,5 @@
-// Меню !rpmenu — управление воспроизведением реплея (cs2menus, паттерн kz_option_menu).
+// Меню !rpmenu — управление воспроизведением реплея (cs2menus). Здесь же живёт образец
+// «один хэндл меню на слот»: старое меню !options, откуда он пришёл, снято с команды.
 #include "kz/kz.h"
 #include "kz/language/kz_language.h"
 #include "menu.h"
@@ -81,7 +82,7 @@ namespace
 	}
 
 	// Хэндл нашего !rpmenu на слот — один на слот, пересоздаётся при повторном открытии
-	// (паттерн kz_option_menu). Живёт в области файла, а не внутри функции: по нему худ
+	// (тот же паттерн «один хэндл на слот»). Живёт в области файла, а не внутри функции: по нему худ
 	// отличает !rpmenu от любого другого cs2menus-меню (см. IsReplayControlsMenuOpen).
 	// Сравнение по хэндлу корректно и на устаревшем значении: cs2menus раздаёт хэндлы
 	// монотонным счётчиком (`m_nextHandle++`, menu_manager.cpp) и НЕ переиспользует
@@ -193,7 +194,7 @@ void KZ::replaysystem::menu::OpenReplayControlsMenu(KZPlayer *player)
 		return;
 	}
 
-	// Один хэндл на слот — пересоздаём при повторном вызове (паттерн kz_option_menu).
+	// Один хэндл на слот — пересоздаём при повторном вызове.
 	if (s_rpMenu[slot] != kInvalidMenuHandle)
 	{
 		g_pMenus->DestroyMenu(s_rpMenu[slot]);
@@ -269,7 +270,7 @@ bool KZ::replaysystem::menu::OpenReplaySearchMenu(KZPlayer *player, const std::v
 		return false;
 	}
 
-	// Один хэндл на слот — пересоздаём при повторном вызове (паттерн kz_option_menu/!spec).
+	// Один хэндл на слот — пересоздаём при повторном вызове (тот же паттерн, что в !spec).
 	static MenuHandle s_searchMenu[MAXPLAYERS + 1] = {};
 	if (s_searchMenu[slot] != kInvalidMenuHandle)
 	{
