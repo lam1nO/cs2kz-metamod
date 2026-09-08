@@ -427,12 +427,16 @@ void KZHUDService::RenderMenu()
 void KZHUDService::RenderMenuCategories(CCSCustomHudLayout *layout)
 {
 	const std::vector<KZOptNode *> &tree = KZ::menu::GetTree();
+	const char *lang = this->player->languageService->GetLanguage();
 	for (i32 i = 0; i < KZ_MENU_CATS; i++)
 	{
 		const bool used = i < (i32)tree.size();
 		if (used)
 		{
-			this->SetMenuVar(layout, CatLbl(i), CatVar(i), tree[i]->phraseKey);
+			// PrepareMessageWithLang деградирует в сам ключ, если фразы нет (см. GetTranslatedFormat) —
+			// это то же поведение, что и у остального форка (KZLanguageService), не своя логика.
+			const std::string catLabel = KZLanguageService::PrepareMessageWithLang(lang, tree[i]->phraseKey);
+			this->SetMenuVar(layout, CatLbl(i), CatVar(i), catLabel.c_str());
 			this->SetMenuBoolClass(layout, CatPanel(i), "selected", this->menuApplied.catSelected[i], i == this->menuCategory);
 		}
 		this->SetMenuBoolClass(layout, CatPanel(i), "hidden", this->menuApplied.catHidden[i], !used);
@@ -469,6 +473,7 @@ void KZHUDService::RenderMenuItems(CCSCustomHudLayout *layout)
 	const std::vector<KZOptNode *> &tree = KZ::menu::GetTree();
 	const std::vector<KZOptItem> *items = (this->menuCategory >= 0 && this->menuCategory < (i32)tree.size()) ? &tree[this->menuCategory]->items : NULL;
 	const i32 count = items ? MIN((i32)items->size(), KZ_MENU_ITEMS) : 0;
+	const char *lang = this->player->languageService->GetLanguage();
 
 	for (i32 i = 0; i < KZ_MENU_ITEMS; i++)
 	{
@@ -476,7 +481,8 @@ void KZHUDService::RenderMenuItems(CCSCustomHudLayout *layout)
 		if (used)
 		{
 			const KZOptItem &it = (*items)[i];
-			this->SetMenuVar(layout, ItemLbl(i), ItemLblVar(i), it.phraseKey);
+			const std::string itemLabel = KZLanguageService::PrepareMessageWithLang(lang, it.phraseKey);
+			this->SetMenuVar(layout, ItemLbl(i), ItemLblVar(i), itemLabel.c_str());
 			// subtext (item-sub) — видимость целиком на CSS (.item.has-sub .item-sub), нам
 			// достаточно переключить класс has-sub на самом пункте; var пишем всегда (пусто,
 			// если subKey нет, — безвредно под collapse).
@@ -629,7 +635,9 @@ void KZHUDService::RenderMenuStepPopup(CCSCustomHudLayout *layout)
 				   it->unit ? it->unit : "");
 	}
 	this->SetMenuVar(layout, "step_readout", "step", readout);
-	this->SetMenuVar(layout, "step_label", "steplabel", it->phraseKey);
+	const char *lang = this->player->languageService->GetLanguage();
+	const std::string stepLabel = KZLanguageService::PrepareMessageWithLang(lang, it->phraseKey);
+	this->SetMenuVar(layout, "step_label", "steplabel", stepLabel.c_str());
 }
 
 // Choice: попап списка, наполняется getChoices() КАЖДЫЙ рендер (а не только при открытии) —
@@ -665,7 +673,9 @@ void KZHUDService::RenderMenuListPopup(CCSCustomHudLayout *layout)
 		}
 		this->SetMenuBoolClass(layout, LiPanel(i), "hidden", this->menuApplied.liHidden[i], !used);
 	}
-	this->SetMenuVar(layout, "lp_title", "lptitle", it->phraseKey);
+	const char *lang = this->player->languageService->GetLanguage();
+	const std::string lpTitle = KZLanguageService::PrepareMessageWithLang(lang, it->phraseKey);
+	this->SetMenuVar(layout, "lp_title", "lptitle", lpTitle.c_str());
 	char page[16];
 	V_snprintf(page, sizeof(page), "%i/%i", this->menuPopupPage + 1, pages);
 	this->SetMenuVar(layout, "lp_page", "lppage", page);
