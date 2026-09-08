@@ -154,6 +154,7 @@ def configure_main(sdk_target, sdk, cxx):
     os.path.join(builder.sourcePath, 'src', 'kz', 'prac', 'events.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'option', 'kz_option.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'option', 'kz_option_menu.cpp'),
+    os.path.join(builder.sourcePath, 'src', 'kz', 'option', 'menu', 'model.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'misc', 'kz_customchangemap.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'pistol', 'kz_pistol.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'weapon', 'kz_weapon.cpp'),
