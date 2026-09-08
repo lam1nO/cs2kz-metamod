@@ -643,7 +643,8 @@ private:
 	{
 		None,
 		Color, // попап выбора цвета (перенесено с апстрима почти без изменений)
-		Step,  // попап +-1/+-5 для позиции/размера/прозрачности (апстримный "Step popup")
+		Step,  // попап +-1/+-5 для позиции/размера/прозрачности/Vector (апстримный "Step popup")
+		List,  // попап списка (Choice) — строки li%i, наполняется getChoices при каждом рендере
 	};
 
 	MenuPopup menuPopup {MenuPopup::None};
@@ -658,7 +659,9 @@ private:
 		bool rootHidden {true};
 		bool colorPopupHidden {true};
 		bool stepPopupHidden {true};
-		bool stepVHidden {true}; // вертикальный ряд степпера (только Position)
+		bool listPopupHidden {true};
+		bool stepVHidden {true}; // вертикальный ряд степпера (Position и Y-ось Vector)
+		bool stepZHidden {true}; // ряд m_step_z (только Vector, третья ось)
 
 		bool catHidden[KZ_MENU_CATS] {};
 		bool catSelected[KZ_MENU_CATS] {};
@@ -667,10 +670,19 @@ private:
 		const char *itemType[KZ_MENU_ITEMS] {};
 		bool itemOn[KZ_MENU_ITEMS] {};
 		const char *itemSwatch[KZ_MENU_ITEMS] {};
+		// item_div%i в разметке НЕ имеет класса hidden по умолчанию (в отличие от cat/item/sw/li,
+		// у которых hidden уже в markup) — реальное начальное состояние "показан", поэтому кэш
+		// стартует с false, а не true (см. RenderMenuItems).
+		bool itemDivHidden[KZ_MENU_ITEMS] {};
+		bool itemHasSub[KZ_MENU_ITEMS] {};
+		bool itemDisabled[KZ_MENU_ITEMS] {};
 
 		const char *swBg[KZ_MENU_SWATCH] {};
 		bool swSelected[KZ_MENU_SWATCH] {};
 		bool swHidden[KZ_MENU_SWATCH] {};
+
+		bool liHidden[KZ_MENU_LIST] {};
+		bool liSelected[KZ_MENU_LIST] {};
 
 		MenuAppliedState()
 		{
@@ -686,6 +698,10 @@ private:
 			{
 				swHidden[i] = true;
 			}
+			for (i32 i = 0; i < KZ_MENU_LIST; i++)
+			{
+				liHidden[i] = true;
+			}
 		}
 	};
 
@@ -700,6 +716,7 @@ private:
 	void RenderMenuItems(CCSCustomHudLayout *layout);
 	void RenderMenuColorPopup(CCSCustomHudLayout *layout);
 	void RenderMenuStepPopup(CCSCustomHudLayout *layout);
+	void RenderMenuListPopup(CCSCustomHudLayout *layout);
 
 	void SelectMenuCategory(i32 index);
 	void ActivateMenuItem(i32 slot);
@@ -707,7 +724,9 @@ private:
 	void CloseMenuPopup();
 	void MenuPopupPageStep(i32 delta);
 	void MenuPopupPick(i32 slot);
-	// axis: 0 — x/размер/прозрачность (единственная ось степпера кроме Position), 1 — y (только Position).
+	void MenuListPick(i32 slot);
+	// axis: 0 — x/размер/прозрачность (тот же, что раньше), 1 — y (Position и Y-ось Vector),
+	// 2 — z (только Vector).
 	void MenuStep(i32 axis, i32 delta);
 
 	void SetMenuClass(CCSCustomHudLayout *layout, const char *panelId, const char *className, bool on);

@@ -1,13 +1,15 @@
-// Меню настроек panorama-худа и крестика (Task 11, обход реестра — задача 2). Урезанный
-// перенос апстримного src/kz/option/menu/{kz_menu,model,tables}.cpp — расхождения с ним:
+// Меню настроек panorama-худа и крестика (Task 11, обход реестра — задача 2, типы Choice/Vector/
+// Button + enabledBy/solidOnly/unit/scale/subtext/divider — задача 3). Урезанный перенос
+// апстримного src/kz/option/menu/{kz_menu,model,tables}.cpp — расхождения с ним:
 //   - Состав меню (категории/пункты) больше НЕ зашит статическими таблицами прямо тут —
 //     регистрируется в hud/prefs/hud_prefs.cpp через общий реестр (KZOptNode/KZOptItem,
 //     KZ::menu::Add*, kz/option/menu/model.h — Task 1), этот файл только обходит
 //     KZ::menu::GetTree() и рендерит. prefs_transfer апстрима (экспорт/импорт настроек)
 //     по-прежнему НЕ переносим — не нужен: своей подсистемы экспорта настроек у нас нет.
-//   - НЕТ апстримного font-list-попапа (постраничный обзор ~30 семейств шрифтов): шрифт —
-//     Cycle-пункт (клик перебирает короткий курированный список MENU_FONTS), поэтому список
-//     панелей ("li%i"/list_popup) и есть НЕ переносим тоже.
+//   - list_popup/li%i (панель апстримного font-list-попапа, постраничный обзор ~30 семейств)
+//     задача 2 сознательно не переносила — у нас Font остался Cycle-пунктом (MENU_FONTS).
+//     Задача 3 использует ЭТУ ЖЕ панель под Choice (список, наполняемый getChoices) — панель
+//     жила в разметке неиспользованной, теперь работает; Font по-прежнему Cycle, без попапа.
 //   - Позиция/размер/прозрачность используют ПОПАП-СТЕППЕР (+-1/+-5), как у апстрима, —
 //     без него эти пункты были бы нередактируемы, а спека прямо требует «для каждого элемента
 //     — позиция X/Y, размер, шрифт, прозрачность».
@@ -106,6 +108,10 @@ static_function const char *NextFontSlug(const char *current)
 	return MENU_FONTS[0];
 }
 
+// .type-toggle/.type-color — единственные подтверждённые strings-ом классы с реальным CSS-эффектом
+// (пилюля тумблера, показ свотча вместо текста). .type-position/.type-size/.type-choice уже были
+// в коде до этой задачи без подтверждённого CSS-правила (harmless, класс просто не красит) —
+// .type-vector/.type-button заведены по тому же прецеденту, не новый риск.
 static_function const char *GetItemTypeClass(KZOptItemType type)
 {
 	switch (type)
@@ -121,9 +127,12 @@ static_function const char *GetItemTypeClass(KZOptItemType type)
 			return "type-size";
 		case KZOptItemType::Color:
 			return "type-color";
-		default: // Vector/Button — не используются нашим составом меню
-			return "type-toggle";
+		case KZOptItemType::Vector:
+			return "type-vector";
+		case KZOptItemType::Button:
+			return "type-button";
 	}
+	return "type-toggle";
 }
 
 // === Float/Int-развязка хранения (R2/prefs.cpp): позиция/размер элемента — Float,
@@ -144,6 +153,68 @@ static_function void SetIntPref(KZPlayer *player, const char *key, i32 value, bo
 	{
 		player->optionService->SetPreferenceInt(key, value);
 	}
+}
+
+// === scale (model.h): "the preference stores value / scale" — на экране Size всегда целое
+// (шаг 1/5), а преф при scale>1 хранит ДРОБЬ этого целого (Float, независимо от storage-флага
+// самого пункта — дробь без float не сохранить). Ни один пункт нашего состава scale не
+// выставляет (hud_prefs.cpp) — при scale<=1 (0 или 1, дефолт) это ровно старый GetIntPref/
+// SetIntPref, поведение существующих Size-пунктов не меняется ни на бит.
+static_function i32 GetScaledDisplay(KZPlayer *player, const char *key, i32 displayDefault, i32 scale, bool isFloat)
+{
+	if (scale <= 1)
+	{
+		return GetIntPref(player, key, displayDefault, isFloat);
+	}
+	const f64 stored = player->optionService->GetPreferenceFloat(key, (f64)displayDefault / (f64)scale);
+	// Size никогда не отрицателен (px/percent) — обычное округление до целого без <cmath>.
+	return (i32)(stored * (f64)scale + 0.5);
+}
+
+static_function void SetScaledDisplay(KZPlayer *player, const char *key, i32 displayValue, i32 scale, bool isFloat)
+{
+	if (scale <= 1)
+	{
+		SetIntPref(player, key, displayValue, isFloat);
+		return;
+	}
+	player->optionService->SetPreferenceFloat(key, (f64)displayValue / (f64)scale);
+}
+
+// === enabledBy: серый и клики игнорируются, пока хотя бы один из до двух гейт-префов выключен.
+// Дефолт отсутствующего гейт-префа — true (включён): гейтующие тумблеры нашего состава сами
+// заведены с дефолтом true (см. hud_prefs.cpp — Enabled-тумблеры элементов), трактовать
+// отсутствие как "выключено" ложно погасило бы пункт игроку, который этот преф не трогал.
+static_function bool IsMenuItemEnabled(KZPlayer *player, const KZOptItem &it)
+{
+	for (const char *key : it.enabledBy)
+	{
+		if (key && !player->optionService->GetPreferenceBool(key, true))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+// === solidOnly (Color): попап без градиентов — для потребителя, который не умеет их
+// рендерить (см. model.h). Сплошные идут первыми, градиенты хвостом (panorama_tables.cpp:
+// entry<PANORAMA_COLOR_COUNT — сплошной), поэтому достаточно отрезать хвост без нового
+// экспорта из panorama_tables (panorama::GetSolidColorCount убрана в задаче 14 как мёртвая) —
+// маркер градиента читаем через уже публичный GetColorEntryValue(...).a() (255 — сплошной,
+// 1 — маркер градиента, см. panorama_tables.cpp:IsGradient). Флаг никто из состава не ставит
+// (задача 14: "заводить не нужно") — при solidOnly=false это ровно GetColorEntryCount().
+static_function i32 GetColorPopupTotal(const KZOptItem *it)
+{
+	i32 total = panorama::GetColorEntryCount();
+	if (it && it->solidOnly)
+	{
+		while (total > 0 && panorama::GetColorEntryValue(total - 1).a() != 255)
+		{
+			total--;
+		}
+	}
+	return total;
 }
 
 // Симметрично GetMHUDColorPref (kz_hud.cpp) — тот же формат упаковки (R2: своего
@@ -178,7 +249,13 @@ SLOT_ID(ItemLblVar, "il%i")
 SLOT_ID(ItemVal, "item_val%i")
 SLOT_ID(ItemValVar, "iv%i")
 SLOT_ID(ItemSw, "item_sw%i")
+SLOT_ID(ItemSub, "item_sub%i")
+SLOT_ID(ItemSubVar, "is%i")
+SLOT_ID(ItemDiv, "item_div%i")
 SLOT_ID(SwPanel, "sw%i")
+SLOT_ID(LiPanel, "li%i")
+SLOT_ID(LiLbl, "li_lbl%i")
+SLOT_ID(LiLblVar, "ll%i")
 #undef SLOT_ID
 
 // === Сущность меню (своя, отдельная от this->ownedLayout — см. kz_hud.h/OpenLayoutMenu) =====
@@ -327,6 +404,7 @@ void KZHUDService::RenderMenu()
 	this->SetMenuVar(layout, "menu_title", "title", KZ_MENU_DEFAULT_TITLE);
 	this->SetMenuBoolClass(layout, "color_popup", "hidden", this->menuApplied.colorPopupHidden, this->menuPopup != MenuPopup::Color);
 	this->SetMenuBoolClass(layout, "step_popup", "hidden", this->menuApplied.stepPopupHidden, this->menuPopup != MenuPopup::Step);
+	this->SetMenuBoolClass(layout, "list_popup", "hidden", this->menuApplied.listPopupHidden, this->menuPopup != MenuPopup::List);
 
 	this->RenderMenuCategories(layout);
 	this->RenderMenuItems(layout);
@@ -338,6 +416,10 @@ void KZHUDService::RenderMenu()
 	else if (this->menuPopup == MenuPopup::Step)
 	{
 		this->RenderMenuStepPopup(layout);
+	}
+	else if (this->menuPopup == MenuPopup::List)
+	{
+		this->RenderMenuListPopup(layout);
 	}
 }
 
@@ -394,6 +476,16 @@ void KZHUDService::RenderMenuItems(CCSCustomHudLayout *layout)
 		{
 			const KZOptItem &it = (*items)[i];
 			this->SetMenuVar(layout, ItemLbl(i), ItemLblVar(i), it.phraseKey);
+			// subtext (item-sub) — видимость целиком на CSS (.item.has-sub .item-sub), нам
+			// достаточно переключить класс has-sub на самом пункте; var пишем всегда (пусто,
+			// если subKey нет, — безвредно под collapse).
+			this->SetMenuVar(layout, ItemSub(i), ItemSubVar(i), it.subKey ? it.subKey : "");
+			this->SetMenuBoolClass(layout, ItemPanel(i), "has-sub", this->menuApplied.itemHasSub[i], it.subKey != NULL);
+			// divider — item_div%i БЕЗ hidden в самой разметке (см. MenuAppliedState), поэтому
+			// по умолчанию (dividerAfter=false) его нужно явно спрятать.
+			this->SetMenuBoolClass(layout, ItemDiv(i), "hidden", this->menuApplied.itemDivHidden[i], !it.dividerAfter);
+			// enabledBy — серый и клики мимо (клик гасится в ActivateMenuItem, здесь только цвет).
+			this->SetMenuBoolClass(layout, ItemPanel(i), "disabled", this->menuApplied.itemDisabled[i], !IsMenuItemEnabled(this->player, it));
 
 			const bool isFloat = it.storage == KZOptStorage::Float;
 			std::string value;
@@ -425,7 +517,16 @@ void KZHUDService::RenderMenuItems(CCSCustomHudLayout *layout)
 				case KZOptItemType::Size:
 				{
 					char buf[24];
-					V_snprintf(buf, sizeof(buf), "%i%s", GetIntPref(this->player, it.prefKey, it.idef, isFloat), it.unit ? it.unit : "");
+					V_snprintf(buf, sizeof(buf), "%i%s", GetScaledDisplay(this->player, it.prefKey, it.idef, it.scale, isFloat),
+							   it.unit ? it.unit : "");
+					value = buf;
+					break;
+				}
+				case KZOptItemType::Vector:
+				{
+					const Vector v = this->player->optionService->GetPreferenceVector(it.prefKey, Vector((f32)it.idef, (f32)it.iydef, (f32)it.izdef));
+					char buf[48];
+					V_snprintf(buf, sizeof(buf), "%i, %i, %i", (i32)v.x, (i32)v.y, (i32)v.z);
 					value = buf;
 					break;
 				}
@@ -435,8 +536,8 @@ void KZHUDService::RenderMenuItems(CCSCustomHudLayout *layout)
 					swatch = panorama::GetColorEntryBgClass(panorama::FindColorEntry(cur));
 					break;
 				}
-				default: // Vector/Button — не используются нашим составом меню
-					break;
+				case KZOptItemType::Button:
+					break; // без значения (клик зовёт onActivate, состояния нет)
 			}
 
 			this->SetMenuVar(layout, ItemVal(i), ItemValVar(i), value.c_str());
@@ -456,12 +557,14 @@ void KZHUDService::RenderMenuColorPopup(CCSCustomHudLayout *layout)
 	{
 		curIdx = panorama::FindColorEntry(this->GetMHUDColorPref(it->prefKey, it->cdef));
 	}
-	// Градиенты в попапе РАЗРЕШЕНЫ (задача 14): ограничение до сплошных заводилось из-за
-	// particle-MHUD (там же градиент был маркер-цветом с alpha==1, который particle-путь
+	// Градиенты в попапе РАЗРЕШЕНЫ по умолчанию (задача 14): ограничение до сплошных заводилось
+	// из-за particle-MHUD (там же градиент был маркер-цветом с alpha==1, который particle-путь
 	// понимал как реальную прозрачность — почти невидимый худ). Particle удалён в задаче 12,
 	// а panorama (ResolveColorClass/FindColorEntry) и так резолвит маркер в свою CSS-палитру
-	// правильно — прятать от игрока рабочую опцию незачем.
-	const i32 total = panorama::GetColorEntryCount();
+	// правильно — прятать от игрока рабочую опцию незачем. solidOnly (задача 3) даёт узкий
+	// путь назад для будущего потребителя, который явно попросит только сплошные (см.
+	// GetColorPopupTotal) — сейчас такого пункта в составе нет (hud_prefs.cpp).
+	const i32 total = GetColorPopupTotal(it);
 	const i32 pages = MAX(1, (total + KZ_MENU_SWATCH - 1) / KZ_MENU_SWATCH);
 	this->menuPopupPage = Clamp(this->menuPopupPage, 0, pages - 1);
 
@@ -489,26 +592,82 @@ void KZHUDService::RenderMenuStepPopup(CCSCustomHudLayout *layout)
 		return;
 	}
 	const bool isFloat = it->storage == KZOptStorage::Float;
-	const bool vstep = it->type == KZOptItemType::Position;
+	// Y-ряд (m_step_up/m_step_down, класс v-step) нужен и Position (вторая ось), и Vector
+	// (тоже вторая ось) — третья ось Vector отдельным рядом m_step_z (см. ниже).
+	const bool vstep = it->type == KZOptItemType::Position || it->type == KZOptItemType::Vector;
+	const bool zstep = it->type == KZOptItemType::Vector;
 	if (this->menuApplied.stepVHidden != !vstep)
 	{
 		this->menuApplied.stepVHidden = !vstep;
 		this->SetMenuClass(layout, "m_step_up", "hidden", !vstep);
 		this->SetMenuClass(layout, "m_step_down", "hidden", !vstep);
 	}
+	if (this->menuApplied.stepZHidden != !zstep)
+	{
+		this->menuApplied.stepZHidden = !zstep;
+		this->SetMenuClass(layout, "m_step_z", "hidden", !zstep);
+	}
 
-	char readout[32];
-	if (vstep)
+	char readout[48];
+	if (it->type == KZOptItemType::Vector)
+	{
+		// Разметка: "the z row reuses the readout slot for an axis label; the main readout
+		// shows all three" — единственный readout на все три оси, ряд m_step_z несёт только
+		// статическую подпись "Z" (не var, уже в разметке).
+		const Vector v = this->player->optionService->GetPreferenceVector(it->prefKey, Vector((f32)it->idef, (f32)it->iydef, (f32)it->izdef));
+		V_snprintf(readout, sizeof(readout), "%i, %i, %i", (i32)v.x, (i32)v.y, (i32)v.z);
+	}
+	else if (vstep) // Position
 	{
 		V_snprintf(readout, sizeof(readout), "%i%%, %i%%", GetIntPref(this->player, it->prefKey, it->idef, isFloat),
 				   GetIntPref(this->player, it->yKey, it->iydef, isFloat));
 	}
-	else
+	else // Size
 	{
-		V_snprintf(readout, sizeof(readout), "%i%s", GetIntPref(this->player, it->prefKey, it->idef, isFloat), it->unit ? it->unit : "");
+		V_snprintf(readout, sizeof(readout), "%i%s", GetScaledDisplay(this->player, it->prefKey, it->idef, it->scale, isFloat),
+				   it->unit ? it->unit : "");
 	}
 	this->SetMenuVar(layout, "step_readout", "step", readout);
 	this->SetMenuVar(layout, "step_label", "steplabel", it->phraseKey);
+}
+
+// Choice: попап списка, наполняется getChoices() КАЖДЫЙ рендер (а не только при открытии) —
+// тот же приём, что и в ActivateMenuItem/GetChoiceValueLabel, чтобы рантайм-варианты не отставали
+// от смены страницы/повторного открытия. colorClass строки (KZChoice) не применяется — под него
+// нет подтверждённого CSS-класса на .li/.li-label (см. отчёт задачи), сама строка не теряется.
+void KZHUDService::RenderMenuListPopup(CCSCustomHudLayout *layout)
+{
+	const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuPopupItem);
+	if (!it)
+	{
+		return;
+	}
+	std::vector<KZChoice> choices;
+	if (it->getChoices)
+	{
+		it->getChoices(this->player, it->tag, choices);
+	}
+	const i64 current = it->getCurrent ? it->getCurrent(this->player, it->tag) : (choices.empty() ? 0 : choices[0].id);
+	const i32 total = (i32)choices.size();
+	const i32 pages = MAX(1, (total + KZ_MENU_LIST - 1) / KZ_MENU_LIST);
+	this->menuPopupPage = Clamp(this->menuPopupPage, 0, pages - 1);
+
+	for (i32 i = 0; i < KZ_MENU_LIST; i++)
+	{
+		const i32 idx = this->menuPopupPage * KZ_MENU_LIST + i;
+		const bool used = idx < total;
+		if (used)
+		{
+			this->SetMenuVar(layout, LiLbl(i), LiLblVar(i), choices[idx].label.c_str());
+			const bool selected = choices[idx].selected || choices[idx].id == current;
+			this->SetMenuBoolClass(layout, LiPanel(i), "selected", this->menuApplied.liSelected[i], selected);
+		}
+		this->SetMenuBoolClass(layout, LiPanel(i), "hidden", this->menuApplied.liHidden[i], !used);
+	}
+	this->SetMenuVar(layout, "lp_title", "lptitle", it->phraseKey);
+	char page[16];
+	V_snprintf(page, sizeof(page), "%i/%i", this->menuPopupPage + 1, pages);
+	this->SetMenuVar(layout, "lp_page", "lppage", page);
 }
 
 // === Взаимодействие ==========================================================================
@@ -535,6 +694,12 @@ void KZHUDService::ActivateMenuItem(i32 slot)
 	{
 		return;
 	}
+	// enabledBy: клик мимо — пункт серый (см. RenderMenuItems), но проверка тут независима от
+	// рендера (клиент теоретически мог прислать клик по устаревшему кадру разметки).
+	if (!IsMenuItemEnabled(this->player, *it))
+	{
+		return;
+	}
 	if (this->menuPopup != MenuPopup::None)
 	{
 		this->CloseMenuPopup();
@@ -554,37 +719,12 @@ void KZHUDService::ActivateMenuItem(i32 slot)
 			break;
 		}
 		case KZOptItemType::Choice:
-		{
-			// Тип худа (сейчас единственный Choice в нашем составе) — клик перебирает
-			// getChoices() по кругу, без попапа (см. HudTypeLabel/NextHudType — было раньше,
-			// поведение сохранено byte-в-byte). RefreshLayoutPrefs() тут НЕ нужен — GetHudType
-			// не кэшируется в layoutPrefs, читается напрямую при каждой отрисовке.
-			std::vector<KZChoice> choices;
-			if (it->getChoices)
-			{
-				it->getChoices(this->player, it->tag, choices);
-			}
-			if (!choices.empty())
-			{
-				const i64 current = it->getCurrent ? it->getCurrent(this->player, it->tag) : choices[0].id;
-				i32 idx = 0;
-				for (i32 i = 0; i < (i32)choices.size(); i++)
-				{
-					if (choices[i].id == current)
-					{
-						idx = i;
-						break;
-					}
-				}
-				const i64 next = choices[(idx + 1) % choices.size()].id;
-				if (it->onPick)
-				{
-					it->onPick(this->player, it->tag, next);
-				}
-			}
-			this->RenderMenu();
+			// Разметка держит настоящий попап списка (list_popup/li%i) — прежний инлайн-цикл
+			// (клик сразу перебирает getChoices) убран, включая для HudType: по явному решению
+			// после задачи 2 (см. бриф задачи 3) исключения для него больше нет — открывается
+			// списком, как любой другой Choice.
+			this->OpenMenuPopup(MenuPopup::List, slot);
 			break;
-		}
 		case KZOptItemType::Font:
 		{
 			const char *cur = opts->GetPreferenceStr(it->prefKey, it->sdef ? it->sdef : LAYOUT_DEFAULT_FONT);
@@ -595,12 +735,21 @@ void KZHUDService::ActivateMenuItem(i32 slot)
 		}
 		case KZOptItemType::Position:
 		case KZOptItemType::Size:
+		case KZOptItemType::Vector:
 			this->OpenMenuPopup(MenuPopup::Step, slot);
 			break;
 		case KZOptItemType::Color:
 			this->OpenMenuPopup(MenuPopup::Color, slot);
 			break;
-		default: // Vector/Button — не используются нашим составом меню
+		case KZOptItemType::Button:
+			if (it->onActivate)
+			{
+				it->onActivate(this->player, it->tag);
+			}
+			// onActivate — произвольное действие, могло написать любой преф (см. модель) —
+			// тот же инвариант, что и у Toggle/Font: RefreshLayoutPrefs после записи.
+			this->RefreshLayoutPrefs();
+			this->RenderMenu();
 			break;
 	}
 }
@@ -626,16 +775,33 @@ void KZHUDService::CloseMenuPopup()
 
 void KZHUDService::MenuPopupPageStep(i32 delta)
 {
-	if (this->menuPopup != MenuPopup::Color)
+	if (this->menuPopup == MenuPopup::Color)
 	{
-		// Степпер (+-1/+-5) — не постраничный попап; страницы есть только у выбора цвета.
-		return;
+		const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuPopupItem);
+		// Тот же список, что и в попапе (см. RenderMenuColorPopup/GetColorPopupTotal) —
+		// сплошные (+градиенты, если не solidOnly).
+		const i32 total = GetColorPopupTotal(it);
+		const i32 pages = MAX(1, (total + KZ_MENU_SWATCH - 1) / KZ_MENU_SWATCH);
+		this->menuPopupPage = Clamp(this->menuPopupPage + delta, 0, pages - 1);
+		this->RenderMenu();
 	}
-	// Тот же список, что и в попапе (см. RenderMenuColorPopup) — сплошные + градиенты.
-	const i32 total = panorama::GetColorEntryCount();
-	const i32 pages = MAX(1, (total + KZ_MENU_SWATCH - 1) / KZ_MENU_SWATCH);
-	this->menuPopupPage = Clamp(this->menuPopupPage + delta, 0, pages - 1);
-	this->RenderMenu();
+	else if (this->menuPopup == MenuPopup::List)
+	{
+		const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuPopupItem);
+		if (!it)
+		{
+			return;
+		}
+		std::vector<KZChoice> choices;
+		if (it->getChoices)
+		{
+			it->getChoices(this->player, it->tag, choices);
+		}
+		const i32 pages = MAX(1, ((i32)choices.size() + KZ_MENU_LIST - 1) / KZ_MENU_LIST);
+		this->menuPopupPage = Clamp(this->menuPopupPage + delta, 0, pages - 1);
+		this->RenderMenu();
+	}
+	// Степпер (+-1/+-5) — не постраничный попап; страницы есть только у цвета и списка.
 }
 
 void KZHUDService::MenuPopupPick(i32 slot)
@@ -650,12 +816,44 @@ void KZHUDService::MenuPopupPick(i32 slot)
 		return;
 	}
 	const i32 idx = this->menuPopupPage * KZ_MENU_SWATCH + slot;
-	// Тот же список, что и в попапе (см. RenderMenuColorPopup) — сплошные + градиенты.
-	if (idx < 0 || idx >= panorama::GetColorEntryCount())
+	// Тот же список, что и в попапе (см. RenderMenuColorPopup/GetColorPopupTotal).
+	if (idx < 0 || idx >= GetColorPopupTotal(it))
 	{
 		return;
 	}
 	this->SetMHUDColorPref(it->prefKey, panorama::GetColorEntryValue(idx));
+	this->RefreshLayoutPrefs();
+	this->RenderMenu();
+}
+
+void KZHUDService::MenuListPick(i32 slot)
+{
+	if (this->menuPopup != MenuPopup::List)
+	{
+		return;
+	}
+	const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuPopupItem);
+	if (!it || it->type != KZOptItemType::Choice)
+	{
+		return;
+	}
+	std::vector<KZChoice> choices;
+	if (it->getChoices)
+	{
+		it->getChoices(this->player, it->tag, choices);
+	}
+	const i32 idx = this->menuPopupPage * KZ_MENU_LIST + slot;
+	if (idx < 0 || idx >= (i32)choices.size())
+	{
+		return;
+	}
+	if (it->onPick)
+	{
+		it->onPick(this->player, it->tag, choices[idx].id);
+	}
+	// onPick — тот же контракт, что у Toggle/Font/Button: пишет произвольный преф, RefreshLayoutPrefs
+	// после записи обязателен (HudType, единственный сегодняшний Choice, тоже проходит этот путь
+	// безвредно — GetHudType не кэшируется в layoutPrefs, лишний вызов ничего не портит).
 	this->RefreshLayoutPrefs();
 	this->RenderMenu();
 }
@@ -693,11 +891,21 @@ void KZHUDService::MenuStep(i32 axis, i32 delta)
 		const i32 value = panorama::SnapToStep(current + StepDelta(current, delta), it->lo, it->hi);
 		SetIntPref(this->player, key, value, isFloat);
 	}
-	else
+	else if (it->type == KZOptItemType::Vector)
 	{
-		const i32 current = GetIntPref(this->player, it->prefKey, it->idef, isFloat);
+		// Одна Vector-преф хранит все три компоненты разом (GetPreferenceVector/SetPreferenceVector,
+		// kz_option.h) — читаем целиком, правим одну ось по axis (0=x/1=y/2=z), пишем целиком.
+		Vector v = this->player->optionService->GetPreferenceVector(it->prefKey, Vector((f32)it->idef, (f32)it->iydef, (f32)it->izdef));
+		f32 &comp = axis == 2 ? v.z : (axis == 1 ? v.y : v.x);
+		const i32 current = (i32)comp;
+		comp = (f32)panorama::SnapToStep(current + StepDelta(current, delta), it->lo, it->hi);
+		this->player->optionService->SetPreferenceVector(it->prefKey, v);
+	}
+	else // Size — единственный оставшийся одноосный тип попапа-степпера
+	{
+		const i32 current = GetScaledDisplay(this->player, it->prefKey, it->idef, it->scale, isFloat);
 		const i32 value = panorama::SnapToStep(current + StepDelta(current, delta), it->lo, it->hi);
-		SetIntPref(this->player, it->prefKey, value, isFloat);
+		SetScaledDisplay(this->player, it->prefKey, value, it->scale, isFloat);
 	}
 	this->RefreshLayoutPrefs();
 	this->RenderMenu();
@@ -723,17 +931,33 @@ void KZHUDService::OnLayoutMenuClick(uint32 packedHandle, const char *panelId)
 	{
 		this->CloseLayoutMenu();
 	}
-	else if (V_strcmp(panelId, "color_close") == 0 || V_strcmp(panelId, "step_close") == 0)
+	else if (V_strcmp(panelId, "color_close") == 0 || V_strcmp(panelId, "step_close") == 0 || V_strcmp(panelId, "list_close") == 0)
 	{
 		this->CloseMenuPopup();
 	}
-	else if (V_strcmp(panelId, "cp_prev") == 0)
+	else if (V_strcmp(panelId, "cp_prev") == 0 || V_strcmp(panelId, "lp_prev") == 0)
 	{
 		this->MenuPopupPageStep(-1);
 	}
-	else if (V_strcmp(panelId, "cp_next") == 0)
+	else if (V_strcmp(panelId, "cp_next") == 0 || V_strcmp(panelId, "lp_next") == 0)
 	{
 		this->MenuPopupPageStep(1);
+	}
+	else if (V_strcmp(panelId, "m_z_n5") == 0)
+	{
+		this->MenuStep(2, -5);
+	}
+	else if (V_strcmp(panelId, "m_z_n1") == 0)
+	{
+		this->MenuStep(2, -1);
+	}
+	else if (V_strcmp(panelId, "m_z_p1") == 0)
+	{
+		this->MenuStep(2, 1);
+	}
+	else if (V_strcmp(panelId, "m_z_p5") == 0)
+	{
+		this->MenuStep(2, 5);
 	}
 	else if (V_strcmp(panelId, "m_v_n5") == 0)
 	{
@@ -778,6 +1002,11 @@ void KZHUDService::OnLayoutMenuClick(uint32 packedHandle, const char *panelId)
 	else if (V_strncmp(panelId, "sw", 2) == 0 && V_isdigit(panelId[2]))
 	{
 		this->MenuPopupPick(atoi(panelId + 2));
+	}
+	else if (V_strncmp(panelId, "li", 2) == 0 && V_isdigit(panelId[2]))
+	{
+		// "list_close" отсеян точным сравнением выше (panelId[2]=='s', не цифра) — коллизий нет.
+		this->MenuListPick(atoi(panelId + 2));
 	}
 }
 

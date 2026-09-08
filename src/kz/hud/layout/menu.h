@@ -19,3 +19,6 @@
 #define KZ_MENU_CATS   20
 #define KZ_MENU_ITEMS  20
 #define KZ_MENU_SWATCH 40
+// Строк попапа списка (Choice) — li0..li31 в разметке; наш самый длинный getChoices (тип худа)
+// даёт всего 3 строки, но ёмкость держим как в разметке на случай будущих рантайм-списков.
+#define KZ_MENU_LIST 32
