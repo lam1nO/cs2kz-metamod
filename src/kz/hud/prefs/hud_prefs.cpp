@@ -63,80 +63,80 @@ static_function void OnKeysIdlePick(KZPlayer *player, i64 tag, i64 id)
 static_function void AddHudElementItems(KZOptNode *node, LayoutElement e)
 {
 	const LayoutElementDef &def = LAYOUT_ELEMENTS[(i32)e];
-	KZ::menu::AddToggle(node, "Enabled", def.enabledKey, true);
-	KZ::menu::AddPosition(node, "Position", def.xKey, def.yKey, def.xDefault, def.yDefault);
-	KZ::menu::AddSize(node, "Size", def.sizeKey, def.sizeDefault, LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX);
-	KZ::menu::AddFont(node, "Font", def.fontKey, LAYOUT_DEFAULT_FONT);
+	KZ::menu::AddToggle(node, "HUD - Menu Label Enabled", def.enabledKey, true);
+	KZ::menu::AddPosition(node, "HUD - Menu Label Position", def.xKey, def.yKey, def.xDefault, def.yDefault);
+	KZ::menu::AddSize(node, "HUD - Menu Label Size", def.sizeKey, def.sizeDefault, LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX);
+	KZ::menu::AddFont(node, "HUD - Menu Label Font", def.fontKey, LAYOUT_DEFAULT_FONT);
 	// Обводка — теперь поэлементный тумблер (def.outlineKey, задача 4), а не один общий
 	// пункт на всё меню: старый "Outline" в General убран, чтобы не осталось двух источников.
-	KZ::menu::AddToggle(node, "Outline", def.outlineKey, true);
+	KZ::menu::AddToggle(node, "HUD - Menu Label Outline", def.outlineKey, true);
 	// Прозрачность хранится Int (0-100), а не Float, как размер/позиция того же элемента —
 	// AddSize по умолчанию заводит Float (px-поле), поэтому storage переопределяем ЯВНО:
 	// реальный потребитель (layout/prefs.cpp:GetLayoutPrefs) читает opacityKey через
 	// GetPreferenceInt, разойтись с ним значило бы читать иное значение, чем видит худ.
-	KZ::menu::AddSize(node, "Opacity", def.opacityKey, 100, 0, 100);
+	KZ::menu::AddSize(node, "HUD - Menu Label Opacity", def.opacityKey, 100, 0, 100);
 	KZ::menu::SetItemUnit(node, "%");
 	KZ::menu::SetItemPref(node, def.opacityKey, KZOptStorage::Int, 100);
 }
 
 void KZHUDService::InitMenuPrefs()
 {
-	KZOptNode *general = KZ::menu::AddCategory("General");
-	KZ::menu::AddChoice(general, "Hud Type", GetHudTypeChoices, GetHudTypeCurrent, OnHudTypePick);
+	KZOptNode *general = KZ::menu::AddCategory("HUD - Menu Cat General");
+	KZ::menu::AddChoice(general, "HUD - Menu Label HudType", GetHudTypeChoices, GetHudTypeCurrent, OnHudTypePick);
 	// Общий пункт "Outline" убран (задача 4): обводка стала поэлементной
 	// (LAYOUT_ELEMENTS[*].outlineKey у каждого элемента свой, пункт — в AddHudElementItems),
 	// два источника одной и той же настройки — прямой путь к рассинхрону.
 
-	KZOptNode *timer = KZ::menu::AddCategory("Timer");
+	KZOptNode *timer = KZ::menu::AddCategory("HUD - Menu Cat Timer");
 	AddHudElementItems(timer, LayoutElement::Timer);
-	KZ::menu::AddColor(timer, "Pro Color", "mhudTimerProColor", MHUD_DEF_TIMER_PRO_COLOR);
-	KZ::menu::AddColor(timer, "TP Color", "mhudTimerTpColor", MHUD_DEF_TIMER_TP_COLOR);
-	KZ::menu::AddColor(timer, "Paused Color", "mhudTimerPausedColor", MHUD_DEF_TIMER_PAUSED_COLOR);
-	KZ::menu::AddColor(timer, "Stopped Color", "mhudTimerStoppedColor", MHUD_DEF_TIMER_STOPPED_COLOR);
+	KZ::menu::AddColor(timer, "HUD - Menu Label ProColor", "mhudTimerProColor", MHUD_DEF_TIMER_PRO_COLOR);
+	KZ::menu::AddColor(timer, "HUD - Menu Label TpColor", "mhudTimerTpColor", MHUD_DEF_TIMER_TP_COLOR);
+	KZ::menu::AddColor(timer, "HUD - Menu Label PausedColor", "mhudTimerPausedColor", MHUD_DEF_TIMER_PAUSED_COLOR);
+	KZ::menu::AddColor(timer, "HUD - Menu Label StoppedColor", "mhudTimerStoppedColor", MHUD_DEF_TIMER_STOPPED_COLOR);
 
-	KZOptNode *speed = KZ::menu::AddCategory("Speed");
+	KZOptNode *speed = KZ::menu::AddCategory("HUD - Menu Cat Speed");
 	AddHudElementItems(speed, LayoutElement::Speed);
-	KZ::menu::AddColor(speed, "Color", "mhudSpeedColor", MHUD_DEF_BASE_COLOR);
-	KZ::menu::AddColor(speed, "CJ Color", "mhudSpeedCjColor", MHUD_DEF_CJ_COLOR);
+	KZ::menu::AddColor(speed, "HUD - Menu Label Color", "mhudSpeedColor", MHUD_DEF_BASE_COLOR);
+	KZ::menu::AddColor(speed, "HUD - Menu Label CjColor", "mhudSpeedCjColor", MHUD_DEF_CJ_COLOR);
 
-	KZOptNode *prespeed = KZ::menu::AddCategory("Prespeed");
+	KZOptNode *prespeed = KZ::menu::AddCategory("HUD - Menu Cat Prespeed");
 	AddHudElementItems(prespeed, LayoutElement::Prespeed);
-	KZ::menu::AddColor(prespeed, "Color", "mhudPrespeedColor", MHUD_DEF_BASE_COLOR);
-	KZ::menu::AddColor(prespeed, "Perf Color", "mhudPrespeedPerfColor", MHUD_DEF_PERF_COLOR);
-	KZ::menu::AddColor(prespeed, "Jumpbug Color", "mhudPrespeedJumpbugColor", MHUD_DEF_JUMPBUG_COLOR);
+	KZ::menu::AddColor(prespeed, "HUD - Menu Label Color", "mhudPrespeedColor", MHUD_DEF_BASE_COLOR);
+	KZ::menu::AddColor(prespeed, "HUD - Menu Label PerfColor", "mhudPrespeedPerfColor", MHUD_DEF_PERF_COLOR);
+	KZ::menu::AddColor(prespeed, "HUD - Menu Label JumpbugColor", "mhudPrespeedJumpbugColor", MHUD_DEF_JUMPBUG_COLOR);
 
-	KZOptNode *keys = KZ::menu::AddCategory("Keys");
+	KZOptNode *keys = KZ::menu::AddCategory("HUD - Menu Cat Keys");
 	AddHudElementItems(keys, LayoutElement::Keys);
-	KZ::menu::AddColor(keys, "Color", "mhudKeysColor", MHUD_DEF_BASE_COLOR);
+	KZ::menu::AddColor(keys, "HUD - Menu Label Color", "mhudKeysColor", MHUD_DEF_BASE_COLOR);
 	// hudKeysOverlap читался кодом (layout/prefs.cpp) ещё до этой задачи, но пункта в меню у
 	// него не было — одна из шести находок транша "клавиши" (без пункта/команды у игрока).
 	// Дефолт true — тот же, что уже читает GetPreferenceBool на этом ключе.
-	KZ::menu::AddToggle(keys, "Overlap", "hudKeysOverlap", true);
-	KZ::menu::AddColor(keys, "Overlap Color", "mhudKeysOverlapColor", MHUD_DEF_KEYS_OVERLAP_COLOR);
+	KZ::menu::AddToggle(keys, "HUD - Menu Label Overlap", "hudKeysOverlap", true);
+	KZ::menu::AddColor(keys, "HUD - Menu Label OverlapColor", "mhudKeysOverlapColor", MHUD_DEF_KEYS_OVERLAP_COLOR);
 	KZ::menu::SetItemEnabledBy(keys, "hudKeysOverlap");
 	// Осевой режим: тонировать только конфликтующую пару клавиш вместо всего контейнера.
-	KZ::menu::AddToggle(keys, "Overlap Axis Only", "mhudKeysOverlapAxis", false);
+	KZ::menu::AddToggle(keys, "HUD - Menu Label OverlapAxisOnly", "mhudKeysOverlapAxis", false);
 	KZ::menu::SetItemEnabledBy(keys, "hudKeysOverlap");
-	KZ::menu::AddColor(keys, "Pressed Color", "mhudKeysPressedColor", MHUD_DEF_KEYS_PRESSED_COLOR);
+	KZ::menu::AddColor(keys, "HUD - Menu Label PressedColor", "mhudKeysPressedColor", MHUD_DEF_KEYS_PRESSED_COLOR);
 	KZ::menu::SetItemSolidOnly(keys); // key-glow-N (keys.css) — только сплошные, градиента там нет
-	KZ::menu::AddColor(keys, "Overlap Glow Color", "mhudKeysOverlapGlowColor", MHUD_DEF_KEYS_OVERLAP_GLOW_COLOR);
+	KZ::menu::AddColor(keys, "HUD - Menu Label OverlapGlowColor", "mhudKeysOverlapGlowColor", MHUD_DEF_KEYS_OVERLAP_GLOW_COLOR);
 	KZ::menu::SetItemSolidOnly(keys);
 	KZ::menu::SetItemEnabledBy(keys, "hudKeysOverlap");
-	KZ::menu::AddToggle(keys, "Letters", "mhudKeysLetters", false);
-	KZ::menu::AddToggle(keys, "Square", "mhudKeysSquare", false);
-	KZ::menu::AddToggle(keys, "Border", "mhudKeysBorder", true);
-	KZ::menu::AddToggle(keys, "Glow", "mhudKeysGlow", true);
-	KZ::menu::AddToggle(keys, "Fill", "mhudKeysFill", true);
-	KZ::menu::AddChoice(keys, "Idle", &GetKeysIdleChoices, &GetKeysIdleCurrent, &OnKeysIdlePick);
+	KZ::menu::AddToggle(keys, "HUD - Menu Label Letters", "mhudKeysLetters", false);
+	KZ::menu::AddToggle(keys, "HUD - Menu Label Square", "mhudKeysSquare", false);
+	KZ::menu::AddToggle(keys, "HUD - Menu Label Border", "mhudKeysBorder", true);
+	KZ::menu::AddToggle(keys, "HUD - Menu Label Glow", "mhudKeysGlow", true);
+	KZ::menu::AddToggle(keys, "HUD - Menu Label Fill", "mhudKeysFill", true);
+	KZ::menu::AddChoice(keys, "HUD - Menu Label Idle", &GetKeysIdleChoices, &GetKeysIdleCurrent, &OnKeysIdlePick);
 	KZ::menu::SetItemPref(keys, "mhudKeysIdle", KZOptStorage::Int, 0);
 
-	KZOptNode *checkpoint = KZ::menu::AddCategory("Checkpoint");
+	KZOptNode *checkpoint = KZ::menu::AddCategory("HUD - Menu Cat Checkpoint");
 	AddHudElementItems(checkpoint, LayoutElement::Checkpoint);
-	KZ::menu::AddColor(checkpoint, "Color", "mhudCheckpointColor", MHUD_DEF_BASE_COLOR);
+	KZ::menu::AddColor(checkpoint, "HUD - Menu Label Color", "mhudCheckpointColor", MHUD_DEF_BASE_COLOR);
 
-	KZOptNode *crosshair = KZ::menu::AddCategory("Crosshair");
-	KZ::menu::AddToggle(crosshair, "Enabled", "mhudCrosshair", false);
-	KZ::menu::AddSize(crosshair, "Scale", "mhudCrosshairScale", 100, 0, 500);
+	KZOptNode *crosshair = KZ::menu::AddCategory("HUD - Menu Cat Crosshair");
+	KZ::menu::AddToggle(crosshair, "HUD - Menu Label Enabled", "mhudCrosshair", false);
+	KZ::menu::AddSize(crosshair, "HUD - Menu Label Scale", "mhudCrosshairScale", 100, 0, 500);
 	KZ::menu::SetItemUnit(crosshair, "%");
 	KZ::menu::SetItemPref(crosshair, "mhudCrosshairScale", KZOptStorage::Int, 100);
 }
