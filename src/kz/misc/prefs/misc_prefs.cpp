@@ -370,8 +370,9 @@ void KZMiscMenu_Register()
 	KZ::menu::AddChoice(cat, "Options - Menu Label Language", &LanguageGetChoices, &LanguageGetCurrent, &LanguageOnPick);
 	KZ::menu::SetItemPref(cat, "preferredLanguage", KZOptStorage::Str);
 
-	KZ::menu::AddActionToggle(cat, "Options - Menu Label ShowTips", &ShowTipsGetCurrent, &ShowTipsOnActivate);
-	KZ::menu::SetItemPref(cat, "showTips", KZOptStorage::Bool, 1);
+	// Пункт снят по решению пользователя: подсказки всегда выключены (см. KZTipService::
+	// ShouldPrintTip, kz_tip.cpp) — включать нечего, пункт был бы no-op. ShowTipsGetCurrent/
+	// OnActivate и сам преф showTips не удаляем, команда !kz_tips продолжает работать.
 
 	KZ::menu::AddSize(cat, "Options - Menu Label FOV", "fov", (i32)KZFOVService::GetDefaultFOV(), (i32)KZFOVService::GetMinFOV(),
 					  (i32)KZFOVService::GetMaxFOV());
