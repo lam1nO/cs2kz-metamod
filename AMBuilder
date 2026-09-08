@@ -128,6 +128,7 @@ def configure_main(sdk_target, sdk, cxx):
     os.path.join(builder.sourcePath, 'src', 'kz', 'global', 'replays.cpp'),
     
     os.path.join(builder.sourcePath, 'src', 'kz', 'hud', 'kz_hud.cpp'),
+    os.path.join(builder.sourcePath, 'src', 'kz', 'hud', 'prefs', 'hud_prefs.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'hud', 'layout', 'panorama_tables.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'hud', 'layout', 'entity.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'hud', 'layout', 'prefs.cpp'),

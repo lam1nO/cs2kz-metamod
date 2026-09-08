@@ -432,12 +432,17 @@ public:
 	void OnCrosshairCvarValue(const char *name, const char *value);
 	void StartCrosshairPolling();
 
-	// === Меню настроек panorama-худа и крестика (Task 11) ============================
+	// === Меню настроек panorama-худа и крестика (Task 11/2 реестра) ===================
 	// Живёт на СВОЕЙ сущности custom_hud_layout (menu.vxml_c), отдельной от this->ownedLayout
 	// (mhud.vxml_c): худ остаётся видимым и обновляется, пока меню открыто поверх него, а общий
 	// кэш классов/переменных развёл бы состояния разных разметок по одним и тем же панелям.
 	// Наши !zones/!rpmenu/!prac/!options и т.п. остаются на cs2menus — это меню их не трогает
 	// и не проверяет g_pMenus вовсе (отдельная система захвата, см. SetInputCaptureEnabled ниже).
+
+	// Регистрирует состав меню (категории/пункты) в общем реестре (kz/option/menu/model.h) —
+	// зовётся один раз из Init(), см. kz_hud.cpp. Реализация — hud/prefs/hud_prefs.cpp.
+	static void InitMenuPrefs();
+
 	void OpenLayoutMenu();
 
 	// Прячет корневую панель и снимает курсорный захват. Дополнительно зовётся (НЕ только по

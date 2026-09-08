@@ -99,6 +99,7 @@ void KZHUDService::Init()
 {
 	KZTimerService::RegisterEventListener(&timerEventListener);
 	KZOptionService::RegisterEventListener(&optionEventListener);
+	InitMenuPrefs();
 }
 
 bool KZHUDService::IsMHUDAvailable()

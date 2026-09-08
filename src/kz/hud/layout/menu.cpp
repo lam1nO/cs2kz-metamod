@@ -1,10 +1,10 @@
-// Меню настроек panorama-худа и крестика (Task 11). Урезанный перенос апстримного
-// src/kz/option/menu/{kz_menu,model,tables}.cpp — расхождения с ним:
-//   - НЕТ pref-registry (KZOptNode/KZOptItem, KZ::menu::Add*) и НЕТ prefs_transfer
-//     (экспорт/импорт настроек): своей подсистемы настроек с деревом категорий у нас нет,
-//     это меню обслуживает ровно худ+крестик, поэтому категории и пункты — статические
-//     таблицы (MenuCategories() ниже), а не общий реестр. Прямое требование спеки задачи
-//     (task-11-brief.md), не вкусовщина.
+// Меню настроек panorama-худа и крестика (Task 11, обход реестра — задача 2). Урезанный
+// перенос апстримного src/kz/option/menu/{kz_menu,model,tables}.cpp — расхождения с ним:
+//   - Состав меню (категории/пункты) больше НЕ зашит статическими таблицами прямо тут —
+//     регистрируется в hud/prefs/hud_prefs.cpp через общий реестр (KZOptNode/KZOptItem,
+//     KZ::menu::Add*, kz/option/menu/model.h — Task 1), этот файл только обходит
+//     KZ::menu::GetTree() и рендерит. prefs_transfer апстрима (экспорт/импорт настроек)
+//     по-прежнему НЕ переносим — не нужен: своей подсистемы экспорта настроек у нас нет.
 //   - НЕТ апстримного font-list-попапа (постраничный обзор ~30 семейств шрифтов): шрифт —
 //     Cycle-пункт (клик перебирает короткий курированный список MENU_FONTS), поэтому список
 //     панелей ("li%i"/list_popup) и есть НЕ переносим тоже.
@@ -16,8 +16,9 @@
 //     KZHUDService::SetMHUDColorPref (тут же, ниже) — преф хранит упакованный int.
 //   - Позиция/размер элемента ЧИТАЮТСЯ ЧЕРЕЗ Float (см. layout/prefs.cpp — GetPreferenceFloat
 //     для xKey/yKey/sizeKey), а прозрачность и crosshairScale — через Int (GetPreferenceInt):
-//     MenuItem::isFloat выбирает нужный аксессор, перепутать типы значило бы читать иное
-//     значение, чем видит RefreshLayoutPrefs.
+//     KZOptItem::storage (KZOptStorage::Float/Int, переопределён для Opacity/Scale в
+//     hud_prefs.cpp через SetItemPref — AddSize по умолчанию заводит Float) выбирает нужный
+//     аксессор, перепутать типы значило бы читать иное значение, чем видит RefreshLayoutPrefs.
 //
 // ВАЖНО про захват ввода: SetInputCaptureEnabled(slot, true) в OpenLayoutMenu() переводит
 // игрока в режим курсора. Симметричное false — ЯВНО, ПЕРЕД удалением сущности, в ОБОИХ путях
@@ -42,6 +43,7 @@
 #include "kz/hud/layout/menu.h"
 #include "kz/hud/layout/panorama_tables.h"
 #include "kz/option/kz_option.h"
+#include "kz/option/menu/model.h"
 #include "kz/language/kz_language.h"
 #include "sdk/entity/ccscustomhudlayout.h"
 #include "entitykeyvalues.h"
@@ -57,133 +59,19 @@
 
 #define KZ_MENU_DEFAULT_TITLE "HUD Settings"
 
-// === Модель пунктов меню (локальная, НЕ реестр — см. комментарий вверху файла) =============
+// === Обход реестра (KZ::menu::GetTree(), Task 1) ============================================
+// Состав меню (категории/пункты) зарегистрирован в hud/prefs/hud_prefs.cpp — наше дерево без
+// подкатегорий (плоский список, как и раньше: 7 категорий, максимум ~10 пунктов), поэтому
+// menuCategory индексирует ПРЯМО верхний уровень GetTree(), subs не используются.
 
-enum class MenuItemKind
+static_function const KZOptItem *GetMenuItem(i32 category, i32 itemIndex)
 {
-	Toggle,
-	HudType, // цикл MHUD -> Panorama -> Standard -> Off -> MHUD (GetHudType/SetHudType)
-	Font,    // цикл по MENU_FONTS, без попапа
-	Position,
-	Size,
-	Opacity,
-	Color,
-};
-
-struct MenuItem
-{
-	const char *label;
-	MenuItemKind kind;
-	const char *prefKey {};
-	const char *yKey {}; // Position only
-	i32 lo {};           // Position/Size/Opacity range
-	i32 hi {};
-	i32 idef {};          // default value (bool: 0/1)
-	i32 iydef {};         // Position y default
-	const Color *cdef {}; // Color default — указатель на extern-глобал (MHUD_DEF_*), НЕ на временный
-	const char *unit {};  // Size/Opacity суффикс
-	bool isFloat {};      // true — преф хранится как float (позиция/размер элемента), см. layout/prefs.cpp
-};
-
-struct MenuCategory
-{
-	const char *label;
-	std::vector<MenuItem> items;
-};
-
-// Пять полей элемента, общих для Timer/Speed/Prespeed/Keys/Checkpoint — читаем ключи из
-// LAYOUT_ELEMENTS (entity.cpp, Task 4), а не дублируем строки: один источник правды.
-static_function void AddElementItems(std::vector<MenuItem> &items, LayoutElement e)
-{
-	const LayoutElementDef &def = LAYOUT_ELEMENTS[(i32)e];
-	items.push_back({"Enabled", MenuItemKind::Toggle, def.enabledKey, nullptr, 0, 1, 1});
-	items.push_back({"Position", MenuItemKind::Position, def.xKey, def.yKey, -100, 100, def.xDefault, def.yDefault, nullptr, nullptr, true});
-	items.push_back({"Size", MenuItemKind::Size, def.sizeKey, nullptr, LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX, def.sizeDefault, 0, nullptr, "px", true});
-	items.push_back({"Font", MenuItemKind::Font, def.fontKey});
-	items.push_back({"Opacity", MenuItemKind::Opacity, def.opacityKey, nullptr, 0, 100, 100, 0, nullptr, "%"});
-}
-
-static_function void AddColorItem(std::vector<MenuItem> &items, const char *label, const char *prefKey, const Color &def)
-{
-	items.push_back({label, MenuItemKind::Color, prefKey, nullptr, 0, 0, 0, 0, &def});
-}
-
-static_function std::vector<MenuCategory> BuildMenuCategories()
-{
-	std::vector<MenuCategory> cats;
-
-	{
-		MenuCategory cat {"General"};
-		cat.items.push_back({"Hud Type", MenuItemKind::HudType});
-		// hudOutline — ОБЩИЙ тумблер всех пяти элементов (LAYOUT_ELEMENTS[*].outlineKey
-		// одинаков), поэтому один пункт на всё меню, а не по одному в каждой категории.
-		cat.items.push_back({"Outline", MenuItemKind::Toggle, "hudOutline", nullptr, 0, 1, 1});
-		cats.push_back(std::move(cat));
-	}
-	{
-		MenuCategory cat {"Timer"};
-		AddElementItems(cat.items, LayoutElement::Timer);
-		AddColorItem(cat.items, "Pro Color", "mhudTimerProColor", MHUD_DEF_TIMER_PRO_COLOR);
-		AddColorItem(cat.items, "TP Color", "mhudTimerTpColor", MHUD_DEF_TIMER_TP_COLOR);
-		AddColorItem(cat.items, "Paused Color", "mhudTimerPausedColor", MHUD_DEF_TIMER_PAUSED_COLOR);
-		AddColorItem(cat.items, "Stopped Color", "mhudTimerStoppedColor", MHUD_DEF_TIMER_STOPPED_COLOR);
-		cats.push_back(std::move(cat));
-	}
-	{
-		MenuCategory cat {"Speed"};
-		AddElementItems(cat.items, LayoutElement::Speed);
-		AddColorItem(cat.items, "Color", "mhudSpeedColor", MHUD_DEF_BASE_COLOR);
-		AddColorItem(cat.items, "CJ Color", "mhudSpeedCjColor", MHUD_DEF_CJ_COLOR);
-		cats.push_back(std::move(cat));
-	}
-	{
-		MenuCategory cat {"Prespeed"};
-		AddElementItems(cat.items, LayoutElement::Prespeed);
-		AddColorItem(cat.items, "Color", "mhudPrespeedColor", MHUD_DEF_BASE_COLOR);
-		AddColorItem(cat.items, "Perf Color", "mhudPrespeedPerfColor", MHUD_DEF_PERF_COLOR);
-		AddColorItem(cat.items, "Jumpbug Color", "mhudPrespeedJumpbugColor", MHUD_DEF_JUMPBUG_COLOR);
-		cats.push_back(std::move(cat));
-	}
-	{
-		MenuCategory cat {"Keys"};
-		AddElementItems(cat.items, LayoutElement::Keys);
-		AddColorItem(cat.items, "Color", "mhudKeysColor", MHUD_DEF_BASE_COLOR);
-		AddColorItem(cat.items, "Overlap Color", "mhudKeysOverlapColor", MHUD_DEF_KEYS_OVERLAP_COLOR);
-		cats.push_back(std::move(cat));
-	}
-	{
-		MenuCategory cat {"Checkpoint"};
-		AddElementItems(cat.items, LayoutElement::Checkpoint);
-		AddColorItem(cat.items, "Color", "mhudCheckpointColor", MHUD_DEF_BASE_COLOR);
-		cats.push_back(std::move(cat));
-	}
-	{
-		MenuCategory cat {"Crosshair"};
-		cat.items.push_back({"Enabled", MenuItemKind::Toggle, "mhudCrosshair", nullptr, 0, 1, 0});
-		cat.items.push_back({"Scale", MenuItemKind::Size, "mhudCrosshairScale", nullptr, 0, 500, 100, 0, nullptr, "%"});
-		cats.push_back(std::move(cat));
-	}
-
-	return cats;
-}
-
-// Ленивая инициализация на первое обращение — ПОСЛЕ загрузки всех TU (в отличие от
-// namespace-scope статики, которая рискнула бы порядком статической инициализации между
-// этим файлом и entity.cpp/kz_hud.h, откуда берутся LAYOUT_ELEMENTS и MHUD_DEF_* цвета).
-static_function const std::vector<MenuCategory> &MenuCategories()
-{
-	static_persist std::vector<MenuCategory> cats = BuildMenuCategories();
-	return cats;
-}
-
-static_function const MenuItem *GetMenuItem(i32 category, i32 itemIndex)
-{
-	const std::vector<MenuCategory> &cats = MenuCategories();
-	if (category < 0 || category >= (i32)cats.size())
+	const std::vector<KZOptNode *> &tree = KZ::menu::GetTree();
+	if (category < 0 || category >= (i32)tree.size())
 	{
 		return NULL;
 	}
-	const std::vector<MenuItem> &items = cats[category].items;
+	const std::vector<KZOptItem> &items = tree[category]->items;
 	if (itemIndex < 0 || itemIndex >= (i32)items.size())
 	{
 		return NULL;
@@ -191,35 +79,12 @@ static_function const MenuItem *GetMenuItem(i32 category, i32 itemIndex)
 	return &items[itemIndex];
 }
 
-// === Мелкие таблицы: тип худа и шрифты (без апстримного полного list-попапа) ===============
+// === Мелкие таблицы: шрифты (без апстримного полного list-попапа) ==========================
 
-static_function const char *HudTypeLabel(i32 type)
-{
-	switch (type)
-	{
-		case KZHUDService::HUD_TYPE_PANORAMA:
-			return "Panorama";
-		case KZHUDService::HUD_TYPE_OFF:
-			return "Off";
-		default: // Standard либо мигрировавшее значение 1 (удалённый particle-MHUD, задача 12)
-			return "Standard";
-	}
-}
-
-// Цикл Standard → Panorama → Off → Standard (задача 12 убрала MHUD из цикла вместе с
-// particle-путём: апстрим вычистил particles/* из воркшоп-аддона).
-static_function i32 NextHudType(i32 current)
-{
-	switch (current)
-	{
-		case KZHUDService::HUD_TYPE_PANORAMA:
-			return KZHUDService::HUD_TYPE_OFF;
-		case KZHUDService::HUD_TYPE_OFF:
-			return KZHUDService::HUD_TYPE_STANDARD;
-		default: // Standard либо неизвестное (в т.ч. мигрировавшее значение 1)
-			return KZHUDService::HUD_TYPE_PANORAMA;
-	}
-}
+// Тип худа теперь — обычный Choice-пункт реестра (hud_prefs.cpp: getChoices/getCurrent/onPick
+// вокруг GetHudType/SetHudType), цикл Standard → Panorama → Off → Standard получается сам
+// перебором getChoices() по кругу (см. ActivateMenuItem/RenderMenuItems ниже) — свой
+// HudTypeLabel/NextHudType здесь больше не нужен.
 
 // Курированный список вместо апстримного постраничного обзора всех семейств (~30):
 // сознательно урезано (см. комментарий вверху файла) — клик по пункту просто перебирает.
@@ -241,24 +106,24 @@ static_function const char *NextFontSlug(const char *current)
 	return MENU_FONTS[0];
 }
 
-static_function const char *GetItemTypeClass(MenuItemKind kind)
+static_function const char *GetItemTypeClass(KZOptItemType type)
 {
-	switch (kind)
+	switch (type)
 	{
-		case MenuItemKind::Toggle:
+		case KZOptItemType::Toggle:
 			return "type-toggle";
-		case MenuItemKind::HudType:
-		case MenuItemKind::Font:
+		case KZOptItemType::Font:
+		case KZOptItemType::Choice:
 			return "type-choice";
-		case MenuItemKind::Position:
+		case KZOptItemType::Position:
 			return "type-position";
-		case MenuItemKind::Size:
-		case MenuItemKind::Opacity:
+		case KZOptItemType::Size:
 			return "type-size";
-		case MenuItemKind::Color:
+		case KZOptItemType::Color:
 			return "type-color";
+		default: // Vector/Button — не используются нашим составом меню
+			return "type-toggle";
 	}
-	return "type-toggle";
 }
 
 // === Float/Int-развязка хранения (R2/prefs.cpp): позиция/размер элемента — Float,
@@ -478,23 +343,48 @@ void KZHUDService::RenderMenu()
 
 void KZHUDService::RenderMenuCategories(CCSCustomHudLayout *layout)
 {
-	const std::vector<MenuCategory> &cats = MenuCategories();
+	const std::vector<KZOptNode *> &tree = KZ::menu::GetTree();
 	for (i32 i = 0; i < KZ_MENU_CATS; i++)
 	{
-		const bool used = i < (i32)cats.size();
+		const bool used = i < (i32)tree.size();
 		if (used)
 		{
-			this->SetMenuVar(layout, CatLbl(i), CatVar(i), cats[i].label);
+			this->SetMenuVar(layout, CatLbl(i), CatVar(i), tree[i]->phraseKey);
 			this->SetMenuBoolClass(layout, CatPanel(i), "selected", this->menuApplied.catSelected[i], i == this->menuCategory);
 		}
 		this->SetMenuBoolClass(layout, CatPanel(i), "hidden", this->menuApplied.catHidden[i], !used);
 	}
 }
 
+// Значение Choice-пункта (сейчас — только Hud Type) — текущий id ищем в списке getChoices(),
+// не найден (незнакомое сохранённое значение) — берём первый пункт списка тем же способом,
+// каким старый HudTypeLabel по умолчанию отдавал "Standard" (он первый в GetHudTypeChoices).
+static_function std::string GetChoiceValueLabel(KZPlayer *player, const KZOptItem &it)
+{
+	std::vector<KZChoice> choices;
+	if (it.getChoices)
+	{
+		it.getChoices(player, it.tag, choices);
+	}
+	if (choices.empty())
+	{
+		return "";
+	}
+	const i64 current = it.getCurrent ? it.getCurrent(player, it.tag) : choices[0].id;
+	for (const KZChoice &c : choices)
+	{
+		if (c.id == current)
+		{
+			return c.label;
+		}
+	}
+	return choices[0].label;
+}
+
 void KZHUDService::RenderMenuItems(CCSCustomHudLayout *layout)
 {
-	const std::vector<MenuCategory> &cats = MenuCategories();
-	const std::vector<MenuItem> *items = (this->menuCategory >= 0 && this->menuCategory < (i32)cats.size()) ? &cats[this->menuCategory].items : NULL;
+	const std::vector<KZOptNode *> &tree = KZ::menu::GetTree();
+	const std::vector<KZOptItem> *items = (this->menuCategory >= 0 && this->menuCategory < (i32)tree.size()) ? &tree[this->menuCategory]->items : NULL;
 	const i32 count = items ? MIN((i32)items->size(), KZ_MENU_ITEMS) : 0;
 
 	for (i32 i = 0; i < KZ_MENU_ITEMS; i++)
@@ -502,54 +392,56 @@ void KZHUDService::RenderMenuItems(CCSCustomHudLayout *layout)
 		const bool used = i < count;
 		if (used)
 		{
-			const MenuItem &it = (*items)[i];
-			this->SetMenuVar(layout, ItemLbl(i), ItemLblVar(i), it.label);
+			const KZOptItem &it = (*items)[i];
+			this->SetMenuVar(layout, ItemLbl(i), ItemLblVar(i), it.phraseKey);
 
+			const bool isFloat = it.storage == KZOptStorage::Float;
 			std::string value;
 			const char *swatch = NULL;
 			bool on = false;
-			switch (it.kind)
+			switch (it.type)
 			{
-				case MenuItemKind::Toggle:
+				case KZOptItemType::Toggle:
 					on = this->player->optionService->GetPreferenceBool(it.prefKey, it.idef != 0);
 					value = on ? "On" : "Off";
 					break;
-				case MenuItemKind::HudType:
-					value = HudTypeLabel(this->GetHudType());
+				case KZOptItemType::Choice:
+					value = GetChoiceValueLabel(this->player, it);
 					break;
-				case MenuItemKind::Font:
+				case KZOptItemType::Font:
 				{
-					const char *slug = this->player->optionService->GetPreferenceStr(it.prefKey, LAYOUT_DEFAULT_FONT);
+					const char *slug = this->player->optionService->GetPreferenceStr(it.prefKey, it.sdef ? it.sdef : LAYOUT_DEFAULT_FONT);
 					value = panorama::GetFontDisplayName(slug, LAYOUT_DEFAULT_FONT);
 					break;
 				}
-				case MenuItemKind::Position:
+				case KZOptItemType::Position:
 				{
 					char buf[32];
-					V_snprintf(buf, sizeof(buf), "%i%%, %i%%", GetIntPref(this->player, it.prefKey, it.idef, it.isFloat),
-							   GetIntPref(this->player, it.yKey, it.iydef, it.isFloat));
+					V_snprintf(buf, sizeof(buf), "%i%%, %i%%", GetIntPref(this->player, it.prefKey, it.idef, isFloat),
+							   GetIntPref(this->player, it.yKey, it.iydef, isFloat));
 					value = buf;
 					break;
 				}
-				case MenuItemKind::Size:
-				case MenuItemKind::Opacity:
+				case KZOptItemType::Size:
 				{
 					char buf[24];
-					V_snprintf(buf, sizeof(buf), "%i%s", GetIntPref(this->player, it.prefKey, it.idef, it.isFloat), it.unit ? it.unit : "");
+					V_snprintf(buf, sizeof(buf), "%i%s", GetIntPref(this->player, it.prefKey, it.idef, isFloat), it.unit ? it.unit : "");
 					value = buf;
 					break;
 				}
-				case MenuItemKind::Color:
+				case KZOptItemType::Color:
 				{
-					const Color cur = this->GetMHUDColorPref(it.prefKey, *it.cdef);
+					const Color cur = this->GetMHUDColorPref(it.prefKey, it.cdef);
 					swatch = panorama::GetColorEntryBgClass(panorama::FindColorEntry(cur));
 					break;
 				}
+				default: // Vector/Button — не используются нашим составом меню
+					break;
 			}
 
 			this->SetMenuVar(layout, ItemVal(i), ItemValVar(i), value.c_str());
 			this->SetMenuSwapClass(layout, ItemSw(i), this->menuApplied.itemSwatch[i], swatch);
-			this->SetMenuSwapClass(layout, ItemPanel(i), this->menuApplied.itemType[i], GetItemTypeClass(it.kind));
+			this->SetMenuSwapClass(layout, ItemPanel(i), this->menuApplied.itemType[i], GetItemTypeClass(it.type));
 			this->SetMenuBoolClass(layout, ItemPanel(i), "on", this->menuApplied.itemOn[i], on);
 		}
 		this->SetMenuBoolClass(layout, ItemPanel(i), "hidden", this->menuApplied.itemHidden[i], !used);
@@ -558,11 +450,11 @@ void KZHUDService::RenderMenuItems(CCSCustomHudLayout *layout)
 
 void KZHUDService::RenderMenuColorPopup(CCSCustomHudLayout *layout)
 {
-	const MenuItem *it = GetMenuItem(this->menuCategory, this->menuPopupItem);
+	const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuPopupItem);
 	i32 curIdx = -1;
-	if (it && it->kind == MenuItemKind::Color)
+	if (it && it->type == KZOptItemType::Color)
 	{
-		curIdx = panorama::FindColorEntry(this->GetMHUDColorPref(it->prefKey, *it->cdef));
+		curIdx = panorama::FindColorEntry(this->GetMHUDColorPref(it->prefKey, it->cdef));
 	}
 	// Градиенты в попапе РАЗРЕШЕНЫ (задача 14): ограничение до сплошных заводилось из-за
 	// particle-MHUD (там же градиент был маркер-цветом с alpha==1, который particle-путь
@@ -591,12 +483,13 @@ void KZHUDService::RenderMenuColorPopup(CCSCustomHudLayout *layout)
 
 void KZHUDService::RenderMenuStepPopup(CCSCustomHudLayout *layout)
 {
-	const MenuItem *it = GetMenuItem(this->menuCategory, this->menuPopupItem);
+	const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuPopupItem);
 	if (!it)
 	{
 		return;
 	}
-	const bool vstep = it->kind == MenuItemKind::Position;
+	const bool isFloat = it->storage == KZOptStorage::Float;
+	const bool vstep = it->type == KZOptItemType::Position;
 	if (this->menuApplied.stepVHidden != !vstep)
 	{
 		this->menuApplied.stepVHidden = !vstep;
@@ -607,23 +500,23 @@ void KZHUDService::RenderMenuStepPopup(CCSCustomHudLayout *layout)
 	char readout[32];
 	if (vstep)
 	{
-		V_snprintf(readout, sizeof(readout), "%i%%, %i%%", GetIntPref(this->player, it->prefKey, it->idef, it->isFloat),
-				   GetIntPref(this->player, it->yKey, it->iydef, it->isFloat));
+		V_snprintf(readout, sizeof(readout), "%i%%, %i%%", GetIntPref(this->player, it->prefKey, it->idef, isFloat),
+				   GetIntPref(this->player, it->yKey, it->iydef, isFloat));
 	}
 	else
 	{
-		V_snprintf(readout, sizeof(readout), "%i%s", GetIntPref(this->player, it->prefKey, it->idef, it->isFloat), it->unit ? it->unit : "");
+		V_snprintf(readout, sizeof(readout), "%i%s", GetIntPref(this->player, it->prefKey, it->idef, isFloat), it->unit ? it->unit : "");
 	}
 	this->SetMenuVar(layout, "step_readout", "step", readout);
-	this->SetMenuVar(layout, "step_label", "steplabel", it->label);
+	this->SetMenuVar(layout, "step_label", "steplabel", it->phraseKey);
 }
 
 // === Взаимодействие ==========================================================================
 
 void KZHUDService::SelectMenuCategory(i32 index)
 {
-	const std::vector<MenuCategory> &cats = MenuCategories();
-	if (index < 0 || index >= (i32)cats.size())
+	const std::vector<KZOptNode *> &tree = KZ::menu::GetTree();
+	if (index < 0 || index >= (i32)tree.size())
 	{
 		return;
 	}
@@ -637,7 +530,7 @@ void KZHUDService::SelectMenuCategory(i32 index)
 
 void KZHUDService::ActivateMenuItem(i32 slot)
 {
-	const MenuItem *it = GetMenuItem(this->menuCategory, slot);
+	const KZOptItem *it = GetMenuItem(this->menuCategory, slot);
 	if (!it)
 	{
 		return;
@@ -648,9 +541,9 @@ void KZHUDService::ActivateMenuItem(i32 slot)
 	}
 
 	auto *opts = this->player->optionService;
-	switch (it->kind)
+	switch (it->type)
 	{
-		case MenuItemKind::Toggle:
+		case KZOptItemType::Toggle:
 		{
 			const bool next = !opts->GetPreferenceBool(it->prefKey, it->idef != 0);
 			opts->SetPreferenceBool(it->prefKey, next);
@@ -660,29 +553,54 @@ void KZHUDService::ActivateMenuItem(i32 slot)
 			this->RenderMenu();
 			break;
 		}
-		case MenuItemKind::HudType:
+		case KZOptItemType::Choice:
 		{
-			// Цикл больше не заходит в удалённый particle-MHUD (задача 12) — переключение типа
-			// всегда успешно, гейта IsMHUDAvailable() здесь не нужно.
-			this->SetHudType(NextHudType(this->GetHudType()));
+			// Тип худа (сейчас единственный Choice в нашем составе) — клик перебирает
+			// getChoices() по кругу, без попапа (см. HudTypeLabel/NextHudType — было раньше,
+			// поведение сохранено byte-в-byte). RefreshLayoutPrefs() тут НЕ нужен — GetHudType
+			// не кэшируется в layoutPrefs, читается напрямую при каждой отрисовке.
+			std::vector<KZChoice> choices;
+			if (it->getChoices)
+			{
+				it->getChoices(this->player, it->tag, choices);
+			}
+			if (!choices.empty())
+			{
+				const i64 current = it->getCurrent ? it->getCurrent(this->player, it->tag) : choices[0].id;
+				i32 idx = 0;
+				for (i32 i = 0; i < (i32)choices.size(); i++)
+				{
+					if (choices[i].id == current)
+					{
+						idx = i;
+						break;
+					}
+				}
+				const i64 next = choices[(idx + 1) % choices.size()].id;
+				if (it->onPick)
+				{
+					it->onPick(this->player, it->tag, next);
+				}
+			}
 			this->RenderMenu();
 			break;
 		}
-		case MenuItemKind::Font:
+		case KZOptItemType::Font:
 		{
-			const char *cur = opts->GetPreferenceStr(it->prefKey, LAYOUT_DEFAULT_FONT);
+			const char *cur = opts->GetPreferenceStr(it->prefKey, it->sdef ? it->sdef : LAYOUT_DEFAULT_FONT);
 			opts->SetPreferenceStr(it->prefKey, NextFontSlug(cur));
 			this->RefreshLayoutPrefs();
 			this->RenderMenu();
 			break;
 		}
-		case MenuItemKind::Position:
-		case MenuItemKind::Size:
-		case MenuItemKind::Opacity:
+		case KZOptItemType::Position:
+		case KZOptItemType::Size:
 			this->OpenMenuPopup(MenuPopup::Step, slot);
 			break;
-		case MenuItemKind::Color:
+		case KZOptItemType::Color:
 			this->OpenMenuPopup(MenuPopup::Color, slot);
+			break;
+		default: // Vector/Button — не используются нашим составом меню
 			break;
 	}
 }
@@ -726,8 +644,8 @@ void KZHUDService::MenuPopupPick(i32 slot)
 	{
 		return;
 	}
-	const MenuItem *it = GetMenuItem(this->menuCategory, this->menuPopupItem);
-	if (!it || it->kind != MenuItemKind::Color)
+	const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuPopupItem);
+	if (!it || it->type != KZOptItemType::Color)
 	{
 		return;
 	}
@@ -761,24 +679,25 @@ void KZHUDService::MenuStep(i32 axis, i32 delta)
 	{
 		return;
 	}
-	const MenuItem *it = GetMenuItem(this->menuCategory, this->menuPopupItem);
+	const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuPopupItem);
 	if (!it)
 	{
 		return;
 	}
-	if (it->kind == MenuItemKind::Position)
+	const bool isFloat = it->storage == KZOptStorage::Float;
+	if (it->type == KZOptItemType::Position)
 	{
 		const char *key = axis == 1 ? it->yKey : it->prefKey;
 		const i32 def = axis == 1 ? it->iydef : it->idef;
-		const i32 current = GetIntPref(this->player, key, def, it->isFloat);
+		const i32 current = GetIntPref(this->player, key, def, isFloat);
 		const i32 value = panorama::SnapToStep(current + StepDelta(current, delta), it->lo, it->hi);
-		SetIntPref(this->player, key, value, it->isFloat);
+		SetIntPref(this->player, key, value, isFloat);
 	}
 	else
 	{
-		const i32 current = GetIntPref(this->player, it->prefKey, it->idef, it->isFloat);
+		const i32 current = GetIntPref(this->player, it->prefKey, it->idef, isFloat);
 		const i32 value = panorama::SnapToStep(current + StepDelta(current, delta), it->lo, it->hi);
-		SetIntPref(this->player, it->prefKey, value, it->isFloat);
+		SetIntPref(this->player, it->prefKey, value, isFloat);
 	}
 	this->RefreshLayoutPrefs();
 	this->RenderMenu();
