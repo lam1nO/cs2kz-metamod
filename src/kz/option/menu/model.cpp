@@ -242,8 +242,20 @@ namespace KZ::menu
 			}
 			switch (item.type)
 			{
+				// storage у Toggle не всегда Bool: AddActionToggle + SetItemPref(..., Int, ...)
+				// заводит int-backed тумблер (sgReset/sgTeleport, misc_prefs.cpp) — писать его
+				// SetPreferenceBool значило бы сохранить значение не того типа, который читает
+				// сервис. AddToggle всегда ставит storage=Bool сам, так что ветка Bool не теряет
+				// ни одного существующего поведения.
 				case KZOptItemType::Toggle:
-					opts->SetPreferenceBool(item.prefKey, item.idef != 0);
+					if (item.storage == KZOptStorage::Int)
+					{
+						opts->SetPreferenceInt(item.prefKey, item.idef);
+					}
+					else
+					{
+						opts->SetPreferenceBool(item.prefKey, item.idef != 0);
+					}
 					break;
 				case KZOptItemType::Color:
 					// У нас нет SetPreferenceColor (kz_option.h) — цвет хранится как
