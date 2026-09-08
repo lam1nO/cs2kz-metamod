@@ -3,6 +3,7 @@
 // расхождения с ним — см. журнал решений задачи (планинг-доки этой ветки, разделы R1/R4).
 #include "kz/hud/layout/layout.h"
 #include "kz/hud/layout/panorama_tables.h"
+#include "kz/spec/kz_spec.h" // GetSpectatedPlayer — источник mhudMimicSpec (см. EnsureOwnedLayout)
 #include "sdk/entity/ccscustomhudlayout.h"
 #include "entitykeyvalues.h"
 #include "utils/utils.h"
@@ -170,6 +171,60 @@ CCSCustomHudLayout *KZHUDService::EnsureOwnedLayout(bool &created)
 	{
 		return NULL;
 	}
+
+	// mhudMimicSpec: интерн-таблицы сущности (HUD_LAYOUT_MAX_INTERNED_STRINGS,
+	// sdk/entity/ccscustomhudlayout.h) копятся за весь сеанс наблюдателя и не освобождаются —
+	// спектейт нескольких игроков с разной раскладкой добавляет в них ~22 новые строки на
+	// каждую новую цель (x/y/font-size/opacity/key-size, см. LogHudInternFailure выше по
+	// файлу). Единственный способ вернуть счётчик к нулю — новая сущность (у неё свои,
+	// пустые m_vecClassNames/m_vecDialogVariableNames). Пересоздаём СТРОГО на факт смены
+	// эффективного источника префов, а не каждый тик: слот ниже меняется только когда
+	// реально сменилась цель наблюдения (или мимикрия включилась/выключилась), сравнение —
+	// дешёвый int, тик спектейта его не чувствует.
+	CPlayerSlot mimicSource(-1);
+	if (this->GetOwnLayoutPrefs().mimicSpec)
+	{
+		// Та же тройная отсечка, что в GetLayoutPrefs (layout/prefs.cpp): нет цели / цель —
+		// сам игрок / цель — бот (реплей-бот). Ни один из трёх случаев не мимикрирует —
+		// эффективный источник остаётся невалидным (свои префы), пересоздавать не нужно.
+		KZPlayer *target = this->player->specService->GetSpectatedPlayer();
+		if (target && target != this->player && !target->IsFakeClient())
+		{
+			mimicSource = target->GetPlayerSlot();
+		}
+	}
+	if (mimicSource != this->layoutMimicSource)
+	{
+		this->layoutMimicSource = mimicSource;
+		// DestroyOwnedLayout снимает сущность и ВМЕСТЕ с ней все кэши классов (layoutElements/
+		// layoutKeys/layoutCrosshair) — без этого свежая сущность ниже завелась бы, но кэш
+		// решил бы, что всё уже выставлено как надо, и не переслал бы ни одного класса заново.
+		// Здесь та же ловушка, что уже документирована для реконнекта в этой же функции.
+		//
+		// Захват ввода меню (SetInputCaptureEnabled) здесь трогать не нужно: он живёт на
+		// ОТДЕЛЬНОЙ сущности this->ownedMenuLayout (layout/menu.cpp, EnsureMenuLayout/
+		// DestroyOwnedMenuLayout), а не на this->ownedLayout, который пересоздаём здесь.
+		// custom_hud_layout ХУДА никогда не получает SetInputCaptureEnabled(true) — это
+		// свойство только окна настроек. Проверено: `git grep SetInputCaptureEnabled` внутри
+		// src/kz/hud/ даёт три попадания, и все три — на layout из EnsureMenuLayout
+		// (layout/menu.cpp:358,1249,1281), ни одного на ownedLayout. Значит DestroyOwnedLayout
+		// не может оставить игрока в режиме курсора, и седьмого пути снятия захвата не
+		// требуется — уже существующие шесть (см. журнал menu.cpp) остаются исчерпывающими.
+		//
+		// Баг апстрима "смена наблюдаемого сливает состояния худа, а не заменяет"
+		// (sdk/entity/ccscustomhudlayout.h, BUGS п.1) — про m_vecPlayerLayoutStates,
+		// per-observed-slot состояния РАЗНЫХ зрителей одной ОБЩЕЙ сущности. У нас сущность
+		// ПЕРСОНАЛЬНАЯ (одна на владельца-наблюдателя, см. комментарий у создания ниже), и
+		// весь этот файл пишет ИСКЛЮЧИТЕЛЬНО в GetGlobalLayoutState() — per-player состояния
+		// (GetPlayerLayoutState/SetHasClassForPlayer) нигде не используются. Значит сам
+		// механизм, в котором живёт баг, в нашем пути записи не участвует: заменить чужой
+		// слот на свой в нём нечему сливаться. Пересоздание здесь ничего не лечит (лечить
+		// было нечего — баг не наш случай) и ничего не усугубляет: новая сущность получает
+		// такое же единственное глобальное состояние, что и старая, просто с чистыми
+		// интерн-таблицами.
+		this->DestroyOwnedLayout();
+	}
+
 	if (CBaseEntity *cached = this->ownedLayout.Get())
 	{
 		return (CCSCustomHudLayout *)cached;
