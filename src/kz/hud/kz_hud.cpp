@@ -4,6 +4,7 @@
 #include "sdk/datatypes.h"
 #include "utils/utils.h"
 #include "utils/simplecmds.h"
+#include "utils/logging.h" // KZ_LOG_* — отказ конвара подавки viewpunch не должен быть немым
 
 #include "kz/option/kz_option.h"
 #include "kz/timer/kz_timer.h"
@@ -93,6 +94,18 @@ static_function void FormatTimeHud(f64 time, char *output, u32 length)
 
 static CConVar<bool> kz_force_mhud("kz_force_mhud", FCVAR_NONE, "Force the panorama HUD even when MultiAddonManager is not available.", false);
 
+// Подавка тряски камеры (viewpunch). Конвар движка cheat+replicated: из RCON/cfg он не
+// берётся («cheat protected, change ignored»), поэтому серверное значение пишем прямо в его
+// ConVarData, а клиенту досылаем персонально (см. OnProcessMovement).
+static CConVarRef<bool> sv_suppress_viewpunch("sv_suppress_viewpunch");
+
+// К типу худа подавка больше НЕ привязана. Раньше её включал particle-путь MHUD, и так как
+// MHUD был дефолтным худом, гладкий полёт (ноуклип сквозь стены) получали практически все;
+// удаление particle-пути (c4b5e5f) вернуло тряску всему флоту. Привязка к panorama-худу
+// оставила бы с тряской тех, кто выбрал HTML-худ или выключил худ вовсе — для них это
+// выглядело бы случайной поломкой. Поэтому один серверный конвар на всех игроков.
+static CConVar<bool> kz_suppress_viewpunch("kz_suppress_viewpunch", FCVAR_NONE, "Suppress view punch (camera shake) for all players.", true);
+
 static_global class KZTimerServiceEventListener_HUD : public KZTimerServiceEventListener
 {
 	virtual void OnTimerStopped(KZPlayer *player, u32 courseGUID) override;
@@ -115,6 +128,16 @@ void KZHUDService::Init()
 	KZTimerService::RegisterEventListener(&timerEventListener);
 	KZOptionService::RegisterEventListener(&optionEventListener);
 	InitMenuPrefs();
+	// Снять FCVAR_REPLICATED, иначе персональные значения конвара до клиентов не доходят
+	// (движок реплицирует одно общее) — без этого подавка не работает вообще.
+	if (sv_suppress_viewpunch.IsValidRef() && sv_suppress_viewpunch.IsConVarDataAvailable())
+	{
+		sv_suppress_viewpunch.GetConVarData()->RemoveFlags(FCVAR_REPLICATED);
+	}
+	else
+	{
+		KZ_LOG_WARN(LogChannel::General, "[cyb] viewpunch_suppress_unavailable reason=convar_data_unavailable cvar=sv_suppress_viewpunch\n");
+	}
 }
 
 bool KZHUDService::IsMHUDAvailable()
@@ -256,6 +279,47 @@ SpeedInfo KZHUDService::GetSpeedInfo()
 	// красить скорость в CJ-цвет было бы враньём (взлёта уже/ещё нет).
 	info.crouchJump = info.hasPrespeed && src->hudService->crouchJumping;
 	return info;
+}
+
+// Подавка viewpunch. Зовётся каждый тик на каждого игрока (из KZPlayer::OnProcessMovement),
+// поэтому логов на такт здесь нет: пишем только на смене состояния, один раз на смену.
+void KZHUDService::OnProcessMovement()
+{
+	if (!sv_suppress_viewpunch.IsValidRef() || !sv_suppress_viewpunch.IsConVarDataAvailable())
+	{
+		// Один раз на процесс: иначе строка в такте на каждого игрока.
+		static bool warnedUnavailable = false;
+		if (!warnedUnavailable)
+		{
+			warnedUnavailable = true;
+			KZ_LOG_WARN(LogChannel::General, "[cyb] viewpunch_suppress_unavailable reason=convar_data_unavailable cvar=sv_suppress_viewpunch\n");
+		}
+		return;
+	}
+
+	bool wantSuppress = kz_suppress_viewpunch.Get();
+	// Смена самого конвара — состояние сервера, не выводимое из БД: пишем ОДНУ строку на
+	// смену на весь сервер (а не на каждого игрока, иначе строка размножится по слотам).
+	static i32 loggedConVarState = -1;
+	if (loggedConVarState != (i32)wantSuppress)
+	{
+		loggedConVarState = (i32)wantSuppress;
+		KZ_LOG_INFO(LogChannel::General, "[cyb] viewpunch_suppress_changed enabled=%i\n", (i32)wantSuppress);
+	}
+	// Смена состояния отслеживается полем-кэшем: выключение конвара на живом сервере обязано
+	// вернуть ванильное поведение сразу (view_punch_decay = 18, серверное значение = 0), а не
+	// залипнуть у клиента до перезахода — клиенту значения досылаются ТОЛЬКО на смене.
+	if (wantSuppress != this->viewpunchSuppressed)
+	{
+		this->viewpunchSuppressed = wantSuppress;
+		utils::SendConVarValue(this->player->GetPlayerSlot(), sv_suppress_viewpunch, wantSuppress ? "1" : "0");
+		utils::SendConVarValue(this->player->GetPlayerSlot(), "view_punch_decay", wantSuppress ? "99999" : "18");
+	}
+	// Серверное значение конвара — на каждом тике: движок и чужой код могут его перетереть,
+	// а решает подавку именно оно (клиентский decay лишь убирает остаточную тряску предикта).
+	auto dst = sv_suppress_viewpunch.GetConVarData()->Value(-1);
+	auto traits = sv_suppress_viewpunch.TypeTraits();
+	traits->Copy(dst, CVValue_t(this->viewpunchSuppressed));
 }
 
 void KZHUDService::OnProcessMovementPost()

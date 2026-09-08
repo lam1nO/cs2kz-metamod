@@ -153,6 +153,10 @@ private:
 	bool fromDuckbug {};
 	bool crouchJumping {};
 	bool showPanel {};
+	// Подавка viewpunch, ПОСЛЕДНЕЕ отправленное этому клиенту состояние. Кэш нужен, чтобы
+	// персональные значения конваров уходили только на смене (не каждый тик) и чтобы
+	// выключение kz_suppress_viewpunch на живом сервере вернуло клиенту ванильные значения.
+	bool viewpunchSuppressed {};
 	// На прошлом тике в канал нижней панели уходил её текст (нужен одноразовый клир,
 	// когда слать стало нечего — см. ClearBottomPanel).
 	bool bottomPanelActive {};
@@ -331,6 +335,10 @@ public:
 	{
 		jumpedThisTick = false;
 	}
+
+	// Подавка тряски камеры (viewpunch) — та же точка жизненного цикла, где она жила до
+	// удаления particle-худа (см. c4b5e5f^). Реализация — kz_hud.cpp.
+	void OnProcessMovement();
 
 	void OnProcessMovementPost();
 
