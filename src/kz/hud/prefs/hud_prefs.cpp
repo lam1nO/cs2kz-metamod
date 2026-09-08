@@ -32,6 +32,32 @@ static_function void OnHudTypePick(KZPlayer *player, i64 tag, i64 id)
 	player->hudService->SetHudType((i32)id);
 }
 
+// === mhudKeysIdle: чем показывать ненажатую клавишу (Task 5, транш "клавиши") ================
+// Сырой int-преф (0 show / 1 hide / 2 underscore, см. LayoutElement::Keys/mhud.cpp) — в
+// отличие от hudType это НЕ вычисляемое состояние сервиса, поэтому читаем/пишем сам преф,
+// как CompareType в misc_prefs.cpp.
+
+static_function void GetKeysIdleChoices(KZPlayer *player, i64 tag, std::vector<KZChoice> &out)
+{
+	out.push_back({"Show", 0});
+	out.push_back({"Hide", 1});
+	out.push_back({"Underscore", 2});
+}
+
+static_function i64 GetKeysIdleCurrent(KZPlayer *player, i64 tag)
+{
+	return player->optionService->GetPreferenceInt("mhudKeysIdle", 0);
+}
+
+static_function void OnKeysIdlePick(KZPlayer *player, i64 tag, i64 id)
+{
+	if (id < 0 || id > 2)
+	{
+		return;
+	}
+	player->optionService->SetPreferenceInt("mhudKeysIdle", id);
+}
+
 // === Пять полей элемента, общих для Timer/Speed/Prespeed/Keys/Checkpoint — ключи из
 // LAYOUT_ELEMENTS (entity.cpp, Task 4), один источник правды, как и раньше в menu.cpp. =======
 static_function void AddHudElementItems(KZOptNode *node, LayoutElement e)
@@ -82,7 +108,27 @@ void KZHUDService::InitMenuPrefs()
 	KZOptNode *keys = KZ::menu::AddCategory("Keys");
 	AddHudElementItems(keys, LayoutElement::Keys);
 	KZ::menu::AddColor(keys, "Color", "mhudKeysColor", MHUD_DEF_BASE_COLOR);
+	// hudKeysOverlap читался кодом (layout/prefs.cpp) ещё до этой задачи, но пункта в меню у
+	// него не было — одна из шести находок транша "клавиши" (без пункта/команды у игрока).
+	// Дефолт true — тот же, что уже читает GetPreferenceBool на этом ключе.
+	KZ::menu::AddToggle(keys, "Overlap", "hudKeysOverlap", true);
 	KZ::menu::AddColor(keys, "Overlap Color", "mhudKeysOverlapColor", MHUD_DEF_KEYS_OVERLAP_COLOR);
+	KZ::menu::SetItemEnabledBy(keys, "hudKeysOverlap");
+	// Осевой режим: тонировать только конфликтующую пару клавиш вместо всего контейнера.
+	KZ::menu::AddToggle(keys, "Overlap Axis Only", "mhudKeysOverlapAxis", false);
+	KZ::menu::SetItemEnabledBy(keys, "hudKeysOverlap");
+	KZ::menu::AddColor(keys, "Pressed Color", "mhudKeysPressedColor", MHUD_DEF_KEYS_PRESSED_COLOR);
+	KZ::menu::SetItemSolidOnly(keys); // key-glow-N (keys.css) — только сплошные, градиента там нет
+	KZ::menu::AddColor(keys, "Overlap Glow Color", "mhudKeysOverlapGlowColor", MHUD_DEF_KEYS_OVERLAP_GLOW_COLOR);
+	KZ::menu::SetItemSolidOnly(keys);
+	KZ::menu::SetItemEnabledBy(keys, "hudKeysOverlap");
+	KZ::menu::AddToggle(keys, "Letters", "mhudKeysLetters", false);
+	KZ::menu::AddToggle(keys, "Square", "mhudKeysSquare", false);
+	KZ::menu::AddToggle(keys, "Border", "mhudKeysBorder", true);
+	KZ::menu::AddToggle(keys, "Glow", "mhudKeysGlow", true);
+	KZ::menu::AddToggle(keys, "Fill", "mhudKeysFill", true);
+	KZ::menu::AddChoice(keys, "Idle", &GetKeysIdleChoices, &GetKeysIdleCurrent, &OnKeysIdlePick);
+	KZ::menu::SetItemPref(keys, "mhudKeysIdle", KZOptStorage::Int, 0);
 
 	KZOptNode *checkpoint = KZ::menu::AddCategory("Checkpoint");
 	AddHudElementItems(checkpoint, LayoutElement::Checkpoint);

@@ -8,13 +8,14 @@
 //     задача 12 подняла реализацию туда из удалённого particles.cpp);
 //   - SpeedInfo больше не апстримный тип: это ОБЩИЙ метод KZHUDService::GetSpeedInfo()
 //     (kz_hud.cpp) — см. R3.
-//   - клавиши: апстримные keysIdle/keysBorder/keysGlowEnabled/keysFillEnabled/keysLetters/
-//     keysSquare/keysOverlapAxis/keysOverlapGlow/keysPressed-цвет НЕ переносим — таких префов
-//     Task 5 не заводил (в нашей базе их нет). Оставлено то, что опирается на существующие
-//     префы: нажатие клавиши, общий цвет/оверлап (hudKeysOverlap/mhudKeysOverlapColor),
-//     размер и шрифт-класс контейнера Keys.
+//   - клавиши: транш "клавиши" (Task 5) довёл UpdateKeysElement до апстримного состава —
+//     keysIdle/keysBorder/keysGlowEnabled(keysGlow)/keysFillEnabled(keysFill)/keysLetters/
+//     keysSquare/keysOverlapAxis/keysOverlapGlow/keysPressed-цвет заведены (см. kz_hud.h,
+//     layout/prefs.cpp); имена полей местами короче апстримных (Glow/Fill вместо
+//     GlowEnabled/FillEnabled), классы разметки и дефолты — те же.
 //   - ApplyCrosshair (Task 10) — реализация в отдельном layout/crosshair.cpp, вызов отсюда.
 #include "kz/hud/layout/layout.h"
+#include "kz/hud/layout/panorama_tables.h" // FindColorEntry/ResolveColorClass — key-glow-N и осевая тонировка клавиш
 #include "kz/language/kz_language.h"
 #include "kz/checkpoint/kz_checkpoint.h"
 #include "kz/replays/kz_replaysystem.h"
@@ -115,6 +116,30 @@ static_global const char *KEY_GLYPHS[] = {"mhud_kg_c_main",   "mhud_kg_c_idle", 
 										  "mhud_kg_a_letter", "mhud_kg_a_idle", "mhud_kg_s_main",   "mhud_kg_s_letter",
 										  "mhud_kg_s_idle",   "mhud_kg_d_main", "mhud_kg_d_letter", "mhud_kg_d_idle"};
 
+// Ось движения каждой кнопки — только чтобы при keysOverlapAxis подсветить именно две
+// конфликтующие клавиши, а не весь контейнер. Индексы под тем же порядком, что KEY_PANELS.
+enum KeyAxis
+{
+	KEY_AXIS_NONE = -1,
+	KEY_AXIS_FORWARD_BACK,
+	KEY_AXIS_LEFT_RIGHT,
+};
+
+static_global const i32 KEY_AXES[] = {KEY_AXIS_NONE,       KEY_AXIS_FORWARD_BACK, KEY_AXIS_NONE,
+									   KEY_AXIS_LEFT_RIGHT, KEY_AXIS_FORWARD_BACK, KEY_AXIS_LEFT_RIGHT};
+
+// Обёртка над SetHasClass с логом отказа (интерн-лимит 1024, см. LogHudInternFailure в
+// entity.cpp) — та же проверка, что уже была у "pressed"/размерных классов ниже, но теперь
+// нужна в нескольких местах разом (idle/border/glow/fill/letters/square), поэтому вынесена.
+static_function void SetKeysHasClass(CCSCustomHudLayout *layout, KZPlayer *player, const char *panelId, const char *className, bool has)
+{
+	if (!layout->SetHasClass(panelId, className, has ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass))
+	{
+		KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_hud_class_dropped reason=intern_limit panel=%s class=%s slot=%i\n", panelId, className,
+					player->GetPlayerSlot().Get());
+	}
+}
+
 void KZHUDService::UpdateKeysElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force)
 {
 	// Состояние клавиш игрока — тот же источник, что у нижней панели (KPF_*/particle-путь):
@@ -128,10 +153,16 @@ void KZHUDService::UpdateKeysElement(CCSCustomHudLayout *layout, KZPlayer *sourc
 	const bool keys[] = {duck, forward, jump, left, back, right};
 
 	const MHUDLayoutPrefs &prefs = this->GetLayoutPrefs();
-	// Как в particle-пути (UpdateMHUDKeys): без раздельного per-axis режима (такого префа у
-	// нас нет) — оверлап красит контейнер целиком в hudKeysOverlap/mhudKeysOverlapColor.
 	const bool overlap = ((forward && back) || (left && right)) && prefs.keysOverlapEnabled;
-	const Color color = overlap ? prefs.keysOverlap : prefs.keys;
+	// keysOverlapAxis: контейнер остаётся на базовом цвете, а тонировку получают только две
+	// конфликтующие кнопки (ниже, per-key overlapClass) — иначе (как раньше) красится целиком.
+	bool overlapped[KZ_ARRAYSIZE(KEY_PANELS)] {};
+	for (i32 i = 0; overlap && i < (i32)KZ_ARRAYSIZE(KEY_PANELS); i++)
+	{
+		overlapped[i] = !prefs.keysOverlapAxis || (KEY_AXES[i] == KEY_AXIS_FORWARD_BACK && forward && back)
+						|| (KEY_AXES[i] == KEY_AXIS_LEFT_RIGHT && left && right);
+	}
+	const Color color = overlap && !prefs.keysOverlapAxis ? prefs.keysOverlap : prefs.keys;
 	const bool show = this->IsLayoutElementEnabled(LayoutElement::Keys);
 	this->UpdateLayoutElement(layout, LayoutElement::Keys, show, NULL, color, force);
 
@@ -144,6 +175,85 @@ void KZHUDService::UpdateKeysElement(CCSCustomHudLayout *layout, KZPlayer *sourc
 	if (!show)
 	{
 		return;
+	}
+
+	const char *const keysPanel = LAYOUT_ELEMENTS[(i32)LayoutElement::Keys].panelId;
+
+	// Тумблеры на весь контейнер клавиш — каждый ставится И снимается по значению префа
+	// (залипание оформления при выключении уже ловилось ревью на другом месте, см. брифинг).
+	const i32 idle = prefs.keysIdle;
+	if (this->layoutKeys.idle != idle)
+	{
+		SetKeysHasClass(layout, this->player, keysPanel, "hide-idle", idle == 1);
+		SetKeysHasClass(layout, this->player, keysPanel, "keys-underscore", idle == 2);
+		this->layoutKeys.idle = idle;
+	}
+	const i32 noBorder = prefs.keysBorder ? 0 : 1;
+	if (this->layoutKeys.noBorder != noBorder)
+	{
+		SetKeysHasClass(layout, this->player, keysPanel, "keys-noborder", noBorder != 0);
+		this->layoutKeys.noBorder = noBorder;
+	}
+	const i32 noGlow = prefs.keysGlow ? 0 : 1;
+	if (this->layoutKeys.noGlow != noGlow)
+	{
+		SetKeysHasClass(layout, this->player, keysPanel, "keys-noglow", noGlow != 0);
+		this->layoutKeys.noGlow = noGlow;
+	}
+	const i32 noFill = prefs.keysFill ? 0 : 1;
+	if (this->layoutKeys.noFill != noFill)
+	{
+		SetKeysHasClass(layout, this->player, keysPanel, "keys-nofill", noFill != 0);
+		this->layoutKeys.noFill = noFill;
+	}
+	const i32 letters = prefs.keysLetters ? 1 : 0;
+	if (this->layoutKeys.letters != letters)
+	{
+		SetKeysHasClass(layout, this->player, keysPanel, "keys-letters", letters != 0);
+		this->layoutKeys.letters = letters;
+	}
+	const i32 square = prefs.keysSquare ? 1 : 0;
+	if (this->layoutKeys.square != square)
+	{
+		SetKeysHasClass(layout, this->player, keysPanel, "keys-square", square != 0);
+		this->layoutKeys.square = square;
+	}
+
+	// key-glow-N (keys.css, 160 записей) — та же палитра, что pal-fg-N/pal-bg-N в
+	// panorama_tables.cpp (значения сверены построчно, см. отчёт задачи): индекс через
+	// FindColorEntry и клэмп в [0, 159] — тот же приём, что и остальной проект (fallback на
+	// дефолт при "нашёл, но не туда"); градиент сюда не долетает — SetItemSolidOnly (hud_prefs.cpp)
+	// не даёт выбрать его в пикере обоих цветов ниже.
+	auto resolveGlowIndex = [](const Color &c)
+	{
+		return Clamp(panorama::FindColorEntry(c), 0, 159);
+	};
+	const i32 glow = resolveGlowIndex(prefs.keysPressed);
+	const i32 glowOverlap = overlap ? resolveGlowIndex(prefs.keysOverlapGlow) : glow;
+	const char *overlapClass = prefs.keysOverlapAxis ? panorama::ResolveColorClass(prefs.keysOverlap) : NULL;
+	for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(KEY_PANELS); i++)
+	{
+		// Цвет контейнера наследуется детьми — класс здесь его переопределяет для одной кнопки.
+		this->SetLayoutClass(layout, KEY_PANELS[i], this->layoutKeys.overlapClass[i], overlapped[i] ? overlapClass : NULL);
+
+		const i32 wanted = overlapped[i] ? glowOverlap : glow;
+		if (this->layoutKeys.glow[i] == wanted)
+		{
+			continue;
+		}
+		char glowClass[32];
+		if (this->layoutKeys.glow[i] >= 0)
+		{
+			V_snprintf(glowClass, sizeof(glowClass), "key-glow-%i", this->layoutKeys.glow[i]);
+			layout->SetHasClass(KEY_PANELS[i], glowClass, k_eHudPanelClassStatus_DoesNotHaveClass);
+		}
+		V_snprintf(glowClass, sizeof(glowClass), "key-glow-%i", wanted);
+		if (!layout->SetHasClass(KEY_PANELS[i], glowClass, k_eHudPanelClassStatus_HasClass))
+		{
+			KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_hud_class_dropped reason=intern_limit panel=%s class=%s slot=%i\n", KEY_PANELS[i],
+						glowClass, this->player->GetPlayerSlot().Get());
+		}
+		this->layoutKeys.glow[i] = wanted;
 	}
 
 	for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(KEY_PANELS); i++)
@@ -165,7 +275,6 @@ void KZHUDService::UpdateKeysElement(CCSCustomHudLayout *layout, KZPlayer *sourc
 	// font-size не наследуется детьми через класс родителя, апстрим тоже дублирует явно.
 	const MHUDLayoutPrefs::Element &cached = prefs.elements[(i32)LayoutElement::Keys];
 	const i32 size = cached.size;
-	const char *const keysPanel = LAYOUT_ELEMENTS[(i32)LayoutElement::Keys].panelId;
 
 	if (this->layoutKeys.boxSize != size)
 	{

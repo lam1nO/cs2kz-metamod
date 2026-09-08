@@ -23,6 +23,9 @@ extern const Color MHUD_DEF_TIMER_PRO_COLOR;
 extern const Color MHUD_DEF_TIMER_PAUSED_COLOR;
 extern const Color MHUD_DEF_TIMER_STOPPED_COLOR;
 extern const Color MHUD_DEF_KEYS_OVERLAP_COLOR;
+// Задача 5 (транш "клавиши"): дефолты те же, что в апстриме (значения не менялись).
+extern const Color MHUD_DEF_KEYS_PRESSED_COLOR;
+extern const Color MHUD_DEF_KEYS_OVERLAP_GLOW_COLOR;
 
 // Элементы panorama-худа (сущность custom_hud_layout, Task 4).
 enum class LayoutElement
@@ -119,11 +122,21 @@ struct MHUDLayoutPrefs
 	Color prespeedJumpbug {};
 	Color keys {};
 	Color keysOverlap {};
+	Color keysPressed {};
+	Color keysOverlapGlow {};
 	Color checkpoint {};
 
 	bool timerDetailed {};
 	bool speedPrecise {};
 	bool keysOverlapEnabled {};
+	// Клавиши (Task 5, транш "клавиши"): опции апстрима, ранее не заводившиеся — см. mhud.cpp.
+	bool keysOverlapAxis {}; // красить только пару клавиш конфликтующей оси, не весь контейнер
+	bool keysLetters {};     // буквы WASD вместо стрелок
+	bool keysSquare {};      // квадратные кнопки вместо широких
+	bool keysBorder {};      // рамка кнопки
+	bool keysGlow {};        // свечение нажатой кнопки
+	bool keysFill {};        // заливка нажатой кнопки
+	i32 keysIdle {};         // 0 show, 1 hide, 2 underscore (см. MHUDKeysIdle апстрима)
 
 	// Крестик (Task 10) — независим от элементов худа выше, но живёт в той же структуре
 	// префов: ключи те же, что читает RefreshLayoutPrefs.
@@ -579,15 +592,28 @@ private:
 	// панели целиком). Живёт ТОЛЬКО вместе с сущностью — обнулять вместе с layoutElements[]
 	// в DestroyOwnedLayout, иначе следующий владелец слота унаследует чужие классы кнопок и
 	// решит, что клавиши уже выставлены (та же ловушка, что и с layoutElements).
-	// В отличие от апстрима здесь НЕТ per-key idle/border/glow/fill/letters/square тумблеров —
-	// в нашей базе таких префов не существует (Task 5 их не заводил), поэтому кэшируем только
-	// то, что реально показываем: нажатие, размер клавиш и шрифт-класс глифов.
+	// Транш "клавиши" (Task 5) довёл кэш до апстримного состава: idle-режим/рамка/свечение/
+	// заливка/буквы/квадрат — тумблеры на весь контейнер (одно значение кэшируется как int/bool
+	// и сравнивается по значению — тех же классов на панели несколько сразу, поэтому
+	// SetLayoutClass с его one-slot заменой не подходит, см. UpdateKeysElement), а per-key
+	// свечение (glow) и осевая тонировка при keysOverlapAxis — по каждой из 6 кнопок отдельно.
 	struct LayoutKeysState
 	{
 		bool pressed[KZHUDService::MHUD_KEY_COUNT] {};
 		i32 boxSize {INT_MIN};
 		i32 fontSize {INT_MIN};
 		const char *fontClass {};
+		i32 idle {-1};      // прошлый MHUDLayoutPrefs::keysIdle, -1 — ещё не выставляли
+		i32 noBorder {-1};
+		i32 noGlow {-1};
+		i32 noFill {-1};
+		i32 letters {-1};
+		i32 square {-1};
+		// Индекс палитры key-glow-N (keys.css) на кнопку; -1 — класс ещё не выставлен.
+		i32 glow[KZHUDService::MHUD_KEY_COUNT] {-1, -1, -1, -1, -1, -1};
+		// Класс тонировки конфликтующей оси (keysOverlapAxis) — резолвленный стабильный указатель
+		// (panorama::ResolveColorClass), поэтому кэшируется через SetLayoutClass как обычно.
+		const char *overlapClass[KZHUDService::MHUD_KEY_COUNT] {};
 	};
 
 	LayoutKeysState layoutKeys {};

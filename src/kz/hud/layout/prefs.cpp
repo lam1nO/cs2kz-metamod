@@ -62,10 +62,21 @@ void KZHUDService::RefreshLayoutPrefs()
 	this->layoutPrefs.prespeedJumpbug = this->GetMHUDColorPref("mhudPrespeedJumpbugColor", MHUD_DEF_JUMPBUG_COLOR);
 	this->layoutPrefs.keys = this->GetMHUDColorPref("mhudKeysColor", MHUD_DEF_BASE_COLOR);
 	this->layoutPrefs.keysOverlap = this->GetMHUDColorPref("mhudKeysOverlapColor", MHUD_DEF_KEYS_OVERLAP_COLOR);
+	this->layoutPrefs.keysPressed = this->GetMHUDColorPref("mhudKeysPressedColor", MHUD_DEF_KEYS_PRESSED_COLOR);
+	this->layoutPrefs.keysOverlapGlow = this->GetMHUDColorPref("mhudKeysOverlapGlowColor", MHUD_DEF_KEYS_OVERLAP_GLOW_COLOR);
 	this->layoutPrefs.checkpoint = this->GetMHUDColorPref("mhudCheckpointColor", MHUD_DEF_BASE_COLOR);
 
 	this->layoutPrefs.timerDetailed = opts->GetPreferenceBool("hudTimerDetail", true);
+	// hudKeysOverlap читался кодом до этой задачи, но пункта в реестре меню у него не было
+	// (одна из шести находок транша) — hud_prefs.cpp теперь заводит тумблер на этот же ключ.
 	this->layoutPrefs.keysOverlapEnabled = opts->GetPreferenceBool("hudKeysOverlap", true);
+	this->layoutPrefs.keysOverlapAxis = opts->GetPreferenceBool("mhudKeysOverlapAxis", false);
+	this->layoutPrefs.keysLetters = opts->GetPreferenceBool("mhudKeysLetters", false);
+	this->layoutPrefs.keysSquare = opts->GetPreferenceBool("mhudKeysSquare", false);
+	this->layoutPrefs.keysBorder = opts->GetPreferenceBool("mhudKeysBorder", true);
+	this->layoutPrefs.keysGlow = opts->GetPreferenceBool("mhudKeysGlow", true);
+	this->layoutPrefs.keysFill = opts->GetPreferenceBool("mhudKeysFill", true);
+	this->layoutPrefs.keysIdle = Clamp((i32)opts->GetPreferenceInt("mhudKeysIdle", 0), 0, 2);
 	this->layoutPrefs.speedPrecise = opts->GetPreferenceBool("mhudSpeedPrecise", false);
 
 	// Крестик (Task 10) — самостоятельный тумблер, не элемент LAYOUT_ELEMENTS: у него нет
