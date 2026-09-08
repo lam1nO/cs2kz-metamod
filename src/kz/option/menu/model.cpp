@@ -20,14 +20,6 @@ namespace KZ::menu
 		}
 	}
 
-	void SetItemDivider(KZOptNode *node)
-	{
-		if (!node->items.empty())
-		{
-			node->items.back().dividerAfter = true;
-		}
-	}
-
 	void SetItemPref(KZOptNode *node, const char *prefKey, KZOptStorage storage, i32 idef, const char *sdef)
 	{
 		if (node->items.empty())
