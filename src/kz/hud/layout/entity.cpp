@@ -1,6 +1,6 @@
 // Сущность custom_hud_layout (Task 4): создание/уничтожение на игрока, запись классов
 // панелей и dialog-переменных. Перенесено с апстрима (src/kz/hud/layout/entity.cpp),
-// расхождения с ним — см. docs/superpowers/sdd/2026-09-08-panorama-hud/base-facts.md (R1/R4).
+// расхождения с ним — см. журнал решений задачи (планинг-доки этой ветки, разделы R1/R4).
 #include "kz/hud/layout/layout.h"
 #include "kz/hud/layout/panorama_tables.h"
 #include "sdk/entity/ccscustomhudlayout.h"
@@ -169,6 +169,14 @@ CCSCustomHudLayout *KZHUDService::EnsureOwnedLayout(bool &created)
 
 void KZHUDService::DestroyOwnedLayout()
 {
+	if (!this->ownedLayout.IsValid())
+	{
+		// Уже уничтожена (или никогда не создавалась) — DrawPanels зовёт этот метод КАЖДЫЙ
+		// тик для каждого НЕ-panorama игрока (то есть почти для всех); без этого раннего
+		// выхода пять LayoutElementState (со std::string), LayoutKeysState и
+		// LayoutCrosshairState пересобирались бы заново на каждый такой тик впустую.
+		return;
+	}
 	if (CBaseEntity *ent = this->ownedLayout.Get())
 	{
 		g_pKZUtils->RemoveEntity(ent);
@@ -191,11 +199,10 @@ void KZHUDService::DestroyOwnedLayout()
 	// выставлен как надо, — крестик молча не появится (тот же баг, что ревью поймало для
 	// клавиш в задаче 6).
 	this->layoutCrosshair = LayoutCrosshairState();
-	// Сами значения cl_crosshair* (и флаг confirmed) — та же ловушка наизнанку: без сброса
-	// новый игрок в этом слоте унаследовал бы «подтверждённые» cl_crosshair* ПРЕДЫДУЩЕГО
-	// (Reset() зовёт DestroyOwnedLayout на дисконнекте), и ApplyCrosshair нарисовал бы ему
-	// чужой крестик как настоящий — ревью прямо просило исключить этот сценарий.
-	this->crosshair = MHUDCrosshairSettings();
+	// Сами значения cl_crosshair* (и флаг confirmed) здесь НЕ трогаем: это НАСТОЯЩИЕ данные
+	// игрока (не кэш классов ЭТОЙ сущности), и без цели наблюдения/при смене типа худа они
+	// обязаны пережить пересоздание сущности — иначе крестик вернётся только через следующий
+	// опрос (до MHUD_XH_POLL_INTERVAL). Сброс — в Reset() (реальное освобождение слота).
 }
 
 void KZHUDService::LayoutCleanup()
@@ -217,5 +224,9 @@ void KZHUDService::LayoutCleanup()
 
 bool KZHUDService::OwnsLayoutEntity(CEntityHandle handle)
 {
-	return this->ownedLayout.IsValid() && this->ownedLayout.ToInt() == handle.ToInt();
+	// Своих сущностей ДВЕ: сам худ (ownedLayout) и отдельное меню настроек (ownedMenuLayout,
+	// Task 11) — транзит (KZ::quiet) гасит всё, чего нет в этом списке, и без второй проверки
+	// сущность меню игроку не долетала бы вовсе (пустые/невалидные хэндлы по-прежнему false).
+	return (this->ownedLayout.IsValid() && this->ownedLayout.ToInt() == handle.ToInt())
+		   || (this->ownedMenuLayout.IsValid() && this->ownedMenuLayout.ToInt() == handle.ToInt());
 }
