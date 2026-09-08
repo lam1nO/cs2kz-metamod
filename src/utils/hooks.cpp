@@ -37,7 +37,9 @@
 #include "kz/racing/kz_racing.h"
 #include "utils/utils.h"
 #include "sdk/entity/cbasetrigger.h"
+#include "sdk/entity/ccscustomhudlayout.h"
 #include "sdk/usercmd.h"
+#include "cstrike15_usermessages.pb.h"
 
 #include "vprof.h"
 
@@ -116,6 +118,12 @@ static_function void Hook_ClientVoice(CPlayerSlot slot);
 
 SH_DECL_HOOK2_void(ISource2GameClients, ClientCommand, SH_NOATTRIB, false, CPlayerSlot, const CCommand &);
 static_function void Hook_ClientCommand(CPlayerSlot slot, const CCommand &args);
+
+// Клик по кнопке panorama-меню (Task 11, layout/menu.cpp) — идёт usermessage'ом клиента,
+// как и все прочие CS_UM_*; фильтр по типу в самом хуке ОБЯЗАН стоять первым, иначе на каждое
+// клиентское usermessage (а их много каждый тик на каждого игрока) тратится лишний разбор.
+SH_DECL_HOOK4_void(ISource2GameClients, ClientSvcUserMessage, SH_NOATTRIB, false, CPlayerSlot, int, uint32, const void *);
+static_function void Hook_ClientSvcUserMessage(CPlayerSlot slot, int type, uint32 size, const void *buf);
 
 // INetworkServerService
 SH_DECL_HOOK3_void(INetworkServerService, StartupServer, SH_NOATTRIB, 0, const GameSessionConfiguration_t &, ISource2WorldSession *, const char *);
@@ -207,6 +215,7 @@ void hooks::Initialize()
 	SH_ADD_HOOK(ISource2GameClients, ClientDisconnect, g_pSource2GameClients, SH_STATIC(Hook_ClientDisconnect), true);
 	SH_ADD_HOOK(ISource2GameClients, ClientVoice, g_pSource2GameClients, SH_STATIC(Hook_ClientVoice), false);
 	SH_ADD_HOOK(ISource2GameClients, ClientCommand, g_pSource2GameClients, SH_STATIC(Hook_ClientCommand), false);
+	SH_ADD_HOOK(ISource2GameClients, ClientSvcUserMessage, g_pSource2GameClients, SH_STATIC(Hook_ClientSvcUserMessage), false);
 
 	SH_ADD_HOOK(INetworkServerService, StartupServer, g_pNetworkServerService, SH_STATIC(Hook_StartupServer), true);
 
@@ -301,6 +310,7 @@ void hooks::Cleanup()
 	SH_REMOVE_HOOK(ISource2GameClients, ClientDisconnect, g_pSource2GameClients, SH_STATIC(Hook_ClientDisconnect), true);
 	SH_REMOVE_HOOK(ISource2GameClients, ClientVoice, g_pSource2GameClients, SH_STATIC(Hook_ClientVoice), false);
 	SH_REMOVE_HOOK(ISource2GameClients, ClientCommand, g_pSource2GameClients, SH_STATIC(Hook_ClientCommand), false);
+	SH_REMOVE_HOOK(ISource2GameClients, ClientSvcUserMessage, g_pSource2GameClients, SH_STATIC(Hook_ClientSvcUserMessage), false);
 
 	SH_REMOVE_HOOK(INetworkServerService, StartupServer, g_pNetworkServerService, SH_STATIC(Hook_StartupServer), true);
 
@@ -639,6 +649,34 @@ static_function void Hook_ClientCommand(CPlayerSlot slot, const CCommand &args)
 	{
 		RETURN_META(result);
 	}
+	RETURN_META(MRES_IGNORED);
+}
+
+// Клик по кнопке panorama-меню (Task 11): через ClientSvcUserMessage идут ВСЕ клиентские
+// usermessage каждого игрока каждый тик, поэтому фильтр по типу — первая строка, до всякого
+// разбора протобафа. slot берём из аргумента хука (не из сущности в сообщении) и резолвим
+// через него hudService — так клик одного игрока физически не может попасть на чужую сущность
+// меню: KZHUDService::OnLayoutMenuClick сверяет присланный handle с this->ownedMenuLayout
+// ИМЕННО этого hudService (см. layout/menu.cpp).
+static_function void Hook_ClientSvcUserMessage(CPlayerSlot slot, int type, uint32 size, const void *buf)
+{
+	if (type != CS_UM_CustomHudClicked)
+	{
+		RETURN_META(MRES_IGNORED);
+	}
+
+	CCSUsrMsg_CustomHudClicked msg;
+	if (!msg.ParseFromArray(buf, size))
+	{
+		RETURN_META(MRES_IGNORED);
+	}
+
+	KZPlayer *player = g_pKZPlayerManager->ToPlayer(slot);
+	if (player && player->IsInGame() && player->hudService)
+	{
+		player->hudService->OnLayoutMenuClick(msg.custom_hud_layout(), msg.button_id().c_str());
+	}
+
 	RETURN_META(MRES_IGNORED);
 }
 

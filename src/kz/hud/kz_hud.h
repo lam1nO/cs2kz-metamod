@@ -530,14 +530,13 @@ public:
 		return this->menuOpen;
 	}
 
-	// Колбэк клика по кнопке меню. У апстрима вызывается из Hook_ClientSvcUserMessage
-	// (utils/hooks.cpp, CS_UM_CustomHudClicked) — В НАШЕЙ БАЗЕ этого хука нет (нет ни
-	// SH_DECL_HOOK4_void(..., ClientSvcUserMessage, ...), ни CCSUsrMsg_CustomHudClicked/
-	// CS_UM_CustomHudClicked в вендоренных заголовках): проводка клика от движка до этого
-	// метода — ОТДЕЛЬНАЯ задача, не входящая в файлы этой (menu.h/menu.cpp/kz_hud.h/AMBuilder).
-	// packedHandle — CEntityHandle сущности МЕНЮ (CCSCustomHudLayout::FromClickHandle),
-	// присланный клиентом; сверяем с this->ownedMenuLayout, чтобы клик по чужому/устаревшему
-	// хэндлу (сущность уже пересоздана) не перепутал панели.
+	// Колбэк клика по кнопке меню — зовётся из Hook_ClientSvcUserMessage (utils/hooks.cpp,
+	// CS_UM_CustomHudClicked) уже с резолвленным по СЛОТУ хука hudService, поэтому здесь
+	// достаточно сверить handle с СОБСТВЕННЫМ ownedMenuLayout: клик одного игрока физически
+	// не может попасть на чужую сущность меню, даже если бы клиент прислал чужой handle.
+	// packedHandle — CEntityHandle сущности МЕНЮ (CCSCustomHudLayout::FromClickHandle);
+	// устаревший (сущность уже пересоздана) или чужой handle просто не совпадёт и будет
+	// проигнорирован (см. layout/menu.cpp).
 	void OnLayoutMenuClick(uint32 packedHandle, const char *panelId);
 
 	// Гасит сущность меню и обнуляет её диф-кэш (та же ловушка, что у DestroyOwnedLayout —

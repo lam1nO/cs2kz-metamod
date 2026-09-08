@@ -28,13 +28,11 @@
 // (DestroyOwnedLayout). Без этого покрытия игрок, у которого меню было открыто в момент одного
 // из этих событий, застревает в режиме курсора и не может играть вообще.
 //
-// НЕ входит в эту задачу (см. task-11-report.md): проводка клика от движка до
-// OnLayoutMenuClick(). У апстрима это Hook_ClientSvcUserMessage на CS_UM_CustomHudClicked
-// (utils/hooks.cpp) — в нашей базе такого хука и нужных вендоренных типов (CCSUsrMsg_CustomHudClicked)
-// нет вовсе, а utils/hooks.cpp не входит в файлы этой задачи (menu.h/menu.cpp/kz_hud.h/AMBuilder).
-// Меню можно открыть/закрыть чат-командой (SCMD ниже) и оно безопасно гасится всеми путями
-// выше — но клики по панелям внутри него не дойдут до OnLayoutMenuClick, пока эта проводка не
-// появится отдельной задачей.
+// Проводка клика от движка: Hook_ClientSvcUserMessage на CS_UM_CustomHudClicked
+// (utils/hooks.cpp) резолвит игрока по СЛОТУ хука (не по сущности из сообщения) и зовёт
+// player->hudService->OnLayoutMenuClick(...) — OnLayoutMenuClick ниже сам сверяет присланный
+// handle с ownedMenuLayout ИМЕННО этого hudService, так что клик одного игрока физически не
+// может применить настройку другому (см. utils/hooks.cpp и base-facts.md).
 #include "kz/hud/layout/layout.h"
 #include "kz/hud/layout/menu.h"
 #include "kz/hud/layout/panorama_tables.h"
