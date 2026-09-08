@@ -268,6 +268,9 @@ void KZPlayer::OnPhysicsSimulatePost()
 		if (this->hudService->IsLayoutMenuOpen())
 		{
 			this->hudService->CloseLayoutMenu();
+			// Раньше закрывалось молча — игрок не понимал, куда делось меню. Отказ обязан
+			// быть виден игроку, тем же способом, что и «MHUD - Unavailable» рядом.
+			this->languageService->PrintChat(true, false, "HUD - Menu Closed Spectate");
 		}
 	}
 	else if (this->IsAlive())
