@@ -64,6 +64,14 @@
 // локальные ветки. На выбранной категории показываем её имя: игрок видит, где он.
 #define KZ_MENU_TITLE_PHRASE "HUD - Menu Title"
 
+// Оформление самого меню (menuFont/menuColor/menuSounds/menuPopupShift). Дефолты — ровно те
+// значения, что до этой задачи были зашиты в RenderMenu классами font-family--stratum2-medium-tf
+// и pal-fg-9 (= белый, panorama_tables.cpp): смена дефолта поехала бы у всех сразу.
+// KZ_MENU_DEFAULT_FONT совпадает с апстримным (origin/master:src/kz/option/menu/prefs/menu_prefs.cpp:10)
+// и НЕ равен LAYOUT_DEFAULT_FONT: у худа свой дефолтный шрифт (lato-bold), у меню — свой.
+#define KZ_MENU_DEFAULT_FONT "stratum2-medium-tf"
+static_global const Color KZ_MENU_DEFAULT_COLOR(255, 255, 255, 255);
+
 // === Обход реестра (KZ::menu::GetTree(), Task 1) ============================================
 // Состав меню собирается из ЧЕТЫРЁХ Register() (hud/prefs/hud_prefs.cpp, misc/local/jumpstats —
 // порядок Init см. cs2kz.cpp, Task 15) и с задачи «дерево категорий» он ДВУХУРОВНЕВЫЙ, как у
@@ -148,10 +156,12 @@ static_function i32 BuildMenuLeft(i32 selectedCategory, MenuLeftEntry (&slots)[K
 // сознательно урезано (см. комментарий вверху файла) — клик по пункту просто перебирает.
 // stratum2-bold-monodigit был дефолтом до смены LAYOUT_DEFAULT_FONT на lato-bold: без него
 // в цикле игрок, у которого он сохранён, терял свой шрифт первым же кликом (NextFontSlug не
-// нашёл бы текущий и вернул MENU_FONTS[0]).
+// нашёл бы текущий и вернул MENU_FONTS[0]). KZ_MENU_DEFAULT_FONT здесь по той же причине: цикл
+// один на все Font-пункты, а у нового пункта menuFont дефолт СВОЙ (stratum2-medium-tf) — без
+// него первый клик по «Шрифт меню» терял бы текущее значение вместо шага на следующее.
 static_global const char *const MENU_FONTS[] = {
-	LAYOUT_DEFAULT_FONT, "stratum2-bold-monodigit", "stratum2-regular-monodigit", "stratum2-bold", "stratum2-medium", "stratum2-mono-bold",
-	"noto-sans-bold", "arial", "forcestratum2",
+	LAYOUT_DEFAULT_FONT,      "stratum2-bold-monodigit", "stratum2-regular-monodigit", "stratum2-bold", "stratum2-medium",
+	"stratum2-mono-bold",     "noto-sans-bold",          "arial",                      "forcestratum2", KZ_MENU_DEFAULT_FONT,
 };
 
 static_function const char *NextFontSlug(const char *current)
@@ -450,6 +460,16 @@ void KZHUDService::RenderMenu()
 		return;
 	}
 
+	auto *opts = this->player->optionService;
+	// menuSounds: класс snd на корне включает звуки наведения/клика — правила в menu.css чужого
+	// аддона висят на потомках корня (".snd .cat:not(.disabled):hover { sound: ... }" и ещё шесть
+	// пар), так что класс обязан лежать именно на menu_root. Апстрим: kz_menu.cpp:289.
+	this->SetMenuBoolClass(layout, "menu_root", "snd", this->menuApplied.sounds, opts->GetPreferenceBool("menuSounds", true));
+	// menuPopupShift: пока открыт попап, всё меню уезжает влево (#menu_root.shift { x: -125px }) —
+	// на 4:3/5:4 попап иначе вылезает за край экрана. Апстрим: kz_menu.cpp:291-293.
+	const bool shift = this->menuPopup != MenuPopup::None && opts->GetPreferenceBool("menuPopupShift", true);
+	this->SetMenuBoolClass(layout, "menu_root", "shift", this->menuApplied.shift, shift);
+
 	// Заголовок — имя АКТИВНОГО узла (подкатегории, если она выбрана): имя самой категории и
 	// так стоит слева жирной шапкой (класс cat-parent), дублировать его в заголовке значило бы
 	// не показать игроку, на какой он странице.
@@ -457,13 +477,22 @@ void KZHUDService::RenderMenu()
 	const char *titleKey = (titleNode && titleNode->phraseKey) ? titleNode->phraseKey : KZ_MENU_TITLE_PHRASE;
 	const std::string title = KZLanguageService::PrepareMessageWithLang(this->player->languageService->GetLanguage(), titleKey);
 	this->SetMenuVar(layout, "menu_title", "title", title.c_str());
-	// Шрифт и цвет корня — статикой, без своего префа (GetPreferenceColor у нас в базе нет,
-	// см. журнал задачи 2): апстрим тянет menuFont/menuColor из префов игрока
-	// (kz_menu.cpp:318-321), мы фиксируем тот же дефолт — Stratum2 Medium TF + белый
-	// (fonts.css/palette.css чужого аддона). Без этих классов панели наследуют движковый
-	// дефолт (мелкий шрифт, красный текст) — этим и было наше «пиксельно».
-	this->SetMenuBoolClass(layout, "menu_root", "font-family--stratum2-medium-tf", this->menuApplied.rootFont, true);
-	this->SetMenuBoolClass(layout, "menu_root", "pal-fg-9", this->menuApplied.rootColor, true);
+	// Шрифт и цвет корня — ПРЕФЫ игрока (порт апстримного RenderChrome, kz_menu.cpp:316-334).
+	// До этой задачи оба класса были зашиты (font-family--stratum2-medium-tf + pal-fg-9); теперь
+	// это ДЕФОЛТЫ пунктов menuFont/menuColor (KZMenuChromeMenu_Register ниже), и зашитая пара
+	// сохраняется как поведение по умолчанию — у кого префов нет, вид не меняется ни на пиксель.
+	// Текстовые панели наследуют оба класса от корня; без них движковый дефолт (мелкий шрифт,
+	// красный текст) — этим и было наше «пиксельно».
+	const char *menuFont = panorama::ResolveFontClass(opts->GetPreferenceStr("menuFont", KZ_MENU_DEFAULT_FONT), KZ_MENU_DEFAULT_FONT);
+	// Расхождение с апстримной строкой kz_menu.cpp:321: GetPreferenceColor в нашей базе нет (R2),
+	// цвет хранится упакованным int и читается GetMHUDColorPref — как у всех остальных цветов.
+	const char *menuColor = panorama::ResolveColorClass(this->GetMHUDColorPref("menuColor", KZ_MENU_DEFAULT_COLOR));
+	// Апстрим оборачивает эти два вызова в `if (applied.menuFont != font || applied.menuColor != color)`
+	// ради MarkFullChanged (без пересчёта слоя ребёнок остаётся со старым шрифтом). У нас
+	// MarkFullChanged зовётся БЕЗУСЛОВНО в конце RenderMenu (см. комментарий там), поэтому
+	// условие лишнее: сам SetMenuSwapClass уже диф-кэширован и на неизменившемся классе молчит.
+	this->SetMenuSwapClass(layout, "menu_root", this->menuApplied.menuFont, menuFont);
+	this->SetMenuSwapClass(layout, "menu_root", this->menuApplied.menuColor, menuColor);
 	this->SetMenuBoolClass(layout, "color_popup", "hidden", this->menuApplied.colorPopupHidden, this->menuPopup != MenuPopup::Color);
 	this->SetMenuBoolClass(layout, "step_popup", "hidden", this->menuApplied.stepPopupHidden, this->menuPopup != MenuPopup::Step);
 	this->SetMenuBoolClass(layout, "list_popup", "hidden", this->menuApplied.listPopupHidden, this->menuPopup != MenuPopup::List);
@@ -1276,6 +1305,10 @@ void KZHUDService::CloseLayoutMenu()
 		CCSCustomHudLayout *layout = (CCSCustomHudLayout *)ent;
 		this->SetMenuClass(layout, "menu_root", "hidden", true);
 		this->menuApplied.rootHidden = true;
+		// Сдвиг под попап снимаем здесь же (апстрим — DropCapture, kz_menu.cpp:986-988): иначе
+		// следующее открытие приезжает анимацией слева, из положения закрытого попапа.
+		this->SetMenuClass(layout, "menu_root", "shift", false);
+		this->menuApplied.shift = false;
 		// Самая важная строка файла: без неё игрок остаётся в режиме курсора навсегда —
 		// движок возвращает управление только когда ВСЕ layout-сущности с capture его сняли.
 		layout->SetInputCaptureEnabled(this->player->GetPlayerSlot(), false);
@@ -1307,3 +1340,29 @@ SCMD(kz_hudmenu, SCFL_HUD | SCFL_PREFERENCE)
 }
 
 SCMD_LINK(kz_hm, kz_hudmenu);
+
+// === Оформление самого меню: регистрация пунктов ============================================
+// Порт апстримного KZMenuService::RegisterChromePrefs (origin/master:src/kz/option/menu/prefs/
+// menu_prefs.cpp:12-21) — до этой задачи четыре ключа (menuFont/menuColor/menuSounds/
+// menuPopupShift) не читались вообще ни одной строкой форка, а шрифт и цвет меню были зашиты
+// классами в RenderMenu. Читатель заведён выше (RenderMenu), здесь — сами пункты.
+// Отличия от апстримной функции:
+//   - SetItemDivider/KZ::prefs::RegisterMenu не переносим: подсистемы экспорта настроек
+//     (prefs_transfer) у нас нет, а класс divider на пункте не имеет правила в menu.css чужого
+//     аддона (тот же вывод, что в RenderMenuItems) — применялся бы молча и без эффекта.
+//   - Категория — ЛИСТОВАЯ (без AddSub), как Misc и Jumpstats: четыре пункта на подкатегории
+//     делить нечего.
+// Вызов — cs2kz.cpp::Load, последним из Register(): порядок вызовов = порядок категорий в левой
+// колонке, оформление меню трогают реже всего остального.
+void KZMenuChromeMenu_Register()
+{
+	KZOptNode *cat = KZ::menu::AddCategory("HUD - Menu Cat MenuChrome");
+	// Дефолты обязаны совпасть с тем, что читает RenderMenu (KZ_MENU_DEFAULT_FONT/
+	// KZ_MENU_DEFAULT_COLOR и `true` у обоих тумблеров) — разойтись значило бы показывать в
+	// меню не то значение, с которым оно нарисовано.
+	KZ::menu::AddFont(cat, "HUD - Menu Label MenuFont", "menuFont", KZ_MENU_DEFAULT_FONT);
+	KZ::menu::AddColor(cat, "HUD - Menu Label MenuColor", "menuColor", KZ_MENU_DEFAULT_COLOR);
+	KZ::menu::AddToggle(cat, "HUD - Menu Label MenuSounds", "menuSounds", true);
+	KZ::menu::AddToggle(cat, "HUD - Menu Label MenuPopupShift", "menuPopupShift", true);
+	KZ::menu::SetItemSubtext(cat, "HUD - Menu Label MenuPopupShift Sub");
+}

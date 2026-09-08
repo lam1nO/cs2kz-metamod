@@ -736,6 +736,51 @@
 		"ua"		"Показувати передшвидкість лише після стрибка або драбини"
 	}
 
+	// Оформление самого меню настроек (menuFont/menuColor/menuSounds/menuPopupShift,
+	// KZMenuChromeMenu_Register в hud/layout/menu.cpp).
+	"HUD - Menu Cat MenuChrome"
+	{
+		"en"		"Menu"
+		"ru"		"Меню"
+		"chi"		"菜单"
+		"ua"		"Меню"
+	}
+	"HUD - Menu Label MenuFont"
+	{
+		"en"		"Menu font"
+		"ru"		"Шрифт меню"
+		"chi"		"菜单字体"
+		"ua"		"Шрифт меню"
+	}
+	"HUD - Menu Label MenuColor"
+	{
+		"en"		"Menu color"
+		"ru"		"Цвет меню"
+		"chi"		"菜单颜色"
+		"ua"		"Колір меню"
+	}
+	"HUD - Menu Label MenuSounds"
+	{
+		"en"		"Menu sounds"
+		"ru"		"Звуки меню"
+		"chi"		"菜单音效"
+		"ua"		"Звуки меню"
+	}
+	"HUD - Menu Label MenuPopupShift"
+	{
+		"en"		"Shift for popups"
+		"ru"		"Сдвиг под попап"
+		"chi"		"弹窗时偏移"
+		"ua"		"Зсув під попап"
+	}
+	"HUD - Menu Label MenuPopupShift Sub"
+	{
+		"en"		"Move the menu left while a popup is open, so it fits a 4:3 screen"
+		"ru"		"Сдвигать меню влево, пока открыт попап — чтобы он влезал на 4:3"
+		"chi"		"弹窗打开时将菜单左移，以适配 4:3 屏幕"
+		"ua"		"Зсувати меню ліворуч, поки відкритий попап — щоб він влазив на 4:3"
+	}
+
 	// Меню закрыто автоматически (уход в спектейт/смерть без цели наблюдения, kz_player.cpp):
 	// раньше закрывалось молча, без объяснения игроку.
 	"HUD - Menu Closed Spectate"

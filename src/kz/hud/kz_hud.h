@@ -739,8 +739,13 @@ private:
 	struct MenuAppliedState
 	{
 		bool rootHidden {true};
-		bool rootFont {false};  // font-family--stratum2-medium-tf на menu_root (задача 2, вид как у апстрима)
-		bool rootColor {false}; // pal-fg-9 на menu_root — иначе панели наследуют движковый дефолт (красный)
+		// Шрифт и цвет корня — теперь ПРЕФЫ игрока (menuFont/menuColor, задача «оформление меню»),
+		// а не два зашитых класса: держим последний применённый класс, как у апстрима
+		// (KZMenuService::Applied::menuFont/menuColor, origin/master:src/kz/option/menu/kz_menu.h:127-128).
+		const char *menuFont {};  // font-family--* на menu_root, наследуется текстовыми панелями
+		const char *menuColor {}; // pal-fg-*/grad-* на menu_root, туда же
+		bool sounds {};           // menu_root "snd" — звуки наведения/клика (menuSounds)
+		bool shift {};            // menu_root "shift" — сдвиг меню влево под открытый попап (menuPopupShift)
 		bool colorPopupHidden {true};
 		bool stepPopupHidden {true};
 		bool listPopupHidden {true};

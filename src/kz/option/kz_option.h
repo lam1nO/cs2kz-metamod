@@ -262,3 +262,6 @@ namespace KZ::option
 void KZMiscMenu_Register();
 void KZJumpstatsMenu_Register();
 void KZLocalOptionsMenu_Register();
+// Оформление самого меню настроек (menuFont/menuColor/menuSounds/menuPopupShift) —
+// определена в hud/layout/menu.cpp, рядом со своим читателем (RenderMenu).
+void KZMenuChromeMenu_Register();
