@@ -110,4 +110,69 @@
 		"en"	"Missed record"
 		"ru"	"Потеря рекорда"
 	}
+
+	// Категория Misc (реестр настроек, задача 7) — префы читались кодом, но пункта меню не
+	// было ни у нас, ни в apstream-дереве по нашим ключам (см. диф-документ §2).
+	"Options - Menu Cat Misc"
+	{
+		"en"	"Misc"
+		"ru"	"Разное"
+	}
+	"Options - Menu Label Mode"
+	{
+		"en"	"Mode"
+		"ru"	"Режим"
+	}
+	"Options - Menu Label Styles"
+	{
+		"en"	"Styles"
+		"ru"	"Стили"
+	}
+	"Options - Menu Label Pistol"
+	{
+		"en"	"Pistol"
+		"ru"	"Пистолет"
+	}
+	"Options - Menu Label Beam"
+	{
+		"en"	"Beam"
+		"ru"	"Луч"
+	}
+	"Options - Menu Label BeamOffset"
+	{
+		"en"	"Beam offset"
+		"ru"	"Смещение луча"
+	}
+	"Options - Menu Label Language"
+	{
+		"en"	"Language"
+		"ru"	"Язык"
+	}
+	"Options - Menu Label ShowTips"
+	{
+		"en"	"Show tips"
+		"ru"	"Показывать подсказки"
+	}
+	"Options - Menu Label FOV"
+	{
+		"en"	"Field of view"
+		"ru"	"Угол обзора"
+	}
+	// safeguard расцеплён на два независимых префа (sgReset/sgTeleport), см. kz_timer.cpp —
+	// единый старый "safeguard" больше не пишется ни одной командой, только читается как фолбэк.
+	"Options - Menu Label SafeguardReset"
+	{
+		"en"	"Safeguard (timer reset)"
+		"ru"	"Сейфгард (сброс таймера)"
+	}
+	"Options - Menu Label SafeguardTeleport"
+	{
+		"en"	"Safeguard (teleports, PRO)"
+		"ru"	"Сейфгард (телепорты, PRO)"
+	}
+	"Options - Menu Label CompareType"
+	{
+		"en"	"Compare against"
+		"ru"	"Сравнивать с"
+	}
 }

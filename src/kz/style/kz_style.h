@@ -198,6 +198,10 @@ public:
 	CUtlString GetStylesString(KZPlayer *player);
 	void PrintActiveStyles(KZPlayer *player);
 	void PrintAllStyles(KZPlayer *player);
+	// Для реестра настроек (Task 7, Choice-пункт styles): список загруженных стилей для
+	// getChoices — styleInfos (внутренний static-вектор kz_style_manager.cpp) снаружи файла
+	// не виден, PrintAllStyles печатает в консоль вместо возврата данных.
+	const CUtlVector<StylePluginInfo> &GetStyleInfos() const;
 
 private:
 };

@@ -68,4 +68,21 @@
 		"ru"		"{grey}Текущий сдвиг луча: {default}{x} {y} {z}"
 		"es"		"{grey}El ajuste de la posición de tu haz de luz es: {default}{x} {y} {z}"
 	}
+
+	// Простые имена значений для Choice-пункта Beam в реестре настроек (задача 7).
+	"Misc - Beam Type None"
+	{
+		"en"	"Off"
+		"ru"	"Выкл"
+	}
+	"Misc - Beam Type Ground"
+	{
+		"en"	"Ground"
+		"ru"	"По земле"
+	}
+	"Misc - Beam Type Feet"
+	{
+		"en"	"Feet"
+		"ru"	"От ступней"
+	}
 }

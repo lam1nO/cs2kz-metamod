@@ -469,6 +469,11 @@ void KZStyleManager::PrintAllStyles(KZPlayer *player)
 	}
 }
 
+const CUtlVector<KZStyleManager::StylePluginInfo> &KZStyleManager::GetStyleInfos() const
+{
+	return styleInfos;
+}
+
 void KZDatabaseServiceEventListener_Styles::OnDatabaseSetup()
 {
 	FOR_EACH_VEC(styleInfos, i)
