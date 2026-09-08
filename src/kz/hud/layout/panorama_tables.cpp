@@ -384,6 +384,15 @@ const char *panorama::ResolveColorClass(const Color &c)
 	return ResolveNearestColorClass(c);
 }
 
+const char *panorama::ResolveSwatchClass(const Color &c)
+{
+	if (IsGradient(c))
+	{
+		return PANORAMA_GRADIENTS[Clamp(GetGradientIndex(c), 0, PANORAMA_GRADIENT_COUNT - 1)].bgClass;
+	}
+	return PANORAMA_COLORS[GetNearestColorIndex(c)].bgClass;
+}
+
 i32 panorama::GetColorEntryCount()
 {
 	return PANORAMA_COLOR_COUNT + PANORAMA_GRADIENT_COUNT;
