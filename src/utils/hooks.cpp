@@ -36,6 +36,11 @@
 #include "kz/replays/kz_replaysystem.h"
 #include "kz/racing/kz_racing.h"
 #include "utils/utils.h"
+#include "utils/cvarquery.h"
+// Полное определение CServerSideClientBase: хук ниже берёт индекс втаблицы из указателя на
+// член-функцию, для этого мало forward-декларации. Цепочка kz/kz.h → movement/movement.h →
+// player/player.h его уже даёт, но опираться на чужой инклюд для собственного хука нельзя.
+#include "sdk/serversideclient.h"
 #include "sdk/entity/cbasetrigger.h"
 #include "sdk/entity/ccscustomhudlayout.h"
 #include "sdk/usercmd.h"
@@ -177,6 +182,15 @@ static_function CServerSideClientBase *Hook_ConnectClient(const char *, ns_addre
 static_function CServerSideClientBase *Hook_ConnectClientPost(const char *, ns_address *, uint32, C2S_CONNECT_Message *, const char *, const byte *,
 															  int, bool);
 
+// CServerSideClient
+// Ответ клиента на наш CSVCMsg_GetCvarValue (cvarquery::Query). Слот втаблицы совпадает с
+// апстримным: src/sdk/serversideclient.h у нас и у origin/master различаются РОВНО одной строкой
+// (:200, ApplyConVars против переименованного ProcessSetConVar — та же одна чисто-виртуальная
+// функция в той же позиции), при равной длине файла, поэтому все индексы ниже неё идентичны.
+static_global int respondCvarValueHook {};
+SH_DECL_HOOK1(CServerSideClientBase, ProcessRespondCvarValue, SH_NOATTRIB, 0, bool, const CNetMessagePB<CCLCMsg_RespondCvarValue> &);
+static_function bool Hook_ProcessRespondCvarValue(const CNetMessagePB<CCLCMsg_RespondCvarValue> &msg);
+
 // IGameSystem
 static_global int serverGamePostSimulateHook {};
 SH_DECL_HOOK1_void(IGameSystem, OnServerGamePostSimulate, SH_NOATTRIB, false, const EventServerGamePostSimulate_t *);
@@ -255,6 +269,13 @@ void hooks::Initialize()
 		SH_STATIC(Hook_ConnectClientPost), 
 		true
 	);
+	respondCvarValueHook = SH_ADD_DVPHOOK(
+		CServerSideClientBase,
+		ProcessRespondCvarValue,
+		(CServerSideClientBase *)modules::engine->FindVirtualTable("CServerSideClient"),
+		SH_STATIC(Hook_ProcessRespondCvarValue),
+		true
+	);
 	serverGamePostSimulateHook = SH_ADD_DVPHOOK(
 		IGameSystem, 
 		OnServerGamePostSimulate, 
@@ -329,6 +350,9 @@ void hooks::Cleanup()
 	SH_REMOVE_HOOK(IGameEventSystem, PostEventAbstract, interfaces::pGameEventSystem, SH_STATIC(Hook_PostEvent), false);
 
 	SH_REMOVE_HOOK_ID(activateServerHook);
+
+	SH_REMOVE_HOOK_ID(respondCvarValueHook);
+	cvarquery::Shutdown();
 
 	SH_REMOVE_HOOK_ID(clientConnectHook);
 	SH_REMOVE_HOOK_ID(clientConnectPostHook);
@@ -632,6 +656,8 @@ static_function void Hook_ClientDisconnect(CPlayerSlot slot, ENetworkDisconnecti
 		Warning("WARNING: Player pawn for slot %i not found!\n", slot.Get());
 	}
 	KZ_LOG_INFO(LogChannel::Player, "[cyb] player_leave steam_id=%llu name=%s reason=%d\n", xuid, pszName, (int)reason);
+	// Незакрытые опросы конваров этого слота: колбэк держит слот, а слот вот-вот переиспользуют.
+	cvarquery::OnClientDisconnect(slot);
 	player->recordingService->OnClientDisconnect();
 	player->optionService->OnClientDisconnect();
 	player->racingService->OnClientDisconnect();
@@ -863,6 +889,18 @@ static_function CServerSideClientBase *Hook_ConnectClientPost(const char *pszNam
 {
 	g_pKZPlayerManager->OnConnectClientPost(pszName, pAddr, steam_handle, pConnectMsg, pszChallenge, pAuthTicket, nAuthTicketLength, bIsLowViolence);
 	RETURN_META_VALUE(MRES_IGNORED, 0);
+}
+
+// CServerSideClient
+static_function bool Hook_ProcessRespondCvarValue(const CNetMessagePB<CCLCMsg_RespondCvarValue> &msg)
+{
+	CServerSideClientBase *client = META_IFACEPTR(CServerSideClientBase);
+	if (client)
+	{
+		cvarquery::OnCvarValueResponse(client->GetPlayerSlot(), msg.cookie(), (cvarquery::Status)msg.status_code(), msg.name().c_str(),
+									   msg.value().c_str());
+	}
+	RETURN_META_VALUE(MRES_IGNORED, true);
 }
 
 // IGameSystem

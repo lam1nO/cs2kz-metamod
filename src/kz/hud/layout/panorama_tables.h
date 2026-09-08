@@ -7,7 +7,12 @@
 // иначе элемент просто не покрасится, и это будет молчаливый отказ.
 namespace panorama
 {
+	// ResolveColorClass — класс ТЕКСТОВОГО цвета (`color:`, pal-fg-N/grad-N),
+	// ResolveSwatchClass — класс ФОНА (`background-color:`, pal-bg-N/gbg-N). Пустой <Panel> без
+	// текста (плечи крестика, свотчи палитры) красится только фоном: pal-fg-N на нём молча ничего
+	// не рисует.
 	const char *ResolveColorClass(const Color &color);
+	const char *ResolveSwatchClass(const Color &color);
 	const char *ResolveFontClass(const char *name, const char *fallback);
 	const char *ResolveFontSlug(const char *name, const char *fallback);
 	const char *GetFontDisplayName(const char *name, const char *fallback);
