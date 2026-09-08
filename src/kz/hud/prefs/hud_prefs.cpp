@@ -5,6 +5,7 @@
 #include "kz/hud/kz_hud.h"
 #include "kz/hud/layout/layout.h"
 #include "kz/option/menu/model.h"
+#include "kz/language/kz_language.h"
 
 #include "tier0/memdbgon.h"
 
@@ -14,12 +15,15 @@
 // (mhudMaster, удалённый particle-тип 1). Моделируем как Choice: список из трёх пунктов в
 // ТОМ ЖЕ порядке, что и старый цикл NextHudType, а клик по пункту (layout/menu.cpp) перебирает
 // список по кругу — попап списка (как у апстримного Choice) сюда не переносим, его и не было.
+// Значения переведены через ключи (Task 15, тот же паттерн, что kBeamTypeKeys в misc_prefs.cpp) —
+// до этого висели литералом (см. отчёт задачи 9, раздел "осталось непереведённым").
 
 static_function void GetHudTypeChoices(KZPlayer *player, i64 tag, std::vector<KZChoice> &out)
 {
-	out.push_back({"Standard", KZHUDService::HUD_TYPE_STANDARD});
-	out.push_back({"Panorama", KZHUDService::HUD_TYPE_PANORAMA});
-	out.push_back({"Off", KZHUDService::HUD_TYPE_OFF});
+	const char *lang = player->languageService->GetLanguage();
+	out.push_back({KZLanguageService::PrepareMessageWithLang(lang, "HUD - HudType Standard"), KZHUDService::HUD_TYPE_STANDARD});
+	out.push_back({KZLanguageService::PrepareMessageWithLang(lang, "HUD - HudType Panorama"), KZHUDService::HUD_TYPE_PANORAMA});
+	out.push_back({KZLanguageService::PrepareMessageWithLang(lang, "HUD - HudType Off"), KZHUDService::HUD_TYPE_OFF});
 }
 
 static_function i64 GetHudTypeCurrent(KZPlayer *player, i64 tag)
@@ -35,13 +39,15 @@ static_function void OnHudTypePick(KZPlayer *player, i64 tag, i64 id)
 // === mhudKeysIdle: чем показывать ненажатую клавишу (Task 5, транш "клавиши") ================
 // Сырой int-преф (0 show / 1 hide / 2 underscore, см. LayoutElement::Keys/mhud.cpp) — в
 // отличие от hudType это НЕ вычисляемое состояние сервиса, поэтому читаем/пишем сам преф,
-// как CompareType в misc_prefs.cpp.
+// как CompareType в misc_prefs.cpp. Значения переведены (Task 15) — см. комментарий у
+// GetHudTypeChoices выше.
 
 static_function void GetKeysIdleChoices(KZPlayer *player, i64 tag, std::vector<KZChoice> &out)
 {
-	out.push_back({"Show", 0});
-	out.push_back({"Hide", 1});
-	out.push_back({"Underscore", 2});
+	const char *lang = player->languageService->GetLanguage();
+	out.push_back({KZLanguageService::PrepareMessageWithLang(lang, "HUD - Idle Show"), 0});
+	out.push_back({KZLanguageService::PrepareMessageWithLang(lang, "HUD - Idle Hide"), 1});
+	out.push_back({KZLanguageService::PrepareMessageWithLang(lang, "HUD - Idle Underscore"), 2});
 }
 
 static_function i64 GetKeysIdleCurrent(KZPlayer *player, i64 tag)

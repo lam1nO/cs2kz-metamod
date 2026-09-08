@@ -422,14 +422,35 @@
 		"chi"		"准星"
 		"ua"		"Приціл"
 	}
-	// Choice "General" -> цикл Standard/Panorama/Off (значения цикла — GetHudTypeChoices,
-	// не переведены отдельно, вне области задачи 9, см. отчёт).
+	// Choice "General" -> цикл Standard/Panorama/Off (значения цикла — GetHudTypeChoices).
 	"HUD - Menu Label HudType"
 	{
 		"en"		"Hud Type"
 		"ru"		"Тип худа"
 		"chi"		"HUD 类型"
 		"ua"		"Тип худу"
+	}
+	// Значения цикла HudType (задача 15, схема — как "Misc - Beam Type *" в misc_prefs.cpp).
+	"HUD - HudType Standard"
+	{
+		"en"		"Standard"
+		"ru"		"Стандартный"
+		"chi"		"标准"
+		"ua"		"Стандартний"
+	}
+	"HUD - HudType Panorama"
+	{
+		"en"		"Panorama"
+		"ru"		"Панорама"
+		"chi"		"Panorama"
+		"ua"		"Панорама"
+	}
+	"HUD - HudType Off"
+	{
+		"en"		"Off"
+		"ru"		"Выключен"
+		"chi"		"关闭"
+		"ua"		"Вимкнено"
 	}
 	// Пять общих полей элемента (AddHudElementItems) — один ключ на все категории-элементы,
 	// как и было в коде (тот же литерал переиспользовался буквально).
@@ -605,13 +626,35 @@
 		"ua"		"Заповнення"
 	}
 	// Choice "Idle" -> чем показывать ненажатую клавишу (значения Show/Hide/Underscore —
-	// GetKeysIdleChoices, не переведены отдельно, вне области задачи 9, см. отчёт).
+	// GetKeysIdleChoices).
 	"HUD - Menu Label Idle"
 	{
 		"en"		"Idle"
 		"ru"		"В покое"
 		"chi"		"静止"
 		"ua"		"У спокої"
+	}
+	// Значения Choice "Idle" (задача 15).
+	"HUD - Idle Show"
+	{
+		"en"		"Show"
+		"ru"		"Показывать"
+		"chi"		"显示"
+		"ua"		"Показувати"
+	}
+	"HUD - Idle Hide"
+	{
+		"en"		"Hide"
+		"ru"		"Скрывать"
+		"chi"		"隐藏"
+		"ua"		"Приховувати"
+	}
+	"HUD - Idle Underscore"
+	{
+		"en"		"Underscore"
+		"ru"		"Подчёркивание"
+		"chi"		"下划线"
+		"ua"		"Підкреслення"
 	}
 	// Crosshair: свой масштаб (Enabled переиспользует общий ключ выше).
 	"HUD - Menu Label Scale"
