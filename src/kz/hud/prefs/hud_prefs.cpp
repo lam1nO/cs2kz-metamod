@@ -5,6 +5,7 @@
 #include "kz/hud/kz_hud.h"
 #include "kz/hud/layout/layout.h"
 #include "kz/option/menu/model.h"
+#include "kz/option/kz_option.h"
 #include "kz/language/kz_language.h"
 
 #include "tier0/memdbgon.h"
