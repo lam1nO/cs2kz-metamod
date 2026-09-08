@@ -1,6 +1,6 @@
 // Регистрация категории Misc в реестре настроек (kz/option/menu/model.h). Все восемь префов
 // из брифа (mode/styles/pistol/beam/beamOffset/preferredLanguage/showTips/fov) читаются кодом,
-// но ни в !options (kz_option_menu.cpp), ни в panorama-меню пункта для них не было — см.
+// но ни в старом cs2menus-меню !options, ни в panorama-меню пункта для них не было — см.
 // docs/design/2026-09-08-hud-options-diff.md §2 ("Misc целиком").
 //
 // Отклонения от буквального текста брифа (см. task-7-brief.md), обе — по прямому требованию
@@ -17,11 +17,9 @@
 // sgReset/sgTeleport) и в худшем вводит в заблуждение (не покрывает независимость двух
 // защит). Регистрируем два реальных живых префа: sgReset и sgTeleport.
 //
-// preferredCompareType — пункт меню Choice(5) был (None/SPB/GPB/SR/WR), снят задачей
-// hud-defaults по решению пользователя; преф и команда !comparelevel остаются рабочими.
-//
-// showTips — пункт-тумблер был (ShowTipsGetCurrent/OnActivate), снят той же задачей: подсказки
-// в чат выключены безусловно на уровне KZTipService::ShouldPrintTip (kz_tip.cpp).
+// preferredCompareType и showTips пунктов меню НЕ имеют: оба снято по решению пользователя
+// (задача hud-defaults). Сами префы и команды (!comparelevel, !kz_tips) остаются рабочими,
+// подсказки в чат выключены безусловно в KZTipService::ShouldPrintTip (kz_tip.cpp).
 //
 // Вызов регистрации (KZMiscMenu_Register) — в общем Init-порядке (cs2kz.cpp::Load, Task 15),
 // сразу после HUD и перед Jumpstats: категория часто используется (режим/стиль/язык/подсказки),
@@ -33,7 +31,6 @@
 #include "kz/style/kz_style.h"
 #include "kz/pistol/kz_pistol.h"
 #include "kz/beam/kz_beam.h"
-#include "kz/tip/kz_tip.h"
 #include "kz/fov/kz_fov.h"
 #include "kz/timer/kz_timer.h"
 #include "kz/checkpoint/kz_checkpoint.h"
@@ -285,20 +282,6 @@ namespace
 		}
 	}
 
-	// ------------------------------------------------------------ Show tips (toggle) ----
-	// showTips персистентен (правка ревью задачи 7: до неё Reset() жёстко ставил true, теперь
-	// читает/пишет optionService, см. kz_tip.cpp) — колбэки, а не голый AddToggle, потому что
-	// запись обязана попасть и в кэш-член KZTipService, и в преф разом (ToggleTips() делает оба).
-	i64 ShowTipsGetCurrent(KZPlayer *player, i64 tag)
-	{
-		return player->tipService->GetShowTips() ? 1 : 0;
-	}
-
-	void ShowTipsOnActivate(KZPlayer *player, i64 tag)
-	{
-		player->tipService->ToggleTips();
-	}
-
 	// --------------------------------------------------------- Safeguard (toggles) ------
 	i64 SgResetGetCurrent(KZPlayer *player, i64 tag)
 	{
@@ -320,34 +303,6 @@ namespace
 		player->timerService->ToggleProSafeguard();
 	}
 
-	// -------------------------------------------------------- Compare type (Choice) -----
-	// Акронимы (None/SPB/GPB/SR/WR) — те же, что "| SPB {diff_time}" и т.п. во всех языках
-	// translations/cs2kz-timer.phrases.txt: не переводятся, литералы без PrepareMessageWithLang.
-	const char *kCompareTypeNames[KZTimerService::CompareType::COMPARETYPE_COUNT] = {"None", "SPB", "GPB", "SR", "WR"};
-
-	void CompareTypeGetChoices(KZPlayer *player, i64 tag, std::vector<KZChoice> &out)
-	{
-		i64 current = player->optionService->GetPreferenceInt("preferredCompareType", KZTimerService::CompareType::COMPARE_GPB);
-		for (i64 t = 0; t < (i64)KZTimerService::CompareType::COMPARETYPE_COUNT; t++)
-		{
-			out.push_back({std::string(kCompareTypeNames[t]), t, nullptr, t == current});
-		}
-	}
-
-	i64 CompareTypeGetCurrent(KZPlayer *player, i64 tag)
-	{
-		return player->optionService->GetPreferenceInt("preferredCompareType", KZTimerService::CompareType::COMPARE_GPB);
-	}
-
-	void CompareTypeOnPick(KZPlayer *player, i64 tag, i64 id)
-	{
-		static const char *kTypeStrings[KZTimerService::CompareType::COMPARETYPE_COUNT] = {"none", "spb", "gpb", "sr", "wr"};
-		if (id < 0 || id >= (i64)KZTimerService::CompareType::COMPARETYPE_COUNT)
-		{
-			return;
-		}
-		player->timerService->SetCompareTarget(kTypeStrings[id]);
-	}
 } // namespace
 
 // Регистрирует категорию Misc. Вызов — cs2kz.cpp::Load (Task 15).
@@ -373,9 +328,8 @@ void KZMiscMenu_Register()
 	KZ::menu::AddChoice(cat, "Options - Menu Label Language", &LanguageGetChoices, &LanguageGetCurrent, &LanguageOnPick);
 	KZ::menu::SetItemPref(cat, "preferredLanguage", KZOptStorage::Str);
 
-	// Пункт снят по решению пользователя: подсказки всегда выключены (см. KZTipService::
-	// ShouldPrintTip, kz_tip.cpp) — включать нечего, пункт был бы no-op. ShowTipsGetCurrent/
-	// OnActivate и сам преф showTips не удаляем, команда !kz_tips продолжает работать.
+	// Пункта «Показывать подсказки» нет: подсказки всегда выключены (см. KZTipService::
+	// ShouldPrintTip, kz_tip.cpp) — включать нечего, пункт был бы no-op.
 
 	KZ::menu::AddSize(cat, "Options - Menu Label FOV", "fov", (i32)KZFOVService::GetDefaultFOV(), (i32)KZFOVService::GetMinFOV(),
 					  (i32)KZFOVService::GetMaxFOV());
@@ -391,7 +345,6 @@ void KZMiscMenu_Register()
 	KZ::menu::AddActionToggle(cat, "Options - Menu Label SafeguardTeleport", &SgTeleportGetCurrent, &SgTeleportOnActivate);
 	KZ::menu::SetItemPref(cat, "sgTeleport", KZOptStorage::Int, 0);
 
-	// Пункт "Сравнивать с" снят по решению пользователя: команда !comparelevel (kz_timer.cpp,
-	// SetCompareTarget) и сам преф preferredCompareType остаются рабочими без изменений —
-	// CompareTypeGetChoices/GetCurrent/OnPick не удаляем, они были только колбэками меню.
+	// Пункта "Сравнивать с" нет: команда !comparelevel (kz_timer.cpp, SetCompareTarget) и сам
+	// преф preferredCompareType остаются рабочими без изменений.
 }
