@@ -369,6 +369,259 @@
 		"en"		"Info panel"
 		"ru"		"Инфо-панель"
 	}
+
+	// Меню настроек panorama-худа (hud/layout/menu.cpp обходит реестр kz/option/menu/model.h,
+	// hud/prefs/hud_prefs.cpp регистрирует). Категории и общие для Timer/Speed/Prespeed/Keys/
+	// Checkpoint пункты (Enabled/Position/Size/Font/Outline/Opacity) — задача 9.
+	"HUD - Menu Cat General"
+	{
+		"en"		"General"
+		"ru"		"Общее"
+		"chi"		"常规"
+		"ua"		"Загальне"
+	}
+	"HUD - Menu Cat Timer"
+	{
+		"en"		"Timer"
+		"ru"		"Таймер"
+		"chi"		"计时器"
+		"ua"		"Таймер"
+	}
+	"HUD - Menu Cat Speed"
+	{
+		"en"		"Speed"
+		"ru"		"Скорость"
+		"chi"		"速度"
+		"ua"		"Швидкість"
+	}
+	"HUD - Menu Cat Prespeed"
+	{
+		"en"		"Prespeed"
+		"ru"		"Прескорость"
+		"chi"		"起跳前速度"
+		"ua"		"Передшвидкість"
+	}
+	"HUD - Menu Cat Keys"
+	{
+		"en"		"Keys"
+		"ru"		"Клавиши"
+		"chi"		"按键"
+		"ua"		"Клавіші"
+	}
+	"HUD - Menu Cat Checkpoint"
+	{
+		"en"		"Checkpoint"
+		"ru"		"Чекпоинт"
+		"chi"		"检查点"
+		"ua"		"Чекпоінт"
+	}
+	"HUD - Menu Cat Crosshair"
+	{
+		"en"		"Crosshair"
+		"ru"		"Прицел"
+		"chi"		"准星"
+		"ua"		"Приціл"
+	}
+	// Choice "General" -> цикл Standard/Panorama/Off (значения цикла — GetHudTypeChoices,
+	// не переведены отдельно, вне области задачи 9, см. отчёт).
+	"HUD - Menu Label HudType"
+	{
+		"en"		"Hud Type"
+		"ru"		"Тип худа"
+		"chi"		"HUD 类型"
+		"ua"		"Тип худу"
+	}
+	// Пять общих полей элемента (AddHudElementItems) — один ключ на все категории-элементы,
+	// как и было в коде (тот же литерал переиспользовался буквально).
+	"HUD - Menu Label Enabled"
+	{
+		"en"		"Enabled"
+		"ru"		"Включено"
+		"chi"		"启用"
+		"ua"		"Увімкнено"
+	}
+	"HUD - Menu Label Position"
+	{
+		"en"		"Position"
+		"ru"		"Позиция"
+		"chi"		"位置"
+		"ua"		"Позиція"
+	}
+	"HUD - Menu Label Size"
+	{
+		"en"		"Size"
+		"ru"		"Размер"
+		"chi"		"大小"
+		"ua"		"Розмір"
+	}
+	"HUD - Menu Label Font"
+	{
+		"en"		"Font"
+		"ru"		"Шрифт"
+		"chi"		"字体"
+		"ua"		"Шрифт"
+	}
+	"HUD - Menu Label Outline"
+	{
+		"en"		"Outline"
+		"ru"		"Обводка"
+		"chi"		"轮廓"
+		"ua"		"Обведення"
+	}
+	"HUD - Menu Label Opacity"
+	{
+		"en"		"Opacity"
+		"ru"		"Прозрачность"
+		"chi"		"透明度"
+		"ua"		"Прозорість"
+	}
+	// Timer: цвета по состоянию таймера.
+	"HUD - Menu Label ProColor"
+	{
+		"en"		"Pro Color"
+		"ru"		"Цвет PRO"
+		"chi"		"PRO 颜色"
+		"ua"		"Колір PRO"
+	}
+	"HUD - Menu Label TpColor"
+	{
+		"en"		"TP Color"
+		"ru"		"Цвет с ТП"
+		"chi"		"传送颜色"
+		"ua"		"Колір з ТП"
+	}
+	"HUD - Menu Label PausedColor"
+	{
+		"en"		"Paused Color"
+		"ru"		"Цвет паузы"
+		"chi"		"暂停颜色"
+		"ua"		"Колір паузи"
+	}
+	"HUD - Menu Label StoppedColor"
+	{
+		"en"		"Stopped Color"
+		"ru"		"Цвет остановки"
+		"chi"		"停止颜色"
+		"ua"		"Колір зупинки"
+	}
+	// Общий "Color" — Speed/Prespeed/Keys/Checkpoint (тот же литерал у всех четырёх и раньше).
+	"HUD - Menu Label Color"
+	{
+		"en"		"Color"
+		"ru"		"Цвет"
+		"chi"		"颜色"
+		"ua"		"Колір"
+	}
+	"HUD - Menu Label CjColor"
+	{
+		"en"		"CJ Color"
+		"ru"		"Цвет CJ"
+		"chi"		"CJ 颜色"
+		"ua"		"Колір CJ"
+	}
+	"HUD - Menu Label PerfColor"
+	{
+		"en"		"Perf Color"
+		"ru"		"Цвет перфа"
+		"chi"		"完美颜色"
+		"ua"		"Колір перфу"
+	}
+	"HUD - Menu Label JumpbugColor"
+	{
+		"en"		"Jumpbug Color"
+		"ru"		"Цвет джампбага"
+		"chi"		"跳跃错误颜色"
+		"ua"		"Колір джампбага"
+	}
+	// Keys: тонирование при зажатии/наложении осей и вид самой клавиши.
+	"HUD - Menu Label Overlap"
+	{
+		"en"		"Overlap"
+		"ru"		"Наложение"
+		"chi"		"重叠"
+		"ua"		"Накладання"
+	}
+	"HUD - Menu Label OverlapColor"
+	{
+		"en"		"Overlap Color"
+		"ru"		"Цвет наложения"
+		"chi"		"重叠颜色"
+		"ua"		"Колір накладання"
+	}
+	"HUD - Menu Label OverlapAxisOnly"
+	{
+		"en"		"Overlap Axis Only"
+		"ru"		"Наложение только по оси"
+		"chi"		"仅按轴重叠"
+		"ua"		"Накладання лише по осі"
+	}
+	"HUD - Menu Label PressedColor"
+	{
+		"en"		"Pressed Color"
+		"ru"		"Цвет нажатия"
+		"chi"		"按下颜色"
+		"ua"		"Колір натискання"
+	}
+	"HUD - Menu Label OverlapGlowColor"
+	{
+		"en"		"Overlap Glow Color"
+		"ru"		"Цвет свечения наложения"
+		"chi"		"重叠发光颜色"
+		"ua"		"Колір світіння накладання"
+	}
+	"HUD - Menu Label Letters"
+	{
+		"en"		"Letters"
+		"ru"		"Буквы"
+		"chi"		"字母"
+		"ua"		"Літери"
+	}
+	"HUD - Menu Label Square"
+	{
+		"en"		"Square"
+		"ru"		"Квадрат"
+		"chi"		"方形"
+		"ua"		"Квадрат"
+	}
+	"HUD - Menu Label Border"
+	{
+		"en"		"Border"
+		"ru"		"Рамка"
+		"chi"		"边框"
+		"ua"		"Рамка"
+	}
+	"HUD - Menu Label Glow"
+	{
+		"en"		"Glow"
+		"ru"		"Свечение"
+		"chi"		"发光"
+		"ua"		"Світіння"
+	}
+	"HUD - Menu Label Fill"
+	{
+		"en"		"Fill"
+		"ru"		"Заливка"
+		"chi"		"填充"
+		"ua"		"Заповнення"
+	}
+	// Choice "Idle" -> чем показывать ненажатую клавишу (значения Show/Hide/Underscore —
+	// GetKeysIdleChoices, не переведены отдельно, вне области задачи 9, см. отчёт).
+	"HUD - Menu Label Idle"
+	{
+		"en"		"Idle"
+		"ru"		"В покое"
+		"chi"		"静止"
+		"ua"		"У спокої"
+	}
+	// Crosshair: свой масштаб (Enabled переиспользует общий ключ выше).
+	"HUD - Menu Label Scale"
+	{
+		"en"		"Scale"
+		"ru"		"Масштаб"
+		"chi"		"缩放"
+		"ua"		"Масштаб"
+	}
+
 	// Меню закрыто автоматически (уход в спектейт/смерть без цели наблюдения, kz_player.cpp):
 	// раньше закрывалось молча, без объяснения игроку.
 	"HUD - Menu Closed Spectate"
