@@ -79,8 +79,8 @@ void KZHUDService::ApplyHudDefaults()
 		}
 
 		// mhudMimicSpec в набор НЕ входит: это поведение спектейта, а не вид худа —
-// перезаписывать чужой выбор им незачем.
-// Тумблеры худа вне LAYOUT_ELEMENTS — дефолты те же, что читает RefreshLayoutPrefs
+		// перезаписывать чужой выбор им незачем.
+		// Тумблеры худа вне LAYOUT_ELEMENTS — дефолты те же, что читает RefreshLayoutPrefs
 		// (layout/prefs.cpp) и показывают пункты меню (hud/prefs/hud_prefs.cpp).
 		const struct
 		{

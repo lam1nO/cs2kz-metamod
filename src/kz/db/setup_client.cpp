@@ -98,6 +98,16 @@ void KZDatabaseService::SetupClient()
 				// остаётся NONE) не мешал бы флашу пустого дефолта поверх настоящих префов
 				// при первой же записи (SetPreference*/SaveLocalPrefs).
 				this->isSetUp = pl->optionService->IsLoaded();
+				// Гейт SavePrefs открылся только сейчас, а записи в prefKV могли произойти
+				// РАНЬШЕ: InitializeLocalPrefs выше сама поднимает OnPlayerPreferencesLoaded,
+				// и слушатели (например одноразовая перезапись дефолтов худа,
+				// hud/layout/defaults.cpp) писали в память, а их флаш молча съедался
+				// проверкой !isSetUp. Один явный флаш здесь доносит их до БД; если префы не
+				// загрузились, isSetUp остался false и SavePrefs сам ничего не пишет.
+				if (this->isSetUp)
+				{
+					pl->optionService->SaveLocalPrefs();
+				}
 				CALL_FORWARD(KZDatabaseService::eventListeners, OnClientSetup, pl, pl->GetSteamId64(), isBanned);
 				// Рестор персист-рана: первый спаун почти всегда происходит ДО завершения
 				// Steam-auth (спаун мгновенный, auth — секунды), а второго спауна на KZ нет —

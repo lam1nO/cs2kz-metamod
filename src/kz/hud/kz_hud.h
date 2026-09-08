@@ -477,9 +477,12 @@ public:
 	// подъём = один заход каждого игрока с потерей его персональных настроек худа.
 	static constexpr i32 HUD_DEFAULTS_REV = 1;
 	static constexpr const char *HUD_DEFAULTS_REV_KEY = "hudDefaultsRev";
-	// Перезаписывает ВСЕ ключи худа новыми дефолтами, если применённая ревизия старше
+	// Перезаписывает ключи ВИДА худа новыми дефолтами, если применённая ревизия старше
 	// HUD_DEFAULTS_REV, и поднимает маркер (реализация и полный список ключей —
-	// hud/layout/defaults.cpp). Зовётся из OnPlayerPreferencesLoaded ДО RefreshLayoutPrefs.
+	// hud/layout/defaults.cpp). В набор НЕ входят mhudMimicSpec (поведение спектейта),
+	// compactPanel/showPanel и hudKeysTwoRows — их выбор игрока не затираем.
+	// Зовётся из OnPlayerPreferencesLoaded ДО RefreshLayoutPrefs; флаш в БД происходит
+	// в setup_client.cpp сразу после открытия гейта записи (isSetUp).
 	void ApplyHudDefaults();
 
 	// Точка сборки panorama-худа (Task 6): true — сущность есть и худ обновлён (даже если
