@@ -104,6 +104,20 @@ void KZ::quiet::OnCheckTransmit(CCheckTransmitInfo **pInfo, int infoCount)
 			pTransmitInfo->m_pTransmitEdict->Clear(particleSystem->GetEntityIndex().Get());
 		}
 
+		// Сущности panorama-худа: каждому получателю оставляем ТОЛЬКО его собственную.
+		// Без этого на 20 игроках каждый получает 20 сущностей с чужими таймерами —
+		// и трафиком, и мусором на экране.
+		EntityInstanceByClassIter_t iterLayout(NULL, "custom_hud_layout");
+		for (CBaseEntity *layoutEnt = static_cast<CBaseEntity *>(iterLayout.First()); layoutEnt;
+			 layoutEnt = static_cast<CBaseEntity *>(iterLayout.Next()))
+		{
+			if (targetPlayer->hudService->OwnsLayoutEntity(layoutEnt->GetRefEHandle()))
+			{
+				continue;
+			}
+			pTransmitInfo->m_pTransmitEdict->Clear(layoutEnt->GetEntityIndex().Get());
+		}
+
 		EntityInstanceByClassIter_t iter(NULL, "player");
 		// clang-format off
 		for (CCSPlayerPawn *pawn = static_cast<CCSPlayerPawn *>(iter.First());
