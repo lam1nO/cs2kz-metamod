@@ -39,7 +39,10 @@
 #include "sdk/entity/cbasetrigger.h"
 #include "sdk/entity/ccscustomhudlayout.h"
 #include "sdk/usercmd.h"
-#include "cstrike15_usermessages.pb.h"
+// Свой protobuf (Task 11 — проводка клика panorama-меню), НЕ cstrike15_usermessages.pb.h SDK:
+// см. комментарий в protobuf/kz_customhud.proto — тот файл симлинк в сабмодуль на чужом пине,
+// который CS_UM_CustomHudClicked ещё не знает.
+#include "kz_customhud.pb.h"
 
 #include "vprof.h"
 
@@ -658,14 +661,27 @@ static_function void Hook_ClientCommand(CPlayerSlot slot, const CCommand &args)
 // через него hudService — так клик одного игрока физически не может попасть на чужую сущность
 // меню: KZHUDService::OnLayoutMenuClick сверяет присланный handle с this->ownedMenuLayout
 // ИМЕННО этого hudService (см. layout/menu.cpp).
+//
+// KZ_UM_CUSTOM_HUD_CLICKED / CKZUsrMsg_CustomHudClicked — СВОИ, не SDK-шные CS_UM_
+// CustomHudClicked/CCSUsrMsg_CustomHudClicked: движок реально шлёт usermessage с типом 390
+// (значение из апстримного пина hl2sdk bd17582, game/shared/cstrike15/cstrike15_usermessages
+// .proto, строки 636-639 — CS_UM_CustomHudClicked = 390), но наш сабмодульный пин hl2sdk-cs2
+// (5f891c9) этого типа ещё не знает, а `protobuf/cstrike15_usermessages.proto` — СИМЛИНК в
+// рабочее дерево сабмодуля (правка там не переживёт переклонирование сабмодуля раннером и не
+// входит в наш коммит, см. protobuf/kz_customhud.proto). Поэтому константу типа держим своей
+// (значение то же самое — оно приходит по проводу от игры, а не выводится из SDK), а тело
+// сообщения парсим СВОИМ protobuf-типом с теми же номерами полей (совместимость wire-формата
+// определяют номера полей, не имя типа).
+static constexpr int KZ_UM_CUSTOM_HUD_CLICKED = 390;
+
 static_function void Hook_ClientSvcUserMessage(CPlayerSlot slot, int type, uint32 size, const void *buf)
 {
-	if (type != CS_UM_CustomHudClicked)
+	if (type != KZ_UM_CUSTOM_HUD_CLICKED)
 	{
 		RETURN_META(MRES_IGNORED);
 	}
 
-	CCSUsrMsg_CustomHudClicked msg;
+	CKZUsrMsg_CustomHudClicked msg;
 	if (!msg.ParseFromArray(buf, size))
 	{
 		RETURN_META(MRES_IGNORED);

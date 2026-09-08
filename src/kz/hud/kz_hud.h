@@ -531,7 +531,9 @@ public:
 	}
 
 	// Колбэк клика по кнопке меню — зовётся из Hook_ClientSvcUserMessage (utils/hooks.cpp,
-	// CS_UM_CustomHudClicked) уже с резолвленным по СЛОТУ хука hudService, поэтому здесь
+	// свой тип сообщения KZ_UM_CUSTOM_HUD_CLICKED/CKZUsrMsg_CustomHudClicked, НЕ SDK-шный
+	// CS_UM_CustomHudClicked — см. комментарий в hooks.cpp/protobuf/kz_customhud.proto)
+	// уже с резолвленным по СЛОТУ хука hudService, поэтому здесь
 	// достаточно сверить handle с СОБСТВЕННЫМ ownedMenuLayout: клик одного игрока физически
 	// не может попасть на чужую сущность меню, даже если бы клиент прислал чужой handle.
 	// packedHandle — CEntityHandle сущности МЕНЮ (CCSCustomHudLayout::FromClickHandle);

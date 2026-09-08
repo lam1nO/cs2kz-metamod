@@ -28,8 +28,10 @@
 // (DestroyOwnedLayout). Без этого покрытия игрок, у которого меню было открыто в момент одного
 // из этих событий, застревает в режиме курсора и не может играть вообще.
 //
-// Проводка клика от движка: Hook_ClientSvcUserMessage на CS_UM_CustomHudClicked
-// (utils/hooks.cpp) резолвит игрока по СЛОТУ хука (не по сущности из сообщения) и зовёт
+// Проводка клика от движка: Hook_ClientSvcUserMessage на своём KZ_UM_CUSTOM_HUD_CLICKED
+// (utils/hooks.cpp; НЕ SDK-шный CS_UM_CustomHudClicked — тот идёт через symlink-proto в
+// сабмодуль на чужом пине, см. protobuf/kz_customhud.proto) резолвит игрока по СЛОТУ хука
+// (не по сущности из сообщения) и зовёт
 // player->hudService->OnLayoutMenuClick(...) — OnLayoutMenuClick ниже сам сверяет присланный
 // handle с ownedMenuLayout ИМЕННО этого hudService, так что клик одного игрока физически не
 // может применить настройку другому (см. utils/hooks.cpp и base-facts.md).

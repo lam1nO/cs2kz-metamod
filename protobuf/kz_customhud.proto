@@ -1,0 +1,22 @@
+syntax = "proto2";
+
+package cs2kz.customhud;
+
+// Клик по кнопке panorama-меню настроек худа/крестика (Task 11, src/kz/hud/layout/menu.cpp).
+//
+// НЕ используем SDK-тип CCSUsrMsg_CustomHudClicked/CS_UM_CustomHudClicked напрямую: он живёт в
+// protobuf/cstrike15_usermessages.proto, а этот файл — СИМЛИНК в hl2sdk-cs2 (сабмодуль, пин
+// 5f891c9), и апстрим SDK на этом пине его ещё не знает. Редактировать симлинк — редактировать
+// рабочее дерево сабмодуля: раннер клонирует сабмодуль заново по пину при каждой сборке, любая
+// правка внутри него теряется, а бампать сам пин нельзя (меняет ABI всего плагина, тянет
+// пересборку cs2kz-форка и cs2menus). Поэтому — свой protobuf-файл со своим сообщением.
+//
+// Номера полей СОВПАДАЮТ с апстримным CCSUsrMsg_CustomHudClicked (проверено по пину hl2sdk
+// bd17582, game/shared/cstrike15/cstrike15_usermessages.proto, строки 636-639) — именно номера
+// полей определяют совместимость wire-формата, а не имя сообщения, так что переименование
+// безопасно и НЕ меняет то, что реально пришлёт клиент (он использует движковый тип с теми же
+// номерами полей).
+message CKZUsrMsg_CustomHudClicked {
+	optional uint32 custom_hud_layout = 1 [default = 16777215];
+	optional string button_id = 2;
+}
