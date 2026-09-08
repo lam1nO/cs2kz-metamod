@@ -53,7 +53,8 @@ static_function void GetKeysIdleChoices(KZPlayer *player, i64 tag, std::vector<K
 
 static_function i64 GetKeysIdleCurrent(KZPlayer *player, i64 tag)
 {
-	return player->optionService->GetPreferenceInt("mhudKeysIdle", 0);
+	// Дефолт 2 (Underscore) синхронизирован с текущими настройками игрока (задача hud-defaults).
+	return player->optionService->GetPreferenceInt("mhudKeysIdle", 2);
 }
 
 static_function void OnKeysIdlePick(KZPlayer *player, i64 tag, i64 id)
@@ -124,7 +125,9 @@ static_function void AddHudElementItems(KZOptNode *node, LayoutElement e)
 	// пункт на всё меню: старый "Outline" в General убран, чтобы не осталось двух источников.
 	// Через колбэки — из-за миграции с hudOutline, см. OutlineGetCurrent выше.
 	KZ::menu::AddActionToggle(node, "HUD - Menu Label Outline", &OutlineGetCurrent, &OutlineOnActivate, (i64)e);
-	KZ::menu::SetItemPref(node, def.outlineKey, KZOptStorage::Bool, 1);
+	// Дефолт 0 (выкл) синхронизирован с текущими настройками игрока (задача hud-defaults) —
+	// тот же ответ отдаёт GetElementOutlinePref (layout/prefs.cpp) через fallback на hudOutline.
+	KZ::menu::SetItemPref(node, def.outlineKey, KZOptStorage::Bool, 0);
 	// Прозрачность хранится Int (0-100), а не Float, как размер/позиция того же элемента —
 	// AddSize по умолчанию заводит Float (px-поле), поэтому storage переопределяем ЯВНО:
 	// реальный потребитель (layout/prefs.cpp:GetLayoutPrefs) читает opacityKey через
@@ -180,13 +183,15 @@ void KZHUDService::InitMenuPrefs()
 	KZ::menu::AddColor(keys, "HUD - Menu Label OverlapGlowColor", "mhudKeysOverlapGlowColor", MHUD_DEF_KEYS_OVERLAP_GLOW_COLOR);
 	KZ::menu::SetItemSolidOnly(keys);
 	KZ::menu::SetItemEnabledBy(keys, "hudKeysOverlap");
-	KZ::menu::AddToggle(keys, "HUD - Menu Label Letters", "mhudKeysLetters", false);
-	KZ::menu::AddToggle(keys, "HUD - Menu Label Square", "mhudKeysSquare", false);
-	KZ::menu::AddToggle(keys, "HUD - Menu Label Border", "mhudKeysBorder", true);
-	KZ::menu::AddToggle(keys, "HUD - Menu Label Glow", "mhudKeysGlow", true);
-	KZ::menu::AddToggle(keys, "HUD - Menu Label Fill", "mhudKeysFill", true);
+	// Дефолты пяти тумблеров ниже синхронизированы с текущими настройками игрока (задача
+	// hud-defaults) — те же значения читает layout/prefs.cpp:RefreshLayoutPrefs.
+	KZ::menu::AddToggle(keys, "HUD - Menu Label Letters", "mhudKeysLetters", true);
+	KZ::menu::AddToggle(keys, "HUD - Menu Label Square", "mhudKeysSquare", true);
+	KZ::menu::AddToggle(keys, "HUD - Menu Label Border", "mhudKeysBorder", false);
+	KZ::menu::AddToggle(keys, "HUD - Menu Label Glow", "mhudKeysGlow", false);
+	KZ::menu::AddToggle(keys, "HUD - Menu Label Fill", "mhudKeysFill", false);
 	KZ::menu::AddChoice(keys, "HUD - Menu Label Idle", &GetKeysIdleChoices, &GetKeysIdleCurrent, &OnKeysIdlePick);
-	KZ::menu::SetItemPref(keys, "mhudKeysIdle", KZOptStorage::Int, 0);
+	KZ::menu::SetItemPref(keys, "mhudKeysIdle", KZOptStorage::Int, 2);
 	AddResetButton(keys, (i32)LayoutElement::Keys);
 
 	KZOptNode *checkpoint = KZ::menu::AddCategory("HUD - Menu Cat Checkpoint");
@@ -195,7 +200,8 @@ void KZHUDService::InitMenuPrefs()
 	AddResetButton(checkpoint, (i32)LayoutElement::Checkpoint);
 
 	KZOptNode *crosshair = KZ::menu::AddCategory("HUD - Menu Cat Crosshair");
-	KZ::menu::AddToggle(crosshair, "HUD - Menu Label Enabled", "mhudCrosshair", false);
+	// Дефолт true синхронизирован с текущими настройками игрока (задача hud-defaults).
+	KZ::menu::AddToggle(crosshair, "HUD - Menu Label Enabled", "mhudCrosshair", true);
 	KZ::menu::AddSize(crosshair, "HUD - Menu Label Scale", "mhudCrosshairScale", 100, 0, 500);
 	KZ::menu::SetItemUnit(crosshair, "%");
 	KZ::menu::SetItemPref(crosshair, "mhudCrosshairScale", KZOptStorage::Int, 100);
