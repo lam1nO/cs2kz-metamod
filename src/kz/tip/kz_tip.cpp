@@ -37,7 +37,9 @@ void KZTipService::ToggleTips()
 {
 	this->showTips = !this->showTips;
 	this->player->optionService->SetPreferenceBool("showTips", this->showTips);
-	player->languageService->PrintChat(true, false, this->showTips ? "Option - Tips - Enable" : "Option - Tips - Disable");
+	// Периодические подсказки выключены безусловно (ShouldPrintTip ниже), поэтому «включено»
+	// рапортовать нельзя — игрок ждал бы подсказок, которых не будет.
+	player->languageService->PrintChat(true, false, "Option - Tips - Disable");
 }
 
 bool KZTipService::ShouldPrintTip()

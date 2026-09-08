@@ -337,6 +337,9 @@ void KZHUDService::OnProcessMovementPost()
 
 void KZHUDService::Reset()
 {
+	// Reset зовётся и на дисконнекте: без сброса новый клиент в том же слоте не получит
+	// sv_suppress_viewpunch/view_punch_decay (состояние «уже подавлено» осталось бы от прошлого).
+	this->viewpunchSuppressed = false;
 	this->showPanel = this->player->optionService->GetPreferenceBool("showPanel", true);
 	this->timerStoppedTime = {};
 	this->currentTimeWhenTimerStopped = {};

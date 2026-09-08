@@ -95,9 +95,12 @@ static_function const KZOptItem *GetMenuItem(i32 category, i32 itemIndex)
 
 // Курированный список вместо апстримного постраничного обзора всех семейств (~30):
 // сознательно урезано (см. комментарий вверху файла) — клик по пункту просто перебирает.
+// stratum2-bold-monodigit был дефолтом до смены LAYOUT_DEFAULT_FONT на lato-bold: без него
+// в цикле игрок, у которого он сохранён, терял свой шрифт первым же кликом (NextFontSlug не
+// нашёл бы текущий и вернул MENU_FONTS[0]).
 static_global const char *const MENU_FONTS[] = {
-	LAYOUT_DEFAULT_FONT, "stratum2-regular-monodigit", "stratum2-bold", "stratum2-medium", "stratum2-mono-bold", "noto-sans-bold", "arial",
-	"forcestratum2",
+	LAYOUT_DEFAULT_FONT, "stratum2-bold-monodigit", "stratum2-regular-monodigit", "stratum2-bold", "stratum2-medium", "stratum2-mono-bold",
+	"noto-sans-bold", "arial", "forcestratum2",
 };
 
 static_function const char *NextFontSlug(const char *current)
