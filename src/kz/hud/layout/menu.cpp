@@ -402,6 +402,13 @@ void KZHUDService::RenderMenu()
 							   : KZ_MENU_TITLE_PHRASE;
 	const std::string title = KZLanguageService::PrepareMessageWithLang(this->player->languageService->GetLanguage(), titleKey);
 	this->SetMenuVar(layout, "menu_title", "title", title.c_str());
+	// Шрифт и цвет корня — статикой, без своего префа (GetPreferenceColor у нас в базе нет,
+	// см. журнал задачи 2): апстрим тянет menuFont/menuColor из префов игрока
+	// (kz_menu.cpp:318-321), мы фиксируем тот же дефолт — Stratum2 Medium TF + белый
+	// (fonts.css/palette.css чужого аддона). Без этих классов панели наследуют движковый
+	// дефолт (мелкий шрифт, красный текст) — этим и было наше «пиксельно».
+	this->SetMenuBoolClass(layout, "menu_root", "font-family--stratum2-medium-tf", this->menuApplied.rootFont, true);
+	this->SetMenuBoolClass(layout, "menu_root", "pal-fg-9", this->menuApplied.rootColor, true);
 	this->SetMenuBoolClass(layout, "color_popup", "hidden", this->menuApplied.colorPopupHidden, this->menuPopup != MenuPopup::Color);
 	this->SetMenuBoolClass(layout, "step_popup", "hidden", this->menuApplied.stepPopupHidden, this->menuPopup != MenuPopup::Step);
 	this->SetMenuBoolClass(layout, "list_popup", "hidden", this->menuApplied.listPopupHidden, this->menuPopup != MenuPopup::List);
@@ -421,6 +428,19 @@ void KZHUDService::RenderMenu()
 	{
 		this->RenderMenuListPopup(layout);
 	}
+
+	// Движковый баг (sdk/entity/ccscustomhudlayout.h:179-181): SetHasClassForPlayer не
+	// доезжает до ДЕТЕЙ панели — стили ребёнка (статичный фон .menu-box, зелёная плашка
+	// .item.type-toggle.on .item-value, свотч .item.type-color .item-swatch, подпись
+	// .item.has-sub .item-sub) применяются только при прямом изменении самого ребёнка или
+	// при полном пересчёте слоя. Первое появление НОВОЙ пары (панель,класс) сама метит
+	// сущность на полный пересчёт (SetHasClass, ветка AddToTail), но повторное переключение
+	// уже интернированной пары — только точечно (MarkHasClassChanged), и тогда ребёнок
+	// остаётся со старым стилем. Апстрим обходит это тем же вызовом, но только вслед за
+	// сменой шрифта/цвета (kz_menu.cpp:330); мы зовём безусловно на каждый рендер меню —
+	// сама пометка не заводит ни строку, ни класс, лимита HUD_LAYOUT_MAX_INTERNED_STRINGS
+	// не касается (0 новых записей).
+	layout->GetGlobalLayoutState()->MarkFullChanged();
 }
 
 void KZHUDService::RenderMenuCategories(CCSCustomHudLayout *layout)
@@ -502,8 +522,11 @@ void KZHUDService::RenderMenuItems(CCSCustomHudLayout *layout)
 			this->SetMenuVar(layout, ItemLbl(i), ItemLblVar(i), itemLabel.c_str());
 			// subtext (item-sub) — видимость целиком на CSS (.item.has-sub .item-sub), нам
 			// достаточно переключить класс has-sub на самом пункте; var пишем всегда (пусто,
-			// если subKey нет, — безвредно под collapse).
-			this->SetMenuVar(layout, ItemSub(i), ItemSubVar(i), it.subKey ? it.subKey : "");
+			// если subKey нет, — безвредно под collapse). subKey — ключ фразы, а не готовый
+			// текст (как и phraseKey label двумя строками выше) — переводим тем же механизмом,
+			// апстрим делает так же (kz_menu.cpp:450, KZMenuService::GetPhrase).
+			const std::string itemSub = it.subKey ? KZLanguageService::PrepareMessageWithLang(lang, it.subKey) : "";
+			this->SetMenuVar(layout, ItemSub(i), ItemSubVar(i), itemSub.c_str());
 			this->SetMenuBoolClass(layout, ItemPanel(i), "has-sub", this->menuApplied.itemHasSub[i], it.subKey != NULL);
 			// divider (dividerAfter/SetItemDivider модели) НЕ проводим: в разметке чужого аддона
 			// панель item_div%i несёт класс .item-divider, а правила ни для .item-divider.hidden,

@@ -693,6 +693,8 @@ private:
 	struct MenuAppliedState
 	{
 		bool rootHidden {true};
+		bool rootFont {false};  // font-family--stratum2-medium-tf на menu_root (задача 2, вид как у апстрима)
+		bool rootColor {false}; // pal-fg-9 на menu_root — иначе панели наследуют движковый дефолт (красный)
 		bool colorPopupHidden {true};
 		bool stepPopupHidden {true};
 		bool listPopupHidden {true};
