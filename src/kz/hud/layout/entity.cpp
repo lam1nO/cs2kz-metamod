@@ -13,11 +13,11 @@
 // clang-format off
 extern const LayoutElementDef LAYOUT_ELEMENTS[(i32)LayoutElement::Count] =
 {
-	{"mhud_timer",      "timer",      "hudTimer",      "mhudTimerX",      "mhudTimerY",      "mhudTimerSize",      "mhudTimerFont",      "mhudTimerOutline",      "mhudTimerOpacity",      LAYOUT_DEF_TIMER_X,      LAYOUT_DEF_TIMER_Y,      LAYOUT_DEF_TIMER_SIZE},
-	{"mhud_speed",      "speed",      "hudSpeed",      "mhudSpeedX",      "mhudSpeedY",      "mhudSpeedSize",      "mhudSpeedFont",      "mhudSpeedOutline",      "mhudSpeedOpacity",      LAYOUT_DEF_SPEED_X,      LAYOUT_DEF_SPEED_Y,      LAYOUT_DEF_SPEED_SIZE},
-	{"mhud_prespeed",   "prespeed",   "hudPrespeed",   "mhudPrespeedX",   "mhudPrespeedY",   "mhudPrespeedSize",   "mhudPrespeedFont",   "mhudPrespeedOutline",   "mhudPrespeedOpacity",   LAYOUT_DEF_PRESPEED_X,   LAYOUT_DEF_PRESPEED_Y,   LAYOUT_DEF_PRESPEED_SIZE},
-	{"mhud_keys",       "keys",       "hudKeys",       "mhudKeysX",       "mhudKeysY",       "mhudKeysSize",       "mhudKeysFont",       "mhudKeysOutline",       "mhudKeysOpacity",       LAYOUT_DEF_KEYS_X,       LAYOUT_DEF_KEYS_Y,       LAYOUT_DEF_KEYS_SIZE},
-	{"mhud_checkpoint", "checkpoint", "hudCpTp",       "mhudCheckpointX", "mhudCheckpointY", "mhudCheckpointSize", "mhudCheckpointFont", "mhudCheckpointOutline", "mhudCheckpointOpacity", LAYOUT_DEF_CHECKPOINT_X, LAYOUT_DEF_CHECKPOINT_Y, LAYOUT_DEF_CHECKPOINT_SIZE},
+	{"mhud_timer",      "timer",      "hudTimer",      "mhudTimerX",      "mhudTimerY",      "mhudTimerSize",      "mhudTimerFont",      "hudOutline", "mhudTimerOpacity",      LAYOUT_DEF_TIMER_X,      LAYOUT_DEF_TIMER_Y,      LAYOUT_DEF_TIMER_SIZE},
+	{"mhud_speed",      "speed",      "hudSpeed",      "mhudSpeedX",      "mhudSpeedY",      "mhudSpeedSize",      "mhudSpeedFont",      "hudOutline", "mhudSpeedOpacity",      LAYOUT_DEF_SPEED_X,      LAYOUT_DEF_SPEED_Y,      LAYOUT_DEF_SPEED_SIZE},
+	{"mhud_prespeed",   "prespeed",   "hudPrespeed",   "mhudPrespeedX",   "mhudPrespeedY",   "mhudPrespeedSize",   "mhudPrespeedFont",   "hudOutline", "mhudPrespeedOpacity",   LAYOUT_DEF_PRESPEED_X,   LAYOUT_DEF_PRESPEED_Y,   LAYOUT_DEF_PRESPEED_SIZE},
+	{"mhud_keys",       "keys",       "hudKeys",       "mhudKeysX",       "mhudKeysY",       "mhudKeysSize",       "mhudKeysFont",       "hudOutline", "mhudKeysOpacity",       LAYOUT_DEF_KEYS_X,       LAYOUT_DEF_KEYS_Y,       LAYOUT_DEF_KEYS_SIZE},
+	{"mhud_checkpoint", "checkpoint", "hudCpTp",       "mhudCheckpointX", "mhudCheckpointY", "mhudCheckpointSize", "mhudCheckpointFont", "hudOutline", "mhudCheckpointOpacity", LAYOUT_DEF_CHECKPOINT_X, LAYOUT_DEF_CHECKPOINT_Y, LAYOUT_DEF_CHECKPOINT_SIZE},
 };
 // clang-format on
 
@@ -105,7 +105,10 @@ void KZHUDService::UpdateLayoutElement(CCSCustomHudLayout *layout, LayoutElement
 		state.colorClassComputed = panorama::ResolveColorClass(color);
 	}
 	this->SetLayoutClass(layout, def.panelId, state.colorClass, state.colorClassComputed);
-	this->SetLayoutClass(layout, def.panelId, state.fontClass, panorama::ResolveFontClass(cached.fontClass, LAYOUT_DEFAULT_FONT));
+	// cached.fontClass — уже РЕЗОЛВЛЕННЫЙ css-класс (RefreshLayoutPrefs, Task 5 зовёт
+	// panorama::ResolveFontClass один раз при обновлении префов). Повторный резолв здесь
+	// сравнил бы готовый класс со слагом и всегда проигрывал бы fallback'у.
+	this->SetLayoutClass(layout, def.panelId, state.fontClass, cached.fontClass);
 
 	const i32 opacity = Clamp(cached.opacity, 0, 100);
 	if (state.opacity != opacity)
