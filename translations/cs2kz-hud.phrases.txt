@@ -202,28 +202,6 @@
 		"ko"		"{time}{stop_text}{pause_text}"
 		"lv"		"{time}{stop_text}{pause_text}"
 	}
-	// This text is actually "more" center.
-	// lint-ignore-start
-	"HUD - Alert Text"
-	{
-		// Unused
-		"#format"	"key_text:s,checkpoint_text:s,timer_text:s,speed_text:s"
-		"en"		""
-		"chi"		""
-		"pl"		""
-		"ru"		""
-		"fi"		""
-		"sv"		""
-		"ua"		""
-		"tr"		""
-		"it"		""
-		"es"		""
-		"de"		""
-		"ko"		""
-		"lv"		""
-	}
-	// lint-ignore-end
-
 	"HUD - HTML Panel Disabled"
 	{
 		"en"		"Panel disabled."
@@ -300,21 +278,6 @@
 		"chi"		"{grey}用法: {default}kz_hud <panel>{grey}, 或 {default}kz_hud{grey} 打开设置菜单."
 		"ru"		"{grey}Применение: {default}kz_hud <panel>{grey}, либо {default}kz_hud{grey} — меню настроек."
 		"ua"		"{grey}Використання: {default}kz_hud <panel>{grey}, або {default}kz_hud{grey} — меню налаштувань."
-	}
-
-	"MHUD - Master Enabled"
-	{
-		"en"		"{grey}HUD type set to {green}MHUD{grey} (particle HUD)."
-		"chi"		"{grey}HUD 类型已设置为 {green}MHUD{grey} (粒子 HUD)."
-		"ru"		"{grey}Тип HUD переключён на {green}MHUD{grey} (частицы)."
-		"ua"		"{grey}Тип HUD переключено на {green}MHUD{grey} (частинки)."
-	}
-	"MHUD - Master Disabled"
-	{
-		"en"		"{grey}HUD type set to {green}Standard{grey} (HTML HUD)."
-		"chi"		"{grey}HUD 类型已设置为 {green}标准{grey} (HTML HUD)."
-		"ru"		"{grey}Тип HUD переключён на {green}Стандартный{grey} (HTML)."
-		"ua"		"{grey}Тип HUD переключено на {green}Стандартний{grey} (HTML)."
 	}
 	"MHUD - Unavailable"
 	{
