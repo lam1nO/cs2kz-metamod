@@ -272,6 +272,9 @@ void KZPlayer::OnPhysicsSimulatePost()
 		this->hudService->DestroyAllParticles();
 		this->hudService->ClearBottomPanel();
 		this->hudService->ClearMinimalHud();
+		// Layout-худ по той же причине: DrawPanels сюда не доходит, замороженная сущность
+		// висела бы до следующего вызова.
+		this->hudService->DestroyOwnedLayout();
 	}
 	this->measureService->OnPhysicsSimulatePost();
 	this->quietService->OnPhysicsSimulatePost();

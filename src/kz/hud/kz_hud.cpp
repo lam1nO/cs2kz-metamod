@@ -169,6 +169,9 @@ void KZHUDService::Reset()
 	this->lastPanelSent.clear();
 	this->lastPanelSentTime = {};
 	this->DestroyAllParticles();
+	// Слот реально освобождается — сущность и кэши классов панелей иначе достались бы
+	// следующему игроку в этом слоте (реконнект/новый игрок).
+	this->DestroyOwnedLayout();
 }
 
 // Сброс кэшей отправки нижней панели и минимал-худа БЕЗ *Active-флагов: раунд-старт

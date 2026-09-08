@@ -7,6 +7,73 @@
 #define KZ_HUD_TIMER_STOPPED_GRACE_TIME 3.0f
 #define KZ_HUD_ON_GROUND_THRESHOLD      0.07f
 class IEntityResourceManifest;
+class CCSCustomHudLayout;
+
+// Элементы panorama-худа (сущность custom_hud_layout, Task 4). НЕ путать с локальным
+// `MHUDElement` из particles.cpp (другой состав/порядок) — тот же символ здесь сломал бы
+// particle-путь переопределением, поэтому у layout-худа своё имя.
+enum class LayoutElement
+{
+	Timer,
+	Speed,
+	Prespeed,
+	Keys,
+	Checkpoint,
+	Count
+};
+
+struct LayoutElementDef
+{
+	const char *panelId;    // id панели в mhud.vxml аддона
+	const char *varName;    // имя dialog-переменной панели
+	const char *enabledKey; // НАШ общий тумблер элемента (hudTimer и т.п.)
+	const char *xKey;
+	const char *yKey;
+	const char *sizeKey;
+	const char *fontKey;
+	const char *outlineKey;
+	const char *opacityKey;
+	i32 xDefault;
+	i32 yDefault;
+	i32 sizeDefault;
+};
+
+extern const LayoutElementDef LAYOUT_ELEMENTS[(i32)LayoutElement::Count];
+
+// Кэш префов layout-худа (реализация — Task 5, GetLayoutPrefs/RefreshLayoutPrefs);
+// UpdateLayoutElement (Task 4) читает уже этот тип, объявление обязано быть раньше реализации.
+struct MHUDLayoutPrefs
+{
+	struct Element
+	{
+		bool enabled {};
+		i32 x {};
+		i32 y {};
+		i32 size {};
+		const char *fontClass {};
+		bool outline {};
+		i32 opacity {};
+	};
+
+	Element elements[(i32)LayoutElement::Count] {};
+
+	Color timerPro {};
+	Color timerTp {};
+	Color timerPaused {};
+	Color timerStopped {};
+	Color speed {};
+	Color speedCj {};
+	Color prespeed {};
+	Color prespeedPerf {};
+	Color prespeedJumpbug {};
+	Color keys {};
+	Color keysOverlap {};
+	Color checkpoint {};
+
+	bool timerDetailed {};
+	bool speedPrecise {};
+	bool keysOverlapEnabled {};
+};
 
 class KZHUDService : public KZBaseService
 {
@@ -337,6 +404,32 @@ public:
 	// чинится в одном стиле худа и остаётся в трёх других.
 	static Vector GetDisplayVelocity(KZPlayer *src);
 
+	// === Layout-худ (custom_hud_layout, Task 4) ======================================
+
+	// Сущность создаётся ПЕРСОНАЛЬНО на игрока (не общая на сервер): каждый слот держит свои
+	// dialog-переменные и классы панелей, а транзит чужим гасится KZ::quiet (OwnsLayoutEntity).
+	// created=true — только что заспавнена (вызывающий обязан форсировать полный релейаут,
+	// см. force в UpdateLayoutElement, иначе первый кадр уедет с дефолтными классами схемы).
+	CCSCustomHudLayout *EnsureOwnedLayout(bool &created);
+	// Гасит сущность и обнуляет кэши классов элементов: кэш живёт ТОЛЬКО вместе с сущностью,
+	// иначе следующий владелец слота (реконнект/новый игрок) унаследует чужие классы и
+	// UpdateLayoutElement решит, что менять нечего.
+	void DestroyOwnedLayout();
+	// Выгрузка плагина (g_KZPlugin.unloading, cs2kz.cpp) — снести layout-сущности всех слотов.
+	static void LayoutCleanup();
+
+	void SetLayoutClass(CCSCustomHudLayout *layout, const char *panelId, const char *&cache, const char *className);
+	void SetLayoutValueClass(CCSCustomHudLayout *layout, const char *panelId, i32 &cache, i32 value, const char *prefix, bool percent);
+	void UpdateLayoutElement(CCSCustomHudLayout *layout, LayoutElement element, bool show, const char *text, const Color &color, bool force);
+
+	// CheckTransmit support (см. KZ::quiet::OnCheckTransmit) — свою сущность транслируем.
+	bool OwnsLayoutEntity(CEntityHandle handle);
+
+	// Кэш префов layout-худа: реализация — Task 5.
+	const MHUDLayoutPrefs &GetLayoutPrefs();
+	void RefreshLayoutPrefs();
+	bool IsLayoutElementEnabled(LayoutElement element);
+
 private:
 	// dataSource = источник данных (наблюдаемый при спектировании); nullptr → сам игрок.
 	// Настройки (цвета perf/CJ) всегда идут с this (получателя) — см. GetMHUDColorPref.
@@ -426,4 +519,31 @@ private:
 
 	// Preference helpers.
 	Color GetMHUDColorPref(const char *name, const Color &defaultColor);
+
+	// === Layout-худ (custom_hud_layout, Task 4) ======================================
+
+	struct LayoutElementState
+	{
+		std::string text {};
+		const char *colorClass {};
+		const char *fontClass {};
+		i32 fontSize {-1};
+		i32 x {INT_MIN};
+		i32 y {INT_MIN};
+		bool hidden {true};
+		bool outline {false};
+		i32 opacity {INT_MIN};
+		// Поиск ближайшего цвета палитры — только при смене цвета, не каждый тик.
+		const char *colorClassComputed {};
+		u32 lastColorPacked {};
+		bool colorComputed {};
+	};
+
+	// Сущность худа ЭТОГО игрока; чужим не транслируется (KZ::quiet::OnCheckTransmit).
+	CHandle<CBaseEntity> ownedLayout {};
+	LayoutElementState layoutElements[(i32)LayoutElement::Count] {};
+
+	// Кэш префов (Task 5 наполняет); объявление поля — здесь, чтобы UpdateLayoutElement (Task 4)
+	// уже мог читать this->GetLayoutPrefs().
+	MHUDLayoutPrefs layoutPrefs {};
 };
