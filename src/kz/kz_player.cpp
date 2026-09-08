@@ -280,10 +280,9 @@ void KZPlayer::OnPhysicsSimulatePost()
 	else
 	{
 		// Dead and not spectating anyone (death cam on own corpse / freeroam):
-		// нижнюю панель и минимал-худ гасим одноразово: DrawPanels для этого состояния
-		// не вызывается, и остаток CP/TP висел бы до самозатухания канала.
+		// нижнюю панель гасим одноразово: DrawPanels для этого состояния не вызывается,
+		// и остаток CP/TP висел бы до самозатухания канала.
 		this->hudService->ClearBottomPanel();
-		this->hudService->ClearMinimalHud();
 		// Layout-худ по той же причине: DrawPanels сюда не доходит, замороженная сущность
 		// висела бы до следующего вызова.
 		this->hudService->DestroyOwnedLayout();

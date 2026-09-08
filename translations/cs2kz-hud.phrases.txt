@@ -219,25 +219,6 @@
 		"ko"		"{time}{stop_text}{pause_text}"
 		"lv"		"{time}{stop_text}{pause_text}"
 	}
-	"HUD - Center Text"
-	{
-		// CP: 4/4, TPs: 12
-		// 01:23:45 (STOPPED) (PAUSED)
-		"#format"	"key_text:s,checkpoint_text:s,timer_text:s,speed_text:s"
-		"en"		"{checkpoint_text}\n{timer_text}"
-		"chi"		"{checkpoint_text}\n{timer_text}"
-		"pl"		"{checkpoint_text}\n{timer_text}"
-		"ru"		"{checkpoint_text}\n{timer_text}"
-		"fi"		"{checkpoint_text}\n{timer_text}"
-		"sv"		"{checkpoint_text}\n{timer_text}"
-		"ua"		"{checkpoint_text}\n{timer_text}"
-		"tr"		"{checkpoint_text}\n{timer_text}"
-		"it"		"{checkpoint_text}\n{timer_text}"
-		"es"		"{checkpoint_text}\n{timer_text}"
-		"de"		"{checkpoint_text}\n{timer_text}"
-		"ko"		"{checkpoint_text}\n{timer_text}"
-		"lv"		"{checkpoint_text}\n{timer_text}"
-	}
 	// This text is actually "more" center.
 	// lint-ignore-start
 	"HUD - Alert Text"
@@ -259,25 +240,6 @@
 		"lv"		""
 	}
 	// lint-ignore-end
-	"HUD - HTML Center Text"
-	{
-		// Speed: 234 (200)
-		// Keys: A W S D C J
-		"#format"	"key_text:s,checkpoint_text:s,timer_text:s,speed_text:s"
-		"en"		"{speed_text}<br>{key_text}"
-		"chi"		"{speed_text}<br>{key_text}"
-		"pl"		"{speed_text}<br>{key_text}"
-		"ru"		"{speed_text}<br>{key_text}"
-		"fi"		"{speed_text}<br>{key_text}"
-		"sv"		"{speed_text}<br>{key_text}"
-		"ua"		"{speed_text}<br>{key_text}"
-		"tr"		"{speed_text}<br>{key_text}"
-		"it"		"{speed_text}<br>{key_text}"
-		"es"		"{speed_text}<br>{key_text}"
-		"de"		"{speed_text}<br>{key_text}"
-		"ko"		"{speed_text}<br>{key_text}"
-		"lv"		"{speed_text}<br>{key_text}"
-	}
 
 	"HUD - HTML Panel Disabled"
 	{

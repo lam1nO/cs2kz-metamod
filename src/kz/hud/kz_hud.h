@@ -226,17 +226,6 @@ private:
 	char lastBottomText[256] {};
 	f64 lastBottomSendTime {};
 
-	// Кэш отправки минимал-худа (this = получатель): последний отправленный текст и время
-	// отправки per-канал (centre / html). В движении текст меняется почти каждый тик
-	// (время/скорость), в простое стабилен — тогда каналы живут heartbeat'ом (см.
-	// UpdateMinimalHud). minimalCentreActive — на прошлом тике в centre уходил текст
-	// минимала (нужен одноразовый клир при уходе из стиля, см. ClearMinimalHud).
-	bool minimalCentreActive {};
-	char lastMinimalCentreText[192] {};
-	f64 lastMinimalCentreSendTime {};
-	char lastMinimalHtmlText[512] {};
-	f64 lastMinimalHtmlSendTime {};
-
 	// Последний текст HTML-панели, РЕАЛЬНО ушедший этому получателю из DrawPanels, и время
 	// отправки. Пишется только под kz_hud_panel_trace (деф. выкл) — на тактовом пути это
 	// копия строки на каждого получателя, платить за неё постоянно незачем. Нужен потому, что
@@ -298,28 +287,13 @@ public:
 	int GetHudType();
 	void SetHudType(int type);
 
-	// Стиль стандартного HTML-худа целиком (персистентный int-pref "hudTimerStyle" —
-	// имя префа историческое, семантика расширена со «стиля таймера» до всего худа).
-	// Updated (деф.) — кибершоковская панель (BuildVersionCHud, CP/TP её нижняя строка);
-	// Minimal — апстрим-композиция cs2kz: centre-канал = CP/TP + таймер, HTML-канал =
-	// скорость + клавиши (см. UpdateMinimalHud).
-	enum
-	{
-		HUD_TIMER_STYLE_UPDATED = 0,
-		HUD_TIMER_STYLE_MINIMAL = 1,
-	};
-
-	int GetTimerStyle();
-	void SetTimerStyle(int style);
-
 	// Draw the panel from a player to a specific target.
 	static void DrawPanels(KZPlayer *player, KZPlayer *target);
 
 	// Нижняя панель (обычный centre-канал HUD_PRINTCENTER, не HTML): строка CP/TP (гейт
-	// hudCpTp). Только обновлённый стиль и только при kz_hud_cptp_in_panel 0 — по умолчанию
-	// CP/TP рисуется последней строкой САМОЙ HTML-панели (BuildVersionCHud), а этот тракт
-	// остаётся за плайн-худом спектатора под меню (menuOpen) и за откатом по cvar'у.
-	// В минимале CP/TP рисует апстрим-композиция.
+	// hudCpTp), только при kz_hud_cptp_in_panel 0 — по умолчанию CP/TP рисуется последней
+	// строкой САМОЙ HTML-панели (BuildVersionCHud), а этот тракт остаётся за плайн-худом
+	// спектатора под меню (menuOpen) и за откатом по cvar'у.
 	// this — получатель (его настройки/язык), dataSource — наблюдаемый (его данные).
 	// Слепок состояния считается каждый тик (дёшево, без аллокаций); текст пересобирается
 	// и шлётся только на изменении слепка либо heartbeat'ом раз в KZ_HUD_BOTTOM_HEARTBEAT
@@ -335,20 +309,6 @@ public:
 	// сам по себе канал гасит последний текст лишь через несколько секунд, а остаток CP/TP
 	// после смены типа худа/смерти без спектейта/открытия меню выглядит как зависший худ.
 	void ClearBottomPanel();
-
-	// Минималистичный стиль худа целиком — апстрим-композиция cs2kz на живых строителях
-	// Get*Text: centre-канал = CP/TP + таймер («HUD - Center Text»), HTML-канал = скорость
-	// + клавиши («HUD - HTML Center Text»); компакт — только html (таймер<br>скорость).
-	// this — получатель (настройки/язык/цвета), dataSource — наблюдаемый (данные) — тот же
-	// контракт data/settings, что у BuildVersionCHud. Отправка дедуплицируется слепком
-	// последнего отправленного текста per-канал + heartbeat (см. поля кэша выше).
-	void UpdateMinimalHud(KZPlayer *dataSource);
-
-	// Одноразово стереть минимал-худ при уходе из него (смена стиля/типа, меню,
-	// смерть без спектейта): centre гасится пустым токеном (тот же приём, что
-	// ClearBottomPanel), html не трогаем — его либо тут же перерисовывает новый владелец
-	// (обновлённый худ/меню), либо он сам гаснет за duration=1s (utils::PrintHTMLCentre).
-	void ClearMinimalHud();
 
 	void ResetShowPanel();
 	void TogglePanel();
@@ -552,15 +512,14 @@ private:
 	// только на смене CP/TP/языка. Канал plain-text: разметки нет.
 	void FormatBottomText(const BottomPanelState &state, char *buf, i32 size);
 
-	// Сброс кэшей отправки нижней панели и минимал-худа БЕЗ *Active-флагов (см. kz_hud.cpp):
-	// используется на OnRoundStart, в т.ч. посреди карты (например, кик реплей-бота) —
-	// погасить флаги здесь подавило бы следующий клир-кадр ClearBottomPanel/ClearMinimalHud.
-	// Флаги гасятся только в Reset() (дисконнект, слот реально освобождён).
+	// Сброс кэша отправки нижней панели БЕЗ *Active-флага (см. kz_hud.cpp): используется на
+	// OnRoundStart, в т.ч. посреди карты (например, кик реплей-бота) — погасить флаг здесь
+	// подавило бы следующий клир-кадр ClearBottomPanel.
+	// Флаг гасится только в Reset() (дисконнект, слот реально освобождён).
 	void ResetBottomPanelCache();
 
-	// Единый HTML-center HUD в стиле кибершока (только обновлённый стиль; минимал идёт
-	// через UpdateMinimalHud): строка 1 — таймер (зелёный) + режим + стиль, строка 2 —
-	// крупная скорость + престрейф, строка 3 — Stage (только многостейдж), строка 4 —
+	// Единый HTML-center HUD в стиле кибершока: строка 1 — таймер (зелёный) + режим + стиль,
+	// строка 2 — крупная скорость + престрейф, строка 3 — Stage (только многостейдж), строка 4 —
 	// || PB | WR ||; плюс опциональные ряд клавиш и showpos по тумблерам, последней строкой —
 	// CP/TP (гейт hudCpTp, при kz_hud_cptp_in_panel 0 уезжает обратно в centre-канал).
 	// Компакт (по this->IsCompactPanel()) — только строки 1-2 (плюс CP/TP: у него свой

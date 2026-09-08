@@ -76,11 +76,6 @@ static_function void FormatTimeHud(f64 time, char *output, u32 length)
 // (HtmlStatusInterval, деф. 0 = на каждой смене).
 #define KZ_HUD_BOTTOM_MENU_HEARTBEAT 0.1f
 
-// Heartbeat HTML-канала минимал-худа: show_survival_respawn_status живёт ровно duration=1s
-// (см. utils::PrintHTMLCentre), heartbeat в 1.0s мигал бы на границе — переотправляем вдвое
-// чаще. Centre-канал минимала живёт общим KZ_HUD_BOTTOM_HEARTBEAT (он гаснет медленнее).
-#define KZ_HUD_MINIMAL_HTML_HEARTBEAT 0.5f
-
 static CConVar<bool> kz_force_mhud("kz_force_mhud", FCVAR_NONE, "Force the panorama HUD even when MultiAddonManager is not available.", false);
 
 static_global class KZTimerServiceEventListener_HUD : public KZTimerServiceEventListener
@@ -176,24 +171,6 @@ void KZHUDService::SetHudType(int type)
 	this->MHUDSettingsSource()->optionService->SetPreferenceInt("hudType", type);
 }
 
-// === Стиль худа (hudTimerStyle) ====================================================
-// Настройка только стандартного HTML-худа (имя префа историческое): 0 = Updated
-// (кибершоковская панель + нижняя панель CP/TP), 1 = Minimal (весь худ — апстрим-
-// композиция cs2kz, см. KZHUDService::UpdateMinimalHud). Клир каналов при переключении
-// делает DrawPanels (взаимный одноразовый клир веток), здесь только преф.
-
-int KZHUDService::GetTimerStyle()
-{
-	int stored = this->MHUDSettingsSource()->optionService->GetPreferenceInt("hudTimerStyle", HUD_TIMER_STYLE_UPDATED);
-	// Нормализация мусора в префе: всё, что не Minimal, читаем как дефолтный Updated.
-	return stored == HUD_TIMER_STYLE_MINIMAL ? HUD_TIMER_STYLE_MINIMAL : HUD_TIMER_STYLE_UPDATED;
-}
-
-void KZHUDService::SetTimerStyle(int style)
-{
-	this->MHUDSettingsSource()->optionService->SetPreferenceInt("hudTimerStyle", style);
-}
-
 // Все тумблеры/раскладка — НАСТРОЙКИ: читаем из источника настроек (сам игрок/спектатор),
 // а не из данных наблюдаемого. Иначе у спектатора «прыгал» бы HUD при смене цели.
 // Per-element тумблеры.
@@ -283,12 +260,11 @@ void KZHUDService::Reset()
 	this->jumpedThisTick = false;
 	this->fromDuckbug = false;
 	this->crouchJumping = false;
-	// Слот реально освобождается (дисконнект) — только здесь гасим *Active-флаги:
-	// ClearBottomPanel()/ClearMinimalHud() для НОВОГО игрока в этот слот не должны считать
-	// себя обязанными клиру каналов, которыми никогда не владели.
+	// Слот реально освобождается (дисконнект) — только здесь гасим *Active-флаг:
+	// ClearBottomPanel() для НОВОГО игрока в этот слот не должен считать себя обязанным
+	// клиру канала, которым никогда не владел.
 	this->bottomPanelActive = false;
-	this->minimalCentreActive = false;
-	// Кэши отправки нижней панели и минимал-худа (слепки/тексты/heartbeat).
+	// Кэш отправки нижней панели (слепки/тексты/heartbeat).
 	this->ResetBottomPanelCache();
 	// Слепок отправленной панели — улика конкретного игрока: новому в этом слоте она чужая,
 	// а `kz_hud panel` показал бы её как свою.
@@ -309,20 +285,16 @@ void KZHUDService::Reset()
 	this->DestroyOwnedMenuLayout();
 }
 
-// Сброс кэшей отправки нижней панели и минимал-худа БЕЗ *Active-флагов: раунд-старт
-// (OnRoundStart, в т.ч. посреди карты — например кик реплей-бота) не освобождает каналы
-// получателя, поэтому не должен подавлять следующий клир-кадр (ClearBottomPanel/
-// ClearMinimalHud полагаются на флаги, чтобы не слать лишний #SFUI_EmptyString).
-// Флаги гасятся только в Reset(), где слот реально освобождён (дисконнект).
+// Сброс кэша отправки нижней панели БЕЗ *Active-флага: раунд-старт (OnRoundStart, в т.ч.
+// посреди карты — например кик реплей-бота) не освобождает канал получателя, поэтому не
+// должен подавлять следующий клир-кадр (ClearBottomPanel полагается на флаг, чтобы не слать
+// лишний #SFUI_EmptyString). Флаг гасится только в Reset(), где слот реально освобождён
+// (дисконнект).
 void KZHUDService::ResetBottomPanelCache()
 {
 	this->bottomStateValid = false;
 	this->lastBottomText[0] = '\0';
 	this->lastBottomSendTime = 0.0;
-	this->lastMinimalCentreText[0] = '\0';
-	this->lastMinimalCentreSendTime = 0.0;
-	this->lastMinimalHtmlText[0] = '\0';
-	this->lastMinimalHtmlSendTime = 0.0;
 }
 
 // Раунд-старт (в т.ч. первый на новой карте — mp_restartgame из OnActivateServer). Главное —
@@ -475,42 +447,10 @@ static_function int CountHtmlLines(const std::string &html)
 	return lines;
 }
 
-// Выбросить пустые сегменты из строки, склеенной фиксированным разделителем. Нужен минимал-
-// стилю: его композиция задана фразой («{checkpoint_text}\n{timer_text}»), и выключенный
-// тумблером элемент подставляется пустой строкой — без чистки на его месте остаётся пустой
-// ряд или висячий <br>. Порядок сегментов и сам разделитель при этом остаются из фразы.
-static_function std::string DropEmptySegments(const std::string &text, const char *sep)
-{
-	const size_t sepLen = V_strlen(sep);
-	std::string out;
-	out.reserve(text.size());
-	size_t pos = 0;
-	while (pos <= text.size())
-	{
-		size_t next = text.find(sep, pos);
-		const size_t end = next == std::string::npos ? text.size() : next;
-		if (end > pos)
-		{
-			if (!out.empty())
-			{
-				out += sep;
-			}
-			out.append(text, pos, end - pos);
-		}
-		if (next == std::string::npos)
-		{
-			break;
-		}
-		pos = next + sepLen;
-	}
-	return out;
-}
-
 // Престрейф в скобках и приписка C кибершоковской панели — ФИКСИРОВАННАЯ палитра, не
 // MHUD-префы игрока: префы mhud*Color — цвета элементов panorama-худа, и сохранённое там
 // экзотическое значение красило престрейф в невидимый цвет на тёмной панели
 // (баг 25.07: у игрока mhudSpeedColor = чёрный ⇒ (престрейф) не виден вне перфа).
-// Объявлены до GetSpeedText: жёлтый KZ_HUD_C_JUMPBUG красит и бейдж JB минимал-стиля.
 #define KZ_HUD_C_PERF    "#40FF40" // престрейф после перфа
 #define KZ_HUD_C_JUMPBUG "#FFFF20" // престрейф после jumpbug/duckbug
 #define KZ_HUD_C_CJ      "#71EEB8" // приписка C (crouch-jump)
@@ -1476,10 +1416,10 @@ void KZHUDService::PrintPanelDiagnostics()
 	else
 	{
 		// Трейс включён, а слепка нет — панель этому получателю сейчас не отправляется вовсе.
-		// Штатных причин три, все с ранним return в DrawPanels: hudType Off, минимал-стиль,
-		// открытое Html-меню (либо hudType Panorama — тогда HTML-путь не строится вовсе).
+		// Штатных причин две, обе с ранним return в DrawPanels: hudType Off, открытое
+		// Html-меню (либо hudType Panorama — тогда HTML-путь не строится вовсе).
 		// Валить это на cvar — врать.
-		utils::PrintConsole(controller, "[KZ]  SENT: пусто — панель не отправляется (hudType Off / Panorama / минимал / открытое меню)\n");
+		utils::PrintConsole(controller, "[KZ]  SENT: пусто — панель не отправляется (hudType Off / Panorama / открытое меню)\n");
 	}
 
 	// Пересобранное сейчас. Пешка обязательна: сборщик читает её флаги/скорость напрямую, а
@@ -1509,8 +1449,7 @@ static_function bool MenuStatusAvailable()
 // Нижняя панель — обычный centre-канал (HUD_PRINTCENTER, ClientPrintFilter), НЕ HTML-канал
 // show_survival_respawn_status: движок рисует его ниже центра экрана, что и даёт «низ» худа.
 // Содержимое: строка CP/TP (гейт hudCpTp получателя, данные наблюдаемого, у реплей-бота —
-// из реплей-системы, как апстримный GetCheckpointText). Только обновлённый стиль: в
-// минимале нижней панели нет (CP/TP там рисует апстрим-композиция, см. UpdateMinimalHud).
+// из реплей-системы, как апстримный GetCheckpointText).
 // Второй режим (menuOpen) — плайн-худ спектатора под открытым Html-меню: скорость/время/
 // клавиши наблюдаемого вместо CP/TP (гейт — в DrawPanels, любой стиль), каждый элемент — по
 // своему тумблеру ПОЛУЧАТЕЛЯ (hudSpeed/hudTimer/hudKeys), как и на остальных путях худа.
@@ -1535,8 +1474,8 @@ void KZHUDService::ComputeBottomState(KZPlayer *player, KZPlayer *target, Bottom
 		// клавиши), а вёрстка обязана быть функцией слепка — иначе текст и слепок разъедутся.
 		out.menuStatus = MenuStatusAvailable();
 		// Тумблеры элементов — с ПОЛУЧАТЕЛЯ (cfg), данные — с наблюдаемого: тот же контракт
-		// data/settings, что в BuildVersionCHud и UpdateMinimalHud. До 05.08 плайн-худ под меню
-		// их не смотрел вовсе и показывал выключенные элементы.
+		// data/settings, что в BuildVersionCHud. До 05.08 плайн-худ под меню их не смотрел
+		// вовсе и показывал выключенные элементы.
 		out.showSpeed = cfg->IsMHUDSpeedEnabled();
 		out.showKeys = cfg->IsMHUDKeysEnabled();
 		if (out.showSpeed)
@@ -1864,132 +1803,6 @@ void KZHUDService::ClearBottomPanel()
 	ClearBottomSink(this->player, this->bottomOnMenuStatus, this->bottomOnAlert);
 }
 
-// Тик минимал-худа получателя (this): апстрим-композиция cs2kz на живых строителях —
-// centre-канал (HUD_PRINTCENTER) = CP/TP + таймер («HUD - Center Text»), HTML-канал
-// (show_survival_respawn_status) = скорость + клавиши («HUD - HTML Center Text»);
-// компакт-режим апстрима — только html (таймер<br>скорость), centre пуст. dataSource —
-// наблюдаемый (данные), настройки/язык/цвета — this (получатель): Get*Text зовутся на
-// hudService наблюдаемого (их данные — this->player), GetSpeedText — на получателе с
-// dataSource (его цветовые префы — часть настроек), тот же контракт, что у BuildVersionCHud.
-// Порядок и разделители композиции — апстримные (берутся из фраз), но per-element тумблеры
-// (hudKeys/hudCpTp/hudTimer/hudSpeed) применяются и здесь: выключенный элемент приходит
-// пустой строкой, а осиротевший разделитель снимает DropEmptySegments.
-// Отправка per-канал дедуплицируется слепком последнего отправленного текста + heartbeat
-// (в движении текст меняется почти каждый тик — шлётся каждый тик, это цена стиля; в
-// простое стабилен). Слепок мог обрезаться своим буфером — тогда сравнение никогда не
-// совпадает и текст шлётся каждый тик: корректно, просто без экономии.
-void KZHUDService::UpdateMinimalHud(KZPlayer *dataSource)
-{
-	const char *language = this->player->languageService->GetLanguage();
-	// Тумблеры элементов читаем с ПОЛУЧАТЕЛЯ (this = настройки), данные — с dataSource:
-	// тот же контракт разведения data/settings, что в BuildVersionCHud и GetSpeedText.
-	// Апстримные геттеры про наши per-element префы не знают вовсе — до 05.08 из-за этого
-	// в минималистичном стиле выключенные элементы (cp/tp и прочие) продолжали рисоваться.
-	const bool wantKeys = this->IsMHUDKeysEnabled();
-	const bool wantCpTp = this->IsMHUDCpTpEnabled();
-	const bool wantTimer = this->IsMHUDTimerEnabled();
-	const bool wantSpeed = this->IsMHUDSpeedEnabled();
-	std::string centreText;
-	std::string htmlText;
-	if (this->IsCompactPanel())
-	{
-		std::string timerText = wantTimer ? dataSource->hudService->GetTimerText(language) : std::string();
-		std::string speedText = wantSpeed ? this->GetSpeedText(language, dataSource) : std::string();
-		if (!timerText.empty() && !speedText.empty())
-		{
-			htmlText = timerText + "<br>" + speedText;
-		}
-		else
-		{
-			htmlText = timerText + speedText;
-		}
-	}
-	else
-	{
-		std::string keyText = wantKeys ? dataSource->hudService->GetKeyText(language) : std::string();
-		std::string checkpointText = wantCpTp ? dataSource->hudService->GetCheckpointText(language) : std::string();
-		std::string timerText = wantTimer ? dataSource->hudService->GetTimerText(language) : std::string();
-		std::string speedText = wantSpeed ? this->GetSpeedText(language, dataSource) : std::string();
-		// clang-format off
-		centreText = KZLanguageService::PrepareMessageWithLang(language, "HUD - Center Text",
-			keyText.c_str(), checkpointText.c_str(), timerText.c_str(), speedText.c_str());
-		htmlText = KZLanguageService::PrepareMessageWithLang(language, "HUD - HTML Center Text",
-			keyText.c_str(), checkpointText.c_str(), timerText.c_str(), speedText.c_str());
-		// clang-format on
-		// Композиционные фразы склеивают элементы ФИКСИРОВАННЫМ разделителем, поэтому
-		// выключенный элемент оставляет по себе пустой ряд (\n) или лишний <br>. Порядок и
-		// сам разделитель остаются апстримными (фраза может отличаться по языкам) — мы лишь
-		// выбрасываем пустые сегменты.
-		centreText = DropEmptySegments(centreText, "\n");
-		htmlText = DropEmptySegments(htmlText, "<br>");
-	}
-	// Хвостовые \n срезаются, как в апстриме (пустой таймер в idle оставляет висячий перенос).
-	centreText = centreText.substr(0, centreText.find_last_not_of('\n') + 1);
-	htmlText = htmlText.substr(0, htmlText.find_last_not_of('\n') + 1);
-
-	f64 now = g_pKZUtils->GetServerGlobals()->curtime;
-
-	if (centreText.empty())
-	{
-		// Компакт: centre минимал не занимает — одноразовый клир остатка полной раскладки.
-		if (this->minimalCentreActive)
-		{
-			this->minimalCentreActive = false;
-			this->lastMinimalCentreText[0] = '\0';
-			this->player->PrintCentre(false, false, "#SFUI_EmptyString");
-		}
-	}
-	else
-	{
-		const bool changed = V_strcmp(this->lastMinimalCentreText, centreText.c_str()) != 0;
-		// now < lastSendTime = curtime пошёл заново (кэш пережил смену карты — подстраховка
-		// к сбросу в OnRoundStart): считаем heartbeat истёкшим. Тот же приём в html ниже.
-		const bool heartbeatDue = now < this->lastMinimalCentreSendTime || now - this->lastMinimalCentreSendTime >= KZ_HUD_BOTTOM_HEARTBEAT;
-		if (changed || heartbeatDue)
-		{
-			V_strncpy(this->lastMinimalCentreText, centreText.c_str(), sizeof(this->lastMinimalCentreText));
-			this->player->PrintCentre(false, false, "%s", centreText.c_str());
-			this->lastMinimalCentreSendTime = now;
-			this->minimalCentreActive = true;
-		}
-	}
-
-	if (htmlText.empty())
-	{
-		// Нечего слать (реплей-бот без времени в компакте): канал сам гаснет за duration=1s.
-		this->lastMinimalHtmlText[0] = '\0';
-	}
-	else
-	{
-		const bool changed = V_strcmp(this->lastMinimalHtmlText, htmlText.c_str()) != 0;
-		const bool heartbeatDue = now < this->lastMinimalHtmlSendTime || now - this->lastMinimalHtmlSendTime >= KZ_HUD_MINIMAL_HTML_HEARTBEAT;
-		if (changed || heartbeatDue)
-		{
-			V_strncpy(this->lastMinimalHtmlText, htmlText.c_str(), sizeof(this->lastMinimalHtmlText));
-			this->player->PrintHTMLCentre(false, false, "%s", htmlText.c_str());
-			this->lastMinimalHtmlSendTime = now;
-		}
-	}
-}
-
-// Одноразовый клир минимал-худа при уходе из него (стиль Updated, panorama-путь, тип Off,
-// открытое меню, смерть без спектейта): centre гасится пустым токеном — сам бы висел ещё
-// несколько секунд; html не трогаем — его либо тут же перерисовывает новый владелец
-// (обновлённый худ/меню), либо он сам гаснет за duration=1s (см. utils::PrintHTMLCentre).
-// Зовётся каждый тик на не-минимальных путях (no-op без minimalCentreActive).
-void KZHUDService::ClearMinimalHud()
-{
-	// Инвалидация кэша всегда: после клира следующий текст обязан отправиться.
-	this->lastMinimalCentreText[0] = '\0';
-	this->lastMinimalHtmlText[0] = '\0';
-	if (!this->minimalCentreActive)
-	{
-		return;
-	}
-	this->minimalCentreActive = false;
-	this->player->PrintCentre(false, false, "#SFUI_EmptyString");
-}
-
 void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 {
 	KZHUDService *cfg = target->hudService;
@@ -2006,9 +1819,9 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	// живой владелец» — panorama одинаково пригодна и владельцу, и спектатору (cfg — всегда
 	// settings/entity ПОЛУЧАТЕЛЯ, т.е. target, а данные берутся у player — наблюдаемого при
 	// спектейте, иначе он же сам). Сущность рисуется независимо от HTML-центр-канала —
-	// поэтому она обязана жить и обновляться и под открытым cs2menus-меню, и в минимал-
-	// стиле: ниже мы уходим с раннего return'а ДО проверки Off/меню/needHtml, чтобы не
-	// завести второй путь показаний тех же данных поверх panorama.
+	// поэтому она обязана жить и обновляться и под открытым cs2menus-меню: ниже мы уходим с
+	// раннего return'а ДО проверки Off/меню/needHtml, чтобы не завести второй путь показаний
+	// тех же данных поверх panorama.
 	bool usePanorama = available && cfg->GetHudType() == HUD_TYPE_PANORAMA;
 	if (usePanorama)
 	{
@@ -2017,7 +1830,6 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 			// needHtml ниже никогда не увидит usePanorama=true — html и panorama обязаны
 			// оставаться взаимоисключающими (иначе получатель ловит оба худа разом).
 			cfg->ClearBottomPanel();
-			cfg->ClearMinimalHud();
 			return;
 		}
 		// Сущность не создалась (см. reason в логе UpdateHudLayout) — это ОТКАЗ, а не выбор
@@ -2032,12 +1844,10 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	}
 
 	// Тип Off — единственный рычаг «выключить худ целиком»: ни panorama (уже обработана
-	// выше — не выбрана либо отвалилась в HTML-фолбэк), ни HTML-панель, ни нижнюю панель,
-	// ни минимал (клир остатков — одноразовый).
+	// выше — не выбрана либо отвалилась в HTML-фолбэк), ни HTML-панель, ни нижнюю панель.
 	if (cfg->GetHudType() == HUD_TYPE_OFF)
 	{
 		cfg->ClearBottomPanel();
-		cfg->ClearMinimalHud();
 		return;
 	}
 
@@ -2054,7 +1864,6 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	// Высоту меню не измеряем: отступ под меню отключён (см. ComputeBottomState).
 	if (g_pMenus && g_pMenus->GetActiveMenuType(target->GetPlayerSlot().Get()) == MenuType::Html)
 	{
-		cfg->ClearMinimalHud();
 		if (player != target && KZ::replaysystem::menu::IsReplayControlsMenuOpen(target->GetPlayerSlot().Get()))
 		{
 			cfg->UpdateBottomPanel(player, /*menuOpen=*/true);
@@ -2077,20 +1886,6 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	// функция уже вышла, либо сброшен в false строкой выше.)
 	bool needHtml = !available || cfg->GetHudType() == HUD_TYPE_STANDARD || !usePanorama;
 
-	// --- Минималистичный стиль: весь худ = апстрим-композиция cs2kz (см. UpdateMinimalHud).
-	//        Кибершоковская HTML-панель и нижняя панель не рисуются вовсе; их остаток при
-	//        переключении стиля стирает одноразовый ClearBottomPanel (centre-канал переходит
-	//        к минималу), html просто перерисовывается новым текстом. ---
-	if (needHtml && cfg->GetTimerStyle() == HUD_TIMER_STYLE_MINIMAL)
-	{
-		cfg->ClearBottomPanel();
-		cfg->UpdateMinimalHud(player);
-		return;
-	}
-	// Уход из минимала (стиль Updated): одноразовый клир его centre-канала;
-	// no-op, пока минимал не был активен.
-	cfg->ClearMinimalHud();
-
 	std::string htmlText;
 
 	if (needHtml)
@@ -2109,8 +1904,7 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	{
 		// "%s", а не текст форматом: KZPlayer::PrintHTMLCentre прогоняет аргумент через
 		// FormatV, а utils::PrintHTMLCentre — ВТОРОЙ раз. Первый же `%` в переводимой фразе
-		// (CP/TP, showpos) или в имени стиля съел бы хвост панели — тот самый симптом,
-		// который тут и чинят. UpdateMinimalHud так и делал, этот путь — нет.
+		// (CP/TP, showpos) съел бы хвост панели — тот самый симптом, который тут и чинят.
 		target->PrintHTMLCentre(false, false, "%s", htmlText.c_str());
 		// Слепок отправленного — под cvar'ом, см. kz_hud_panel_trace. Пишем ПОСЛЕ отправки и
 		// ровно ту строку, что ушла (после трима выше), иначе улика не про провод.
