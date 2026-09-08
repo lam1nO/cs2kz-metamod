@@ -106,6 +106,17 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 	KZGotoService::Init();
 	KZHUDService::Init();
 	KZ::option::InitOptionsMenu();
+	// Включение реестра настроек целиком (Task 15): до этого в дереве жила только ветка HUD
+	// (InitMenuPrefs() внутри KZHUDService::Init() выше) — три остальных Register() существовали
+	// кодом, но их никто не звал. Порядок здесь = порядок категорий в меню, выбран по частоте
+	// использования: HUD (уже первый, самая частая настройка) → Misc (режим/стиль/язык/подсказки —
+	// общее, трогают почти все) → локальные ветки (чекпоинты/видимость/звук/сообщения/paint —
+	// per-run настройки, тоже частые) → Jumpstats (нишевая фича, не у каждого игрока). Регистрация
+	// однократна (сама функция один раз пушит категории в KZ::menu::GetTree()), повторный вызов
+	// сюда не добавлен и не предполагается.
+	KZMiscMenu_Register();
+	KZLocalOptionsMenu_Register();
+	KZJumpstatsMenu_Register();
 	KZLanguageService::Init();
 	KZBeamService::Init();
 	KZPistolService::Init();

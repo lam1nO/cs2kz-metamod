@@ -20,9 +20,9 @@
 // preferredCompareType — пункта меню действительно нет нигде (проверено task-7-brief.md
 // шаг 1), добавляем как Choice(5): None/SPB/GPB/SR/WR (см. KZTimerService::CompareType).
 //
-// Вызов регистрации (KZMiscMenu_Register) в общий Init-порядок пока никто не включает —
-// потребитель дерева (KZMenuService) ещё не построен, см. тот же комментарий в
-// jumpstats_prefs.cpp.
+// Вызов регистрации (KZMiscMenu_Register) — в общем Init-порядке (cs2kz.cpp::Load, Task 15),
+// сразу после HUD и перед Jumpstats: категория часто используется (режим/стиль/язык/подсказки),
+// но реже, чем HUD.
 #include "kz/option/kz_option.h"
 #include "kz/option/menu/model.h"
 #include "kz/language/kz_language.h"
@@ -343,7 +343,7 @@ namespace
 	}
 } // namespace
 
-// Регистрирует категорию Misc. Пока не вызывается ниоткуда — см. комментарий в шапке файла.
+// Регистрирует категорию Misc. Вызов — cs2kz.cpp::Load (Task 15).
 void KZMiscMenu_Register()
 {
 	KZOptNode *cat = KZ::menu::AddCategory("Options - Menu Cat Misc");

@@ -231,3 +231,11 @@ namespace KZ::option
 	// (иначе NavSelect=E дёргал пункты оставленного меню посреди рана).
 	void InitOptionsMenu();
 } // namespace KZ::option
+
+// Регистрация остальных категорий реестра настроек (kz/option/menu/model.h) — каждая зовётся
+// РОВНО ОДИН РАЗ из cs2kz.cpp::Load, рядом с KZHUDService::Init() (Task 15). Объявлены здесь
+// (не в namespace, как и определены в *_prefs.cpp) — единственному вызывающему не нужно тянуть
+// отдельные заголовки misc/jumpstats ради одной функции каждый.
+void KZMiscMenu_Register();
+void KZJumpstatsMenu_Register();
+void KZLocalOptionsMenu_Register();

@@ -17,8 +17,9 @@
 //
 // Старое меню !options (kz_option_menu.cpp) не трогаем — оно остаётся рабочим до отдельной
 // задачи переноса на реестр (см. docs/design диф §6 и брифы транша). Вызов регистрации
-// (KZLocalOptionsMenu_Register) в общий Init-порядок пока никто не включает — потребитель
-// дерева (KZMenuService) ещё не построен, см. тот же комментарий в jumpstats_prefs.cpp.
+// (KZLocalOptionsMenu_Register) — в общем Init-порядке (cs2kz.cpp::Load, Task 15), между Misc
+// и Jumpstats: пять per-run веток (чекпоинты/видимость/звук/сообщения/paint), используются
+// часто, но не так вездесуще, как Misc.
 #include "kz/option/kz_option.h"
 #include "kz/option/menu/model.h"
 #include "kz/checkpoint/kz_checkpoint.h"
@@ -74,7 +75,7 @@ namespace
 	}
 } // namespace
 
-// Регистрирует наши локальные ветки. Пока не вызывается ниоткуда — см. комментарий в шапке.
+// Регистрирует наши локальные ветки. Вызов — cs2kz.cpp::Load (Task 15).
 void KZLocalOptionsMenu_Register()
 {
 	// --- Checkpoint --------------------------------------------------------------------

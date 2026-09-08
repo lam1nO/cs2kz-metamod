@@ -8,9 +8,8 @@
 // задачи переноса на реестр (Task 10 транша), поэтому фразы тиров ниже дублируют
 // s_tierNameKeys из prefs.cpp (static-таблица того файла, внутренняя, трогать незачем).
 //
-// Вызов регистрации (KZJumpstatsMenu_Register) в общий Init-порядок пока никто не включает —
-// потребитель дерева (KZMenuService, см. комментарий в model.h) ещё не построен, это отдельная
-// параллельная задача. Как будет готов — один вызов из cs2kz.cpp рядом с другими ::Init().
+// Вызов регистрации (KZJumpstatsMenu_Register) — в общем Init-порядке (cs2kz.cpp::Load,
+// Task 15), последней из четырёх: нишевая фича, используется реже HUD/Misc/локальных веток.
 #include "kz/jumpstats/kz_jumpstats.h"
 #include "kz/option/kz_option.h"
 #include "kz/option/menu/model.h"
@@ -80,7 +79,7 @@ namespace
 	}
 } // namespace
 
-// Регистрирует категорию Jumpstats. Пока не вызывается ниоткуда — см. комментарий в шапке.
+// Регистрирует категорию Jumpstats. Вызов — cs2kz.cpp::Load (Task 15).
 void KZJumpstatsMenu_Register()
 {
 	KZOptNode *cat = KZ::menu::AddCategory("Options - Menu Cat Jumpstats");
