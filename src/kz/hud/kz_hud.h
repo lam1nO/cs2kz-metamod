@@ -1,8 +1,10 @@
 #pragma once
 #include "kz/kz.h"
 #include "kz/timer/kz_timer.h"
+#include "kz/hud/layout/menu.h"
 #include "entityhandle.h"
 #include "sdk/entity/cparticlesystem.h"
+#include <unordered_map>
 
 #define KZ_HUD_TIMER_STOPPED_GRACE_TIME 3.0f
 #define KZ_HUD_ON_GROUND_THRESHOLD      0.07f
@@ -290,10 +292,11 @@ public:
 	enum
 	{
 		HUD_TYPE_STANDARD = 0, // классическая HTML-панель по центру
-		HUD_TYPE_MHUD     = 1, // particle-оверлей
-		HUD_TYPE_OFF      = 2, // ничего не рисуется
+		HUD_TYPE_MHUD = 1,     // particle-оверлей
+		HUD_TYPE_OFF = 2,      // ничего не рисуется
 		HUD_TYPE_PANORAMA = 3, // custom_hud_layout: разметка mhud.vxml из аддона 3469155349
 	};
+
 	int GetHudType();
 	void SetHudType(int type);
 
@@ -505,6 +508,45 @@ public:
 	void OnCrosshairCvarValue(const char *name, const char *value);
 	void StartCrosshairPolling();
 
+	// === Меню настроек panorama-худа и крестика (Task 11) ============================
+	// Живёт на СВОЕЙ сущности custom_hud_layout (menu.vxml_c), отдельной от this->ownedLayout
+	// (mhud.vxml_c): худ остаётся видимым и обновляется, пока меню открыто поверх него, а общий
+	// кэш классов/переменных развёл бы состояния разных разметок по одним и тем же панелям.
+	// Наши !zones/!rpmenu/!prac/!options и т.п. остаются на cs2menus — это меню их не трогает
+	// и не проверяет g_pMenus вовсе (отдельная система захвата, см. SetInputCaptureEnabled ниже).
+	void OpenLayoutMenu();
+
+	// Прячет корневую панель и снимает курсорный захват. Дополнительно зовётся (НЕ только по
+	// клику "Закрыть") из точек, где персистентный худ-стейт уже гасится по тем же причинам:
+	// Reset() (дисконнект/новый игрок в слоте), OnRoundStart (смена карты — сущность меню
+	// переживить её всё равно не может, но менюOpen-флаг на КЗPlayer живёт дольше и обязан
+	// сброситься сам), kz_player.cpp (мёртв и никого не наблюдает — тот же кадр, что гасит
+	// ownedLayout) и LayoutCleanup (выгрузка плагина). Без этого игрок с открытым меню
+	// застревает в режиме курсора НАВСЕГДА в любой из этих ситуаций.
+	void CloseLayoutMenu();
+
+	bool IsLayoutMenuOpen() const
+	{
+		return this->menuOpen;
+	}
+
+	// Колбэк клика по кнопке меню. У апстрима вызывается из Hook_ClientSvcUserMessage
+	// (utils/hooks.cpp, CS_UM_CustomHudClicked) — В НАШЕЙ БАЗЕ этого хука нет (нет ни
+	// SH_DECL_HOOK4_void(..., ClientSvcUserMessage, ...), ни CCSUsrMsg_CustomHudClicked/
+	// CS_UM_CustomHudClicked в вендоренных заголовках): проводка клика от движка до этого
+	// метода — ОТДЕЛЬНАЯ задача, не входящая в файлы этой (menu.h/menu.cpp/kz_hud.h/AMBuilder).
+	// packedHandle — CEntityHandle сущности МЕНЮ (CCSCustomHudLayout::FromClickHandle),
+	// присланный клиентом; сверяем с this->ownedMenuLayout, чтобы клик по чужому/устаревшему
+	// хэндлу (сущность уже пересоздана) не перепутал панели.
+	void OnLayoutMenuClick(uint32 packedHandle, const char *panelId);
+
+	// Гасит сущность меню и обнуляет её диф-кэш (та же ловушка, что у DestroyOwnedLayout —
+	// следующий владелец слота иначе унаследует чужие классы/захват). Зовётся из Reset()
+	// (дисконнект) и LayoutCleanup() (выгрузка плагина); CloseLayoutMenu() саму сущность НЕ
+	// уничтожает (симметрично апстримному DropCapture — только root/capture), чтобы обычное
+	// закрытие меню в течение карты не платило пересозданием сущности на следующее открытие.
+	void DestroyOwnedMenuLayout();
+
 private:
 	// dataSource = источник данных (наблюдаемый при спектировании); nullptr → сам игрок.
 	// Настройки (цвета perf/CJ) всегда идут с this (получателя) — см. GetMHUDColorPref.
@@ -582,12 +624,13 @@ private:
 	enum KeyParticleFlags : u8
 	{
 		KPF_Forward = 1 << 0,
-		KPF_Left    = 1 << 1,
-		KPF_Back    = 1 << 2,
-		KPF_Right   = 1 << 3,
-		KPF_Jump    = 1 << 4,
-		KPF_Duck    = 1 << 5,
+		KPF_Left = 1 << 1,
+		KPF_Back = 1 << 2,
+		KPF_Right = 1 << 3,
+		KPF_Jump = 1 << 4,
+		KPF_Duck = 1 << 5,
 	};
+
 	CHandle<CParticleSystem> keysParticle;
 
 	void UpdateMHUDSpeed();
@@ -645,6 +688,7 @@ private:
 		i32 fontSize {INT_MIN};
 		const char *fontClass {};
 	};
+
 	LayoutKeysState layoutKeys {};
 
 	// Кэш класс-суффиксов крестика (Task 10) — та же ловушка, что у layoutElements[]/
@@ -682,4 +726,95 @@ private:
 	void UpdatePrespeedElement(CCSCustomHudLayout *layout, const SpeedInfo &info, bool force);
 	void UpdateKeysElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force);
 	void UpdateCheckpointElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force);
+
+	// === Меню настроек (Task 11) — состояние и рендер ==================================
+
+	// Сущность меню ЭТОГО игрока — своя, отдельная от this->ownedLayout (см. комментарий у
+	// OpenLayoutMenu). Гасится вместе с ownedLayout везде, где гасится персистентный худ-стейт.
+	CHandle<CBaseEntity> ownedMenuLayout {};
+	bool menuOpen {};
+	// Индекс активной категории (см. MENU_CATEGORIES в menu.cpp) — плоский список без
+	// подкатегорий: наше дерево (7 категорий, максимум 10 пунктов) укладывается без вложенности,
+	// в отличие от апстримного полноразмерного меню настроек.
+	i32 menuCategory {};
+
+	enum class MenuPopup
+	{
+		None,
+		Color, // попап выбора цвета (перенесено с апстрима почти без изменений)
+		Step,  // попап +-1/+-5 для позиции/размера/прозрачности (апстримный "Step popup")
+	};
+
+	MenuPopup menuPopup {MenuPopup::None};
+	i32 menuPopupItem {-1}; // индекс пункта в активной категории, на который открыт попап
+	i32 menuPopupPage {};   // страница попапа (свотчи цвета постранично, как в апстриме)
+
+	// Диф-кэш применённых классов/переменных сущности меню — та же ловушка, что у
+	// layoutElements/layoutKeys/layoutCrosshair: живёт ТОЛЬКО вместе со своей сущностью,
+	// обнуляется в EnsureMenuLayout при created=true (см. force-паттерн entity.cpp).
+	struct MenuAppliedState
+	{
+		bool rootHidden {true};
+		bool colorPopupHidden {true};
+		bool stepPopupHidden {true};
+		bool stepVHidden {true}; // вертикальный ряд степпера (только Position)
+
+		bool catHidden[KZ_MENU_CATS] {};
+		bool catSelected[KZ_MENU_CATS] {};
+
+		bool itemHidden[KZ_MENU_ITEMS] {};
+		const char *itemType[KZ_MENU_ITEMS] {};
+		bool itemOn[KZ_MENU_ITEMS] {};
+		const char *itemSwatch[KZ_MENU_ITEMS] {};
+
+		const char *swBg[KZ_MENU_SWATCH] {};
+		bool swSelected[KZ_MENU_SWATCH] {};
+		bool swHidden[KZ_MENU_SWATCH] {};
+
+		MenuAppliedState()
+		{
+			for (i32 i = 0; i < KZ_MENU_CATS; i++)
+			{
+				catHidden[i] = true;
+			}
+			for (i32 i = 0; i < KZ_MENU_ITEMS; i++)
+			{
+				itemHidden[i] = true;
+			}
+			for (i32 i = 0; i < KZ_MENU_SWATCH; i++)
+			{
+				swHidden[i] = true;
+			}
+		}
+	};
+
+	MenuAppliedState menuApplied {};
+	// Последнее записанное значение каждой (panelId,var)-пары — как у апстрима: SetDialogVariableString
+	// метит ВСЮ сущность на полную пересылку, повторная запись того же значения того не стоит.
+	std::unordered_map<std::string, std::string> menuVars;
+
+	CCSCustomHudLayout *EnsureMenuLayout(bool &created);
+	void RenderMenu();
+	void RenderMenuCategories(CCSCustomHudLayout *layout);
+	void RenderMenuItems(CCSCustomHudLayout *layout);
+	void RenderMenuColorPopup(CCSCustomHudLayout *layout);
+	void RenderMenuStepPopup(CCSCustomHudLayout *layout);
+
+	void SelectMenuCategory(i32 index);
+	void ActivateMenuItem(i32 slot);
+	void OpenMenuPopup(MenuPopup kind, i32 itemIndex);
+	void CloseMenuPopup();
+	void MenuPopupPageStep(i32 delta);
+	void MenuPopupPick(i32 slot);
+	// axis: 0 — x/размер/прозрачность (единственная ось степпера кроме Position), 1 — y (только Position).
+	void MenuStep(i32 axis, i32 delta);
+
+	void SetMenuClass(CCSCustomHudLayout *layout, const char *panelId, const char *className, bool on);
+	void SetMenuBoolClass(CCSCustomHudLayout *layout, const char *panelId, const char *className, bool &cache, bool want);
+	void SetMenuSwapClass(CCSCustomHudLayout *layout, const char *panelId, const char *&cache, const char *want);
+	void SetMenuVar(CCSCustomHudLayout *layout, const char *panelId, const char *var, const char *value);
+
+	// Симметрично GetMHUDColorPref — цвет хранится упакованным int (R2), своего
+	// GetPreferenceColor/SetPreferenceColor в базе нет.
+	void SetMHUDColorPref(const char *name, const Color &color);
 };

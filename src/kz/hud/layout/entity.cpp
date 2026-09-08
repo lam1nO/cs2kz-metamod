@@ -206,6 +206,11 @@ void KZHUDService::LayoutCleanup()
 		if (player && player->hudService)
 		{
 			player->hudService->DestroyOwnedLayout();
+			// Меню (Task 11) — сущность ОТДЕЛЬНАЯ от ownedLayout выше, с собственным
+			// курсорным захватом: без явного гашения здесь застрявший в режиме курсора
+			// игрок остался бы так и после выгрузки плагина (сущность и захват на ней —
+			// не наши больше, но клиент их не увидит снятыми, пока кто-то не уберёт entity).
+			player->hudService->DestroyOwnedMenuLayout();
 		}
 	}
 }

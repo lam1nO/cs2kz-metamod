@@ -279,6 +279,14 @@ void KZPlayer::OnPhysicsSimulatePost()
 		// Layout-худ по той же причине: DrawPanels сюда не доходит, замороженная сущность
 		// висела бы до следующего вызова.
 		this->hudService->DestroyOwnedLayout();
+		// Меню (Task 11) — снимаем захват по той же причине (мёртв и никого не наблюдает):
+		// без этого игрок, умерший с открытым меню, застрял бы в режиме курсора до
+		// следующего открытия/дисконнекта. Только закрытие (не полный DestroyOwnedMenuLayout) —
+		// сущность дешевле оставить живой на случай быстрого переоткрытия при респавне.
+		if (this->hudService->IsLayoutMenuOpen())
+		{
+			this->hudService->CloseLayoutMenu();
+		}
 	}
 	this->measureService->OnPhysicsSimulatePost();
 	this->quietService->OnPhysicsSimulatePost();
