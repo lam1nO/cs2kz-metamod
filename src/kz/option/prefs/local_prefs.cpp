@@ -14,6 +14,9 @@
 // сырой AddToggle написал бы преф, но не тронул бы кэш, и поведение разошлось бы с настройкой
 // до следующего реконнекта. HideLegs/CheckpointMessage/CheckpointSound/TeleportSound/
 // ShowAllPaint кэша не держат (каждый раз читают преф заново) — им хватает AddToggle.
+// SetItemPref рядом с каждым из трёх — не для чтения (его делает getCurrent), а чтобы у пункта
+// не оставался prefKey == NULL: запись по такому ключу заводит в префах игрока член с ПУСТЫМ
+// именем и флашит его в БД (см. фикс-раунд ревью, находка 1).
 //
 // Старое меню !options (kz_option_menu.cpp) не трогаем — оно остаётся рабочим до отдельной
 // задачи переноса на реестр (см. docs/design диф §6 и брифы транша). Вызов регистрации
@@ -87,7 +90,9 @@ void KZLocalOptionsMenu_Register()
 	// --- Visibility ----------------------------------------------------------------------
 	KZOptNode *visibility = KZ::menu::AddCategory("Options - Menu Cat Visibility");
 	KZ::menu::AddActionToggle(visibility, "Options - Menu Label HidePlayers", &HidePlayersGetCurrent, &HidePlayersOnActivate);
+	KZ::menu::SetItemPref(visibility, "hideOtherPlayers", KZOptStorage::Bool, 0);
 	KZ::menu::AddActionToggle(visibility, "Options - Menu Label HideWeapon", &HideWeaponGetCurrent, &HideWeaponOnActivate);
+	KZ::menu::SetItemPref(visibility, "hideWeapon", KZOptStorage::Bool, 0);
 	// hideLegs дефолт НАШ: true (kz_option_menu.cpp/kz_player.cpp), апстримный false НЕ
 	// переносим — см. docs/design диф §4, task-8-brief.md.
 	KZ::menu::AddToggle(visibility, "Options - Menu Label HideLegs", "hideLegs", true);
@@ -97,6 +102,7 @@ void KZLocalOptionsMenu_Register()
 	KZ::menu::AddToggle(sound, "Options - Menu Label CheckpointSound", "checkpointSound", true);
 	KZ::menu::AddToggle(sound, "Options - Menu Label TeleportSound", "teleportSound", true);
 	KZ::menu::AddActionToggle(sound, "Options - Menu Label TimerStopSound", &TimerStopSoundGetCurrent, &TimerStopSoundOnActivate);
+	KZ::menu::SetItemPref(sound, "timerStopSound", KZOptStorage::Bool, 1);
 	// Хранится как float 0.0-2.0 (см. kz_recordvolume, клэмп 0..2), в меню — проценты 0-200.
 	KZ::menu::AddSize(sound, "Options - Menu Label RecordVolume", "recordVolume", 100, 0, 200);
 	KZ::menu::SetItemUnit(sound, "%");

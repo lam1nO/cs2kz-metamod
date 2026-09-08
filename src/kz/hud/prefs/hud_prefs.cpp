@@ -87,7 +87,7 @@ static_function void OutlineOnActivate(KZPlayer *player, i64 tag)
 // Апстрим держит такую кнопку на каждой странице элемента (origin/master hud_prefs.cpp:256) —
 // при порте она потерялась, и ResetNode остался без единого вызова. Возвращаем её ТОЛЬКО на
 // страницы, где все пункты — обычные префы: ResetNode пишет преф напрямую, и на пункте с
-// колбэком (AddActionToggle сервисов в misc/local/jumpstats) он оставил бы кэш сервиса
+// колбэком (AddActionToggle сервисов в misc_prefs/local_prefs) он оставил бы кэш сервиса
 // рассинхронизированным — ровно тот дефект, из-за которого сломались тумблеры до этого
 // фикс-раунда. Обводка исключением не является: её кэш — layoutPrefs, а ActivateMenuItem
 // зовёт RefreshLayoutPrefs сразу после onActivate кнопки. В General сбрасывать нечего
