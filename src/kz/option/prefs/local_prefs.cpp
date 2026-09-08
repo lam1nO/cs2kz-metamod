@@ -81,14 +81,21 @@ namespace
 // Регистрирует наши локальные ветки. Вызов — cs2kz.cpp::Load (Task 15).
 void KZLocalOptionsMenu_Register()
 {
+	// Пять локальных страниц — ПОДКАТЕГОРИИ одного узла «Игра» (задача «дерево категорий»):
+	// по одному-четырём пункта каждая, плоским списком они забивали левую колонку наравне с
+	// худом. Состав пунктов не меняется, меняется только группировка. Родитель заводится
+	// здесь, потому что все пять живут в этом файле: делить его между Register-ами разных
+	// файлов значило бы завязать порядок подкатегорий на порядок вызовов в cs2kz.cpp.
+	KZOptNode *game = KZ::menu::AddCategory("Options - Menu Cat Gameplay");
+
 	// --- Checkpoint --------------------------------------------------------------------
-	KZOptNode *checkpoint = KZ::menu::AddCategory("Options - Menu Cat Checkpoint");
+	KZOptNode *checkpoint = KZ::menu::AddSub(game, "Options - Menu Cat Checkpoint");
 	KZ::menu::AddButton(checkpoint, "Options - Menu Label SetStartPos", &SetStartPosOnActivate);
 	KZ::menu::AddButton(checkpoint, "Options - Menu Label ClearStartPos", &ClearStartPosOnActivate);
 	KZ::menu::AddToggle(checkpoint, "Options - Menu Label CheckpointMessage", "checkpointMessage", true);
 
 	// --- Visibility ----------------------------------------------------------------------
-	KZOptNode *visibility = KZ::menu::AddCategory("Options - Menu Cat Visibility");
+	KZOptNode *visibility = KZ::menu::AddSub(game, "Options - Menu Cat Visibility");
 	KZ::menu::AddActionToggle(visibility, "Options - Menu Label HidePlayers", &HidePlayersGetCurrent, &HidePlayersOnActivate);
 	KZ::menu::SetItemPref(visibility, "hideOtherPlayers", KZOptStorage::Bool, 0);
 	KZ::menu::AddActionToggle(visibility, "Options - Menu Label HideWeapon", &HideWeaponGetCurrent, &HideWeaponOnActivate);
@@ -98,7 +105,7 @@ void KZLocalOptionsMenu_Register()
 	KZ::menu::AddToggle(visibility, "Options - Menu Label HideLegs", "hideLegs", true);
 
 	// --- Sound ----------------------------------------------------------------------------
-	KZOptNode *sound = KZ::menu::AddCategory("Options - Menu Cat Sound");
+	KZOptNode *sound = KZ::menu::AddSub(game, "Options - Menu Cat Sound");
 	KZ::menu::AddToggle(sound, "Options - Menu Label CheckpointSound", "checkpointSound", true);
 	KZ::menu::AddToggle(sound, "Options - Menu Label TeleportSound", "teleportSound", true);
 	KZ::menu::AddActionToggle(sound, "Options - Menu Label TimerStopSound", &TimerStopSoundGetCurrent, &TimerStopSoundOnActivate);
@@ -109,11 +116,11 @@ void KZLocalOptionsMenu_Register()
 	KZ::menu::SetItemScale(sound, 100);
 
 	// --- Messages --------------------------------------------------------------------------
-	KZOptNode *messages = KZ::menu::AddCategory("Options - Menu Cat Messages");
+	KZOptNode *messages = KZ::menu::AddSub(game, "Options - Menu Cat Messages");
 	KZ::menu::AddToggle(messages, "Options - Menu Label MissedTime", "missedTimeAnnounce", true);
 
 	// --- Paint -------------------------------------------------------------------------------
-	KZOptNode *paint = KZ::menu::AddCategory("Options - Menu Cat Paint");
+	KZOptNode *paint = KZ::menu::AddSub(game, "Options - Menu Cat Paint");
 	KZ::menu::AddToggle(paint, "Options - Menu Label ShowAllPaint", "showAllPaint", false);
 	// Преф хранится как упакованный int 0xRRGGBBAA (KZPaintService::SetColor/SetColorRGB) —
 	// тот же формат, что и модель Color (см. model.cpp::ResetNode). Дефолт — красный, как в

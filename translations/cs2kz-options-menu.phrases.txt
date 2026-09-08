@@ -9,6 +9,15 @@
 		"chi"	"设置"
 		"ua"	"Налаштування"
 	}
+	// Корень локальной ветки: чекпоинты/видимость/звуки/сообщения/paint — её подкатегории
+	// (задача «дерево категорий», local_prefs.cpp).
+	"Options - Menu Cat Gameplay"
+	{
+		"en"	"Gameplay"
+		"ru"	"Игра"
+		"chi"	"游戏"
+		"ua"	"Гра"
+	}
 	"Options - Menu Cat Checkpoint"
 	{
 		"en"	"Checkpoints & start"
