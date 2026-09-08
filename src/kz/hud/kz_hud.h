@@ -72,7 +72,7 @@ struct SpeedInfo
 
 // Собственные cl_crosshair* значения игрока (Task 10): дефолты игры, пока не ответит клиент
 // на запрос через ClientCvarValue — наша база (пин cyb.149) ещё не тянет апстримный
-// cvarquery (введён апстримом позже слияния, base-facts.md это не покрывал), читаем тем же
+// cvarquery (введён апстримом позже слияния, журнал решений задачи это не покрывал), читаем тем же
 // механизмом, что anticheat/detectors/cvars.cpp и kz_language.cpp (g_pClientCvarValue).
 struct MHUDCrosshairSettings
 {
@@ -292,11 +292,10 @@ public:
 	enum
 	{
 		HUD_TYPE_STANDARD = 0, // классическая HTML-панель по центру
-		HUD_TYPE_MHUD = 1,     // particle-оверлей
-		HUD_TYPE_OFF = 2,      // ничего не рисуется
+		HUD_TYPE_MHUD     = 1, // particle-оверлей
+		HUD_TYPE_OFF      = 2, // ничего не рисуется
 		HUD_TYPE_PANORAMA = 3, // custom_hud_layout: разметка mhud.vxml из аддона 3469155349
 	};
-
 	int GetHudType();
 	void SetHudType(int type);
 
@@ -627,13 +626,12 @@ private:
 	enum KeyParticleFlags : u8
 	{
 		KPF_Forward = 1 << 0,
-		KPF_Left = 1 << 1,
-		KPF_Back = 1 << 2,
-		KPF_Right = 1 << 3,
-		KPF_Jump = 1 << 4,
-		KPF_Duck = 1 << 5,
+		KPF_Left    = 1 << 1,
+		KPF_Back    = 1 << 2,
+		KPF_Right   = 1 << 3,
+		KPF_Jump    = 1 << 4,
+		KPF_Duck    = 1 << 5,
 	};
-
 	CHandle<CParticleSystem> keysParticle;
 
 	void UpdateMHUDSpeed();
