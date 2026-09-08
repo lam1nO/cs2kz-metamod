@@ -1005,6 +1005,15 @@
 		"chi"		"MHUD"
 		"ua"		"MHUD"
 	}
+	// Пункт-переход из !hud в panorama-меню настроек (задача 12). Panorama — имя технологии,
+	// латиницей во всех языках, как и «HUD - Menu Type Panorama» выше.
+	"HUD - Menu Label PanoramaMenu"
+	{
+		"en"		"Panorama HUD settings"
+		"ru"		"Настройки Panorama-худа"
+		"chi"		"Panorama HUD 设置"
+		"ua"		"Налаштування Panorama HUD"
+	}
 	// Строка координат/углов (!showpos) в HTML-панели.
 	// ДВЕ отдельные фразы, а не одна: с точностью до сотых (решение пользователя 17.08) строка
 	// «pos … ang …» не влезала в ширину панели и рвалась движком ПОСЕРЕДИНЕ — «pos: x y z ang:»

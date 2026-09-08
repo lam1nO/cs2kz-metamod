@@ -1039,6 +1039,8 @@ static constexpr const char *HUD_MENU_TYPE_TAG = "__hudType__";
 static constexpr const char *HUD_MENU_COMPACT_TAG = "__compactPanel__";
 static constexpr const char *HUD_MENU_FONT_TAG = "__mhudFont__";
 static constexpr const char *HUD_MENU_TIMERSTYLE_TAG = "__hudTimerStyle__";
+// Задача 12: переход из !hud в panorama-меню настроек (кроссовер particle-меню → layout-меню).
+static constexpr const char *HUD_MENU_PANORAMA_TAG = "__hudPanoramaMenu__";
 
 // Следующий тип в цикле меню: MHUD → Panorama → Standard → Off → MHUD.
 static_function int HudTypeNext(int current)
@@ -1156,6 +1158,22 @@ static_function void OnHUDMenuSelect(MenuHandle menu, int slot, int item)
 		std::string typeName = KZLanguageService::PrepareMessageWithLang(lang, HudTypePhrase(next));
 		std::string typeLabel = KZLanguageService::PrepareMessageWithLang(lang, "HUD - Menu Label Type", typeName.c_str());
 		g_pMenus->SetItemText(menu, item, typeLabel.c_str());
+		return;
+	}
+
+	// Переход в panorama-меню настроек (задача 12): доступно только с MultiAddonManager,
+	// тот же гейт, что у остальных panorama-возможностей худа.
+	if (KZ_STREQ(key, HUD_MENU_PANORAMA_TAG))
+	{
+		if (!KZHUDService::IsMHUDAvailable())
+		{
+			p->languageService->PrintChat(true, false, "MHUD - Unavailable");
+			return;
+		}
+		// Корень !hud не закрывается сам по себе (SetCloseOnSelect(m, false) ниже) — закрываем
+		// явно, иначе игрок получит и захват курсора panorama-меню, и активное cs2menus-меню.
+		g_pMenus->CancelMenu(slot);
+		p->hudService->OpenLayoutMenu();
 		return;
 	}
 
@@ -1607,6 +1625,13 @@ u32 KZHUDService::CreateHUDMenu()
 	std::string typeName = KZLanguageService::PrepareMessageWithLang(lang, HudTypePhrase(this->GetHudType()));
 	std::string typeText = KZLanguageService::PrepareMessageWithLang(lang, "HUD - Menu Label Type", typeName.c_str());
 	g_pMenus->AddItem(m, typeText.c_str(), HUD_MENU_TYPE_TAG, false);
+
+	// --- Пункт «Настройки Panorama-худа» (задача 12): выбор закрывает это меню и открывает
+	// panorama-меню (OpenLayoutMenu). Пункт показан всегда — недоступность MultiAddonManager
+	// гасится в OnHUDMenuSelect тем же чат-сообщением, что и у остальных MHUD-действий, а не
+	// скрытием пункта (в этом файле так же устроен HUD_MENU_TYPE_TAG выше). ---
+	std::string panoramaMenuText = KZLanguageService::PrepareMessageWithLang(lang, "HUD - Menu Label PanoramaMenu");
+	g_pMenus->AddItem(m, panoramaMenuText.c_str(), HUD_MENU_PANORAMA_TAG, false);
 
 	// --- Подменю «Элементы (видимость)»: тумблеры видимости строк худа ---
 	{
