@@ -24,6 +24,7 @@
 #include "kz/option/kz_option.h"
 #include "sdk/entity/ccscustomhudlayout.h"
 #include "utils/ctimer.h"
+#include "utils/logging.h"
 #include <vendor/ClientCvarValue/public/iclientcvarvalue.h>
 
 #include "tier0/memdbgon.h"
@@ -92,10 +93,32 @@ static_global const MHUDCrosshairCvar CROSSHAIR_CVARS[] = {
 };
 // clang-format on
 
+// Строка причины отказа ClientCvarValue — machine-readable reason для лога ниже.
+static_function const char *CvarValueStatusReason(ECvarValueStatus eStatus)
+{
+	switch (eStatus)
+	{
+		case ECvarValueStatus::CvarNotFound:
+			return "cvar_not_found";
+		case ECvarValueStatus::NotACvar:
+			return "not_a_cvar";
+		case ECvarValueStatus::CvarProtected:
+			return "cvar_protected";
+		default:
+			return "unknown";
+	}
+}
+
 static_function void OnCrosshairCvarQueried(CPlayerSlot nSlot, ECvarValueStatus eStatus, const char *pszCvarName, const char *pszCvarValue)
 {
 	if (eStatus != ECvarValueStatus::ValueIntact)
 	{
+		// Отказ клиента отдать cl_crosshair* (нет вендорного плагина у клиента, cvar
+		// запротекчен и т.п.) — до подтверждения крестик просто не рисуется (см. ApplyCrosshair/
+		// confirmed), но САМ отказ раньше проходил тихо. Канон проекта требует reason на любой
+		// отказ.
+		KZ_LOG_WARN(LogChannel::General, "[cyb] crosshair_cvar_query_failed reason=%s cvar=%s slot=%i\n",
+					CvarValueStatusReason(eStatus), pszCvarName, nSlot.Get());
 		return;
 	}
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(nSlot);
@@ -191,7 +214,8 @@ static_function Color GetCrosshairColor(const MHUDCrosshairSettings &settings)
 
 // Переносит одно числовое класс-семейство с oldValue на newValue на всех перечисленных панелях.
 // Кэш держит вызывающий: одно значение может водить сразу два семейства.
-static_function void ApplyValueClass(CCSCustomHudLayout *layout, const char *const *panels, i32 count, const char *prefix, i32 oldValue, i32 newValue)
+static_function void ApplyValueClass(KZPlayer *player, CCSCustomHudLayout *layout, const char *const *panels, i32 count, const char *prefix,
+									  i32 oldValue, i32 newValue)
 {
 	if (oldValue == newValue)
 	{
@@ -206,7 +230,13 @@ static_function void ApplyValueClass(CCSCustomHudLayout *layout, const char *con
 			layout->SetHasClass(panels[i], className, k_eHudPanelClassStatus_DoesNotHaveClass);
 		}
 		V_snprintf(className, sizeof(className), "%s%i", prefix, newValue);
-		layout->SetHasClass(panels[i], className, k_eHudPanelClassStatus_HasClass);
+		// SetHasClass возвращает false у сущности, упёршейся в HUD_LAYOUT_MAX_INTERNED_STRINGS
+		// (1024) — крестик молча перестал бы обновляться, отказ обязан быть виден (канон проекта).
+		if (!layout->SetHasClass(panels[i], className, k_eHudPanelClassStatus_HasClass))
+		{
+			KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_crosshair_class_dropped reason=intern_limit panel=%s class=%s slot=%i\n",
+						panels[i], className, player ? player->GetPlayerSlot().Get() : -1);
+		}
 	}
 }
 
@@ -224,14 +254,18 @@ static_function i32 ToMarginClass(i32 devicePixels, f32 scale, i32 outline)
 		   + MHUD_XH_MARGIN_BIAS * MHUD_XH_MARGIN_STEP;
 }
 
-static_function void ApplyFlagClass(CCSCustomHudLayout *layout, const char *panelId, const char *className, i32 &cache, bool set)
+static_function void ApplyFlagClass(KZPlayer *player, CCSCustomHudLayout *layout, const char *panelId, const char *className, i32 &cache, bool set)
 {
 	if (cache == (i32)set)
 	{
 		return;
 	}
 	cache = (i32)set;
-	layout->SetHasClass(panelId, className, set ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass);
+	if (!layout->SetHasClass(panelId, className, set ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass))
+	{
+		KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_crosshair_class_dropped reason=intern_limit panel=%s class=%s slot=%i\n", panelId,
+					className, player ? player->GetPlayerSlot().Get() : -1);
+	}
 }
 
 void KZHUDService::ApplyCrosshair(CCSCustomHudLayout *layout, bool show, bool force)
@@ -251,7 +285,7 @@ void KZHUDService::ApplyCrosshair(CCSCustomHudLayout *layout, bool show, bool fo
 	// «чужой» крестик хуже отсутствующего, поэтому до подтверждения ведём себя как при
 	// выключенном префе (ни классов, ни панелей не трогаем).
 	const bool enabled = show && this->GetLayoutPrefs().crosshair && this->crosshair.confirmed;
-	ApplyFlagClass(layout, "mhud_crosshair", "hidden", state.shown, !enabled);
+	ApplyFlagClass(this->player, layout, "mhud_crosshair", "hidden", state.shown, !enabled);
 	if (!enabled)
 	{
 		// Спрятанный крестик классы не теряет — включить обратно ничего не стоит.
@@ -283,26 +317,26 @@ void KZHUDService::ApplyCrosshair(CCSCustomHudLayout *layout, bool show, bool fo
 	const i32 opacity = alpha * MHUD_XH_OPACITY_STEPS / 255;
 	const char *colorClass = panorama::ResolveColorClass(GetCrosshairColor(settings));
 
-	ApplyValueClass(layout, XH_HORIZONTAL, KZ_ARRAYSIZE(XH_HORIZONTAL), "xh-w--", state.armLength, boxLength);
-	ApplyValueClass(layout, XH_VERTICAL, KZ_ARRAYSIZE(XH_VERTICAL), "xh-h--", state.armLength, boxLength);
+	ApplyValueClass(this->player, layout, XH_HORIZONTAL, KZ_ARRAYSIZE(XH_HORIZONTAL), "xh-w--", state.armLength, boxLength);
+	ApplyValueClass(this->player, layout, XH_VERTICAL, KZ_ARRAYSIZE(XH_VERTICAL), "xh-h--", state.armLength, boxLength);
 	state.armLength = boxLength;
 
-	ApplyValueClass(layout, XH_HORIZONTAL, KZ_ARRAYSIZE(XH_HORIZONTAL), "xh-h--", state.thickness, boxThickness);
-	ApplyValueClass(layout, XH_VERTICAL, KZ_ARRAYSIZE(XH_VERTICAL), "xh-w--", state.thickness, boxThickness);
-	ApplyValueClass(layout, XH_DOT, KZ_ARRAYSIZE(XH_DOT), "xh-w--", state.thickness, boxThickness);
-	ApplyValueClass(layout, XH_DOT, KZ_ARRAYSIZE(XH_DOT), "xh-h--", state.thickness, boxThickness);
+	ApplyValueClass(this->player, layout, XH_HORIZONTAL, KZ_ARRAYSIZE(XH_HORIZONTAL), "xh-h--", state.thickness, boxThickness);
+	ApplyValueClass(this->player, layout, XH_VERTICAL, KZ_ARRAYSIZE(XH_VERTICAL), "xh-w--", state.thickness, boxThickness);
+	ApplyValueClass(this->player, layout, XH_DOT, KZ_ARRAYSIZE(XH_DOT), "xh-w--", state.thickness, boxThickness);
+	ApplyValueClass(this->player, layout, XH_DOT, KZ_ARRAYSIZE(XH_DOT), "xh-h--", state.thickness, boxThickness);
 	state.thickness = boxThickness;
 
-	ApplyValueClass(layout, XH_ARMS_NEAR, KZ_ARRAYSIZE(XH_ARMS_NEAR), "xh-m--", state.margin, margin);
+	ApplyValueClass(this->player, layout, XH_ARMS_NEAR, KZ_ARRAYSIZE(XH_ARMS_NEAR), "xh-m--", state.margin, margin);
 	state.margin = margin;
 
-	ApplyValueClass(layout, XH_ARMS_FAR, KZ_ARRAYSIZE(XH_ARMS_FAR), "xh-m--", state.marginFar, marginFar);
+	ApplyValueClass(this->player, layout, XH_ARMS_FAR, KZ_ARRAYSIZE(XH_ARMS_FAR), "xh-m--", state.marginFar, marginFar);
 	state.marginFar = marginFar;
 
-	ApplyValueClass(layout, XH_PAINTED, KZ_ARRAYSIZE(XH_PAINTED), "xh-ol--", state.outline, outline);
+	ApplyValueClass(this->player, layout, XH_PAINTED, KZ_ARRAYSIZE(XH_PAINTED), "xh-ol--", state.outline, outline);
 	state.outline = outline;
 
-	ApplyValueClass(layout, XH_PAINTED, KZ_ARRAYSIZE(XH_PAINTED), "xh-op--", state.opacity, opacity);
+	ApplyValueClass(this->player, layout, XH_PAINTED, KZ_ARRAYSIZE(XH_PAINTED), "xh-op--", state.opacity, opacity);
 	state.opacity = opacity;
 
 	if (state.colorClass != colorClass)
@@ -313,16 +347,24 @@ void KZHUDService::ApplyCrosshair(CCSCustomHudLayout *layout, bool show, bool fo
 			{
 				layout->SetHasClass(panelId, state.colorClass, k_eHudPanelClassStatus_DoesNotHaveClass);
 			}
-			layout->SetHasClass(panelId, colorClass, k_eHudPanelClassStatus_HasClass);
+			if (!layout->SetHasClass(panelId, colorClass, k_eHudPanelClassStatus_HasClass))
+			{
+				KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_crosshair_class_dropped reason=intern_limit panel=%s class=%s slot=%i\n",
+							panelId, colorClass, this->player->GetPlayerSlot().Get());
+			}
 		}
 		state.colorClass = colorClass;
 	}
 
-	ApplyFlagClass(layout, "xh_dot", "hidden", state.dot, !settings.dot);
+	ApplyFlagClass(this->player, layout, "xh_dot", "hidden", state.dot, !settings.dot);
 	if (state.noTopArm != (i32)settings.tStyle)
 	{
 		state.noTopArm = (i32)settings.tStyle;
 		const auto status = settings.tStyle ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass;
-		layout->SetHasClass("xh_top", "hidden", status);
+		if (!layout->SetHasClass("xh_top", "hidden", status))
+		{
+			KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_crosshair_class_dropped reason=intern_limit panel=xh_top class=hidden slot=%i\n",
+						this->player->GetPlayerSlot().Get());
+		}
 	}
 }

@@ -151,7 +151,11 @@ void KZHUDService::UpdateKeysElement(CCSCustomHudLayout *layout, KZPlayer *sourc
 			continue;
 		}
 		this->layoutKeys.pressed[i] = keys[i];
-		layout->SetHasClass(KEY_PANELS[i], "pressed", keys[i] ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass);
+		if (!layout->SetHasClass(KEY_PANELS[i], "pressed", keys[i] ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass))
+		{
+			KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_hud_class_dropped reason=intern_limit panel=%s class=pressed slot=%i\n",
+						KEY_PANELS[i], this->player->GetPlayerSlot().Get());
+		}
 	}
 
 	// Размер элемента (уже clamped/snapped к LAYOUT_SIZE_MIN/MAX в RefreshLayoutPrefs) — на
@@ -170,7 +174,11 @@ void KZHUDService::UpdateKeysElement(CCSCustomHudLayout *layout, KZPlayer *sourc
 			layout->SetHasClass(keysPanel, className, k_eHudPanelClassStatus_DoesNotHaveClass);
 		}
 		V_snprintf(className, sizeof(className), "key-size--%i", size);
-		layout->SetHasClass(keysPanel, className, k_eHudPanelClassStatus_HasClass);
+		if (!layout->SetHasClass(keysPanel, className, k_eHudPanelClassStatus_HasClass))
+		{
+			KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_hud_class_dropped reason=intern_limit panel=%s class=%s slot=%i\n", keysPanel,
+						className, this->player->GetPlayerSlot().Get());
+		}
 		this->layoutKeys.boxSize = size;
 	}
 
@@ -185,7 +193,11 @@ void KZHUDService::UpdateKeysElement(CCSCustomHudLayout *layout, KZPlayer *sourc
 				layout->SetHasClass(KEY_PANELS[i], className, k_eHudPanelClassStatus_DoesNotHaveClass);
 			}
 			V_snprintf(className, sizeof(className), "font-size--%ipx", size);
-			layout->SetHasClass(KEY_PANELS[i], className, k_eHudPanelClassStatus_HasClass);
+			if (!layout->SetHasClass(KEY_PANELS[i], className, k_eHudPanelClassStatus_HasClass))
+			{
+				KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_hud_class_dropped reason=intern_limit panel=%s class=%s slot=%i\n",
+							KEY_PANELS[i], className, this->player->GetPlayerSlot().Get());
+			}
 		}
 		this->layoutKeys.fontSize = size;
 	}
@@ -200,7 +212,11 @@ void KZHUDService::UpdateKeysElement(CCSCustomHudLayout *layout, KZPlayer *sourc
 			{
 				layout->SetHasClass(KEY_GLYPHS[i], this->layoutKeys.fontClass, k_eHudPanelClassStatus_DoesNotHaveClass);
 			}
-			layout->SetHasClass(KEY_GLYPHS[i], cached.fontClass, k_eHudPanelClassStatus_HasClass);
+			if (!layout->SetHasClass(KEY_GLYPHS[i], cached.fontClass, k_eHudPanelClassStatus_HasClass))
+			{
+				KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_hud_class_dropped reason=intern_limit panel=%s class=%s slot=%i\n",
+							KEY_GLYPHS[i], cached.fontClass, this->player->GetPlayerSlot().Get());
+			}
 		}
 		this->layoutKeys.fontClass = cached.fontClass;
 	}
@@ -236,26 +252,12 @@ bool KZHUDService::UpdateHudLayout(KZPlayer *source)
 	// IsShowingPanel() здесь НЕ читаем: преф showPanel выведен из оборота (TogglePanel()
 	// не вызывается ниоткуда, !panel переключает hudType Off↔Standard) — у игрока со старым
 	// showPanel=false в БД panorama иначе гасла бы целиком и молча, без лога и без способа
-	// включить обратно. Единственный переключатель видимости panorama — сам hudType.
-	const bool show = true;
-
-	// Крестик независим от элементов ниже: у него свой тумблер (mhudCrosshair), и он обязан
-	// применяться, даже когда вся панель худа спрятана (show=false) — иначе игрок с hudType
-	// Off/спрятанной панелью терял бы крестик вместе с таймером/скоростью, хотя по спеке это
-	// самостоятельная настройка. Технически крестик всё равно доступен только на типе
-	// Panorama (та же сущность, что и у элементов худа) — это ожидаемое ограничение, не баг.
-	this->ApplyCrosshair(layout, show, force);
-
-	if (!show)
-	{
-		// show=false — применяем "hidden" всем элементам и выходим: текст/цвет ниже
-		// проигнорированы (см. UpdateLayoutElement), скрытый элемент значения не теряет.
-		for (i32 i = 0; i < (i32)LayoutElement::Count; i++)
-		{
-			this->UpdateLayoutElement(layout, (LayoutElement)i, false, NULL, MHUD_DEF_BASE_COLOR, force);
-		}
-		return true;
-	}
+	// включить обратно. Единственный переключатель видимости panorama — сам hudType, а он уже
+	// проверен вызывающим (usePanorama в DrawPanels) — здесь элементы всегда показываются.
+	//
+	// Крестик независим от элементов ниже: у него свой тумблер (mhudCrosshair), и применяется
+	// он тем же вызовом — самостоятельная настройка, не часть видимости элементов.
+	this->ApplyCrosshair(layout, /* show */ true, force);
 
 	// SpeedInfo — общий расчёт (Task 6/R3): panorama-путь ПЯТАЯ ветвь показа скорости, копия
 	// расчёта сюда запрещена (см. KZHUDService::GetSpeedInfo в kz_hud.h/particles.cpp).

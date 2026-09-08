@@ -6,9 +6,20 @@
 #include "sdk/entity/ccscustomhudlayout.h"
 #include "entitykeyvalues.h"
 #include "utils/utils.h"
+#include "utils/logging.h"
 #include "cs2kz.h"
 
 #include "tier0/memdbgon.h"
+
+// SetHasClass/SetDialogVariableString возвращают false, когда уже упёрлись в
+// HUD_LAYOUT_MAX_INTERNED_STRINGS (1024, sdk/entity/ccscustomhudlayout.h) — дальше схема
+// молча перестаёт меняться. Отказ обязан быть видимым (канон проекта), а не тихим фризом
+// оформления.
+static_function void LogHudInternFailure(KZPlayer *player, const char *panelId, const char *className)
+{
+	KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_hud_class_dropped reason=intern_limit panel=%s class=%s slot=%i\n",
+				panelId, className, player ? player->GetPlayerSlot().Get() : -1);
+}
 
 // clang-format off
 extern const LayoutElementDef LAYOUT_ELEMENTS[(i32)LayoutElement::Count] =
@@ -34,9 +45,9 @@ void KZHUDService::SetLayoutClass(CCSCustomHudLayout *layout, const char *panelI
 	{
 		layout->SetHasClass(panelId, cache, k_eHudPanelClassStatus_DoesNotHaveClass);
 	}
-	if (className)
+	if (className && !layout->SetHasClass(panelId, className, k_eHudPanelClassStatus_HasClass))
 	{
-		layout->SetHasClass(panelId, className, k_eHudPanelClassStatus_HasClass);
+		LogHudInternFailure(this->player, panelId, className);
 	}
 	cache = className;
 }
@@ -56,7 +67,10 @@ void KZHUDService::SetLayoutValueClass(CCSCustomHudLayout *layout, const char *p
 		layout->SetHasClass(panelId, className, k_eHudPanelClassStatus_DoesNotHaveClass);
 	}
 	V_snprintf(className, sizeof(className), "%s--%s%i%s", prefix, value < 0 ? "neg" : "", abs(value), unit);
-	layout->SetHasClass(panelId, className, k_eHudPanelClassStatus_HasClass);
+	if (!layout->SetHasClass(panelId, className, k_eHudPanelClassStatus_HasClass))
+	{
+		LogHudInternFailure(this->player, panelId, className);
+	}
 	cache = value;
 }
 
@@ -77,7 +91,10 @@ void KZHUDService::UpdateLayoutElement(CCSCustomHudLayout *layout, LayoutElement
 	if (state.hidden != !show)
 	{
 		state.hidden = !show;
-		layout->SetHasClass(def.panelId, "hidden", state.hidden ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass);
+		if (!layout->SetHasClass(def.panelId, "hidden", state.hidden ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass))
+		{
+			LogHudInternFailure(this->player, def.panelId, "hidden");
+		}
 	}
 	// Скрытый элемент не теряет значения — включить его обратно ничего не стоит.
 	if (state.hidden)
@@ -89,7 +106,10 @@ void KZHUDService::UpdateLayoutElement(CCSCustomHudLayout *layout, LayoutElement
 	if (text && state.text != text)
 	{
 		state.text = text;
-		layout->SetDialogVariableString(def.panelId, def.varName, text);
+		if (!layout->SetDialogVariableString(def.panelId, def.varName, text))
+		{
+			LogHudInternFailure(this->player, def.panelId, def.varName);
+		}
 	}
 
 	const MHUDLayoutPrefs::Element &cached = this->GetLayoutPrefs().elements[(i32)element];
@@ -120,7 +140,10 @@ void KZHUDService::UpdateLayoutElement(CCSCustomHudLayout *layout, LayoutElement
 			layout->SetHasClass(def.panelId, className, k_eHudPanelClassStatus_DoesNotHaveClass);
 		}
 		V_snprintf(className, sizeof(className), "opacity--%ipct", opacity);
-		layout->SetHasClass(def.panelId, className, k_eHudPanelClassStatus_HasClass);
+		if (!layout->SetHasClass(def.panelId, className, k_eHudPanelClassStatus_HasClass))
+		{
+			LogHudInternFailure(this->player, def.panelId, className);
+		}
 		state.opacity = opacity;
 	}
 
@@ -128,7 +151,10 @@ void KZHUDService::UpdateLayoutElement(CCSCustomHudLayout *layout, LayoutElement
 	if (state.outline != cached.outline)
 	{
 		state.outline = cached.outline;
-		layout->SetHasClass(def.panelId, "outline", cached.outline ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass);
+		if (!layout->SetHasClass(def.panelId, "outline", cached.outline ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass))
+		{
+			LogHudInternFailure(this->player, def.panelId, "outline");
+		}
 	}
 }
 
