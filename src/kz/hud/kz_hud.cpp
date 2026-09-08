@@ -33,11 +33,17 @@ extern bool g_menusHasSlotStatus;
 
 #include "tier0/memdbgon.h"
 
-// Задача 5 (транш "клавиши"): значения — с апстрима, не менялись ни на бит. Остальные
-// MHUD_DEF_* (объявлены extern рядом в kz_hud.h) на момент этой правки в дереве нигде НЕ
-// определены (git grep не находит ни одного тела) — то есть уже до этой задачи линковка
-// была бы разбита; не наша находка чинить чужие восемь констант, но обошли молчанием нельзя —
-// см. отчёт задачи. Свои две новые определяем здесь же, по тому же комментарию в kz_hud.h.
+// Дефолтные цвета худа (объявления — extern в kz_hud.h). Значения апстрима, не менялись ни
+// на бит; жили в particles.cpp и переехали сюда вместе с удалением particle-пути.
+const Color MHUD_DEF_BASE_COLOR(255, 255, 255, 255);
+const Color MHUD_DEF_PERF_COLOR(0x40, 0xFF, 0x40, 0xFF);
+const Color MHUD_DEF_JUMPBUG_COLOR(0xFF, 0xFF, 0x20, 0xFF);
+const Color MHUD_DEF_CJ_COLOR(0x71, 0xEE, 0xB8, 0xFF);
+const Color MHUD_DEF_TIMER_TP_COLOR(255, 255, 255, 255);
+const Color MHUD_DEF_TIMER_PRO_COLOR(0x5F, 0x99, 0xD9, 0xFF);
+const Color MHUD_DEF_TIMER_PAUSED_COLOR(0xFF, 0xFF, 0x00, 0xFF);
+const Color MHUD_DEF_TIMER_STOPPED_COLOR(0xFF, 0xA0, 0xA0, 0xFF);
+const Color MHUD_DEF_KEYS_OVERLAP_COLOR(0xFF, 0x40, 0x40, 0xFF);
 const Color MHUD_DEF_KEYS_PRESSED_COLOR(0x3B, 0xED, 0xA0, 0xFF);
 const Color MHUD_DEF_KEYS_OVERLAP_GLOW_COLOR(0xFF, 0x40, 0x40, 0xFF);
 
