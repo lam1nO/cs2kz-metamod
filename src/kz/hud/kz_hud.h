@@ -68,6 +68,9 @@ struct SpeedInfo
 	bool perfing {};     // src->IsPerfing() && !possibleLadderHop && !takeoffFromLadder
 	bool jumpbug {};     // fromDuckbug — красит преф в отдельный цвет
 	bool crouchJump {};  // crouchJumping НА ВЗЛЁТЕ (см. hasPrespeed) — красит саму скорость
+	// Ушёл с края, а не отпрыгнул (и не с лестницы) — апстримный walkedOff. Валиден только
+	// вместе с hasPrespeed; читает его mhudPrespeedHideWalkOff (см. UpdatePrespeedElement).
+	bool walkedOff {};
 };
 
 // Собственные cl_crosshair* значения игрока (Task 10): дефолты игры, пока не ответит клиент
@@ -127,6 +130,11 @@ struct MHUDLayoutPrefs
 
 	bool timerDetailed {};
 	bool speedPrecise {};
+	// Престрейф (порт с апстрима, origin/master:src/kz/hud/layout/preferences.cpp:46-48):
+	// читаются в UpdatePrespeedElement — точность, скобки и скрытие при уходе с края.
+	bool prespeedPrecise {};     // %.2f вместо %.0f
+	bool prespeedBrackets {};    // «(784)» вместо «784»
+	bool prespeedHideWalkOff {}; // не показывать, когда игрок ушёл с края, а не отпрыгнул
 	bool keysOverlapEnabled {};
 	// Клавиши (Task 5, транш "клавиши"): опции апстрима, ранее не заводившиеся — см. mhud.cpp.
 	bool keysOverlapAxis {}; // красить только пару клавиш конфликтующей оси, не весь контейнер
@@ -136,6 +144,19 @@ struct MHUDLayoutPrefs
 	bool keysGlow {};        // свечение нажатой кнопки
 	bool keysFill {};        // заливка нажатой кнопки
 	i32 keysIdle {};         // 0 show, 1 hide, 2 underscore (см. MHUDKeysIdle апстрима)
+
+	// Показывать худ так, как его видит наблюдаемый игрок (порт с апстрима, mhudMimicSpec).
+	// Читается ТОЛЬКО из своего набора — никогда из набора того, кого мимикрируем, иначе
+	// мимикрия стала бы транзитивной. Разбор — GetLayoutPrefs (layout/prefs.cpp).
+	bool mimicSpec {};
+
+	// false — RefreshLayoutPrefs по этому игроку ещё не прошёл (префы из БД не загружены,
+	// либо это бот): вся структура нулевая, т.е. элементы выключены и цвета чёрные. Своему
+	// худу это безразлично (до загрузки он и не рисуется), но mimicSpec обязан такой набор
+	// отвергать — иначе спектейт свежеподключившегося гасил бы худ наблюдателю целиком.
+	// У апстрима флага нет: там префы ленивые (prefsDirty), GetOwnPrefs() досчитывает их
+	// на первом чтении; у нас кэш наполняется событием OnPlayerPreferencesLoaded.
+	bool loaded {};
 
 	// Крестик (Task 10) — независим от элементов худа выше, но живёт в той же структуре
 	// префов: ключи те же, что читает RefreshLayoutPrefs.
@@ -270,6 +291,10 @@ private:
 	// Игрок, чьи НАСТРОЙКИ (тумблеры/цвета/раскладка) читает MHUD — ВСЕГДА сам игрок.
 	// Та же развязка data/settings живёт в HTML-пути (BuildVersionCHud):
 	// там спектатор реально рисует чужие данные своей раскладкой.
+	// ВАЖНО: это источник СЫРЫХ префов (GetPreference*), и мимикрия под наблюдаемого
+	// (mhudMimicSpec) его НЕ подменяет — она живёт в GetLayoutPrefs(), т.е. на уровне уже
+	// собранного набора. Подмена здесь сломала бы RefreshLayoutPrefs (он наполняет СВОЙ кэш
+	// и читает mimicSpec из своего же набора).
 	KZPlayer *MHUDSettingsSource()
 	{
 		return this->player;
@@ -431,7 +456,13 @@ public:
 	bool OwnsLayoutEntity(CEntityHandle handle);
 
 	// Кэш префов layout-худа: реализация — Task 5.
+	// GetLayoutPrefs — ЭФФЕКТИВНЫЙ набор: свой, а при mhudMimicSpec — набор наблюдаемого
+	// игрока (порт апстримной пары GetPrefs/GetOwnPrefs, origin/master:src/kz/hud/layout/
+	// preferences.cpp:66-89). Всё, что РИСУЕТ худ, обязано звать GetLayoutPrefs.
 	const MHUDLayoutPrefs &GetLayoutPrefs();
+	// Свой набор без мимикрии: наполняется RefreshLayoutPrefs, читает его сама мимикрия
+	// (у наблюдаемого) и всё, что остаётся выбором самого игрока даже во время мимикрии.
+	const MHUDLayoutPrefs &GetOwnLayoutPrefs();
 	void RefreshLayoutPrefs();
 	bool IsLayoutElementEnabled(LayoutElement element);
 	// Эффективное значение поэлементной обводки С УЧЁТОМ миграции с общего hudOutline

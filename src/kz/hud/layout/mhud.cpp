@@ -80,12 +80,13 @@ void KZHUDService::UpdateSpeedElement(CCSCustomHudLayout *layout, const SpeedInf
 
 void KZHUDService::UpdatePrespeedElement(CCSCustomHudLayout *layout, const SpeedInfo &info, bool force)
 {
-	// Отдельного prespeedPrecise у нас нет (Task 5 не заводил) — форматируем тем же
-	// speedPrecise, что и саму скорость; без скобок — апстримный prespeedBrackets тоже
-	// отсутствует как преф.
+	// Точность/скобки/скрытие при уходе с края — порт с апстрима один-в-один
+	// (origin/master:src/kz/hud/layout/mhud.cpp:63-84): свои префы mhudPrespeedPrecise/
+	// mhudPrespeedBrackets/mhudPrespeedHideWalkOff, а не общий с самой скоростью speedPrecise.
 	const MHUDLayoutPrefs &prefs = this->GetLayoutPrefs();
 	char text[16];
-	V_snprintf(text, sizeof(text), prefs.speedPrecise ? "%.2f" : "%.0f", info.prespeed.Length2D());
+	const char *format = prefs.prespeedBrackets ? (prefs.prespeedPrecise ? "(%.2f)" : "(%.0f)") : (prefs.prespeedPrecise ? "%.2f" : "%.0f");
+	V_snprintf(text, sizeof(text), format, info.prespeed.Length2D());
 	Color color;
 	if (info.jumpbug)
 	{
@@ -99,9 +100,11 @@ void KZHUDService::UpdatePrespeedElement(CCSCustomHudLayout *layout, const Speed
 	{
 		color = prefs.prespeed;
 	}
-	// info.hasPrespeed — тот же useTakeoff, что и в particle-пути (общий GetSpeedInfo, R3):
-	// без взлёта престрейфу нечего показывать, апстримный prespeedHideWalkOff у нас не заведён.
-	const bool show = this->IsLayoutElementEnabled(LayoutElement::Prespeed) && info.hasPrespeed;
+	// info.hasPrespeed — тот же useTakeoff/showTakeoff, что и в остальных ветках худа (общий
+	// GetSpeedInfo, R3): без взлёта престрейфу нечего показывать. walkedOff — уход с края
+	// вместо прыжка: с mhudPrespeedHideWalkOff такой «престрейф» не показываем (апстрим:
+	// origin/master:src/kz/hud/layout/mhud.cpp:82).
+	const bool show = this->IsLayoutElementEnabled(LayoutElement::Prespeed) && info.hasPrespeed && !(prefs.prespeedHideWalkOff && info.walkedOff);
 	this->UpdateLayoutElement(layout, LayoutElement::Prespeed, show, text, color, force);
 }
 

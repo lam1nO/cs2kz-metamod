@@ -4,12 +4,37 @@
 #include "kz/hud/layout/layout.h"
 #include "kz/hud/layout/panorama_tables.h"
 #include "kz/option/kz_option.h"
+#include "kz/spec/kz_spec.h" // GetSpectatedPlayer — цель мимикрии (mhudMimicSpec)
 
 #include "tier0/memdbgon.h"
 
-const MHUDLayoutPrefs &KZHUDService::GetLayoutPrefs()
+const MHUDLayoutPrefs &KZHUDService::GetOwnLayoutPrefs()
 {
 	return this->layoutPrefs;
+}
+
+// Порт апстримного KZHUDService::GetPrefs (origin/master:src/kz/hud/layout/preferences.cpp:75-89)
+// на наш кэш: у апстрима набор ленивый (GetOwnPrefs досчитывает по prefsDirty), у нас —
+// заполненное поле layoutPrefs, поэтому вместо вызова досчёта берём чужое поле как есть
+// (кэш наблюдаемого поддерживается его же событиями: OnPlayerPreferencesLoaded и
+// RefreshLayoutPrefs после каждой записи из меню, см. layout/menu.cpp).
+const MHUDLayoutPrefs &KZHUDService::GetLayoutPrefs()
+{
+	const MHUDLayoutPrefs &own = this->GetOwnLayoutPrefs();
+	if (!own.mimicSpec)
+	{
+		return own;
+	}
+	// У ботов (в т.ч. у реплей-бота) своих настроек нет — мимикрия под бота просто погасила бы
+	// худ наблюдателю. Апстримная проверка один-в-один, плюс наша `loaded`: там нулевого набора
+	// не бывает вовсе (ленивый досчёт), у нас он существует до OnPlayerPreferencesLoaded.
+	KZPlayer *target = this->player->specService->GetSpectatedPlayer();
+	if (!target || target == this->player || target->IsFakeClient())
+	{
+		return own;
+	}
+	const MHUDLayoutPrefs &mimicked = target->hudService->GetOwnLayoutPrefs();
+	return mimicked.loaded ? mimicked : own;
 }
 
 // Миграция обводки: до задачи 4 обводка была ОДНИМ тумблером hudOutline на все пять элементов.
@@ -40,9 +65,10 @@ bool KZHUDService::GetElementOutlinePref(LayoutElement element)
 
 void KZHUDService::RefreshLayoutPrefs()
 {
-	// Источник настроек — ВСЕГДА сам игрок (MHUDSettingsSource() не смотрит на спектейт,
-	// см. её объявление в kz_hud.h): тумблеры/цвета/раскладка панорама-худа — не то, что
-	// наблюдается за другим игроком, в отличие от источника ДАННЫХ (MHUDDataSource()).
+	// Источник настроек ЗДЕСЬ — ВСЕГДА сам игрок (MHUDSettingsSource() не смотрит на спектейт,
+	// см. её объявление в kz_hud.h): этот метод наполняет СВОЙ набор игрока. Мимикрия под
+	// наблюдаемого (mhudMimicSpec) живёт исключительно в GetLayoutPrefs выше — иначе она стала
+	// бы транзитивной (чужой mimicSpec попал бы в наш кэш) и зацикливалась бы на чтении.
 	auto *opts = this->MHUDSettingsSource()->optionService;
 	for (i32 e = 0; e < (i32)LayoutElement::Count; e++)
 	{
@@ -93,15 +119,30 @@ void KZHUDService::RefreshLayoutPrefs()
 	this->layoutPrefs.keysFill = opts->GetPreferenceBool("mhudKeysFill", false);
 	this->layoutPrefs.keysIdle = Clamp((i32)opts->GetPreferenceInt("mhudKeysIdle", 2), 0, 2);
 	this->layoutPrefs.speedPrecise = opts->GetPreferenceBool("mhudSpeedPrecise", false);
+	// Престрейф — три префа апстрима, до этой задачи не читавшиеся вообще (дефолты его же,
+	// origin/master:src/kz/hud/layout/preferences.cpp:46-48).
+	this->layoutPrefs.prespeedPrecise = opts->GetPreferenceBool("mhudPrespeedPrecise", false);
+	this->layoutPrefs.prespeedBrackets = opts->GetPreferenceBool("mhudPrespeedBrackets", false);
+	this->layoutPrefs.prespeedHideWalkOff = opts->GetPreferenceBool("mhudPrespeedHideWalkOff", false);
+	// mimicSpec — из СВОЕГО набора и только отсюда: GetLayoutPrefs его не мимикрирует
+	// (origin/master:src/kz/hud/kz_hud.h:127, preferences.cpp:61).
+	this->layoutPrefs.mimicSpec = opts->GetPreferenceBool("mhudMimicSpec", false);
 
 	// Крестик (Task 10) — самостоятельный тумблер, не элемент LAYOUT_ELEMENTS: у него нет
 	// текста/шрифта/позиции в процентах, только масштаб (crosshairScale, доли device-пикселя).
 	// Дефолт true — синхронизирован с текущими настройками игрока (задача hud-defaults).
 	this->layoutPrefs.crosshair = opts->GetPreferenceBool("mhudCrosshair", true);
 	this->layoutPrefs.crosshairScale = panorama::SnapToStep((i32)opts->GetPreferenceInt("mhudCrosshairScale", 100), 0, 500);
+
+	// Последней строкой: набор целиком заполнен, мимикрия (GetLayoutPrefs) может его брать.
+	// Аналог апстримного `prefsDirty = false` в конце RefreshPrefs.
+	this->layoutPrefs.loaded = true;
 }
 
 bool KZHUDService::IsLayoutElementEnabled(LayoutElement element)
 {
-	return this->layoutPrefs.elements[(i32)element].enabled;
+	// Через GetLayoutPrefs, а не напрямую по this->layoutPrefs: иначе при mhudMimicSpec
+	// цвета/раскладка брались бы у наблюдаемого, а ВИДИМОСТЬ элементов — своя (апстрим зовёт
+	// GetPrefs, origin/master:src/kz/hud/layout/preferences.cpp:96-99).
+	return this->GetLayoutPrefs().elements[(i32)element].enabled;
 }

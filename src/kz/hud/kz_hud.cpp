@@ -278,6 +278,10 @@ SpeedInfo KZHUDService::GetSpeedInfo()
 	// Crouch-jump имеет смысл только на взлёте (см. useTakeoff у апстрима) — вне hasPrespeed
 	// красить скорость в CJ-цвет было бы враньём (взлёта уже/ещё нет).
 	info.crouchJump = info.hasPrespeed && src->hudService->crouchJumping;
+	// walkedOff — «ушёл с края»: отрыв без прыжка и не с лестницы (апстрим один-в-один,
+	// origin/master:src/kz/hud/kz_hud.cpp:113). Как и crouchJump, осмыслен только на взлёте:
+	// вне hasPrespeed престрейф всё равно скрыт, но false здесь честнее нулевого поля.
+	info.walkedOff = info.hasPrespeed && !src->jumped && !src->takeoffFromLadder;
 	return info;
 }
 
@@ -361,6 +365,11 @@ void KZHUDService::Reset()
 	// сброса новый игрок унаследовал бы «подтверждённые» cl_crosshair* ПРЕДЫДУЩЕГО, а
 	// ApplyCrosshair нарисовал бы ему чужой крестик как настоящий.
 	this->crosshair = MHUDCrosshairSettings();
+	// Кэш префов худа — ровно тот же класс улики, что crosshair выше: слот освобождается, и без
+	// сброса НОВЫЙ игрок в этом слоте рисовался бы настройками предыдущего до срабатывания
+	// OnPlayerPreferencesLoaded, а спектатор с mhudMimicSpec мимикрировал бы под чужой набор
+	// (loaded остался бы true — см. MHUDLayoutPrefs::loaded в kz_hud.h).
+	this->layoutPrefs = MHUDLayoutPrefs();
 	// Меню (Task 11) — своя сущность с курсорным захватом (см. layout/menu.cpp): дисконнект
 	// обязан снять его так же, как ownedLayout выше, иначе следующий игрок в этом слоте
 	// унаследует чужой menuOpen/diff-кэш, а у отключившегося сам захват уйдёт вместе с
