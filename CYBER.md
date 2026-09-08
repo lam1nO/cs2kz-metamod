@@ -129,7 +129,9 @@ cs2kz-linux-builder .`, иначе компилируется КОПИЯ ИЗ О
   менять только по его слову**.
 - **Эмиттер** (`src/kz/timer/cyb_emitter.*`): `kz.run_finished` в ingest
   платформы по окончании таймера. Конвенция course: 0 = main, N = bonus N.
-- **HUD**: единый `!hud` (Стандартный/MHUD/Выкл, преф `hudType`), per-element тумблеры с
+- **HUD**: единый `!hud`, преф `hudType` — ЧЕТЫРЕ значения: Стандартный/MHUD/Выкл (0/1/2,
+  как раньше) и **Panorama** (3, добавлен вместе с меню настроек, см. отдельный пункт ниже).
+  Цикл в меню: MHUD → Panorama → Standard → Off (`HudTypeNext`). Per-element тумблеры с
   prefKey, particle-MHUD (скорость/клавиши/время; particle-элемента CP/TP не существует),
   спектатор видит по данным наблюдаемого, досылка контент-ассета в OnPlayerActive.
   Приписка у скорости: `C` (crouch-jump, `KZ_HUD_C_CJ`) либо `JB` (строго
@@ -322,6 +324,31 @@ cs2kz-linux-builder .`, иначе компилируется КОПИЯ ИЗ О
     `MenuStatusAvailable()`: он обязан стоять и на выборе приёмника, и на КАЖДОЙ отправке,
     потому что `bottomOnMenuStatus` переживает горячую замену cs2menus на сборку без 005, а
     вызов 005-метода на её vtable — падение сервера, а не отказ.
+
+- **HUD тип Panorama** (`hudType=3`, `src/kz/hud/layout/`): своя сущность
+  `custom_hud_layout` НА ИГРОКА (`EnsureOwnedLayout`/`DestroyOwnedLayout`), разметка
+  `mhud.vxml_c` из чужого воркшоп-аддона 3469155349 (нужен MultiAddonManager, см.
+  `IsMHUDAvailable`; нет аддона/схемы — лог `panorama_hud_unavailable reason=…` и
+  фолбэк на HTML, взаимоисключающе с остальными путями — см. `DrawPanels`). Элементы
+  (таймер/скорость/престрейф/клавиши/чекпоинт) и крестик (реплика `cl_crosshair*`
+  игрока, опрашивается `IClientCvarValue`, тумблер `mhudCrosshair`, гейтится
+  `hudType==Panorama` — на других типах опрос не идёт) рисуются классами схемы
+  (`SetHasClass`) и dialog-переменными (`SetDialogVariableString`) — БЕЗ отдельного
+  текстового канала, поверх минимал-худа и cs2menus-меню не заводит второго показания
+  тех же данных.
+  Настройки — своё меню (`!hudmenu`/`kz_hm`, `OpenLayoutMenu`) на ВТОРОЙ, тоже
+  персональной, сущности `custom_hud_layout` (`ownedMenuLayout`/`EnsureMenuLayout`):
+  клик по пункту доезжает usermessage'ем `KZ_UM_CUSTOM_HUD_CLICKED` (свой protobuf
+  `protobuf/kz_customhud.proto`, package `cs2kz.customhud` → тип `using`-алиасится в
+  `hooks.cpp`, см. комментарий там про пин hl2sdk), открытие меню переводит игрока в
+  режим курсора (`SetInputCaptureEnabled`) — снимается явно на каждом пути выхода
+  (закрытие/смерть/спектейт/смена карты/дисконнект/выгрузка плагина), не полагаясь на
+  побочный эффект удаления сущности.
+  **Транзит** (`KZ::quiet::OnCheckTransmit`, отдельный цикл от particle-белого-списка
+  ниже, тот же файл): у сущностей класса `custom_hud_layout` НЕТ общего трансмита —
+  каждому получателю оставляется ТОЛЬКО его собственная (`KZHUDService::OwnsLayoutEntity`
+  сверяет ОБА хэндла — худ И меню), иначе на N игроках каждый получал бы N сущностей с
+  чужими таймерами и чужим курсорным захватом.
 
 - **Три канала экранного текста, и только три.** (1) HTML-панель — игровое событие
   `show_survival_respawn_status`, **одна на игрока**; её делят наш `BuildVersionCHud` и
