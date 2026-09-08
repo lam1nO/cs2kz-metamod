@@ -279,12 +279,15 @@
 		"ru"		"{grey}Применение: {default}kz_hud <panel>{grey}, либо {default}kz_hud{grey} — меню настроек."
 		"ua"		"{grey}Використання: {default}kz_hud <panel>{grey}, або {default}kz_hud{grey} — меню налаштувань."
 	}
+	// Печатается, когда не удалось создать сущность custom_hud_layout (меню настроек не
+	// открылось). Текст про particle-худ устарел вместе с удалением того пути; ключ
+	// технический, менять его не за что — меняем только видимое игроку.
 	"MHUD - Unavailable"
 	{
-		"en"		"{grey}The particle HUD is currently unavailable."
-		"chi"		"{grey}粒子HUD当前不可用."
-		"ru"		"{grey}Панель HUD сейчас недоступна."
-		"ua"		"{grey}Панель HUD наразі недоступна."
+		"en"		"{grey}The settings menu is unavailable right now. Try reconnecting."
+		"chi"		"{grey}设置菜单当前不可用，请尝试重新连接。"
+		"ru"		"{grey}Меню настроек сейчас недоступно. Попробуй перезайти."
+		"ua"		"{grey}Меню налаштувань зараз недоступне. Спробуй перезайти."
 	}
 
 
