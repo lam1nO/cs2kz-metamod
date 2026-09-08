@@ -65,25 +65,76 @@
 #define KZ_MENU_TITLE_PHRASE "HUD - Menu Title"
 
 // === Обход реестра (KZ::menu::GetTree(), Task 1) ============================================
-// Состав меню (категории/пункты) собирается из ЧЕТЫРЁХ Register() (hud/prefs/hud_prefs.cpp —
-// 7 категорий, misc/jumpstats/local_prefs — ещё 7, включены в Init-порядок Task 15) — дерево
-// без подкатегорий (плоский список), поэтому menuCategory индексирует ПРЯМО верхний уровень
-// GetTree(), subs не используются. menuCategory == -1 — root (список категорий, ни одна не
-// выбрана, панель пунктов пуста): использует OpenLayoutMenu(NULL), см. ниже.
+// Состав меню собирается из ЧЕТЫРЁХ Register() (hud/prefs/hud_prefs.cpp, misc/local/jumpstats —
+// порядок Init см. cs2kz.cpp, Task 15) и с задачи «дерево категорий» он ДВУХУРОВНЕВЫЙ, как у
+// апстрима: верхний уровень — GetTree(), под раскрытой категорией — её KZOptNode::subs.
+// Активный узел держит пара (menuCategory, menuSub), см. kz_hud.h: menuCategory == -1 — root
+// (список категорий, ни одна не раскрыта, панель пунктов пуста, OpenLayoutMenu(NULL));
+// menuSub == -1 — у категории подкатегорий нет и пункты показывает она сама.
 
-static_function const KZOptItem *GetMenuItem(i32 category, i32 itemIndex)
+// Узел, чьи пункты показывает средняя колонка (апстримный ActiveNode, kz_menu.cpp:211-228).
+// У категории с подкатегориями своих пунктов не бывает — их держат subs.
+static_function const KZOptNode *ActiveMenuNode(i32 category, i32 sub)
 {
 	const std::vector<KZOptNode *> &tree = KZ::menu::GetTree();
 	if (category < 0 || category >= (i32)tree.size())
 	{
 		return NULL;
 	}
-	const std::vector<KZOptItem> &items = tree[category]->items;
-	if (itemIndex < 0 || itemIndex >= (i32)items.size())
+	const KZOptNode *cat = tree[category];
+	if (cat->subs.empty())
+	{
+		return cat;
+	}
+	if (sub >= 0 && sub < (i32)cat->subs.size())
+	{
+		return cat->subs[sub];
+	}
+	return NULL;
+}
+
+static_function const KZOptItem *GetMenuItem(i32 category, i32 sub, i32 itemIndex)
+{
+	const KZOptNode *node = ActiveMenuNode(category, sub);
+	if (!node || itemIndex < 0 || itemIndex >= (i32)node->items.size())
 	{
 		return NULL;
 	}
-	return &items[itemIndex];
+	return &node->items[itemIndex];
+}
+
+// Левая колонка плющится в те же 20 кнопок cat0..cat19, что и раньше (своих панелей под
+// вложенность в разметке чужого аддона НЕТ — апстрим рисует подкатегории теми же кнопками с
+// классами indent/cat-parent, kz_menu.cpp:230-248/336-357). Слот -> узел: категории верхнего
+// уровня по порядку, а сразу под РАСКРЫТОЙ категорией (selectedCategory) — её подкатегории.
+// Состав слотов зависит только от selectedCategory, поэтому обработчик клика пересобирает
+// раскладку тем же вызовом и не хранит её между кадрами.
+struct MenuLeftEntry
+{
+	const KZOptNode *node {};
+	bool isSub {};
+	i32 category {-1};
+	i32 sub {-1};
+};
+
+static_function i32 BuildMenuLeft(i32 selectedCategory, MenuLeftEntry (&slots)[KZ_MENU_CATS])
+{
+	const std::vector<KZOptNode *> &tree = KZ::menu::GetTree();
+	i32 n = 0;
+	for (i32 ci = 0; ci < (i32)tree.size() && n < KZ_MENU_CATS; ci++)
+	{
+		slots[n++] = {tree[ci], false, ci, -1};
+		if (ci != selectedCategory)
+		{
+			continue;
+		}
+		const std::vector<KZOptNode *> &subs = tree[ci]->subs;
+		for (i32 si = 0; si < (i32)subs.size() && n < KZ_MENU_CATS; si++)
+		{
+			slots[n++] = {subs[si], true, ci, si};
+		}
+	}
+	return n;
 }
 
 // === Мелкие таблицы: шрифты (без апстримного полного list-попапа) ==========================
@@ -399,10 +450,11 @@ void KZHUDService::RenderMenu()
 		return;
 	}
 
-	const std::vector<KZOptNode *> &titleTree = KZ::menu::GetTree();
-	const char *titleKey = (this->menuCategory >= 0 && this->menuCategory < (i32)titleTree.size() && titleTree[this->menuCategory]->phraseKey)
-							   ? titleTree[this->menuCategory]->phraseKey
-							   : KZ_MENU_TITLE_PHRASE;
+	// Заголовок — имя АКТИВНОГО узла (подкатегории, если она выбрана): имя самой категории и
+	// так стоит слева жирной шапкой (класс cat-parent), дублировать его в заголовке значило бы
+	// не показать игроку, на какой он странице.
+	const KZOptNode *titleNode = ActiveMenuNode(this->menuCategory, this->menuSub);
+	const char *titleKey = (titleNode && titleNode->phraseKey) ? titleNode->phraseKey : KZ_MENU_TITLE_PHRASE;
 	const std::string title = KZLanguageService::PrepareMessageWithLang(this->player->languageService->GetLanguage(), titleKey);
 	this->SetMenuVar(layout, "menu_title", "title", title.c_str());
 	// Шрифт и цвет корня — статикой, без своего префа (GetPreferenceColor у нас в базе нет,
@@ -448,18 +500,30 @@ void KZHUDService::RenderMenu()
 
 void KZHUDService::RenderMenuCategories(CCSCustomHudLayout *layout)
 {
-	const std::vector<KZOptNode *> &tree = KZ::menu::GetTree();
+	MenuLeftEntry slots[KZ_MENU_CATS];
+	const i32 count = BuildMenuLeft(this->menuCategory, slots);
+	const KZOptNode *active = ActiveMenuNode(this->menuCategory, this->menuSub);
 	const char *lang = this->player->languageService->GetLanguage();
 	for (i32 i = 0; i < KZ_MENU_CATS; i++)
 	{
-		const bool used = i < (i32)tree.size();
+		const bool used = i < count;
 		if (used)
 		{
+			const MenuLeftEntry &e = slots[i];
+			// Классы ровно апстримные (kz_menu.cpp:336-357), все четыре описаны в menu.css чужого
+			// аддона: .cat.indent (отступ подкатегории), .cat.cat-parent (жирная шапка категории),
+			// .cat.cat-parent.disabled (раскрытый родитель не подсвечивается наведением, клик по
+			// нему гасит SelectMenuCategory), .cat.selected (плашка активной строки).
+			const bool isParent = !e.isSub;
+			const bool disabled = isParent && !e.node->subs.empty() && e.category == this->menuCategory;
 			// PrepareMessageWithLang деградирует в сам ключ, если фразы нет (см. GetTranslatedFormat) —
 			// это то же поведение, что и у остального форка (KZLanguageService), не своя логика.
-			const std::string catLabel = KZLanguageService::PrepareMessageWithLang(lang, tree[i]->phraseKey);
+			const std::string catLabel = KZLanguageService::PrepareMessageWithLang(lang, e.node->phraseKey);
 			this->SetMenuVar(layout, CatLbl(i), CatVar(i), catLabel.c_str());
-			this->SetMenuBoolClass(layout, CatPanel(i), "selected", this->menuApplied.catSelected[i], i == this->menuCategory);
+			this->SetMenuBoolClass(layout, CatPanel(i), "indent", this->menuApplied.catIndent[i], e.isSub);
+			this->SetMenuBoolClass(layout, CatPanel(i), "cat-parent", this->menuApplied.catParent[i], isParent);
+			this->SetMenuBoolClass(layout, CatPanel(i), "disabled", this->menuApplied.catDisabled[i], disabled);
+			this->SetMenuBoolClass(layout, CatPanel(i), "selected", this->menuApplied.catSelected[i], e.node == active);
 		}
 		this->SetMenuBoolClass(layout, CatPanel(i), "hidden", this->menuApplied.catHidden[i], !used);
 	}
@@ -501,8 +565,8 @@ static_function std::string GetChoiceValueLabel(KZPlayer *player, const KZOptIte
 
 void KZHUDService::RenderMenuItems(CCSCustomHudLayout *layout)
 {
-	const std::vector<KZOptNode *> &tree = KZ::menu::GetTree();
-	const std::vector<KZOptItem> *items = (this->menuCategory >= 0 && this->menuCategory < (i32)tree.size()) ? &tree[this->menuCategory]->items : NULL;
+	const KZOptNode *node = ActiveMenuNode(this->menuCategory, this->menuSub);
+	const std::vector<KZOptItem> *items = node ? &node->items : NULL;
 	const i32 count = items ? MIN((i32)items->size(), KZ_MENU_ITEMS) : 0;
 	// Пункты за KZ_MENU_ITEMS-м просто не существуют для игрока — отказ обязан быть видимым
 	// (канон проекта), как и у интерн-лимита в SetMenuClass. Логируем один раз на кадр рендера
@@ -510,8 +574,7 @@ void KZHUDService::RenderMenuItems(CCSCustomHudLayout *layout)
 	if (items && (i32)items->size() > KZ_MENU_ITEMS)
 	{
 		KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_menu_items_truncated reason=slot_limit category=%s items=%i limit=%i slot=%i\n",
-					tree[this->menuCategory]->phraseKey ? tree[this->menuCategory]->phraseKey : "?", (i32)items->size(), KZ_MENU_ITEMS,
-					this->player->GetPlayerSlot().Get());
+					node->phraseKey ? node->phraseKey : "?", (i32)items->size(), KZ_MENU_ITEMS, this->player->GetPlayerSlot().Get());
 	}
 	const char *lang = this->player->languageService->GetLanguage();
 
@@ -611,7 +674,7 @@ void KZHUDService::RenderMenuItems(CCSCustomHudLayout *layout)
 
 void KZHUDService::RenderMenuColorPopup(CCSCustomHudLayout *layout)
 {
-	const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuPopupItem);
+	const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuSub, this->menuPopupItem);
 	i32 curIdx = -1;
 	if (it && it->type == KZOptItemType::Color)
 	{
@@ -646,7 +709,7 @@ void KZHUDService::RenderMenuColorPopup(CCSCustomHudLayout *layout)
 
 void KZHUDService::RenderMenuStepPopup(CCSCustomHudLayout *layout)
 {
-	const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuPopupItem);
+	const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuSub, this->menuPopupItem);
 	if (!it)
 	{
 		return;
@@ -699,7 +762,7 @@ void KZHUDService::RenderMenuStepPopup(CCSCustomHudLayout *layout)
 // нет подтверждённого CSS-класса на .li/.li-label (см. отчёт задачи), сама строка не теряется.
 void KZHUDService::RenderMenuListPopup(CCSCustomHudLayout *layout)
 {
-	const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuPopupItem);
+	const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuSub, this->menuPopupItem);
 	if (!it)
 	{
 		return;
@@ -736,24 +799,40 @@ void KZHUDService::RenderMenuListPopup(CCSCustomHudLayout *layout)
 
 // === Взаимодействие ==========================================================================
 
+// index — номер СЛОТА левой колонки (cat%i), а не индекс категории: под раскрытой категорией в
+// той же колонке стоят её подкатегории, см. BuildMenuLeft.
 void KZHUDService::SelectMenuCategory(i32 index)
 {
-	const std::vector<KZOptNode *> &tree = KZ::menu::GetTree();
-	if (index < 0 || index >= (i32)tree.size())
+	MenuLeftEntry slots[KZ_MENU_CATS];
+	const i32 count = BuildMenuLeft(this->menuCategory, slots);
+	if (index < 0 || index >= count)
+	{
+		return;
+	}
+	const MenuLeftEntry &e = slots[index];
+	// Шапка уже раскрытой категории инертна (тот же класс disabled, что и в рендере): её
+	// подкатегории и так видны, а сама она пунктов не имеет — клик по ней сбросил бы выбранную
+	// подкатегорию в первую без причины.
+	if (!e.isSub && !e.node->subs.empty() && e.category == this->menuCategory)
 	{
 		return;
 	}
 	if (this->menuPopup != MenuPopup::None)
 	{
+		// До смены узла: CloseMenuPopup зовёт onEdit(begin=false) для пункта СТАРОГО узла.
 		this->CloseMenuPopup();
 	}
-	this->menuCategory = index;
+	this->menuCategory = e.category;
+	// Клик по подкатегории — показать её пункты; клик по категории — раскрыть её и показать
+	// ПЕРВУЮ подкатегорию (пустая средняя колонка на раскрытии выглядела бы отказом), а у
+	// листовой категории показывает её саму (menuSub = -1).
+	this->menuSub = e.isSub ? e.sub : (e.node->subs.empty() ? -1 : 0);
 	this->RenderMenu();
 }
 
 void KZHUDService::ActivateMenuItem(i32 slot)
 {
-	const KZOptItem *it = GetMenuItem(this->menuCategory, slot);
+	const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuSub, slot);
 	if (!it)
 	{
 		return;
@@ -830,7 +909,7 @@ void KZHUDService::ActivateMenuItem(i32 slot)
 
 void KZHUDService::OpenMenuPopup(MenuPopup kind, i32 itemIndex)
 {
-	const KZOptItem *it = GetMenuItem(this->menuCategory, itemIndex);
+	const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuSub, itemIndex);
 	if (!it)
 	{
 		return;
@@ -855,7 +934,7 @@ void KZHUDService::OpenMenuPopup(MenuPopup kind, i32 itemIndex)
 // который уже уходит, некому и незачем.
 void KZHUDService::CloseMenuPopup()
 {
-	if (const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuPopupItem))
+	if (const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuSub, this->menuPopupItem))
 	{
 		if (this->menuPopup != MenuPopup::None && it->onEdit)
 		{
@@ -871,7 +950,7 @@ void KZHUDService::MenuPopupPageStep(i32 delta)
 {
 	if (this->menuPopup == MenuPopup::Color)
 	{
-		const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuPopupItem);
+		const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuSub, this->menuPopupItem);
 		// Тот же список, что и в попапе (см. RenderMenuColorPopup/GetColorPopupTotal) —
 		// сплошные (+градиенты, если не solidOnly).
 		const i32 total = GetColorPopupTotal(it);
@@ -881,7 +960,7 @@ void KZHUDService::MenuPopupPageStep(i32 delta)
 	}
 	else if (this->menuPopup == MenuPopup::List)
 	{
-		const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuPopupItem);
+		const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuSub, this->menuPopupItem);
 		if (!it)
 		{
 			return;
@@ -904,7 +983,7 @@ void KZHUDService::MenuPopupPick(i32 slot)
 	{
 		return;
 	}
-	const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuPopupItem);
+	const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuSub, this->menuPopupItem);
 	if (!it || it->type != KZOptItemType::Color)
 	{
 		return;
@@ -926,7 +1005,7 @@ void KZHUDService::MenuListPick(i32 slot)
 	{
 		return;
 	}
-	const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuPopupItem);
+	const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuSub, this->menuPopupItem);
 	if (!it || it->type != KZOptItemType::Choice)
 	{
 		return;
@@ -972,7 +1051,7 @@ void KZHUDService::MenuStep(i32 axis, i32 delta)
 	{
 		return;
 	}
-	const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuPopupItem);
+	const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuSub, this->menuPopupItem);
 	if (!it)
 	{
 		return;
@@ -1105,25 +1184,46 @@ void KZHUDService::OnLayoutMenuClick(uint32 packedHandle, const char *panelId)
 	}
 }
 
-// Индекс категории по её phraseKey (Task 15: развести !options/root от !hudmenu/HUD, не завязываясь
-// на числовой индекс — он плывёт при первой же смене порядка регистрации в cs2kz.cpp). NULL или
-// ключ не найден в дереве — root (-1): RenderMenuCategories/RenderMenuItems/GetMenuItem уже трактуют
-// -1 как «список категорий без предвыбранной», ничего дополнительно заводить не пришлось.
-static_function i32 FindCategoryIndex(const char *categoryKey)
+// Узел по его phraseKey (Task 15: развести !options/root от !hudmenu/HUD, не завязываясь на
+// числовой индекс — он плывёт при первой же смене порядка регистрации в cs2kz.cpp). Ищем и по
+// верхнему уровню, и по подкатегориям: с появлением дерева часть прежних категорий стала
+// подкатегориями (напр. "HUD - Menu Cat General" уехал под "HUD - Menu Cat Hud"), а ключ в
+// точках входа (!hudmenu тут и kz_hud.cpp) не менялся — попадание по ключу подкатегории
+// раскрывает её родителя и показывает её пункты, то есть ровно прежнее поведение команды.
+// NULL или ключ не найден — root (-1,-1): RenderMenuCategories/RenderMenuItems/GetMenuItem уже
+// трактуют это как «список категорий без предвыбранной».
+static_function void FindMenuNode(const char *categoryKey, i32 &category, i32 &sub)
 {
+	category = -1;
+	sub = -1;
 	if (!categoryKey)
 	{
-		return -1;
+		return;
 	}
 	const std::vector<KZOptNode *> &tree = KZ::menu::GetTree();
 	for (i32 i = 0; i < (i32)tree.size(); i++)
 	{
 		if (tree[i]->phraseKey && V_strcmp(tree[i]->phraseKey, categoryKey) == 0)
 		{
-			return i;
+			category = i;
+			// Категория с подкатегориями своих пунктов не имеет — открываем на первой из них.
+			sub = tree[i]->subs.empty() ? -1 : 0;
+			return;
 		}
 	}
-	return -1;
+	for (i32 i = 0; i < (i32)tree.size(); i++)
+	{
+		const std::vector<KZOptNode *> &subs = tree[i]->subs;
+		for (i32 si = 0; si < (i32)subs.size(); si++)
+		{
+			if (subs[si]->phraseKey && V_strcmp(subs[si]->phraseKey, categoryKey) == 0)
+			{
+				category = i;
+				sub = si;
+				return;
+			}
+		}
+	}
 }
 
 void KZHUDService::OpenLayoutMenu(const char *categoryKey)
@@ -1141,7 +1241,7 @@ void KZHUDService::OpenLayoutMenu(const char *categoryKey)
 		return;
 	}
 	this->menuOpen = true;
-	this->menuCategory = FindCategoryIndex(categoryKey);
+	FindMenuNode(categoryKey, this->menuCategory, this->menuSub);
 	this->menuPopup = MenuPopup::None;
 	this->menuPopupItem = -1;
 	// Переводит игрока в режим курсора — симметричное false обязано случиться на КАЖДОМ пути
@@ -1159,7 +1259,7 @@ void KZHUDService::CloseLayoutMenu()
 	// Меню закрывают и с открытым попапом (клавиша/смерть/спектейт/смена карты) — onEdit
 	// закрытия обязан прийти и на этом пути, иначе правка Vector-пункта (beamOffset) осядет
 	// в БД, а кэш сервиса останется старым до реконнекта.
-	if (const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuPopupItem))
+	if (const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuSub, this->menuPopupItem))
 	{
 		if (this->menuPopup != MenuPopup::None && it->onEdit)
 		{

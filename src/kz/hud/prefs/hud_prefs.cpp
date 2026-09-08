@@ -139,13 +139,20 @@ static_function void AddHudElementItems(KZOptNode *node, LayoutElement e)
 
 void KZHUDService::InitMenuPrefs()
 {
-	KZOptNode *general = KZ::menu::AddCategory("HUD - Menu Cat General");
+	// Дерево, а не плоский список (задача «дерево категорий»): все семь страниц худа —
+	// ПОДКАТЕГОРИИ одного узла «Худ», как у апстрима (origin/master hud_prefs.cpp:135-162,
+	// AddCategory("Menu - HUD") + AddSub на каждый элемент). Состав пунктов не меняется —
+	// меняется только группировка; слева они рисуются теми же кнопками cat%i с отступом
+	// (класс indent), см. layout/menu.cpp:BuildMenuLeft.
+	KZOptNode *hud = KZ::menu::AddCategory("HUD - Menu Cat Hud");
+
+	KZOptNode *general = KZ::menu::AddSub(hud, "HUD - Menu Cat General");
 	KZ::menu::AddChoice(general, "HUD - Menu Label HudType", GetHudTypeChoices, GetHudTypeCurrent, OnHudTypePick);
 	// Общий пункт "Outline" убран (задача 4): обводка стала поэлементной
 	// (LAYOUT_ELEMENTS[*].outlineKey у каждого элемента свой, пункт — в AddHudElementItems),
 	// два источника одной и той же настройки — прямой путь к рассинхрону.
 
-	KZOptNode *timer = KZ::menu::AddCategory("HUD - Menu Cat Timer");
+	KZOptNode *timer = KZ::menu::AddSub(hud, "HUD - Menu Cat Timer");
 	AddHudElementItems(timer, LayoutElement::Timer);
 	KZ::menu::AddColor(timer, "HUD - Menu Label ProColor", "mhudTimerProColor", MHUD_DEF_TIMER_PRO_COLOR);
 	KZ::menu::AddColor(timer, "HUD - Menu Label TpColor", "mhudTimerTpColor", MHUD_DEF_TIMER_TP_COLOR);
@@ -153,20 +160,20 @@ void KZHUDService::InitMenuPrefs()
 	KZ::menu::AddColor(timer, "HUD - Menu Label StoppedColor", "mhudTimerStoppedColor", MHUD_DEF_TIMER_STOPPED_COLOR);
 	AddResetButton(timer, (i32)LayoutElement::Timer);
 
-	KZOptNode *speed = KZ::menu::AddCategory("HUD - Menu Cat Speed");
+	KZOptNode *speed = KZ::menu::AddSub(hud, "HUD - Menu Cat Speed");
 	AddHudElementItems(speed, LayoutElement::Speed);
 	KZ::menu::AddColor(speed, "HUD - Menu Label Color", "mhudSpeedColor", MHUD_DEF_BASE_COLOR);
 	KZ::menu::AddColor(speed, "HUD - Menu Label CjColor", "mhudSpeedCjColor", MHUD_DEF_CJ_COLOR);
 	AddResetButton(speed, (i32)LayoutElement::Speed);
 
-	KZOptNode *prespeed = KZ::menu::AddCategory("HUD - Menu Cat Prespeed");
+	KZOptNode *prespeed = KZ::menu::AddSub(hud, "HUD - Menu Cat Prespeed");
 	AddHudElementItems(prespeed, LayoutElement::Prespeed);
 	KZ::menu::AddColor(prespeed, "HUD - Menu Label Color", "mhudPrespeedColor", MHUD_DEF_BASE_COLOR);
 	KZ::menu::AddColor(prespeed, "HUD - Menu Label PerfColor", "mhudPrespeedPerfColor", MHUD_DEF_PERF_COLOR);
 	KZ::menu::AddColor(prespeed, "HUD - Menu Label JumpbugColor", "mhudPrespeedJumpbugColor", MHUD_DEF_JUMPBUG_COLOR);
 	AddResetButton(prespeed, (i32)LayoutElement::Prespeed);
 
-	KZOptNode *keys = KZ::menu::AddCategory("HUD - Menu Cat Keys");
+	KZOptNode *keys = KZ::menu::AddSub(hud, "HUD - Menu Cat Keys");
 	AddHudElementItems(keys, LayoutElement::Keys);
 	KZ::menu::AddColor(keys, "HUD - Menu Label Color", "mhudKeysColor", MHUD_DEF_BASE_COLOR);
 	// hudKeysOverlap читался кодом (layout/prefs.cpp) ещё до этой задачи, но пункта в меню у
@@ -194,12 +201,12 @@ void KZHUDService::InitMenuPrefs()
 	KZ::menu::SetItemPref(keys, "mhudKeysIdle", KZOptStorage::Int, 2);
 	AddResetButton(keys, (i32)LayoutElement::Keys);
 
-	KZOptNode *checkpoint = KZ::menu::AddCategory("HUD - Menu Cat Checkpoint");
+	KZOptNode *checkpoint = KZ::menu::AddSub(hud, "HUD - Menu Cat Checkpoint");
 	AddHudElementItems(checkpoint, LayoutElement::Checkpoint);
 	KZ::menu::AddColor(checkpoint, "HUD - Menu Label Color", "mhudCheckpointColor", MHUD_DEF_BASE_COLOR);
 	AddResetButton(checkpoint, (i32)LayoutElement::Checkpoint);
 
-	KZOptNode *crosshair = KZ::menu::AddCategory("HUD - Menu Cat Crosshair");
+	KZOptNode *crosshair = KZ::menu::AddSub(hud, "HUD - Menu Cat Crosshair");
 	// Дефолт true синхронизирован с текущими настройками игрока (задача hud-defaults).
 	KZ::menu::AddToggle(crosshair, "HUD - Menu Label Enabled", "mhudCrosshair", true);
 	KZ::menu::AddSize(crosshair, "HUD - Menu Label Scale", "mhudCrosshairScale", 100, 0, 500);

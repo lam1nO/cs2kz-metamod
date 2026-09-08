@@ -681,10 +681,14 @@ private:
 	// OpenLayoutMenu). Гасится вместе с ownedLayout везде, где гасится персистентный худ-стейт.
 	CHandle<CBaseEntity> ownedMenuLayout {};
 	bool menuOpen {};
-	// Индекс активной категории (см. MENU_CATEGORIES в menu.cpp) — плоский список без
-	// подкатегорий: наше дерево (7 категорий, максимум 10 пунктов) укладывается без вложенности,
-	// в отличие от апстримного полноразмерного меню настроек.
-	i32 menuCategory {};
+	// Активный узел реестра — ДВА уровня, как у апстрима: индекс категории верхнего уровня
+	// (KZ::menu::GetTree()) и индекс её подкатегории. -1 в menuCategory — корень (ни одна не
+	// выбрана, панель пунктов пуста); -1 в menuSub — у категории подкатегорий нет и пункты
+	// показывает она сама. Раскладку левой колонки по 20 кнопкам cat%i считает BuildMenuLeft
+	// (layout/menu.cpp) из этой пары, отдельного состояния «что раскрыто» нет: раскрыта всегда
+	// menuCategory.
+	i32 menuCategory {-1};
+	i32 menuSub {-1};
 
 	enum class MenuPopup
 	{
@@ -714,6 +718,12 @@ private:
 
 		bool catHidden[KZ_MENU_CATS] {};
 		bool catSelected[KZ_MENU_CATS] {};
+		// Классы вложенности левой колонки (menu.css чужого аддона: .cat.indent — отступ 26px,
+		// .cat.cat-parent — жирная шапка, .cat.cat-parent.disabled — раскрытый родитель без
+		// подсветки наведения).
+		bool catIndent[KZ_MENU_CATS] {};
+		bool catParent[KZ_MENU_CATS] {};
+		bool catDisabled[KZ_MENU_CATS] {};
 
 		bool itemHidden[KZ_MENU_ITEMS] {};
 		const char *itemType[KZ_MENU_ITEMS] {};
