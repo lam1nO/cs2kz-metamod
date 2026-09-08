@@ -43,6 +43,11 @@
 // см. комментарий в protobuf/kz_customhud.proto — тот файл симлинк в сабмодуль на чужом пине,
 // который CS_UM_CustomHudClicked ещё не знает.
 #include "kz_customhud.pb.h"
+// protobuf/kz_customhud.proto объявляет `package cs2kz.customhud` (по образцу kz_replay.proto,
+// см. using ReplayHeader в kz_replay.h) — protoc генерирует cs2kz::customhud::…, а не голое
+// имя. Остальные (симлинк-)proto форка без package этой развязки не требуют, отсюда и была
+// иллюзия глобального имени; здесь идём тем же путём, что kz_replay, а не снимаем package.
+using CKZUsrMsg_CustomHudClicked = cs2kz::customhud::CKZUsrMsg_CustomHudClicked;
 
 #include "vprof.h"
 
