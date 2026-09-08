@@ -18,6 +18,14 @@ void KZHUDService::RefreshLayoutPrefs()
 	// см. её объявление в kz_hud.h): тумблеры/цвета/раскладка панорама-худа — не то, что
 	// наблюдается за другим игроком, в отличие от источника ДАННЫХ (MHUDDataSource()).
 	auto *opts = this->MHUDSettingsSource()->optionService;
+	// Миграция обводки: до задачи 4 обводка была ОДНИМ тумблером hudOutline на все пять
+	// элементов. Молча упасть на дефолт нельзя — игрок, выключивший обводку, получил бы её
+	// обратно, а это самый незаметный способ испортить худ (см. журнал решений задачи).
+	// Проверено фактом: HTML-путь (kz_hud.cpp) hudOutline вообще не читает — обводка там не
+	// рисуется, ключ был нужен только panorama-худу. Значит после этой миграции hudOutline
+	// в горячем пути нигде больше не читается — он остаётся исключительно как источник
+	// одноразового переноса значения в mhud*Outline ниже.
+	const bool legacyOutline = opts->GetPreferenceBool("hudOutline", true);
 	for (i32 e = 0; e < (i32)LayoutElement::Count; e++)
 	{
 		const LayoutElementDef &def = LAYOUT_ELEMENTS[e];
@@ -29,9 +37,14 @@ void KZHUDService::RefreshLayoutPrefs()
 		// Шрифт разрешается в css-класс уже здесь: UpdateLayoutElement (Task 4) кладёт его на
 		// панель напрямую, повторный резолв в геймтике не нужен и не делается.
 		element.fontClass = panorama::ResolveFontClass(opts->GetPreferenceStr(def.fontKey, LAYOUT_DEFAULT_FONT), LAYOUT_DEFAULT_FONT);
-		// outlineKey у всех элементов один и тот же общий тумблер ("hudOutline") — поэлементных
-		// mhud*Outline в нашей базе нет, апстримную россыпь не заводим.
-		element.outline = opts->GetPreferenceBool(def.outlineKey, true);
+		// HasPreference в нашей базе нет (см. git grep) — отсутствие поэлементного ключа
+		// определяем чтением с двумя РАЗНЫМИ дефолтами: если ключ реально сохранён, оба чтения
+		// вернут одно и то же (настоящее) значение, независимо от дефолта; если ключа нет, оба
+		// чтения просто вернут свои дефолты — и разойдутся. Расхождение = ключа нет, берём
+		// значение из общего hudOutline (миграция), совпадение = ключ есть, доверяем ему.
+		const bool outlineWithTrueDefault = opts->GetPreferenceBool(def.outlineKey, true);
+		const bool outlineWithFalseDefault = opts->GetPreferenceBool(def.outlineKey, false);
+		element.outline = (outlineWithTrueDefault == outlineWithFalseDefault) ? outlineWithTrueDefault : legacyOutline;
 		element.opacity = Clamp((i32)opts->GetPreferenceInt(def.opacityKey, 100), 0, 100);
 	}
 

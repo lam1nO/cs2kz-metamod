@@ -41,6 +41,9 @@ static_function void AddHudElementItems(KZOptNode *node, LayoutElement e)
 	KZ::menu::AddPosition(node, "Position", def.xKey, def.yKey, def.xDefault, def.yDefault);
 	KZ::menu::AddSize(node, "Size", def.sizeKey, def.sizeDefault, LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX);
 	KZ::menu::AddFont(node, "Font", def.fontKey, LAYOUT_DEFAULT_FONT);
+	// Обводка — теперь поэлементный тумблер (def.outlineKey, задача 4), а не один общий
+	// пункт на всё меню: старый "Outline" в General убран, чтобы не осталось двух источников.
+	KZ::menu::AddToggle(node, "Outline", def.outlineKey, true);
 	// Прозрачность хранится Int (0-100), а не Float, как размер/позиция того же элемента —
 	// AddSize по умолчанию заводит Float (px-поле), поэтому storage переопределяем ЯВНО:
 	// реальный потребитель (layout/prefs.cpp:GetLayoutPrefs) читает opacityKey через
@@ -54,9 +57,9 @@ void KZHUDService::InitMenuPrefs()
 {
 	KZOptNode *general = KZ::menu::AddCategory("General");
 	KZ::menu::AddChoice(general, "Hud Type", GetHudTypeChoices, GetHudTypeCurrent, OnHudTypePick);
-	// hudOutline — ОБЩИЙ тумблер всех пяти элементов (LAYOUT_ELEMENTS[*].outlineKey одинаков
-	// у всех), поэтому один пункт на всё меню, а не по одному в каждой категории.
-	KZ::menu::AddToggle(general, "Outline", "hudOutline", true);
+	// Общий пункт "Outline" убран (задача 4): обводка стала поэлементной
+	// (LAYOUT_ELEMENTS[*].outlineKey у каждого элемента свой, пункт — в AddHudElementItems),
+	// два источника одной и той же настройки — прямой путь к рассинхрону.
 
 	KZOptNode *timer = KZ::menu::AddCategory("Timer");
 	AddHudElementItems(timer, LayoutElement::Timer);
