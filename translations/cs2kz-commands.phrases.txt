@@ -1822,12 +1822,6 @@
 		"ru"		"Изменить FOV."
 		"es"		"Cambiar tu campo de visión (FOV)."
 	}
-	"Command Description - kz_mhud"
-	{
-		"en"		"Configure the HUD. Usage: kz_mhud <speed|prespeed|timer|keys> [property] [value...]"
-		"ua"		"Налаштувати HUD. Використання: kz_mhud <speed|prespeed|timer|keys> [властивість] [значення...]"
-		"ru"		"Настроить HUD. Применение: kz_mhud <speed|prespeed|timer|keys> [свойство] [значение...]"
-	}
 	"Command Description - kz_safeguard"
 	{
 		"en"		"Safeguard: block timer reset in a run (noclip/restart/stop)."

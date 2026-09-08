@@ -522,9 +522,6 @@ void KZ::misc::JoinTeam(KZPlayer *player, int newTeam, bool restorePos, bool sav
 		// ставит цель наблюдения, а вторая смена команды в том же кадре может его
 		// пересоздать — админ получал бы «Spectate Failure» вместо слежки за читером.
 		// Цена — строка невидимки живёт в TAB один снапшот-тик.
-		// Партикли мхуда гасим сразу: у обсервера движение не тикает и штатное
-		// выключение в OnProcessMovement не сработает (жалоба: висят в спеках).
-		player->hudService->OnJoinSpectator();
 		// pracService->OnJoinSpectator() здесь НЕ зовём: он висит на движковом хуке
 		// KZPlayer::OnChangeTeamPost, который ловит и смены команды мимо этой обёртки.
 		player->quietService->SendFullUpdate();

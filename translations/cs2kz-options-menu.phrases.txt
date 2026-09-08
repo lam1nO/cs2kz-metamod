@@ -12,11 +12,6 @@
 		"en"	"Checkpoints & start"
 		"ru"	"Чекпоинты и старт"
 	}
-	"Options - Menu Cat HUD"
-	{
-		"en"	"HUD"
-		"ru"	"HUD"
-	}
 	"Options - Menu Cat Visibility"
 	{
 		"en"	"Visibility"

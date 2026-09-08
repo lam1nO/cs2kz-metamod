@@ -35,9 +35,9 @@ void KZHUDService::RefreshLayoutPrefs()
 		element.opacity = Clamp((i32)opts->GetPreferenceInt(def.opacityKey, 100), 0, 100);
 	}
 
-	// Цвета — ОБЩИЕ с particle-путём: ключи префов совпадают, поэтому настройки игроков
-	// переезжают между путями сами (см. дефолты в kz_hud.h). GetPreferenceColor в нашей базе
-	// нет — цвет читается GetMHUDColorPref (преф хранит упакованный int).
+	// Цвета — те же ключи префов, что были у удалённого particle-MHUD (задача 12): настройки
+	// игроков остались валидны без миграции (см. дефолты в kz_hud.h). GetPreferenceColor в
+	// нашей базе нет — цвет читается GetMHUDColorPref (преф хранит упакованный int).
 	this->layoutPrefs.timerPro = this->GetMHUDColorPref("mhudTimerProColor", MHUD_DEF_TIMER_PRO_COLOR);
 	this->layoutPrefs.timerTp = this->GetMHUDColorPref("mhudTimerTpColor", MHUD_DEF_TIMER_TP_COLOR);
 	this->layoutPrefs.timerPaused = this->GetMHUDColorPref("mhudTimerPausedColor", MHUD_DEF_TIMER_PAUSED_COLOR);

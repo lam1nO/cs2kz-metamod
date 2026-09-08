@@ -636,7 +636,9 @@ static_function void Hook_ClientDisconnect(CPlayerSlot slot, ENetworkDisconnecti
 	player->optionService->OnClientDisconnect();
 	player->racingService->OnClientDisconnect();
 	player->globalService->OnClientDisconnect();
-	player->hudService->OnClientDisconnect();
+	// hudService->OnClientDisconnect() удалён вместе с particle-MHUD (задача 12): он только
+	// звал DestroyAllParticles(), а PlayerManager::OnClientDisconnect ниже сразу вызывает
+	// KZPlayer::Reset(), который уже гасит весь худ-стейт слота.
 	g_pKZPlayerManager->OnClientDisconnect(slot, reason, pszName, xuid, pszNetworkID);
 	RETURN_META(MRES_IGNORED);
 }
@@ -884,7 +886,8 @@ static_function void Hook_BuildGameSessionManifest(const EventBuildGameSessionMa
 	{
 		Warning("[CS2KZ] Precache kz soundevents \n");
 		pResourceManifest->AddResource(KZ_WORKSHOP_ADDON_SNDEVENT_FILE);
-		KZHUDService::PrecacheParticles(pResourceManifest);
+		// KZHUDService::PrecacheParticles(pResourceManifest) удалён вместе с particle-MHUD
+		// (задача 12): апстрим вычистил particles/* из воркшоп-аддона, прекешировать больше нечего.
 	}
 	pResourceManifest->AddResource("particles/ui/hud/ui_map_def_utility_trail.vpcf");
 	pResourceManifest->AddResource("particles/ui/annotation/ui_annotation_line_segment.vpcf");

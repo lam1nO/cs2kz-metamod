@@ -84,10 +84,8 @@ void KZ::quiet::OnCheckTransmit(CCheckTransmitInfo **pInfo, int infoCount)
 				continue;
 			}
 
-			if (targetPlayer->hudService->OwnsParticle(particleSystem->GetRefEHandle()))
-			{
-				continue;
-			}
+			// hudService больше не владеет никакими particle-системами (particle-MHUD удалён в
+			// задаче 12) — гейта на него здесь больше нет.
 
 			// Рёбра зон, адресованные ЭТОМУ игроку: превью редактора (!zone start/end) и показ
 			// !zone show. Без этой ветки метка CUSTOM_PARTICLE_SYSTEM_TEAM означает «не видит

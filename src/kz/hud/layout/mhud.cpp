@@ -1,11 +1,13 @@
 // Пять элементов panorama-худа + точка сборки (Task 6). Перенесено с апстрима
 // (origin/master:src/kz/hud/layout/mhud.cpp), расхождения с ним — см. заметки планирования
 // задачи в отдельном (не этом) репозитории, кратко (R1-R4):
-//   - MHUDElement/MHUD_ELEMENTS -> LayoutElement/LAYOUT_ELEMENTS (R1, имя занято particles.cpp);
+//   - MHUDElement/MHUD_ELEMENTS -> LayoutElement/LAYOUT_ELEMENTS (R1, имя было занято
+//     particles.cpp — файл удалён в задаче 12 вместе с particle-MHUD);
 //   - GetPrefs()/IsMHUDElementEnabled -> GetLayoutPrefs()/IsLayoutElementEnabled (R4);
-//   - GetPreferenceColor -> GetMHUDColorPref, дефолтные цвета уже подняты в kz_hud.h (R2);
-//   - SpeedInfo больше не апстримный тип: это ОБЩИЙ метод KZHUDService::GetSpeedInfo(),
-//     который также использует particle-путь (particles.cpp/UpdateMHUDSpeed) — см. R3.
+//   - GetPreferenceColor -> GetMHUDColorPref, дефолтные цвета и сама функция — kz_hud.cpp (R2,
+//     задача 12 подняла реализацию туда из удалённого particles.cpp);
+//   - SpeedInfo больше не апстримный тип: это ОБЩИЙ метод KZHUDService::GetSpeedInfo()
+//     (kz_hud.cpp) — см. R3.
 //   - клавиши: апстримные keysIdle/keysBorder/keysGlowEnabled/keysFillEnabled/keysLetters/
 //     keysSquare/keysOverlapAxis/keysOverlapGlow/keysPressed-цвет НЕ переносим — таких префов
 //     Task 5 не заводил (в нашей базе их нет). Оставлено то, что опирается на существующие
@@ -259,8 +261,9 @@ bool KZHUDService::UpdateHudLayout(KZPlayer *source)
 	// он тем же вызовом — самостоятельная настройка, не часть видимости элементов.
 	this->ApplyCrosshair(layout, /* show */ true, force);
 
-	// SpeedInfo — общий расчёт (Task 6/R3): panorama-путь ПЯТАЯ ветвь показа скорости, копия
-	// расчёта сюда запрещена (см. KZHUDService::GetSpeedInfo в kz_hud.h/particles.cpp).
+	// SpeedInfo — общий расчёт (Task 6/R3): копировать расчёт сюда запрещено (см.
+	// KZHUDService::GetSpeedInfo в kz_hud.h/kz_hud.cpp) — иначе показания скорости panorama-
+	// пути разошлись бы с остальными ветками худа.
 	const SpeedInfo info = source->hudService->GetSpeedInfo();
 	this->UpdateTimerElement(layout, source, force);
 	this->UpdateSpeedElement(layout, info, force);

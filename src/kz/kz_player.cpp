@@ -280,10 +280,8 @@ void KZPlayer::OnPhysicsSimulatePost()
 	else
 	{
 		// Dead and not spectating anyone (death cam on own corpse / freeroam):
-		// destroy particles here, otherwise a frozen MHUD stays up until the next DrawPanels.
-		// Нижнюю панель и минимал-худ тоже гасим одноразово: DrawPanels для этого состояния
+		// нижнюю панель и минимал-худ гасим одноразово: DrawPanels для этого состояния
 		// не вызывается, и остаток CP/TP висел бы до самозатухания канала.
-		this->hudService->DestroyAllParticles();
 		this->hudService->ClearBottomPanel();
 		this->hudService->ClearMinimalHud();
 		// Layout-худ по той же причине: DrawPanels сюда не доходит, замороженная сущность
@@ -361,7 +359,6 @@ void KZPlayer::OnProcessMovement()
 
 	this->DisableTurnbinds();
 	this->anticheatService->OnProcessMovement();
-	this->hudService->OnProcessMovement();
 	this->triggerService->OnProcessMovement();
 	this->modeService->OnProcessMovement();
 	FOR_EACH_VEC(this->styleServices, i)

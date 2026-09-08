@@ -12,8 +12,8 @@
 //     без него эти пункты были бы нередактируемы, а спека прямо требует «для каждого элемента
 //     — позиция X/Y, размер, шрифт, прозрачность».
 //   - GetPreferenceColor/SetPreferenceColor в базе нет (R2, журнал решений задачи): цвет читается
-//     GetMHUDColorPref (уже в кэше) и пишется симметричным KZHUDService::SetMHUDColorPref
-//     (тут же, ниже) — преф хранит упакованный int, как у particles.cpp/SetColorPref.
+//     GetMHUDColorPref (уже в кэше, kz_hud.cpp) и пишется симметричным
+//     KZHUDService::SetMHUDColorPref (тут же, ниже) — преф хранит упакованный int.
 //   - Позиция/размер элемента ЧИТАЮТСЯ ЧЕРЕЗ Float (см. layout/prefs.cpp — GetPreferenceFloat
 //     для xKey/yKey/sizeKey), а прозрачность и crosshairScale — через Int (GetPreferenceInt):
 //     MenuItem::isFloat выбирает нужный аксессор, перепутать типы значило бы читать иное
@@ -197,31 +197,27 @@ static_function const char *HudTypeLabel(i32 type)
 {
 	switch (type)
 	{
-		case KZHUDService::HUD_TYPE_MHUD:
-			return "MHUD";
 		case KZHUDService::HUD_TYPE_PANORAMA:
 			return "Panorama";
 		case KZHUDService::HUD_TYPE_OFF:
 			return "Off";
-		default:
+		default: // Standard либо мигрировавшее значение 1 (удалённый particle-MHUD, задача 12)
 			return "Standard";
 	}
 }
 
-// Тот же цикл, что у particle-меню (particles.cpp/HudTypeNext, static-приватный там,
-// поэтому не переиспользуем символ, а держим свою копию — четыре строки switch).
+// Цикл Standard → Panorama → Off → Standard (задача 12 убрала MHUD из цикла вместе с
+// particle-путём: апстрим вычистил particles/* из воркшоп-аддона).
 static_function i32 NextHudType(i32 current)
 {
 	switch (current)
 	{
-		case KZHUDService::HUD_TYPE_MHUD:
-			return KZHUDService::HUD_TYPE_PANORAMA;
 		case KZHUDService::HUD_TYPE_PANORAMA:
-			return KZHUDService::HUD_TYPE_STANDARD;
-		case KZHUDService::HUD_TYPE_STANDARD:
 			return KZHUDService::HUD_TYPE_OFF;
-		default:
-			return KZHUDService::HUD_TYPE_MHUD;
+		case KZHUDService::HUD_TYPE_OFF:
+			return KZHUDService::HUD_TYPE_STANDARD;
+		default: // Standard либо неизвестное (в т.ч. мигрировавшее значение 1)
+			return KZHUDService::HUD_TYPE_PANORAMA;
 	}
 }
 
@@ -285,7 +281,7 @@ static_function void SetIntPref(KZPlayer *player, const char *key, i32 value, bo
 	}
 }
 
-// Симметрично GetMHUDColorPref (particles.cpp) — тот же формат упаковки (R2: своего
+// Симметрично GetMHUDColorPref (kz_hud.cpp) — тот же формат упаковки (R2: своего
 // SetPreferenceColor в базе нет).
 static_function i64 PackColorForPref(const Color &c)
 {
@@ -569,11 +565,10 @@ void KZHUDService::RenderMenuColorPopup(CCSCustomHudLayout *layout)
 		curIdx = panorama::FindColorEntry(this->GetMHUDColorPref(it->prefKey, *it->cdef));
 	}
 	// Попап показывает ТОЛЬКО сплошные цвета (panorama::GetColorEntryCount() включает и 40
-	// градиентов — particle-путь их понимает, panorama выбором тут не даём, см. правку
-	// финального ревью): иначе выбравший градиент в particle-худе и открывший этот попап
-	// увидел бы урезанный/несовпадающий список без объяснения. Если у игрока в префе уже
-	// сохранён градиент (curIdx >= total), ни один свотч просто не подсветится — резолвится
-	// корректно, без выхода за границы.
+	// градиентов — panorama выбором тут не даём, см. правку финального ревью). Если у игрока
+	// в префе уже сохранён градиент из старого particle-MHUD (curIdx >= total, путь удалён
+	// в задаче 12), ни один свотч просто не подсветится — резолвится корректно, без выхода
+	// за границы.
 	const i32 total = panorama::GetSolidColorCount();
 	const i32 pages = MAX(1, (total + KZ_MENU_SWATCH - 1) / KZ_MENU_SWATCH);
 	this->menuPopupPage = Clamp(this->menuPopupPage, 0, pages - 1);
@@ -662,26 +657,14 @@ void KZHUDService::ActivateMenuItem(i32 slot)
 			// Требование задачи: без этого правка (hudTimer/hudOutline/mhudCrosshair/...) не
 			// видна в панораме до перезахода — RefreshLayoutPrefs кэш всех этих ключей.
 			this->RefreshLayoutPrefs();
-			if (V_strcmp(it->prefKey, "hudOutline") == 0)
-			{
-				// hudOutline — ОБЩИЙ преф с particle-путём (particles.cpp/s_hudToggles): если
-				// сейчас активен HUD_TYPE_MHUD, там outline — отдельный vpcf-ассет
-				// (plain/glow), и без пересоздания частиц смена не подхватится до конца
-				// карты/реконнекта — та же причина, по которой particle-меню зовёт
-				// DestroyAllParticles() на этом же тумблере.
-				this->DestroyAllParticles();
-			}
 			this->RenderMenu();
 			break;
 		}
 		case MenuItemKind::HudType:
 		{
-			const i32 next = NextHudType(this->GetHudType());
-			this->SetHudType(next);
-			if (next == KZHUDService::HUD_TYPE_MHUD && !KZHUDService::IsMHUDAvailable())
-			{
-				this->player->languageService->PrintChat(true, false, "MHUD - Unavailable");
-			}
+			// Цикл больше не заходит в удалённый particle-MHUD (задача 12) — переключение типа
+			// всегда успешно, гейта IsMHUDAvailable() здесь не нужно.
+			this->SetHudType(NextHudType(this->GetHudType()));
 			this->RenderMenu();
 			break;
 		}

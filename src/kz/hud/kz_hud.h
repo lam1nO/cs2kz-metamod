@@ -3,18 +3,17 @@
 #include "kz/timer/kz_timer.h"
 #include "kz/hud/layout/menu.h"
 #include "entityhandle.h"
-#include "sdk/entity/cparticlesystem.h"
 #include <unordered_map>
 
 #define KZ_HUD_TIMER_STOPPED_GRACE_TIME 3.0f
 #define KZ_HUD_ON_GROUND_THRESHOLD      0.07f
-class IEntityResourceManifest;
 class CCSCustomHudLayout;
 
-// Дефолтные цвета — ОБЩИЕ для particle- и panorama-путей худа (Task 5): ключи префов
+// Дефолтные цвета — общие для HTML- и panorama-путей худа (Task 5): ключи префов
 // совпадают, поэтому настройки игрока переезжают между путями сами, без миграции.
-// Определения (значения) остаются в particles.cpp — оттуда их подняли только объявлениями,
-// значения не менялись ни на бит (иначе у игроков поехали бы цвета particle-худа).
+// Определения (значения) — в kz_hud.cpp (задача 12 подняла их туда вместе с
+// GetMHUDColorPref из удалённого particle-пути); значения не менялись ни на бит (иначе у
+// игроков поехали бы цвета худа).
 extern const Color MHUD_DEF_BASE_COLOR;
 extern const Color MHUD_DEF_PERF_COLOR;
 extern const Color MHUD_DEF_JUMPBUG_COLOR;
@@ -25,9 +24,7 @@ extern const Color MHUD_DEF_TIMER_PAUSED_COLOR;
 extern const Color MHUD_DEF_TIMER_STOPPED_COLOR;
 extern const Color MHUD_DEF_KEYS_OVERLAP_COLOR;
 
-// Элементы panorama-худа (сущность custom_hud_layout, Task 4). НЕ путать с локальным
-// `MHUDElement` из particles.cpp (другой состав/порядок) — тот же символ здесь сломал бы
-// particle-путь переопределением, поэтому у layout-худа своё имя.
+// Элементы panorama-худа (сущность custom_hud_layout, Task 4).
 enum class LayoutElement
 {
 	Timer,
@@ -56,9 +53,9 @@ struct LayoutElementDef
 
 extern const LayoutElementDef LAYOUT_ELEMENTS[(i32)LayoutElement::Count];
 
-// Показания скорости — общий результат для ЛЮБОГО худа (Task 6/R3): particle-путь и
+// Показания скорости — общий результат для ЛЮБОГО худа (Task 6/R3): HTML-путь и
 // panorama-layout читают его из ОДНОГО метода (KZHUDService::GetSpeedInfo), а не считают
-// каждый по-своему — иначе это пятая расходящаяся ветка вдобавок к четырём, которые уже
+// каждый по-своему — иначе это лишняя расходящаяся ветка вдобавок к тем, которые уже
 // обязаны совпадать (см. комментарий у GetDisplayVelocity).
 struct SpeedInfo
 {
@@ -143,7 +140,6 @@ private:
 	bool fromDuckbug {};
 	bool crouchJumping {};
 	bool showPanel {};
-	bool particlesActive {};
 	// На прошлом тике в канал нижней панели уходил её текст (нужен одноразовый клир,
 	// когда слать стало нечего — см. ClearBottomPanel).
 	bool bottomPanelActive {};
@@ -283,16 +279,19 @@ public:
 	// выделенном сервере при смене карты НЕ зовётся — только на дисконнекте).
 	static void OnRoundStart();
 
-	// Returns true when the particle-based MHUD should be used.
+	// Returns true when the panorama-layout HUD assets are available.
 	// Requires MultiAddonManager to be available, unless kz_force_mhud is set.
 	static bool IsMHUDAvailable();
 
-	// Тип худа (персистентный int-pref "hudType"). Цикл в меню: MHUD → Panorama → Standard → Off.
-	// Off — не рисуется НИЧЕГО (ни HTML-панель, ни particle-MHUD, ни panorama-layout), см. DrawPanels.
+	// Тип худа (персистентный int-pref "hudType"). Цикл в меню: Standard → Panorama → Off.
+	// Off — не рисуется НИЧЕГО (ни HTML-панель, ни panorama-layout), см. DrawPanels.
 	enum
 	{
 		HUD_TYPE_STANDARD = 0, // классическая HTML-панель по центру
-		HUD_TYPE_MHUD     = 1, // particle-оверлей
+		// 1 — было HUD_TYPE_MHUD (particle-оверлей апстрима): удалён в задаче 12, апстрим
+		// вычистил particles/* из воркшоп-аддона, путь больше не работал и не мог заработать.
+		// Значение не переиспользуем — GetHudType() читает сохранённую 1 как HUD_TYPE_PANORAMA
+		// и перезаписывает её, чтобы не оставить игрока с недействительным типом (пустой экран).
 		HUD_TYPE_OFF      = 2, // ничего не рисуется
 		HUD_TYPE_PANORAMA = 3, // custom_hud_layout: разметка mhud.vxml из аддона 3469155349
 	};
@@ -313,7 +312,6 @@ public:
 	int GetTimerStyle();
 	void SetTimerStyle(int style);
 
-	static void PrecacheParticles(IEntityResourceManifest *pResourceManifest);
 	// Draw the panel from a player to a specific target.
 	static void DrawPanels(KZPlayer *player, KZPlayer *target);
 
@@ -346,8 +344,8 @@ public:
 	// последнего отправленного текста per-канал + heartbeat (см. поля кэша выше).
 	void UpdateMinimalHud(KZPlayer *dataSource);
 
-	// Одноразово стереть минимал-худ при уходе из него (смена стиля/типа, particle-путь,
-	// меню, смерть без спектейта): centre гасится пустым токеном (тот же приём, что
+	// Одноразово стереть минимал-худ при уходе из него (смена стиля/типа, меню,
+	// смерть без спектейта): centre гасится пустым токеном (тот же приём, что
 	// ClearBottomPanel), html не трогаем — его либо тут же перерисовывает новый владелец
 	// (обновлённый худ/меню), либо он сам гаснет за duration=1s (utils::PrintHTMLCentre).
 	void ClearMinimalHud();
@@ -361,7 +359,6 @@ public:
 		jumpedThisTick = false;
 	}
 
-	void OnProcessMovement();
 	void OnProcessMovementPost();
 
 	void OnJump(bool modern = false)
@@ -398,37 +395,16 @@ public:
 			   && g_pKZUtils->GetServerGlobals()->curtime - timerStoppedTime < KZ_HUD_TIMER_STOPPED_GRACE_TIME;
 	}
 
-	// source = игрок-источник данных (наблюдаемый при спектировании); nullptr → сам игрок.
-	void UpdateParticles(KZPlayer *source = nullptr);
-
-	// Destroy all active MHUD particles (e.g. on death or disconnect).
-	void DestroyAllParticles();
-
-	// Погасить particle-MHUD немедленно при уходе в спеки: OnProcessMovement у
-	// обсервера не тикает, штатный транзишен не сработает — партикли зависают.
-	void OnJoinSpectator();
-
-	void OnClientDisconnect();
-
-	// CheckTransmit support (see kz_quiet.cpp).
-	bool OwnsParticle(const CEntityHandle &handle) const;
-
 	// Per-element enable flags (also consulted for panel suppression).
 	bool IsMHUDSpeedEnabled();
-	bool IsMHUDPrespeedEnabled();
 	bool IsMHUDTimerEnabled();
 	bool IsMHUDKeysEnabled();
 	bool IsMHUDCpTpEnabled();
-	bool IsMHUDTimerDetailed();
 	bool IsMHUDKeysOverlapEnabled();
-	bool IsMHUDOutlineEnabled();
-	// Только для стандартного HTML-худа (particle-MHUD их не смотрит):
+	// Только для стандартного HTML-худа:
 	// раскладка клавиш в 2 ряда (иначе одна строка A W S D C J) и показ строки PB/WR.
 	bool IsMHUDKeysTwoRowsEnabled();
 	bool IsMHUDPbWrEnabled();
-
-	// kz_hud / kz_mhud — печатает сводку текущего конфига.
-	void PrintHUDSummary();
 
 	// `kz_hud panel` / `!hud panel` — что уходит сейчас в центральную HTML-панель этому
 	// получателю: шапка (цель, cvar'ы панели, ВСЕ тумблеры состава) и ДВА дампа — SENT
@@ -441,27 +417,16 @@ public:
 	// сравнение с экраном отличает обрезку от непостроенной строки. В консоль, без перевода.
 	void PrintPanelDiagnostics();
 
-	// kz_hud (без аргументов) — интерактивное меню через cs2menus.
-	// Фолбэк на PrintHUDSummary(), если меню-движок недоступен.
-	void OpenHUDMenu();
-
-	// Построить HUD-меню без показа (возвращает MenuHandle == u32; 0 = не построено).
-	// «Назад» — бинд R движка меню (parent от AddSubMenu в !options).
-	u32 CreateHUDMenu();
-
-	// kz_mhud без аргументов — алиас OpenHUDMenu (обратная совместимость).
-	void OpenMHUDMenu();
-
-	// Константы геометрии particle-MHUD (public: нужны из файловых функций particles.cpp).
+	// Константы геометрии клавиш-элемента (public: нужны из LayoutKeysState ниже).
 	// Клавиши: W A S D J C.
 	static constexpr i32 MHUD_KEY_COUNT = 6;
 
 	// Единственный источник скорости для ЛЮБЫХ показаний худа: velocity + baseVelocity,
 	// а у реплей-бота на паузе — скорость кадра записи (у замороженного бота velocity
 	// принудительно обнулена, чтобы физика его не унесла, — см. replays/playback.cpp).
-	// Веток показа скорости четыре (BuildVersionCHud, GetSpeedText, ComputeBottomState,
-	// particle-MHUD), и считать её каждая обязана одинаково — иначе «0 на паузе»
-	// чинится в одном стиле худа и остаётся в трёх других.
+	// Веток показа скорости три (BuildVersionCHud, GetSpeedText, ComputeBottomState), и
+	// считать её каждая обязана одинаково — иначе «0 на паузе» чинится в одном стиле худа
+	// и остаётся в других.
 	static Vector GetDisplayVelocity(KZPlayer *src);
 
 	// === Layout-худ (custom_hud_layout, Task 4) ======================================
@@ -556,7 +521,7 @@ private:
 	std::string GetKeyText(const char *language = KZ_DEFAULT_LANGUAGE);
 
 	// Единственная точка расчёта SpeedInfo (Task 6/R3, см. комментарий у struct SpeedInfo):
-	// particle-путь (particles.cpp/UpdateMHUDSpeed) и panorama-layout (layout/mhud.cpp)
+	// HTML-путь (BuildVersionCHud/GetSpeedText) и panorama-layout (layout/mhud.cpp)
 	// обязаны звать ИМЕННО его, копировать расчёт во вторую ветку запрещено. Данные — из
 	// MHUDDataSource() (this->player, если mhudSource не задан) — та же развязка data/settings,
 	// что у остального худа.
@@ -600,29 +565,15 @@ private:
 	// CP/TP (гейт hudCpTp, при kz_hud_cptp_in_panel 0 уезжает обратно в centre-канал).
 	// Компакт (по this->IsCompactPanel()) — только строки 1-2 (плюс CP/TP: у него свой
 	// тумблер). Вызывается на hudService ПОЛУЧАТЕЛЯ (спектатора): настройки/язык — из
-	// this->player, данные — из dataSource (наблюдаемый). suppress* — элементы, дублируемые
-	// particle-MHUD, чтобы не рисовать их дважды. masterMode — мастер-тумблер: показываем
-	// ТОЛЬКО включённые per-element тумблеры.
+	// this->player, данные — из dataSource (наблюдаемый). suppress* — исторический параметр
+	// (раньше гасил элементы, дублируемые particle-MHUD; с задачи 12 particle-путь удалён,
+	// вызывающая сторона больше не передаёт true, но сигнатуру не меняем — используется
+	// извне). masterMode — мастер-тумблер: показываем ТОЛЬКО включённые per-element тумблеры.
 	std::string BuildVersionCHud(KZPlayer *dataSource, bool suppressSpeed, bool suppressTimer, bool suppressKeys, bool masterMode,
 								 const char *language);
 
-	// Control point mapping (общий контракт particle-ассетов апстрима):
-	// CP16       = RGB tint (0..255)
-	// CP17.x     = sequence (кадр)
-	// CP17.y     = size (масштаб)
-	// CP17.z     = self-illum / init field1 (1.0 = вкл.)
-	// CP18.x/y   = screen-space offset
-
-	// Таймер: до 4 разрядов (каждый = двузначное значение) + до 3 разделителей.
-	CHandle<CParticleSystem> timerTextParticles[4];
-	CHandle<CParticleSystem> timerDelimiterParticles[3];
-
-	// === MHUD (апстрим cs2kz particle-пути: velo/inputs/timer_delimiter) =================
-	// Скорость: два particle'а на пары-разрядов (апстрим-схема hi/lo).
-	CHandle<CParticleSystem> upstreamSpeedParticles[2];
-	CHandle<CParticleSystem> upstreamPrespeedParticles[2];
-
-	// Клавиши: один particle, sequence = 6-битная маска кнопок.
+	// Маска клавиш (KPF_*) — общий формат для нижней панели (ComputeBottomState/
+	// FormatBottomText) и HTML-худа.
 	enum KeyParticleFlags : u8
 	{
 		KPF_Forward = 1 << 0,
@@ -632,16 +583,6 @@ private:
 		KPF_Jump    = 1 << 4,
 		KPF_Duck    = 1 << 5,
 	};
-	CHandle<CParticleSystem> keysParticle;
-
-	void UpdateMHUDSpeed();
-	void SetMHUDSpeedParticleVelocity(const Vector &speed, const Vector *prespeed);
-
-	void CheckMHUDTimerParticles();
-	void UpdateMHUDTimer();
-
-	void CheckMHUDKeyParticle();
-	void UpdateMHUDKeys();
 
 	// Preference helpers.
 	Color GetMHUDColorPref(const char *name, const Color &defaultColor);

@@ -81,9 +81,7 @@ static_function void FormatTimeHud(f64 time, char *output, u32 length)
 // чаще. Centre-канал минимала живёт общим KZ_HUD_BOTTOM_HEARTBEAT (он гаснет медленнее).
 #define KZ_HUD_MINIMAL_HTML_HEARTBEAT 0.5f
 
-static CConVar<bool> kz_force_mhud("kz_force_mhud", FCVAR_NONE, "Force the particle-based MHUD even when MultiAddonManager is not available.", false);
-
-static CConVarRef<bool> sv_suppress_viewpunch("sv_suppress_viewpunch");
+static CConVar<bool> kz_force_mhud("kz_force_mhud", FCVAR_NONE, "Force the panorama HUD even when MultiAddonManager is not available.", false);
 
 static_global class KZTimerServiceEventListener_HUD : public KZTimerServiceEventListener
 {
@@ -106,11 +104,6 @@ void KZHUDService::Init()
 {
 	KZTimerService::RegisterEventListener(&timerEventListener);
 	KZOptionService::RegisterEventListener(&optionEventListener);
-	// Remove FCVAR_REPLICATED so we can send per-player values.
-	if (sv_suppress_viewpunch.IsValidRef() && sv_suppress_viewpunch.IsConVarDataAvailable())
-	{
-		sv_suppress_viewpunch.GetConVarData()->RemoveFlags(FCVAR_REPLICATED);
-	}
 }
 
 bool KZHUDService::IsMHUDAvailable()
@@ -118,24 +111,155 @@ bool KZHUDService::IsMHUDAvailable()
 	return g_pMultiAddonManager != nullptr || kz_force_mhud.Get();
 }
 
-void KZHUDService::OnProcessMovement()
+// === Preferences, общие для HTML- и panorama-путей (задача 12 подняла их сюда из
+// удалённого src/kz/hud/particles/particles.cpp вместе с particle-путём; логика не менялась). ===
+
+static_function i64 PackColor(const Color &c)
 {
-	if (sv_suppress_viewpunch.IsValidRef())
+	return ((i64)c.r() << 24) | ((i64)c.g() << 16) | ((i64)c.b() << 8) | (i64)c.a();
+}
+
+static_function Color UnpackColor(i64 packed)
+{
+	return Color((u8)((packed >> 24) & 0xFF), (u8)((packed >> 16) & 0xFF), (u8)((packed >> 8) & 0xFF), (u8)(packed & 0xFF));
+}
+
+Color KZHUDService::GetMHUDColorPref(const char *name, const Color &defaultColor)
+{
+	// Цвета — настройка: источник настроек (сам игрок / спектатор), не данные.
+	i64 packed = this->MHUDSettingsSource()->optionService->GetPreferenceInt(name, PackColor(defaultColor));
+	return UnpackColor(packed);
+}
+
+// === Тип худа (hudType) ============================================================
+// 0 = Standard (классическая HTML-панель по центру), 2 = Off (не рисуется ничего),
+// 3 = Panorama (custom_hud_layout). 1 (MHUD, particle-оверлей) удалён в задаче 12.
+
+int KZHUDService::GetHudType()
+{
+	// Читаем из настроек источника (сам игрок / спектатор).
+	// Миграция очень старого конфига: если hudType не задан вовсе и mhudMaster=true (легаси-
+	// преф ещё до появления hudType) → считаем это как старое значение 1 (particle-MHUD),
+	// нормализуемое дальше вместе с любым другим сохранённым 1 (см. ниже).
+	auto *opts = this->MHUDSettingsSource()->optionService;
+	int stored = opts->GetPreferenceInt("hudType", -1);
+	if (stored == -1)
 	{
-		// Particle-путь активен при выбранном MHUD, доступных ассетах и хотя бы одном включённом элементе.
-		bool wantParticles = KZHUDService::IsMHUDAvailable() && this->GetHudType() == HUD_TYPE_MHUD
-							 && (this->IsMHUDSpeedEnabled() || this->IsMHUDPrespeedEnabled() || this->IsMHUDTimerEnabled()
-								 || this->IsMHUDKeysEnabled());
-		if (wantParticles != this->particlesActive)
+		bool legacyMaster = opts->GetPreferenceBool("mhudMaster", false);
+		int migrated = legacyMaster ? 1 : 0;
+		// Миграция пишет hudType только после загрузки префов из БД: этот геттер дёргается
+		// на первом тике движения, задолго до InitializeLocalPrefs. Запись здесь до загрузки
+		// зафиксировала бы дефолт в fail-closed prefKV и SaveLocalPrefs потом не смог бы её
+		// перезаписать (см. IsLoaded). Читающий путь просто отдаёт вычисленный дефолт.
+		if (opts->IsLoaded())
 		{
-			this->particlesActive = wantParticles;
-			utils::SendConVarValue(this->player->GetPlayerSlot(), sv_suppress_viewpunch, wantParticles ? "1" : "0");
-			utils::SendConVarValue(this->player->GetPlayerSlot(), "view_punch_decay", wantParticles ? "99999" : "18");
+			opts->SetPreferenceInt("hudType", migrated);
 		}
-		auto dst = sv_suppress_viewpunch.GetConVarData()->Value(-1);
-		auto traits = sv_suppress_viewpunch.TypeTraits();
-		traits->Copy(dst, CVValue_t(this->particlesActive));
+		stored = migrated;
 	}
+	// Задача 12: значение 1 (particle-MHUD) больше не действительно — путь удалён, апстрим
+	// вычистил particles/* из воркшоп-аддона. Молча оставить игрока с недействительным типом
+	// нельзя (пустой экран): мигрируем сохранённую 1 в Panorama и перезаписываем преф.
+	if (stored == 1)
+	{
+		stored = HUD_TYPE_PANORAMA;
+		if (opts->IsLoaded())
+		{
+			opts->SetPreferenceInt("hudType", stored);
+		}
+	}
+	return stored;
+}
+
+void KZHUDService::SetHudType(int type)
+{
+	this->MHUDSettingsSource()->optionService->SetPreferenceInt("hudType", type);
+}
+
+// === Стиль худа (hudTimerStyle) ====================================================
+// Настройка только стандартного HTML-худа (имя префа историческое): 0 = Updated
+// (кибершоковская панель + нижняя панель CP/TP), 1 = Minimal (весь худ — апстрим-
+// композиция cs2kz, см. KZHUDService::UpdateMinimalHud). Клир каналов при переключении
+// делает DrawPanels (взаимный одноразовый клир веток), здесь только преф.
+
+int KZHUDService::GetTimerStyle()
+{
+	int stored = this->MHUDSettingsSource()->optionService->GetPreferenceInt("hudTimerStyle", HUD_TIMER_STYLE_UPDATED);
+	// Нормализация мусора в префе: всё, что не Minimal, читаем как дефолтный Updated.
+	return stored == HUD_TIMER_STYLE_MINIMAL ? HUD_TIMER_STYLE_MINIMAL : HUD_TIMER_STYLE_UPDATED;
+}
+
+void KZHUDService::SetTimerStyle(int style)
+{
+	this->MHUDSettingsSource()->optionService->SetPreferenceInt("hudTimerStyle", style);
+}
+
+// Все тумблеры/раскладка — НАСТРОЙКИ: читаем из источника настроек (сам игрок/спектатор),
+// а не из данных наблюдаемого. Иначе у спектатора «прыгал» бы HUD при смене цели.
+// Per-element тумблеры.
+bool KZHUDService::IsMHUDSpeedEnabled()
+{
+	return this->MHUDSettingsSource()->optionService->GetPreferenceBool("hudSpeed", true);
+}
+
+bool KZHUDService::IsMHUDTimerEnabled()
+{
+	return this->MHUDSettingsSource()->optionService->GetPreferenceBool("hudTimer", true);
+}
+
+bool KZHUDService::IsMHUDKeysEnabled()
+{
+	return this->MHUDSettingsSource()->optionService->GetPreferenceBool("hudKeys", true);
+}
+
+bool KZHUDService::IsMHUDCpTpEnabled()
+{
+	return this->MHUDSettingsSource()->optionService->GetPreferenceBool("hudCpTp", true);
+}
+
+bool KZHUDService::IsMHUDKeysOverlapEnabled()
+{
+	return this->MHUDSettingsSource()->optionService->GetPreferenceBool("hudKeysOverlap", true);
+}
+
+// Ниже — настройки ТОЛЬКО стандартного HTML-худа, но живут рядом с остальными тумблерами:
+// тот же источник настроек.
+bool KZHUDService::IsMHUDKeysTwoRowsEnabled()
+{
+	return this->MHUDSettingsSource()->optionService->GetPreferenceBool("hudKeysTwoRows", true);
+}
+
+bool KZHUDService::IsMHUDPbWrEnabled()
+{
+	return this->MHUDSettingsSource()->optionService->GetPreferenceBool("hudPbWr", true);
+}
+
+// Единственная точка расчёта SpeedInfo (Task 6/R3): ветвей показа скорости несколько
+// (BuildVersionCHud, GetSpeedText, ComputeBottomState, panorama-layout в layout/mhud.cpp) —
+// считать её обязана КАЖДАЯ одинаково, иначе баг вида «0 на паузе» лечится в одном стиле худа
+// и остаётся в остальных. Данные — из MHUDDataSource() (this->player, если mhudSource не
+// задан спектейтом) — та же развязка data/settings, что и у остального худа.
+SpeedInfo KZHUDService::GetSpeedInfo()
+{
+	KZPlayer *src = this->MHUDDataSource();
+	SpeedInfo info {};
+	info.velocity = KZHUDService::GetDisplayVelocity(src);
+
+	// На взлёте (не отлежался KZ_HUD_ON_GROUND_THRESHOLD после приземления и не стоит на
+	// лестнице без прыжка) престрейф валиден; иначе показывать нечего — hasPrespeed=false.
+	info.hasPrespeed = !((src->GetPlayerPawn()->m_fFlags() & FL_ONGROUND
+						  && g_pKZUtils->GetServerGlobals()->curtime - src->landingTime > KZ_HUD_ON_GROUND_THRESHOLD)
+						 || (src->GetPlayerPawn()->m_MoveType() == MOVETYPE_LADDER && !src->IsButtonPressed(IN_JUMP)));
+	if (info.hasPrespeed)
+	{
+		info.prespeed = src->takeoffVelocity;
+	}
+	info.perfing = src->IsPerfing() && !src->possibleLadderHop && !src->takeoffFromLadder;
+	info.jumpbug = src->hudService->fromDuckbug;
+	// Crouch-jump имеет смысл только на взлёте (см. useTakeoff у апстрима) — вне hasPrespeed
+	// красить скорость в CJ-цвет было бы враньём (взлёта уже/ещё нет).
+	info.crouchJump = info.hasPrespeed && src->hudService->crouchJumping;
+	return info;
 }
 
 void KZHUDService::OnProcessMovementPost()
@@ -159,7 +283,6 @@ void KZHUDService::Reset()
 	this->jumpedThisTick = false;
 	this->fromDuckbug = false;
 	this->crouchJumping = false;
-	this->particlesActive = false;
 	// Слот реально освобождается (дисконнект) — только здесь гасим *Active-флаги:
 	// ClearBottomPanel()/ClearMinimalHud() для НОВОГО игрока в этот слот не должны считать
 	// себя обязанными клиру каналов, которыми никогда не владели.
@@ -171,7 +294,6 @@ void KZHUDService::Reset()
 	// а `kz_hud panel` показал бы её как свою.
 	this->lastPanelSent.clear();
 	this->lastPanelSentTime = {};
-	this->DestroyAllParticles();
 	// Слот реально освобождается — сущность и кэши классов панелей иначе достались бы
 	// следующему игроку в этом слоте (реконнект/новый игрок).
 	this->DestroyOwnedLayout();
@@ -227,18 +349,6 @@ void KZHUDService::OnRoundStart()
 			player->hudService->CloseLayoutMenu();
 		}
 	}
-}
-
-void KZHUDService::OnJoinSpectator()
-{
-	if (this->particlesActive)
-	{
-		// Вернуть клиенту дефолты viewpunch, которые particle-путь подменял.
-		utils::SendConVarValue(this->player->GetPlayerSlot(), sv_suppress_viewpunch, "0");
-		utils::SendConVarValue(this->player->GetPlayerSlot(), "view_punch_decay", "18");
-	}
-	this->particlesActive = false;
-	this->DestroyAllParticles();
 }
 
 // Наша HTML-панель и нижняя панель — два НЕЗАВИСИМО позиционируемых движком канала: ни один
@@ -397,8 +507,8 @@ static_function std::string DropEmptySegments(const std::string &text, const cha
 }
 
 // Престрейф в скобках и приписка C кибершоковской панели — ФИКСИРОВАННАЯ палитра, не
-// MHUD-префы игрока: префы mhud*Color принадлежат particle-MHUD («Внешний вид MHUD»), и
-// сохранённое там экзотическое значение красило престрейф в невидимый цвет на тёмной панели
+// MHUD-префы игрока: префы mhud*Color — цвета элементов panorama-худа, и сохранённое там
+// экзотическое значение красило престрейф в невидимый цвет на тёмной панели
 // (баг 25.07: у игрока mhudSpeedColor = чёрный ⇒ (престрейф) не виден вне перфа).
 // Объявлены до GetSpeedText: жёлтый KZ_HUD_C_JUMPBUG красит и бейдж JB минимал-стиля.
 #define KZ_HUD_C_PERF    "#40FF40" // престрейф после перфа
@@ -930,8 +1040,9 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		if (!onGroundSettled)
 		{
 			// Цвет — из палитры стандартного худа (см. KZ_HUD_C_PERF рядом с ней), а НЕ из
-			// mhud*Color игрока: те префы про particle-MHUD, и чужое значение делало престрейф
-			// невидимым. Зазор — nbsp, как во всех остальных строках (обычный пробел схлопывается).
+			// mhud*Color игрока: те префы про цвета элементов panorama-худа, и чужое значение
+			// делало престрейф невидимым. Зазор — nbsp, как во всех остальных строках (обычный
+			// пробел схлопывается).
 			const char *tint = KZ_HUD_C_WHITE;
 			if (dataSource->IsPerfing() && !dataSource->possibleLadderHop && !dataSource->takeoffFromLadder)
 			{
@@ -1165,9 +1276,9 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 	return html;
 }
 
-// `kz_hud panel` / `!hud panel` — см. объявление в kz_hud.h. Живёт здесь, а не рядом с
-// PrintHUDSummary: тут и сборщик панели, и CountHtmlLines (второй счётчик строк разъехался бы
-// с реальным при смене разделителя — диагностика, которая врёт, хуже её отсутствия).
+// `kz_hud panel` / `!hud panel` — см. объявление в kz_hud.h. Живёт здесь, рядом со сборщиком
+// панели и CountHtmlLines (второй счётчик строк разъехался бы с реальным при смене
+// разделителя — диагностика, которая врёт, хуже её отсутствия).
 // Разбор ОДНОЙ панели в консоль получателя: построчно кегль, видимая длина, длина в байтах,
 // баланс тегов и сырой текст кусками. Отдельная функция, потому что печатать надо ДВЕ панели —
 // реально отправленную (kz_hud_panel_trace) и пересобранную сейчас: расхождение между ними
@@ -1365,9 +1476,10 @@ void KZHUDService::PrintPanelDiagnostics()
 	else
 	{
 		// Трейс включён, а слепка нет — панель этому получателю сейчас не отправляется вовсе.
-		// Штатных причин четыре, все с ранним return в DrawPanels: hudType Off, минимал-стиль,
-		// открытое Html-меню, particle-путь живого владельца. Валить это на cvar — врать.
-		utils::PrintConsole(controller, "[KZ]  SENT: пусто — панель не отправляется (hudType Off / минимал / открытое меню / particle-MHUD)\n");
+		// Штатных причин три, все с ранним return в DrawPanels: hudType Off, минимал-стиль,
+		// открытое Html-меню (либо hudType Panorama — тогда HTML-путь не строится вовсе).
+		// Валить это на cvar — врать.
+		utils::PrintConsole(controller, "[KZ]  SENT: пусто — панель не отправляется (hudType Off / Panorama / минимал / открытое меню)\n");
 	}
 
 	// Пересобранное сейчас. Пешка обязательна: сборщик читает её флаги/скорость напрямую, а
@@ -1761,8 +1873,7 @@ void KZHUDService::ClearBottomPanel()
 // dataSource (его цветовые префы — часть настроек), тот же контракт, что у BuildVersionCHud.
 // Порядок и разделители композиции — апстримные (берутся из фраз), но per-element тумблеры
 // (hudKeys/hudCpTp/hudTimer/hudSpeed) применяются и здесь: выключенный элемент приходит
-// пустой строкой, а осиротевший разделитель снимает DropEmptySegments. Particle-подавления
-// нет — на particle-пути минимал не рисуется вовсе.
+// пустой строкой, а осиротевший разделитель снимает DropEmptySegments.
 // Отправка per-канал дедуплицируется слепком последнего отправленного текста + heartbeat
 // (в движении текст меняется почти каждый тик — шлётся каждый тик, это цена стиля; в
 // простое стабилен). Слепок мог обрезаться своим буфером — тогда сравнение никогда не
@@ -1861,7 +1972,7 @@ void KZHUDService::UpdateMinimalHud(KZPlayer *dataSource)
 	}
 }
 
-// Одноразовый клир минимал-худа при уходе из него (стиль Updated, particle-путь, тип Off,
+// Одноразовый клир минимал-худа при уходе из него (стиль Updated, panorama-путь, тип Off,
 // открытое меню, смерть без спектейта): centre гасится пустым токеном — сам бы висел ещё
 // несколько секунд; html не трогаем — его либо тут же перерисовывает новый владелец
 // (обновлённый худ/меню), либо он сам гаснет за duration=1s (см. utils::PrintHTMLCentre).
@@ -1884,46 +1995,20 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	KZHUDService *cfg = target->hudService;
 
 	bool available = KZHUDService::IsMHUDAvailable();
-	// hudType: 0 = Standard (HTML-панель), 1 = MHUD (particle-оверлей), 2 = Off (ничего),
-	// 3 = Panorama (custom_hud_layout сущность).
+	// hudType: 0 = Standard (HTML-панель), 2 = Off (ничего), 3 = Panorama (custom_hud_layout
+	// сущность). 1 (particle-оверлей апстрима) удалён в задаче 12 — апстрим вычистил
+	// particles/* из воркшоп-аддона, путь больше не работал; GetHudType() мигрирует
+	// сохранённую 1 в Panorama.
 	//
-	// Particle-путь — ТОЛЬКО для живого владельца (player == target && target->IsAlive()).
-	// Причина не в правах, а в движке: у CS2 нет честного screen-space API для HUD поверх
-	// экрана произвольного клиента — particle-MHUD физически позиционируется относительно
-	// взгляда ВЛАДЕЛЬЦА (это апстримный контракт, апстримный IsAlive-гейт был ровно про
-	// «owner жив и смотрит своими глазами»). cyb.34 разрешил тот же путь спектатору
-	// (player != target) на тех же particle-хендлах: там позиция считается по взгляду
-	// НАБЛЮДАЕМОГО, а не самого спектатора, и при поворотах цели оверлей уезжает за
-	// экран спектатора (живой баг cyb.36). Поэтому спектатор — всегда HTML: needHtml
-	// ниже подхватывает это автоматически, т.к. useParticles=false как только player != target.
-	// Мёртвый игрок без цели наблюдения (свой труп / фриролл) сюда вообще не попадает —
-	// DrawPanels для него не вызывается, particle'ы гасятся отдельно в
-	// KZPlayer::OnPhysicsSimulatePost.
-	bool useParticles = available && cfg->GetHudType() == HUD_TYPE_MHUD && player == target && target->IsAlive();
-
-	if (useParticles)
-	{
-		// player == target здесь всегда (см. гейт выше) — источник данных — сам владелец.
-		target->hudService->UpdateParticles(player);
-	}
-	else
-	{
-		// Гасим particle'ы: MHUD недоступен, не выбран, игрок мёртв, либо это спектатор
-		// (particle-путь спектатору принципиально не положен, см. комментарий выше).
-		target->hudService->DestroyAllParticles();
-	}
-
-	// Panorama-путь: сущность custom_hud_layout (Task 6). В отличие от particle-пути, здесь
-	// НЕТ гейта «только живой владелец» — текст в неё пишет СЕРВЕР по конкретному слоту
-	// (UpdateLayoutElement/SetPanelText по классам схемы), а не клиентский оператор, считающий
-	// экранную позицию по взгляду владельца. Поэтому panorama одинаково пригодна и владельцу,
-	// и спектатору (cfg — всегда settings/entity ПОЛУЧАТЕЛЯ, т.е. target, а данные берутся у
-	// player — наблюдаемого при спектейте, иначе он же сам); опасность гонки данных того же
-	// рода, что и у particle-пути (cyb.36), тут не возникает.
-	// Сущность рисуется независимо от HTML-центр-канала (как и particle'ы) — поэтому она
-	// обязана жить и обновляться и под открытым cs2menus-меню, и в минимал-стиле: ниже мы
-	// уходим с раннего return'а ДО проверки Off/меню/needHtml, чтобы не завести второй путь
-	// показаний тех же данных поверх panorama.
+	// Panorama-путь: сущность custom_hud_layout (Task 6). Текст в неё пишет СЕРВЕР по
+	// конкретному слоту (UpdateLayoutElement/SetPanelText по классам схемы), а не клиентский
+	// оператор, считающий экранную позицию по взгляду владельца, поэтому НЕТ гейта «только
+	// живой владелец» — panorama одинаково пригодна и владельцу, и спектатору (cfg — всегда
+	// settings/entity ПОЛУЧАТЕЛЯ, т.е. target, а данные берутся у player — наблюдаемого при
+	// спектейте, иначе он же сам). Сущность рисуется независимо от HTML-центр-канала —
+	// поэтому она обязана жить и обновляться и под открытым cs2menus-меню, и в минимал-
+	// стиле: ниже мы уходим с раннего return'а ДО проверки Off/меню/needHtml, чтобы не
+	// завести второй путь показаний тех же данных поверх panorama.
 	bool usePanorama = available && cfg->GetHudType() == HUD_TYPE_PANORAMA;
 	if (usePanorama)
 	{
@@ -1946,10 +2031,9 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 		cfg->DestroyOwnedLayout();
 	}
 
-	// Тип Off — единственный рычаг «выключить худ целиком»: не рисуем ни particle (уже
-	// погашены выше), ни panorama (уже обработана выше — не выбрана либо отвалилась в
-	// HTML-фолбэк), ни HTML-панель, ни нижнюю панель, ни минимал (клир остатков —
-	// одноразовый).
+	// Тип Off — единственный рычаг «выключить худ целиком»: ни panorama (уже обработана
+	// выше — не выбрана либо отвалилась в HTML-фолбэк), ни HTML-панель, ни нижнюю панель,
+	// ни минимал (клир остатков — одноразовый).
 	if (cfg->GetHudType() == HUD_TYPE_OFF)
 	{
 		cfg->ClearBottomPanel();
@@ -1986,13 +2070,12 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	const char *language = target->languageService->GetLanguage();
 
 	// HTML fallback: Standard type is selected, OR no addons are available at all
-	// (no MultiAddonManager/assets), OR the particle path isn't active for some other
-	// reason — target is dead, or this is a spectator (player != target, see the gate
-	// above). needHtml, useParticles и usePanorama обязаны быть взаимоисключающими, иначе
-	// получатель либо ловит два худа разом, либо не получает ни одного. (Off и живой
-	// panorama-путь уже отсеяны ранними return'ами выше; здесь usePanorama=true остаться не
-	// может — либо он вернул true и функция уже вышла, либо сброшен в false строкой выше.)
-	bool needHtml = !available || cfg->GetHudType() == HUD_TYPE_STANDARD || (!useParticles && !usePanorama);
+	// (no MultiAddonManager/assets), OR panorama isn't active for some other reason.
+	// needHtml и usePanorama обязаны быть взаимоисключающими, иначе получатель либо ловит два
+	// худа разом, либо не получает ни одного. (Off и живой panorama-путь уже отсеяны ранними
+	// return'ами выше; здесь usePanorama=true остаться не может — либо он вернул true и
+	// функция уже вышла, либо сброшен в false строкой выше.)
+	bool needHtml = !available || cfg->GetHudType() == HUD_TYPE_STANDARD || !usePanorama;
 
 	// --- Минималистичный стиль: весь худ = апстрим-композиция cs2kz (см. UpdateMinimalHud).
 	//        Кибершоковская HTML-панель и нижняя панель не рисуются вовсе; их остаток при
@@ -2004,8 +2087,8 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 		cfg->UpdateMinimalHud(player);
 		return;
 	}
-	// Уход из минимала (стиль Updated / оживший particle-путь): одноразовый клир его
-	// centre-канала; no-op, пока минимал не был активен.
+	// Уход из минимала (стиль Updated): одноразовый клир его centre-канала;
+	// no-op, пока минимал не был активен.
 	cfg->ClearMinimalHud();
 
 	std::string htmlText;
@@ -2042,14 +2125,13 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	//        По умолчанию CP/TP уже нарисован последней строкой HTML-панели выше (там кегль
 	//        фиксированный и накрыть себя панель не может), а этот канал остаётся пустым.
 	//        Ниже — про прежнюю раскладку (cvar 0): СОПРОВОЖДАЕТ
-	//        HTML-панель (needHtml): CP/TP в particle-MHUD не существует (UpdateParticles —
-	//        только Speed/Timer/Keys), преф hudCpTp всегда был про HTML-путь — поэтому и
-	//        спектатор (всегда HTML), и мёртвый, и получатель с типом MHUD на HTML-фолбэке
-	//        видят низ. Не шлём только на живом particle-пути владельца (needHtml=false):
-	//        там centre-канал остаётся свободным. Отправка/пересборка — по изменению слепка
-	//        + heartbeat (см. UpdateBottomPanel); переход «был текст → стало нечего» стирает
-	//        остаток одноразовым клиром. Каждый получатель (владелец/спектатор) получает
-	//        свой вызов DrawPanels → includeSpectators=false. ---
+	//        HTML-панель (needHtml): преф hudCpTp всегда был про HTML-путь — поэтому и
+	//        спектатор (всегда HTML), и мёртвый видят низ. Не шлём только на живом
+	//        panorama-пути (needHtml=false): там centre-канал остаётся свободным.
+	//        Отправка/пересборка — по изменению слепка + heartbeat (см. UpdateBottomPanel);
+	//        переход «был текст → стало нечего» стирает остаток одноразовым клиром. Каждый
+	//        получатель (владелец/спектатор) получает свой вызов DrawPanels →
+	//        includeSpectators=false. ---
 	if (needHtml && !kz_hud_cptp_in_panel.Get())
 	{
 		// Высота нашей же HTML-панели — из её готового текста: при всех включённых элементах
@@ -2060,7 +2142,7 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	{
 		// CP/TP уехал последней строкой В САМУ панель (деф.) — centre-канал свободен, остаток
 		// прежней нижней панели стирает одноразовый клир (в т.ч. при смене cvar'а на живом
-		// сервере). На particle-пути владельца (needHtml=false) — тот же клир, что и раньше.
+		// сервере). На panorama-пути (needHtml=false) — тот же клир, что и раньше.
 		cfg->ClearBottomPanel();
 	}
 }

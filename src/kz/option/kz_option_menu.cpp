@@ -1,7 +1,8 @@
 // Интерактивное меню !options (cs2menus) — корень с подменю по категориям:
-// чекпоинты/старт, HUD, видимость, звуки, джампстаты, paint. Подменю HUD и
-// джампстатов строят их модули (CreateHUDMenu/CreateJumpstatsMenu) — там же
-// живут их per-slot хэндлы; здесь только локальные подменю и корень.
+// чекпоинты/старт, видимость, звуки, джампстаты, paint. Подменю джампстатов строит свой
+// модуль (CreateJumpstatsMenu) — там же живёт его per-slot хэндл; здесь только локальные
+// подменю и корень. Категория HUD (particle-MHUD, cs2menus) убрана в задаче 12 вместе с
+// particles.cpp — настройки худа теперь в panorama-меню (`kz_hudmenu`/`kz_hm`).
 // Навигация: пункт корня → подменю (AddSubMenu); назад — бинд R движка меню
 // (возврат по parent), выход — бинд F. Пунктов «← Назад» больше нет (решение 23.07).
 #include "kz/option/kz_option.h"
@@ -9,7 +10,6 @@
 #include "kz/checkpoint/kz_checkpoint.h"
 #include "kz/quiet/kz_quiet.h"
 #include "kz/jumpstats/kz_jumpstats.h"
-#include "kz/hud/kz_hud.h"
 #include "kz/paint/kz_paint.h"
 #include "kz/timer/kz_timer.h"
 #include "utils/utils.h"
@@ -402,8 +402,10 @@ void KZ::option::OpenOptionsMenu(KZPlayer *player)
 	handles.sub[OPTSUB_SOUND] = BuildOptionsSubmenu(player, "Options - Menu Cat Sound", s_sndItems, (i32)KZ_ARRAYSIZE(s_sndItems));
 	handles.sub[OPTSUB_MESSAGES] = BuildOptionsSubmenu(player, "Options - Menu Cat Messages", s_msgItems, (i32)KZ_ARRAYSIZE(s_msgItems));
 	handles.sub[OPTSUB_PAINT] = BuildOptionsSubmenu(player, "Options - Menu Cat Paint", s_paintItems, (i32)KZ_ARRAYSIZE(s_paintItems));
-	// HUD/JS-подменю строят их модули (свои per-slot хэндлы, пункт «Назад» внутри).
-	MenuHandle hudMenu = (MenuHandle)player->hudService->CreateHUDMenu();
+	// JS-подменю строит свой модуль (свой per-slot хэндл, пункт «Назад» внутри).
+	// HUD-подменю (particle-MHUD, cs2menus) удалено в задаче 12 вместе с particles.cpp —
+	// настройки худа теперь только в panorama-меню (`kz_hudmenu`/`kz_hm`, см. layout/menu.cpp);
+	// категория в реестре — задача следующего транша (Task 2).
 	MenuHandle jsMenu = (MenuHandle)player->jumpstatsService->CreateJumpstatsMenu();
 
 	// Порядок корня — по частоте использования.
@@ -417,7 +419,6 @@ void KZ::option::OpenOptionsMenu(KZPlayer *player)
 		g_pMenus->AddSubMenu(root, label.c_str(), child, "");
 	};
 	addCat("Options - Menu Cat Checkpoint", handles.sub[OPTSUB_CHECKPOINT]);
-	addCat("Options - Menu Cat HUD", hudMenu);
 	addCat("Options - Menu Cat Visibility", handles.sub[OPTSUB_VISIBILITY]);
 	addCat("Options - Menu Cat Sound", handles.sub[OPTSUB_SOUND]);
 	addCat("Options - Menu Cat Messages", handles.sub[OPTSUB_MESSAGES]);
