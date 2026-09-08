@@ -42,7 +42,11 @@ void KZTipService::ToggleTips()
 
 bool KZTipService::ShouldPrintTip()
 {
-	return this->showTips;
+	// Периодические подсказки выключены безусловно по решению пользователя (задача hud-defaults):
+	// смены дефолта showTips недостаточно тем, у кого в БД уже сохранено true — этот геттер
+	// гейтит только цикл PrintTips, одноразовая подсказка при входе в команду (OnPlayerJoinTeam)
+	// от него не зависит и остаётся.
+	return false;
 }
 
 void KZTipService::PrintTip()

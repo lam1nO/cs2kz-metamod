@@ -33,7 +33,9 @@ bool KZHUDService::GetElementOutlinePref(LayoutElement element)
 	const char *outlineKey = LAYOUT_ELEMENTS[(i32)element].outlineKey;
 	const bool withTrueDefault = opts->GetPreferenceBool(outlineKey, true);
 	const bool withFalseDefault = opts->GetPreferenceBool(outlineKey, false);
-	return (withTrueDefault == withFalseDefault) ? withTrueDefault : opts->GetPreferenceBool("hudOutline", true);
+	// Дефолт false синхронизирован с текущими настройками игрока (задача hud-defaults) — тот
+	// же ответ обязан отдавать SetItemPref(..., outlineKey, ..., 0) в hud_prefs.cpp (кнопка Reset).
+	return (withTrueDefault == withFalseDefault) ? withTrueDefault : opts->GetPreferenceBool("hudOutline", false);
 }
 
 void KZHUDService::RefreshLayoutPrefs()
@@ -82,17 +84,20 @@ void KZHUDService::RefreshLayoutPrefs()
 	// (одна из шести находок транша) — hud_prefs.cpp теперь заводит тумблер на этот же ключ.
 	this->layoutPrefs.keysOverlapEnabled = opts->GetPreferenceBool("hudKeysOverlap", true);
 	this->layoutPrefs.keysOverlapAxis = opts->GetPreferenceBool("mhudKeysOverlapAxis", false);
-	this->layoutPrefs.keysLetters = opts->GetPreferenceBool("mhudKeysLetters", false);
-	this->layoutPrefs.keysSquare = opts->GetPreferenceBool("mhudKeysSquare", false);
-	this->layoutPrefs.keysBorder = opts->GetPreferenceBool("mhudKeysBorder", true);
-	this->layoutPrefs.keysGlow = opts->GetPreferenceBool("mhudKeysGlow", true);
-	this->layoutPrefs.keysFill = opts->GetPreferenceBool("mhudKeysFill", true);
-	this->layoutPrefs.keysIdle = Clamp((i32)opts->GetPreferenceInt("mhudKeysIdle", 0), 0, 2);
+	// Дефолты пяти тумблеров ниже и mhudKeysIdle синхронизированы с текущими настройками игрока
+	// (задача hud-defaults) — тот же ответ обязаны отдавать пункты меню в hud_prefs.cpp.
+	this->layoutPrefs.keysLetters = opts->GetPreferenceBool("mhudKeysLetters", true);
+	this->layoutPrefs.keysSquare = opts->GetPreferenceBool("mhudKeysSquare", true);
+	this->layoutPrefs.keysBorder = opts->GetPreferenceBool("mhudKeysBorder", false);
+	this->layoutPrefs.keysGlow = opts->GetPreferenceBool("mhudKeysGlow", false);
+	this->layoutPrefs.keysFill = opts->GetPreferenceBool("mhudKeysFill", false);
+	this->layoutPrefs.keysIdle = Clamp((i32)opts->GetPreferenceInt("mhudKeysIdle", 2), 0, 2);
 	this->layoutPrefs.speedPrecise = opts->GetPreferenceBool("mhudSpeedPrecise", false);
 
 	// Крестик (Task 10) — самостоятельный тумблер, не элемент LAYOUT_ELEMENTS: у него нет
 	// текста/шрифта/позиции в процентах, только масштаб (crosshairScale, доли device-пикселя).
-	this->layoutPrefs.crosshair = opts->GetPreferenceBool("mhudCrosshair", false);
+	// Дефолт true — синхронизирован с текущими настройками игрока (задача hud-defaults).
+	this->layoutPrefs.crosshair = opts->GetPreferenceBool("mhudCrosshair", true);
 	this->layoutPrefs.crosshairScale = panorama::SnapToStep((i32)opts->GetPreferenceInt("mhudCrosshairScale", 100), 0, 500);
 }
 

@@ -17,8 +17,11 @@
 // sgReset/sgTeleport) и в худшем вводит в заблуждение (не покрывает независимость двух
 // защит). Регистрируем два реальных живых префа: sgReset и sgTeleport.
 //
-// preferredCompareType — пункта меню действительно нет нигде (проверено task-7-brief.md
-// шаг 1), добавляем как Choice(5): None/SPB/GPB/SR/WR (см. KZTimerService::CompareType).
+// preferredCompareType — пункт меню Choice(5) был (None/SPB/GPB/SR/WR), снят задачей
+// hud-defaults по решению пользователя; преф и команда !comparelevel остаются рабочими.
+//
+// showTips — пункт-тумблер был (ShowTipsGetCurrent/OnActivate), снят той же задачей: подсказки
+// в чат выключены безусловно на уровне KZTipService::ShouldPrintTip (kz_tip.cpp).
 //
 // Вызов регистрации (KZMiscMenu_Register) — в общем Init-порядке (cs2kz.cpp::Load, Task 15),
 // сразу после HUD и перед Jumpstats: категория часто используется (режим/стиль/язык/подсказки),
@@ -370,8 +373,9 @@ void KZMiscMenu_Register()
 	KZ::menu::AddChoice(cat, "Options - Menu Label Language", &LanguageGetChoices, &LanguageGetCurrent, &LanguageOnPick);
 	KZ::menu::SetItemPref(cat, "preferredLanguage", KZOptStorage::Str);
 
-	KZ::menu::AddActionToggle(cat, "Options - Menu Label ShowTips", &ShowTipsGetCurrent, &ShowTipsOnActivate);
-	KZ::menu::SetItemPref(cat, "showTips", KZOptStorage::Bool, 1);
+	// Пункт снят по решению пользователя: подсказки всегда выключены (см. KZTipService::
+	// ShouldPrintTip, kz_tip.cpp) — включать нечего, пункт был бы no-op. ShowTipsGetCurrent/
+	// OnActivate и сам преф showTips не удаляем, команда !kz_tips продолжает работать.
 
 	KZ::menu::AddSize(cat, "Options - Menu Label FOV", "fov", (i32)KZFOVService::GetDefaultFOV(), (i32)KZFOVService::GetMinFOV(),
 					  (i32)KZFOVService::GetMaxFOV());
@@ -387,6 +391,7 @@ void KZMiscMenu_Register()
 	KZ::menu::AddActionToggle(cat, "Options - Menu Label SafeguardTeleport", &SgTeleportGetCurrent, &SgTeleportOnActivate);
 	KZ::menu::SetItemPref(cat, "sgTeleport", KZOptStorage::Int, 0);
 
-	KZ::menu::AddChoice(cat, "Options - Menu Label CompareType", &CompareTypeGetChoices, &CompareTypeGetCurrent, &CompareTypeOnPick);
-	KZ::menu::SetItemPref(cat, "preferredCompareType", KZOptStorage::Int, KZTimerService::CompareType::COMPARE_GPB);
+	// Пункт "Сравнивать с" снят по решению пользователя: команда !comparelevel (kz_timer.cpp,
+	// SetCompareTarget) и сам преф preferredCompareType остаются рабочими без изменений —
+	// CompareTypeGetChoices/GetCurrent/OnPick не удаляем, они были только колбэками меню.
 }

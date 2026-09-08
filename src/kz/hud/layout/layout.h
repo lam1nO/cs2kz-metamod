@@ -17,7 +17,8 @@
 
 #define LAYOUT_DEF_KEYS_X    0
 #define LAYOUT_DEF_KEYS_Y    20
-#define LAYOUT_DEF_KEYS_SIZE 20
+// 30, а не 20 — дефолт синхронизирован с текущими настройками игрока (задача hud-defaults).
+#define LAYOUT_DEF_KEYS_SIZE 30
 
 #define LAYOUT_DEF_CHECKPOINT_X    0
 #define LAYOUT_DEF_CHECKPOINT_Y    30
@@ -26,6 +27,8 @@
 #define LAYOUT_SIZE_MIN 8
 #define LAYOUT_SIZE_MAX 100
 
-#define LAYOUT_DEFAULT_FONT "stratum2-bold-monodigit"
+// Дефолт синхронизирован с текущими настройками игрока (задача hud-defaults): было
+// stratum2-bold-monodigit, стало lato-bold (слаг panorama_tables.cpp, "Lato Bold*").
+#define LAYOUT_DEFAULT_FONT "lato-bold"
 // Разметка живёт в чужом аддоне 3469155349; путь совпадает с апстримным.
 #define KZ_MHUD_LAYOUT "panorama/layout/custom_game/cs2kz/mhud.vxml_c"

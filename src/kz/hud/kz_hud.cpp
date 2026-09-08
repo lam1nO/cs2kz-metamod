@@ -43,7 +43,8 @@ const Color MHUD_DEF_TIMER_TP_COLOR(255, 255, 255, 255);
 const Color MHUD_DEF_TIMER_PRO_COLOR(0x5F, 0x99, 0xD9, 0xFF);
 const Color MHUD_DEF_TIMER_PAUSED_COLOR(0xFF, 0xFF, 0x00, 0xFF);
 const Color MHUD_DEF_TIMER_STOPPED_COLOR(0xFF, 0xA0, 0xA0, 0xFF);
-const Color MHUD_DEF_KEYS_OVERLAP_COLOR(0xFF, 0x40, 0x40, 0xFF);
+// Дефолт синхронизирован с текущими настройками игрока (задача hud-defaults): было (255,64,64).
+const Color MHUD_DEF_KEYS_OVERLAP_COLOR(0xFF, 0x00, 0x00, 0xFF);
 const Color MHUD_DEF_KEYS_PRESSED_COLOR(0x3B, 0xED, 0xA0, 0xFF);
 const Color MHUD_DEF_KEYS_OVERLAP_GLOW_COLOR(0xFF, 0x40, 0x40, 0xFF);
 
@@ -156,7 +157,10 @@ int KZHUDService::GetHudType()
 	if (stored == -1)
 	{
 		bool legacyMaster = opts->GetPreferenceBool("mhudMaster", false);
-		int migrated = legacyMaster ? 1 : 0;
+		// Дефолт для игрока без единой записи в БД — Panorama, а не Standard: синхронизирован
+		// с текущими настройками игрока (задача hud-defaults, hudType=3). Легаси-миграция
+		// mhudMaster=true (значение 1) ниже нормализуется в HUD_TYPE_PANORAMA тем же путём.
+		int migrated = legacyMaster ? 1 : HUD_TYPE_PANORAMA;
 		// Миграция пишет hudType только после загрузки префов из БД: этот геттер дёргается
 		// на первом тике движения, задолго до InitializeLocalPrefs. Запись здесь до загрузки
 		// зафиксировала бы дефолт в fail-closed prefKV и SaveLocalPrefs потом не смог бы её
