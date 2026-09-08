@@ -258,6 +258,9 @@ namespace KZ::menu
 			return;
 		}
 		auto *opts = player->optionService;
+		// Один флаш на весь сброс: без этого каждый SetPreference* пишет в БД целиком
+		// сериализованный prefKV — на странице Keys это 18 записей за один клик.
+		KZOptionService::BatchScope batch(opts);
 		for (const KZOptItem &item : node->items)
 		{
 			if (!item.prefKey)

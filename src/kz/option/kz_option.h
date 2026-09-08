@@ -41,6 +41,10 @@ private:
 
 	KeyValues3 prefKV = KeyValues3(KV3_TYPEEX_TABLE, KV3_SUBTYPE_UNSPECIFIED);
 	CUtlVector<CUtlString> userSetPrefs; // Track user-modified preferences
+	// Пакетная запись: пока > 0, SetPreference* не флашит в БД (флаш делает BatchScope на
+	// выходе). Нужно сбросу страницы меню — иначе один клик по «Сбросить страницу» с 18
+	// пунктами даёт 18 полных сериализаций prefKV и 18 записей в БД.
+	i32 saveBatchDepth = 0;
 
 public:
 	void Reset()
@@ -63,6 +67,25 @@ public:
 	}
 
 	void SaveLocalPrefs();
+
+	// RAII-обёртка пакетной записи: копит правки без флаша и пишет один раз на выходе.
+	struct BatchScope
+	{
+		KZOptionService *svc;
+
+		BatchScope(KZOptionService *service) : svc(service)
+		{
+			this->svc->saveBatchDepth++;
+		}
+
+		~BatchScope()
+		{
+			if (--this->svc->saveBatchDepth == 0)
+			{
+				this->svc->SaveLocalPrefs();
+			}
+		}
+	};
 
 	void SaveGlobalPrefs() {}
 

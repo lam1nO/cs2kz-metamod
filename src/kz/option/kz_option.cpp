@@ -232,6 +232,11 @@ void KZOptionService::InitializeGlobalPrefs(std::string json)
 
 void KZOptionService::SaveLocalPrefs()
 {
+	// Идёт пакетная правка (BatchScope) — флаш будет один, на выходе из области.
+	if (this->saveBatchDepth > 0)
+	{
+		return;
+	}
 	// Fail-closed: без успешной InitializeLocalPrefs prefKV — пустая таблица по
 	// умолчанию. Запись такой "пустоты" в БД до загрузки затирала бы реальные префы
 	// игрока (гонка автотриггеров записи с InitializeLocalPrefs, см. GetHudType).
