@@ -425,7 +425,7 @@ void KZCheckpointService::SetStartPosition()
 	// В prac своей стартовой позиции быть не может (решение пользователя 07.08): рестарта в
 	// prac нет вовсе, а зафиксировать её игрок мог бы только из ноуклипа — то есть записать в
 	// префы (и на все будущие сессии этой карты) точку внутри геометрии. Гард стоит в сервисе,
-	// а не в команде: сюда же приходит пункт меню !options (kz_option_menu.cpp).
+	// а не в команде: сюда же приходит пункт меню настроек (option/prefs/local_prefs.cpp).
 	if (this->player->pracService->IsInPrac())
 	{
 		this->player->languageService->PrintChat(true, false, "Prac - No Start Position");

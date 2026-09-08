@@ -577,7 +577,6 @@ public:
 	void OpenJumpstatsMenu();
 
 	// Построить JS-меню без показа (возвращает MenuHandle == u32; 0 = не построено).
-	// «Назад» — бинд R движка меню (parent от AddSubMenu в !options).
-	// (используется подменю джампстатов в kz_option_menu.cpp).
+	// «Назад» — бинд R движка меню (parent от AddSubMenu).
 	u32 CreateJumpstatsMenu();
 };
