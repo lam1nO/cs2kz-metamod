@@ -6,101 +6,141 @@
 	{
 		"en"	"Options"
 		"ru"	"Настройки"
+		"chi"	"设置"
+		"ua"	"Налаштування"
 	}
 	"Options - Menu Cat Checkpoint"
 	{
 		"en"	"Checkpoints & start"
 		"ru"	"Чекпоинты и старт"
+		"chi"	"检查点与起点"
+		"ua"	"Чекпоінти та старт"
 	}
 	"Options - Menu Cat Visibility"
 	{
 		"en"	"Visibility"
 		"ru"	"Видимость"
+		"chi"	"可见性"
+		"ua"	"Видимість"
 	}
 	"Options - Menu Cat Sound"
 	{
 		"en"	"Sounds"
 		"ru"	"Звуки"
+		"chi"	"声音"
+		"ua"	"Звуки"
 	}
 	"Options - Menu Cat Messages"
 	{
 		"en"	"Messages"
 		"ru"	"Сообщения"
+		"chi"	"消息"
+		"ua"	"Повідомлення"
 	}
 	"Options - Menu Cat Jumpstats"
 	{
 		"en"	"Jumpstats"
 		"ru"	"Джампстаты"
+		"chi"	"跳跃统计"
+		"ua"	"Джампстати"
 	}
 	"Options - Menu Cat Paint"
 	{
 		"en"	"Paint"
 		"ru"	"Paint"
+		"chi"	"涂鸦"
+		"ua"	"Paint"
 	}
 	"Options - Menu Label HidePlayers"
 	{
 		"en"	"Hide players"
 		"ru"	"Скрыть игроков"
+		"chi"	"隐藏玩家"
+		"ua"	"Сховати гравців"
 	}
 	"Options - Menu Label HideWeapon"
 	{
 		"en"	"Hide weapon"
 		"ru"	"Скрыть оружие"
+		"chi"	"隐藏武器"
+		"ua"	"Сховати зброю"
 	}
 	"Options - Menu Label HideLegs"
 	{
 		"en"	"Hide legs"
 		"ru"	"Скрыть ноги"
+		"chi"	"隐藏腿部"
+		"ua"	"Сховати ноги"
 	}
 	"Options - Menu Label SetStartPos"
 	{
 		"en"	"Set custom start position"
 		"ru"	"Задать свою точку старта"
+		"chi"	"设置自定义起点"
+		"ua"	"Задати свою точку старту"
 	}
 	"Options - Menu Label ClearStartPos"
 	{
 		"en"	"Clear custom start position"
 		"ru"	"Сбросить свою точку старта"
+		"chi"	"清除自定义起点"
+		"ua"	"Скинути свою точку старту"
 	}
 	"Options - Menu Label CheckpointMessage"
 	{
 		"en"	"Checkpoint messages"
 		"ru"	"Сообщения чекпоинтов"
+		"chi"	"检查点消息"
+		"ua"	"Повідомлення чекпоінтів"
 	}
 	"Options - Menu Label CheckpointSound"
 	{
 		"en"	"Checkpoint sound"
 		"ru"	"Звук чекпоинта"
+		"chi"	"检查点声音"
+		"ua"	"Звук чекпоінта"
 	}
 	"Options - Menu Label TeleportSound"
 	{
 		"en"	"Teleport sound"
 		"ru"	"Звук телепорта"
+		"chi"	"传送声音"
+		"ua"	"Звук телепорта"
 	}
 	"Options - Menu Label TimerStopSound"
 	{
 		"en"	"Timer stop sound"
 		"ru"	"Звук остановки таймера"
+		"chi"	"计时器停止声音"
+		"ua"	"Звук зупинки таймера"
 	}
 	"Options - Menu Label RecordVolume"
 	{
 		"en"	"Record sound volume"
 		"ru"	"Громкость звука рекорда"
+		"chi"	"记录声音音量"
+		"ua"	"Гучність звуку рекорду"
 	}
 	"Options - Menu Label ShowAllPaint"
 	{
 		"en"	"Show everyone's paint"
 		"ru"	"Показывать чужую краску"
+		"chi"	"显示他人的涂鸦"
+		"ua"	"Показувати чужу фарбу"
 	}
 	"Options - Menu Label PaintColor"
 	{
 		"en"	"Paint color"
 		"ru"	"Цвет краски"
+		"chi"	"涂鸦颜色"
+		"ua"	"Колір фарби"
 	}
 	"Options - Menu Label PaintSize"
 	{
 		"en"	"Paint size"
 		"ru"	"Размер краски"
+		"chi"	"涂鸦大小"
+		"ua"	"Розмір фарби"
 	}
 	"Options - Menu Label MissedTime"
 	{
@@ -109,6 +149,8 @@
 		// потеряет уведомление, которое по подписи выключать не собирался).
 		"en"	"Missed record"
 		"ru"	"Потеря рекорда"
+		"chi"	"错失记录"
+		"ua"	"Втрата рекорду"
 	}
 
 	// Категория Misc (реестр настроек, задача 7) — префы читались кодом, но пункта меню не
@@ -117,46 +159,64 @@
 	{
 		"en"	"Misc"
 		"ru"	"Разное"
+		"chi"	"杂项"
+		"ua"	"Різне"
 	}
 	"Options - Menu Label Mode"
 	{
 		"en"	"Mode"
 		"ru"	"Режим"
+		"chi"	"模式"
+		"ua"	"Режим"
 	}
 	"Options - Menu Label Styles"
 	{
 		"en"	"Styles"
 		"ru"	"Стили"
+		"chi"	"风格"
+		"ua"	"Стилі"
 	}
 	"Options - Menu Label Pistol"
 	{
 		"en"	"Pistol"
 		"ru"	"Пистолет"
+		"chi"	"手枪"
+		"ua"	"Пістолет"
 	}
 	"Options - Menu Label Beam"
 	{
 		"en"	"Beam"
 		"ru"	"Луч"
+		"chi"	"轨迹光束"
+		"ua"	"Промінь"
 	}
 	"Options - Menu Label BeamOffset"
 	{
 		"en"	"Beam offset"
 		"ru"	"Смещение луча"
+		"chi"	"光束偏移"
+		"ua"	"Зсув променя"
 	}
 	"Options - Menu Label Language"
 	{
 		"en"	"Language"
 		"ru"	"Язык"
+		"chi"	"语言"
+		"ua"	"Мова"
 	}
 	"Options - Menu Label ShowTips"
 	{
 		"en"	"Show tips"
 		"ru"	"Показывать подсказки"
+		"chi"	"显示提示"
+		"ua"	"Показувати підказки"
 	}
 	"Options - Menu Label FOV"
 	{
 		"en"	"Field of view"
 		"ru"	"Угол обзора"
+		"chi"	"视野"
+		"ua"	"Кут зору"
 	}
 	// safeguard расцеплён на два независимых префа (sgReset/sgTeleport), см. kz_timer.cpp —
 	// единый старый "safeguard" больше не пишется ни одной командой, только читается как фолбэк.
@@ -164,15 +224,21 @@
 	{
 		"en"	"Safeguard (timer reset)"
 		"ru"	"Сейфгард (сброс таймера)"
+		"chi"	"保护 (重置计时器)"
+		"ua"	"Сейфгард (скидання таймера)"
 	}
 	"Options - Menu Label SafeguardTeleport"
 	{
 		"en"	"Safeguard (teleports, PRO)"
 		"ru"	"Сейфгард (телепорты, PRO)"
+		"chi"	"保护 (传送, PRO)"
+		"ua"	"Сейфгард (телепорти, PRO)"
 	}
 	"Options - Menu Label CompareType"
 	{
 		"en"	"Compare against"
 		"ru"	"Сравнивать с"
+		"chi"	"比较对象"
+		"ua"	"Порівнювати з"
 	}
 }

@@ -123,4 +123,9 @@ namespace KZ::menu
 	void ResetNode(KZPlayer *player, KZOptNode *node);
 
 	const std::vector<KZOptNode *> &GetTree();
+
+	// НАША добавка к апстримному model.h: узлы создаются `new` на Load и живут до выгрузки
+	// плагина, парного удаления у апстрима нет. С включённым memdbgon.h это уезжает в отчёт об
+	// утечках, поэтому реестр сносится явно — рядом с KZOptionService::Cleanup() (cs2kz.cpp).
+	void Cleanup();
 } // namespace KZ::menu

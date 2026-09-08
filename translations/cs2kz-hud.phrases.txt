@@ -294,6 +294,13 @@
 		"ru"		"{grey}Применение: {default}kz_panel <compact>{grey}."
 		"ua"		"{grey}Використання: {default}kz_panel <compact>{grey}."
 	}
+	"HUD Command Usage"
+	{
+		"en"		"{grey}Usage: {default}kz_hud <panel>{grey}, or {default}kz_hud{grey} for the settings menu."
+		"chi"		"{grey}用法: {default}kz_hud <panel>{grey}, 或 {default}kz_hud{grey} 打开设置菜单."
+		"ru"		"{grey}Применение: {default}kz_hud <panel>{grey}, либо {default}kz_hud{grey} — меню настроек."
+		"ua"		"{grey}Використання: {default}kz_hud <panel>{grey}, або {default}kz_hud{grey} — меню налаштувань."
+	}
 
 	"MHUD - Master Enabled"
 	{
@@ -316,37 +323,7 @@
 		"ru"		"{grey}Панель HUD сейчас недоступна."
 		"ua"		"{grey}Панель HUD наразі недоступна."
 	}
-	"MHUD - Font"
-	{
-		"#format"	"value:s"
-		"en"		"{grey}HUD font: {default}{value}{grey}."
-		"ru"		"{grey}Шрифт HUD: {default}{value}{grey}."
-		"chi"		"{grey}HUD 字体: {default}{value}{grey}."
-		"ua"		"{grey}Шрифт HUD: {default}{value}{grey}."
-	}
-	"MHUD - Set Font"
-	{
-		"#format"	"value:s"
-		"en"		"{grey}HUD font set to {default}{value}{grey}."
-		"ru"		"{grey}Шрифт HUD изменен на {default}{value}{grey}."
-		"chi"		"{grey}HUD 字体已设置为 {default}{value}{grey}."
-		"ua"		"{grey}Шрифт HUD встановлено на {default}{value}{grey}."
-	}
 
-	"HUD - Type Standard"
-	{
-		"en"		"{grey}HUD type set to {green}Standard{grey} (HTML)."
-		"ru"		"{grey}Тип HUD: {green}Стандартный{grey} (HTML)."
-		"chi"		"{grey}HUD 类型已设置为 {green}标准{grey} (HTML)."
-		"ua"		"{grey}Тип HUD: {green}Стандартний{grey} (HTML)."
-	}
-	"HUD - Type MHUD"
-	{
-		"en"		"{grey}HUD type set to {green}MHUD{grey} (particle)."
-		"ru"		"{grey}Тип HUD: {green}MHUD{grey} (частицы)."
-		"chi"		"{grey}HUD 类型已设置为 {green}MHUD{grey} (粒子)."
-		"ua"		"{grey}Тип HUD: {green}MHUD{grey} (частинки)."
-	}
 
 	// Состояние тумблера в меню (панорама-меню настроек, Task 11/12).
 	"HUD - Menu On"
@@ -363,16 +340,24 @@
 		"chi"		"关"
 		"ua"		"вимк"
 	}
-	// HTML-панель и компактный режим (пункты меню !hud / подменю HUD в !options).
-	"HUD - Menu Label Panel"
-	{
-		"en"		"Info panel"
-		"ru"		"Инфо-панель"
-	}
 
 	// Меню настроек panorama-худа (hud/layout/menu.cpp обходит реестр kz/option/menu/model.h,
 	// hud/prefs/hud_prefs.cpp регистрирует). Категории и общие для Timer/Speed/Prespeed/Keys/
 	// Checkpoint пункты (Enabled/Position/Size/Font/Outline/Opacity) — задача 9.
+	"HUD - Menu Title"
+	{
+		"en"		"Settings"
+		"ru"		"Настройки"
+		"chi"		"设置"
+		"ua"		"Налаштування"
+	}
+	"HUD - Menu Label Reset"
+	{
+		"en"		"Reset this page"
+		"ru"		"Сбросить страницу"
+		"chi"		"重置此页"
+		"ua"		"Скинути сторінку"
+	}
 	"HUD - Menu Cat General"
 	{
 		"en"		"General"

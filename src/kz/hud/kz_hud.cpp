@@ -1991,3 +1991,39 @@ SCMD(kz_panel, SCFL_HUD)
 	}
 	return MRES_SUPERCEDE;
 }
+
+// !hud — команда осталась от particle-пути (спека §4: "!hud остаётся как есть", §8 снимает
+// только `!mhud *`), но её определение жило в particles.cpp и уехало вместе с ним (задача 12).
+// Возвращаем ровно две живые роли: без аргументов — открыть настройки худа (те же, что !hudmenu:
+// категория HUD реестра, layout/menu.cpp), `panel` — диагностика вместимости центральной
+// HTML-панели. Остальные субкоманды particle-эпохи (offset/scale/*color/font/reset) не
+// возвращаем: настройки, которые они правили, теперь пункты меню, а particle-худа больше нет.
+SCMD(kz_hud, SCFL_HUD | SCFL_PREFERENCE)
+{
+	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
+	if (!player)
+	{
+		return MRES_SUPERCEDE;
+	}
+	if (args->ArgC() < 2)
+	{
+		if (player->hudService->IsLayoutMenuOpen())
+		{
+			player->hudService->CloseLayoutMenu();
+		}
+		else
+		{
+			player->hudService->OpenLayoutMenu("HUD - Menu Cat General");
+		}
+		return MRES_SUPERCEDE;
+	}
+	if (KZ_STREQI(args->Arg(1), "panel"))
+	{
+		// Отдельной субкомандой, а не в сводке: сводка печаталась ТОЛЬКО когда cs2menus не
+		// загружен, то есть на живом сервере была недостижима.
+		player->hudService->PrintPanelDiagnostics();
+		return MRES_SUPERCEDE;
+	}
+	player->languageService->PrintChat(true, false, "HUD Command Usage");
+	return MRES_SUPERCEDE;
+}

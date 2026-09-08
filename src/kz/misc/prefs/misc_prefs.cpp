@@ -274,6 +274,10 @@ namespace
 		player->optionService->SetPreferenceStr("preferredLanguage", language);
 		if (!shouldReconnect)
 		{
+			// Обе строки, что печатает SCMD(kz_language): подтверждение смены ("Switch Language")
+			// и предупреждение про ручную смену меню. Без первой смена языка из меню проходила
+			// вообще без ответа игроку.
+			player->languageService->PrintChat(true, false, "Switch Language", language);
 			player->languageService->PrintChat(false, false, "Language Change - Manual Menu Change Required");
 		}
 	}
@@ -372,6 +376,10 @@ void KZMiscMenu_Register()
 	KZ::menu::AddSize(cat, "Options - Menu Label FOV", "fov", (i32)KZFOVService::GetDefaultFOV(), (i32)KZFOVService::GetMinFOV(),
 					  (i32)KZFOVService::GetMaxFOV());
 	KZ::menu::SetItemUnit(cat, "");
+	// AddSize по умолчанию заводит Float, а реальный потребитель читает и пишет fov через
+	// GetPreferenceInt/SetPreferenceInt (kz_fov.h) — та же доктрина, что у Opacity/Scale в
+	// hud_prefs.cpp: тип хранения пункта обязан совпадать с типом читателя.
+	KZ::menu::SetItemPref(cat, "fov", KZOptStorage::Int, (i32)KZFOVService::GetDefaultFOV());
 
 	// safeguard: два независимых префа, не единый Choice — см. комментарий в шапке файла.
 	KZ::menu::AddActionToggle(cat, "Options - Menu Label SafeguardReset", &SgResetGetCurrent, &SgResetOnActivate);

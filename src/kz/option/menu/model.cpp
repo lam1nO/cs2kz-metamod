@@ -227,6 +227,30 @@ namespace KZ::menu
 		node->items.push_back(item);
 	}
 
+	// Парное удаление к new в AddCategory/AddSub (НАША добавка, см. model.h): рекурсивно по
+	// subs, дерево очищается целиком — повторный Load плагина регистрирует состав заново.
+	static void DeleteNode(KZOptNode *node)
+	{
+		if (!node)
+		{
+			return;
+		}
+		for (KZOptNode *sub : node->subs)
+		{
+			DeleteNode(sub);
+		}
+		delete node;
+	}
+
+	void Cleanup()
+	{
+		for (KZOptNode *node : g_tree)
+		{
+			DeleteNode(node);
+		}
+		g_tree.clear();
+	}
+
 	void ResetNode(KZPlayer *player, KZOptNode *node)
 	{
 		if (!node)

@@ -59,7 +59,10 @@
 
 #include "tier0/memdbgon.h"
 
-#define KZ_MENU_DEFAULT_TITLE "HUD Settings"
+// Заголовок меню: фраза (переведена, translations/cs2kz-hud.phrases.txt), а не английский
+// литерал — под этим заголовком лежат уже не только настройки худа, но и Misc/Jumpstats/
+// локальные ветки. На выбранной категории показываем её имя: игрок видит, где он.
+#define KZ_MENU_TITLE_PHRASE "HUD - Menu Title"
 
 // === Обход реестра (KZ::menu::GetTree(), Task 1) ============================================
 // Состав меню (категории/пункты) собирается из ЧЕТЫРЁХ Register() (hud/prefs/hud_prefs.cpp —
@@ -86,9 +89,9 @@ static_function const KZOptItem *GetMenuItem(i32 category, i32 itemIndex)
 // === Мелкие таблицы: шрифты (без апстримного полного list-попапа) ==========================
 
 // Тип худа теперь — обычный Choice-пункт реестра (hud_prefs.cpp: getChoices/getCurrent/onPick
-// вокруг GetHudType/SetHudType), цикл Standard → Panorama → Off → Standard получается сам
-// перебором getChoices() по кругу (см. ActivateMenuItem/RenderMenuItems ниже) — свой
-// HudTypeLabel/NextHudType здесь больше не нужен.
+// вокруг GetHudType/SetHudType) и открывается попапом списка, как остальные 13 Choice-пунктов
+// (см. ActivateMenuItem/RenderMenuListPopup ниже) — свой HudTypeLabel/NextHudType и прежний
+// перебор по кругу здесь больше не нужны.
 
 // Курированный список вместо апстримного постраничного обзора всех семейств (~30):
 // сознательно урезано (см. комментарий вверху файла) — клик по пункту просто перебирает.
@@ -159,9 +162,9 @@ static_function void SetIntPref(KZPlayer *player, const char *key, i32 value, bo
 
 // === scale (model.h): "the preference stores value / scale" — на экране Size всегда целое
 // (шаг 1/5), а преф при scale>1 хранит ДРОБЬ этого целого (Float, независимо от storage-флага
-// самого пункта — дробь без float не сохранить). Ни один пункт нашего состава scale не
-// выставляет (hud_prefs.cpp) — при scale<=1 (0 или 1, дефолт) это ровно старый GetIntPref/
-// SetIntPref, поведение существующих Size-пунктов не меняется ни на бит.
+// самого пункта — дробь без float не сохранить). scale ставят recordVolume (local_prefs.cpp)
+// и jsVolume (jumpstats_prefs.cpp) — ветка scale > 1 живая; у остальных Size-пунктов scale<=1
+// (0 или 1, дефолт), и там это ровно старый GetIntPref/SetIntPref, бит в бит.
 static_function i32 GetScaledDisplay(KZPlayer *player, const char *key, i32 displayDefault, i32 scale, bool isFloat)
 {
 	if (scale <= 1)
@@ -201,23 +204,13 @@ static_function bool IsMenuItemEnabled(KZPlayer *player, const KZOptItem &it)
 
 // === solidOnly (Color): попап без градиентов — для потребителя, который не умеет их
 // рендерить (см. model.h). Сплошные идут первыми, градиенты хвостом (panorama_tables.cpp:
-// entry<PANORAMA_COLOR_COUNT — сплошной), поэтому достаточно отрезать хвост без нового
-// экспорта из panorama_tables (panorama::GetSolidColorCount убрана в задаче 14 как мёртвая) —
-// маркер градиента читаем через уже публичный GetColorEntryValue(...).a() (255 — сплошной,
-// 1 — маркер градиента, см. panorama_tables.cpp:IsGradient). Флаг ставят цвета клавиш
-// (hud_prefs.cpp: key-glow-N в keys.css градиентов не знает); при solidOnly=false это ровно
-// GetColorEntryCount().
+// entry<PANORAMA_COLOR_COUNT — сплошной), поэтому «без градиентов» это ровно
+// GetSolidColorCount() (та же граница, panorama_tables.cpp:392), а не свой обход палитры.
+// Флаг ставят два цвета клавиш (hud_prefs.cpp: key-glow-N в keys.css градиентов не знает);
+// при solidOnly=false это ровно GetColorEntryCount().
 static_function i32 GetColorPopupTotal(const KZOptItem *it)
 {
-	i32 total = panorama::GetColorEntryCount();
-	if (it && it->solidOnly)
-	{
-		while (total > 0 && panorama::GetColorEntryValue(total - 1).a() != 255)
-		{
-			total--;
-		}
-	}
-	return total;
+	return (it && it->solidOnly) ? panorama::GetSolidColorCount() : panorama::GetColorEntryCount();
 }
 
 // Симметрично GetMHUDColorPref (kz_hud.cpp) — тот же формат упаковки (R2: своего
@@ -254,7 +247,6 @@ SLOT_ID(ItemValVar, "iv%i")
 SLOT_ID(ItemSw, "item_sw%i")
 SLOT_ID(ItemSub, "item_sub%i")
 SLOT_ID(ItemSubVar, "is%i")
-SLOT_ID(ItemDiv, "item_div%i")
 SLOT_ID(SwPanel, "sw%i")
 SLOT_ID(LiPanel, "li%i")
 SLOT_ID(LiLbl, "li_lbl%i")
@@ -404,7 +396,12 @@ void KZHUDService::RenderMenu()
 		return;
 	}
 
-	this->SetMenuVar(layout, "menu_title", "title", KZ_MENU_DEFAULT_TITLE);
+	const std::vector<KZOptNode *> &titleTree = KZ::menu::GetTree();
+	const char *titleKey = (this->menuCategory >= 0 && this->menuCategory < (i32)titleTree.size() && titleTree[this->menuCategory]->phraseKey)
+							   ? titleTree[this->menuCategory]->phraseKey
+							   : KZ_MENU_TITLE_PHRASE;
+	const std::string title = KZLanguageService::PrepareMessageWithLang(this->player->languageService->GetLanguage(), titleKey);
+	this->SetMenuVar(layout, "menu_title", "title", title.c_str());
 	this->SetMenuBoolClass(layout, "color_popup", "hidden", this->menuApplied.colorPopupHidden, this->menuPopup != MenuPopup::Color);
 	this->SetMenuBoolClass(layout, "step_popup", "hidden", this->menuApplied.stepPopupHidden, this->menuPopup != MenuPopup::Step);
 	this->SetMenuBoolClass(layout, "list_popup", "hidden", this->menuApplied.listPopupHidden, this->menuPopup != MenuPopup::List);
@@ -445,9 +442,11 @@ void KZHUDService::RenderMenuCategories(CCSCustomHudLayout *layout)
 	}
 }
 
-// Значение Choice-пункта (сейчас — только Hud Type) — текущий id ищем в списке getChoices(),
-// не найден (незнакомое сохранённое значение) — берём первый пункт списка тем же способом,
-// каким старый HudTypeLabel по умолчанию отдавал "Standard" (он первый в GetHudTypeChoices).
+// Значение Choice-пункта: текущий id ищем в списке getChoices(). Первую строку списка при
+// промахе НЕ подставляем — так строка "Стили" (мультивыбор, getCurrent всегда -1) вечно
+// показывала имя первого стиля как выбранное, а Mode/Language врали при сохранённом значении,
+// которого в списке нет. Фолбэк — отмеченные строки (getChoices сам ставит selected), как в
+// апстриме (origin/master src/kz/option/menu/kz_menu.cpp:415-444); ничего не отмечено — пусто.
 static_function std::string GetChoiceValueLabel(KZPlayer *player, const KZOptItem &it)
 {
 	std::vector<KZChoice> choices;
@@ -455,19 +454,26 @@ static_function std::string GetChoiceValueLabel(KZPlayer *player, const KZOptIte
 	{
 		it.getChoices(player, it.tag, choices);
 	}
-	if (choices.empty())
+	if (it.getCurrent)
 	{
-		return "";
-	}
-	const i64 current = it.getCurrent ? it.getCurrent(player, it.tag) : choices[0].id;
-	for (const KZChoice &c : choices)
-	{
-		if (c.id == current)
+		const i64 current = it.getCurrent(player, it.tag);
+		for (const KZChoice &c : choices)
 		{
-			return c.label;
+			if (c.id == current)
+			{
+				return c.label;
+			}
 		}
 	}
-	return choices[0].label;
+	std::string value;
+	for (const KZChoice &c : choices)
+	{
+		if (c.selected)
+		{
+			value += value.empty() ? c.label : ", " + c.label;
+		}
+	}
+	return value;
 }
 
 void KZHUDService::RenderMenuItems(CCSCustomHudLayout *layout)
@@ -475,6 +481,15 @@ void KZHUDService::RenderMenuItems(CCSCustomHudLayout *layout)
 	const std::vector<KZOptNode *> &tree = KZ::menu::GetTree();
 	const std::vector<KZOptItem> *items = (this->menuCategory >= 0 && this->menuCategory < (i32)tree.size()) ? &tree[this->menuCategory]->items : NULL;
 	const i32 count = items ? MIN((i32)items->size(), KZ_MENU_ITEMS) : 0;
+	// Пункты за KZ_MENU_ITEMS-м просто не существуют для игрока — отказ обязан быть видимым
+	// (канон проекта), как и у интерн-лимита в SetMenuClass. Логируем один раз на кадр рендера
+	// той категории, что не влезла: состав фиксируется на регистрации, спама не будет.
+	if (items && (i32)items->size() > KZ_MENU_ITEMS)
+	{
+		KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_menu_items_truncated reason=slot_limit category=%s items=%i limit=%i slot=%i\n",
+					tree[this->menuCategory]->phraseKey ? tree[this->menuCategory]->phraseKey : "?", (i32)items->size(), KZ_MENU_ITEMS,
+					this->player->GetPlayerSlot().Get());
+	}
 	const char *lang = this->player->languageService->GetLanguage();
 
 	for (i32 i = 0; i < KZ_MENU_ITEMS; i++)
@@ -490,9 +505,13 @@ void KZHUDService::RenderMenuItems(CCSCustomHudLayout *layout)
 			// если subKey нет, — безвредно под collapse).
 			this->SetMenuVar(layout, ItemSub(i), ItemSubVar(i), it.subKey ? it.subKey : "");
 			this->SetMenuBoolClass(layout, ItemPanel(i), "has-sub", this->menuApplied.itemHasSub[i], it.subKey != NULL);
-			// divider — item_div%i БЕЗ hidden в самой разметке (см. MenuAppliedState), поэтому
-			// по умолчанию (dividerAfter=false) его нужно явно спрятать.
-			this->SetMenuBoolClass(layout, ItemDiv(i), "hidden", this->menuApplied.itemDivHidden[i], !it.dividerAfter);
+			// divider (dividerAfter/SetItemDivider модели) НЕ проводим: в разметке чужого аддона
+			// панель item_div%i несёт класс .item-divider, а правила ни для .item-divider.hidden,
+			// ни для безусловного .hidden в menu.css нет (проверено по несжатым исходникам
+			// апстрима) — класс применялся молча и без эффекта, разделитель виден под каждым
+			// пунктом в любом случае, зато 20 id панелей интернировались впустую. Апстрим кладёт
+			// на этом месте класс "divider" на сам пункт — правила под него в CSS тоже нет,
+			// поэтому и его не повторяем.
 			// enabledBy — серый и клики мимо (клик гасится в ActivateMenuItem, здесь только цвет).
 			this->SetMenuBoolClass(layout, ItemPanel(i), "disabled", this->menuApplied.itemDisabled[i], !IsMenuItemEnabled(this->player, it));
 
@@ -503,7 +522,12 @@ void KZHUDService::RenderMenuItems(CCSCustomHudLayout *layout)
 			switch (it.type)
 			{
 				case KZOptItemType::Toggle:
-					on = this->player->optionService->GetPreferenceBool(it.prefKey, it.idef != 0);
+					// getCurrent обязателен для AddActionToggle: состояние такого пункта держит
+					// сервис (кэш + свой преф, иногда легаси-фолбэк), а prefKey у части из них
+					// вообще NULL — чтение через преф показывало бы дефолт вместо правды. Ветка
+					// ровно апстримная (origin/master src/kz/option/menu/kz_menu.cpp:381).
+					on = it.getCurrent ? it.getCurrent(this->player, it.tag) != 0
+									   : this->player->optionService->GetPreferenceBool(it.prefKey, it.idef != 0);
 					// Ключи существуют с задачи 12 (particles.cpp), код их не читал — Task 15.
 					value = KZLanguageService::PrepareMessageWithLang(lang, on ? "HUD - Menu On" : "HUD - Menu Off");
 					break;
@@ -571,9 +595,9 @@ void KZHUDService::RenderMenuColorPopup(CCSCustomHudLayout *layout)
 	// из-за particle-MHUD (там же градиент был маркер-цветом с alpha==1, который particle-путь
 	// понимал как реальную прозрачность — почти невидимый худ). Particle удалён в задаче 12,
 	// а panorama (ResolveColorClass/FindColorEntry) и так резолвит маркер в свою CSS-палитру
-	// правильно — прятать от игрока рабочую опцию незачем. solidOnly (задача 3) даёт узкий
-	// путь назад для будущего потребителя, который явно попросит только сплошные (см.
-	// GetColorPopupTotal) — сейчас такого пункта в составе нет (hud_prefs.cpp).
+	// правильно — прятать от игрока рабочую опцию незачем. solidOnly (задача 3) отрезает
+	// градиенты там, где их нечем нарисовать (см. GetColorPopupTotal): сейчас это два цвета
+	// клавиш — SetItemSolidOnly на PressedColor и OverlapGlowColor, hud_prefs.cpp.
 	const i32 total = GetColorPopupTotal(it);
 	const i32 pages = MAX(1, (total + KZ_MENU_SWATCH - 1) / KZ_MENU_SWATCH);
 	this->menuPopupPage = Clamp(this->menuPopupPage, 0, pages - 1);
@@ -724,9 +748,19 @@ void KZHUDService::ActivateMenuItem(i32 slot)
 	{
 		case KZOptItemType::Toggle:
 		{
-			const bool next = !opts->GetPreferenceBool(it->prefKey, it->idef != 0);
-			opts->SetPreferenceBool(it->prefKey, next);
-			// Требование задачи: без этого правка (hudTimer/hudOutline/mhudCrosshair/...) не
+			// AddActionToggle: щёлкает сервис (Toggle*() держит кэш и преф в синхроне), а сырая
+			// запись префа для таких пунктов ЗАПРЕЩЕНА — у трёх из них prefKey == NULL, и
+			// SetPreferenceBool(NULL, ...) завёл бы в префах игрока член с пустым именем и
+			// сохранил его в БД. Ветка ровно апстримная (kz_menu.cpp:666-675).
+			if (it->onActivate)
+			{
+				it->onActivate(this->player, it->tag);
+			}
+			else
+			{
+				opts->SetPreferenceBool(it->prefKey, !opts->GetPreferenceBool(it->prefKey, it->idef != 0));
+			}
+			// Требование задачи: без этого правка (hudTimer/mhud*Outline/mhudCrosshair/...) не
 			// видна в панораме до перезахода — RefreshLayoutPrefs кэш всех этих ключей.
 			this->RefreshLayoutPrefs();
 			this->RenderMenu();
@@ -770,18 +804,38 @@ void KZHUDService::ActivateMenuItem(i32 slot)
 
 void KZHUDService::OpenMenuPopup(MenuPopup kind, i32 itemIndex)
 {
-	if (!GetMenuItem(this->menuCategory, itemIndex))
+	const KZOptItem *it = GetMenuItem(this->menuCategory, itemIndex);
+	if (!it)
 	{
 		return;
 	}
 	this->menuPopup = kind;
 	this->menuPopupItem = itemIndex;
 	this->menuPopupPage = 0;
+	// onEdit(begin=true/false) — контракт модели (model.h): пункт узнаёт, что его правят.
+	// Единственный сегодняшний потребитель (beamOffset, misc_prefs.cpp) досинкивает кэш
+	// сервиса на закрытии, поэтому важнее второй вызов, но апстрим (kz_menu.cpp:758-761,
+	// 769-772) зовёт оба, и порядок держим тот же — колбэк ДО первого рендера попапа.
+	if (it->onEdit)
+	{
+		it->onEdit(this->player, it->tag, true);
+	}
 	this->RenderMenu();
 }
 
+// Закрытие попапа с вызовом onEdit(begin=false). Все явные пути закрытия (кнопка *_close,
+// клик по другому пункту, смена категории, CloseLayoutMenu) идут сюда; DestroyOwnedMenuLayout
+// (дисконнект/выгрузка плагина) колбэк сознательно НЕ зовёт — досинкивать кэш сервиса игроку,
+// который уже уходит, некому и незачем.
 void KZHUDService::CloseMenuPopup()
 {
+	if (const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuPopupItem))
+	{
+		if (this->menuPopup != MenuPopup::None && it->onEdit)
+		{
+			it->onEdit(this->player, it->tag, false);
+		}
+	}
 	this->menuPopup = MenuPopup::None;
 	this->menuPopupItem = -1;
 	this->RenderMenu();
@@ -866,8 +920,9 @@ void KZHUDService::MenuListPick(i32 slot)
 		it->onPick(this->player, it->tag, choices[idx].id);
 	}
 	// onPick — тот же контракт, что у Toggle/Font/Button: пишет произвольный преф, RefreshLayoutPrefs
-	// после записи обязателен (HudType, единственный сегодняшний Choice, тоже проходит этот путь
-	// безвредно — GetHudType не кэшируется в layoutPrefs, лишний вызов ничего не портит).
+	// после записи обязателен. Choice-пунктов в составе 14 (HudType/Idle/Mode/Styles/Pistol/
+	// Beam/Language/CompareType и т.д.); те, что кэша в layoutPrefs не имеют, проходят этот
+	// путь безвредно — лишний RefreshLayoutPrefs ничего не портит.
 	this->RefreshLayoutPrefs();
 	this->RenderMenu();
 }
@@ -1074,6 +1129,16 @@ void KZHUDService::CloseLayoutMenu()
 	if (!this->menuOpen)
 	{
 		return;
+	}
+	// Меню закрывают и с открытым попапом (клавиша/смерть/спектейт/смена карты) — onEdit
+	// закрытия обязан прийти и на этом пути, иначе правка Vector-пункта (beamOffset) осядет
+	// в БД, а кэш сервиса останется старым до реконнекта.
+	if (const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuPopupItem))
+	{
+		if (this->menuPopup != MenuPopup::None && it->onEdit)
+		{
+			it->onEdit(this->player, it->tag, false);
+		}
 	}
 	this->menuOpen = false;
 	this->menuPopup = MenuPopup::None;

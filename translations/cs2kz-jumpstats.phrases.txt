@@ -1134,63 +1134,87 @@
 	{
 		"en"		"Chat reporting"
 		"ru"		"Отчёты в чат"
+		"chi"		"聊天播报"
+		"ua"		"Звіти в чат"
 	}
 	"Jumpstats - Menu Label Always"
 	{
 		"en"		"Always show (invalid too)"
 		"ru"		"Показывать всегда (и невалидные)"
+		"chi"		"总是显示 (含无效)"
+		"ua"		"Показувати завжди (і невалідні)"
 	}
 	"Jumpstats - Menu Label MinTier"
 	{
 		"en"		"Minimum tier (chat)"
 		"ru"		"Мин. тир (чат)"
+		"chi"		"最低等级 (聊天)"
+		"ua"		"Мін. тир (чат)"
 	}
 	"Jumpstats - Menu Label SoundMinTier"
 	{
 		"en"		"Minimum tier (sound)"
 		"ru"		"Мин. тир (звук)"
+		"chi"		"最低等级 (声音)"
+		"ua"		"Мін. тир (звук)"
 	}
 	"Jumpstats - Menu Label Volume"
 	{
 		"en"		"Volume"
 		"ru"		"Громкость"
+		"chi"		"音量"
+		"ua"		"Гучність"
 	}
 	"Jumpstats - Menu Label BroadcastMinTier"
 	{
 		"en"		"Broadcast minimum tier"
 		"ru"		"Мин. тир трансляции"
+		"chi"		"播报最低等级"
+		"ua"		"Мін. тир трансляції"
 	}
 	"Jumpstats - Menu Label BroadcastSoundTier"
 	{
 		"en"		"Broadcast minimum tier (sound)"
 		"ru"		"Мин. тир трансляции (звук)"
+		"chi"		"播报最低等级 (声音)"
+		"ua"		"Мін. тир трансляції (звук)"
 	}
 	// Новый пункт (реестр настроек, задача 6) — был преф без пункта меню, см. диф-документ.
 	"Jumpstats - Menu Label BroadcastMinTierConsole"
 	{
 		"en"		"Broadcast minimum tier (console)"
 		"ru"		"Мин. тир трансляции (консоль)"
+		"chi"		"播报最低等级 (控制台)"
+		"ua"		"Мін. тир трансляції (консоль)"
 	}
 	"Jumpstats - Menu Label Failstats"
 	{
 		"en"		"Failstats"
 		"ru"		"Провальные прыжки"
+		"chi"		"失败跳跃统计"
+		"ua"		"Провальні стрибки"
 	}
 	// Новый пункт (реестр настроек, задача 6) — был преф без пункта меню, см. диф-документ.
 	"Jumpstats - Menu Label FailstatsConsole"
 	{
 		"en"		"Failstats (console)"
 		"ru"		"Провальные прыжки (консоль)"
+		"chi"		"失败跳跃统计 (控制台)"
+		"ua"		"Провальні стрибки (консоль)"
 	}
 	"Jumpstats - Menu Label ExtendedChatStats"
 	{
 		"en"		"Extended chat stats"
 		"ru"		"Расширенная статистика в чате"
+		"chi"		"聊天详细统计"
+		"ua"		"Розширена статистика в чаті"
 	}
 	"Jumpstats - Menu Label MinTierConsole"
 	{
 		"en"		"Minimum tier (console)"
 		"ru"		"Мин. тир (консоль)"
+		"chi"		"最低等级 (控制台)"
+		"ua"		"Мін. тир (консоль)"
 	}
 
 	// Tier names for the !js menu. No localized tier names existed before (tiers are
@@ -1200,36 +1224,50 @@
 	{
 		"en"		"None"
 		"ru"		"None"
+		"chi"		"None"
+		"ua"		"None"
 	}
 	"Jumpstats - Tier Name Meh"
 	{
 		"en"		"Meh"
 		"ru"		"Meh"
+		"chi"		"Meh"
+		"ua"		"Meh"
 	}
 	"Jumpstats - Tier Name Impressive"
 	{
 		"en"		"Impressive"
 		"ru"		"Impressive"
+		"chi"		"Impressive"
+		"ua"		"Impressive"
 	}
 	"Jumpstats - Tier Name Perfect"
 	{
 		"en"		"Perfect"
 		"ru"		"Perfect"
+		"chi"		"Perfect"
+		"ua"		"Perfect"
 	}
 	"Jumpstats - Tier Name Godlike"
 	{
 		"en"		"Godlike"
 		"ru"		"Godlike"
+		"chi"		"Godlike"
+		"ua"		"Godlike"
 	}
 	"Jumpstats - Tier Name Ownage"
 	{
 		"en"		"Ownage"
 		"ru"		"Ownage"
+		"chi"		"Ownage"
+		"ua"		"Ownage"
 	}
 	"Jumpstats - Tier Name Wrecker"
 	{
 		"en"		"Wrecker"
 		"ru"		"Wrecker"
+		"chi"		"Wrecker"
+		"ua"		"Wrecker"
 	}
 
 	// Chat fallback line for !js when the menu engine isn't loaded (one per preference).

@@ -9,12 +9,12 @@
 
 #include "tier0/memdbgon.h"
 
-// === Тип худа: цикл Standard -> Panorama -> Off -> Standard =================================
+// === Тип худа: Standard / Panorama / Off ====================================================
 // Не булев тумблер (три состояния) и не сырой преф — hudType читается/пишется через
 // GetHudType()/SetHudType() (kz_hud.cpp), которые сами тащат миграцию легаси-значений
 // (mhudMaster, удалённый particle-тип 1). Моделируем как Choice: список из трёх пунктов в
-// ТОМ ЖЕ порядке, что и старый цикл NextHudType, а клик по пункту (layout/menu.cpp) перебирает
-// список по кругу — попап списка (как у апстримного Choice) сюда не переносим, его и не было.
+// ТОМ ЖЕ порядке, что и старый цикл NextHudType; сам цикл убран — с задачи 3 клик открывает
+// попап списка (layout/menu.cpp), как у любого другого Choice, а не перебирает по кругу.
 // Значения переведены через ключи (Task 15, тот же паттерн, что kBeamTypeKeys в misc_prefs.cpp) —
 // до этого висели литералом (см. отчёт задачи 9, раздел "осталось непереведённым").
 
@@ -64,6 +64,52 @@ static_function void OnKeysIdlePick(KZPlayer *player, i64 tag, i64 id)
 	player->optionService->SetPreferenceInt("mhudKeysIdle", id);
 }
 
+// === Обводка элемента: тумблер через колбэки, а не голый преф ================================
+// Худ применяет МИГРИРОВАННОЕ значение (KZHUDService::GetElementOutlinePref, layout/prefs.cpp:
+// поэлементный mhud*Outline, а при его отсутствии — старый общий hudOutline). Голый
+// AddToggle(def.outlineKey, true) читал бы преф второй раз и с другим дефолтом: игроку с
+// hudOutline=false меню показывало "Вкл" при выключенной обводке, а первый клик был видимым
+// no-op (писал false поверх уже действующего false). tag — индекс элемента в LAYOUT_ELEMENTS.
+static_function i64 OutlineGetCurrent(KZPlayer *player, i64 tag)
+{
+	return player->hudService->GetElementOutlinePref((LayoutElement)tag) ? 1 : 0;
+}
+
+static_function void OutlineOnActivate(KZPlayer *player, i64 tag)
+{
+	// Инвертируем то же эффективное значение, которое показано в меню; запись поэлементного
+	// ключа заодно завершает миграцию для этого элемента (дальше probe видит сохранённый ключ).
+	const bool next = !player->hudService->GetElementOutlinePref((LayoutElement)tag);
+	player->optionService->SetPreferenceBool(LAYOUT_ELEMENTS[tag].outlineKey, next);
+}
+
+// === Сброс страницы (KZ::menu::ResetNode) ====================================================
+// Апстрим держит такую кнопку на каждой странице элемента (origin/master hud_prefs.cpp:256) —
+// при порте она потерялась, и ResetNode остался без единого вызова. Возвращаем её ТОЛЬКО на
+// страницы, где все пункты — обычные префы: ResetNode пишет преф напрямую, и на пункте с
+// колбэком (AddActionToggle сервисов в misc/local/jumpstats) он оставил бы кэш сервиса
+// рассинхронизированным — ровно тот дефект, из-за которого сломались тумблеры до этого
+// фикс-раунда. Обводка исключением не является: её кэш — layoutPrefs, а ActivateMenuItem
+// зовёт RefreshLayoutPrefs сразу после onActivate кнопки. В General сбрасывать нечего
+// (единственный пункт — HudType, у него нет своего префа), кнопки там нет.
+static_global KZOptNode *s_resettableNodes[(i32)LayoutElement::Count + 1] {};
+
+static_function void ResetPageOnActivate(KZPlayer *player, i64 tag)
+{
+	if (tag < 0 || tag >= (i64)KZ_ARRAYSIZE(s_resettableNodes))
+	{
+		return;
+	}
+	KZ::menu::ResetNode(player, s_resettableNodes[tag]);
+}
+
+// Регистрирует кнопку сброса в конце страницы и запоминает узел под её тегом.
+static_function void AddResetButton(KZOptNode *node, i32 slot)
+{
+	s_resettableNodes[slot] = node;
+	KZ::menu::AddButton(node, "HUD - Menu Label Reset", &ResetPageOnActivate, slot);
+}
+
 // === Пять полей элемента, общих для Timer/Speed/Prespeed/Keys/Checkpoint — ключи из
 // LAYOUT_ELEMENTS (entity.cpp, Task 4), один источник правды, как и раньше в menu.cpp. =======
 static_function void AddHudElementItems(KZOptNode *node, LayoutElement e)
@@ -75,7 +121,9 @@ static_function void AddHudElementItems(KZOptNode *node, LayoutElement e)
 	KZ::menu::AddFont(node, "HUD - Menu Label Font", def.fontKey, LAYOUT_DEFAULT_FONT);
 	// Обводка — теперь поэлементный тумблер (def.outlineKey, задача 4), а не один общий
 	// пункт на всё меню: старый "Outline" в General убран, чтобы не осталось двух источников.
-	KZ::menu::AddToggle(node, "HUD - Menu Label Outline", def.outlineKey, true);
+	// Через колбэки — из-за миграции с hudOutline, см. OutlineGetCurrent выше.
+	KZ::menu::AddActionToggle(node, "HUD - Menu Label Outline", &OutlineGetCurrent, &OutlineOnActivate, (i64)e);
+	KZ::menu::SetItemPref(node, def.outlineKey, KZOptStorage::Bool, 1);
 	// Прозрачность хранится Int (0-100), а не Float, как размер/позиция того же элемента —
 	// AddSize по умолчанию заводит Float (px-поле), поэтому storage переопределяем ЯВНО:
 	// реальный потребитель (layout/prefs.cpp:GetLayoutPrefs) читает opacityKey через
@@ -99,17 +147,20 @@ void KZHUDService::InitMenuPrefs()
 	KZ::menu::AddColor(timer, "HUD - Menu Label TpColor", "mhudTimerTpColor", MHUD_DEF_TIMER_TP_COLOR);
 	KZ::menu::AddColor(timer, "HUD - Menu Label PausedColor", "mhudTimerPausedColor", MHUD_DEF_TIMER_PAUSED_COLOR);
 	KZ::menu::AddColor(timer, "HUD - Menu Label StoppedColor", "mhudTimerStoppedColor", MHUD_DEF_TIMER_STOPPED_COLOR);
+	AddResetButton(timer, (i32)LayoutElement::Timer);
 
 	KZOptNode *speed = KZ::menu::AddCategory("HUD - Menu Cat Speed");
 	AddHudElementItems(speed, LayoutElement::Speed);
 	KZ::menu::AddColor(speed, "HUD - Menu Label Color", "mhudSpeedColor", MHUD_DEF_BASE_COLOR);
 	KZ::menu::AddColor(speed, "HUD - Menu Label CjColor", "mhudSpeedCjColor", MHUD_DEF_CJ_COLOR);
+	AddResetButton(speed, (i32)LayoutElement::Speed);
 
 	KZOptNode *prespeed = KZ::menu::AddCategory("HUD - Menu Cat Prespeed");
 	AddHudElementItems(prespeed, LayoutElement::Prespeed);
 	KZ::menu::AddColor(prespeed, "HUD - Menu Label Color", "mhudPrespeedColor", MHUD_DEF_BASE_COLOR);
 	KZ::menu::AddColor(prespeed, "HUD - Menu Label PerfColor", "mhudPrespeedPerfColor", MHUD_DEF_PERF_COLOR);
 	KZ::menu::AddColor(prespeed, "HUD - Menu Label JumpbugColor", "mhudPrespeedJumpbugColor", MHUD_DEF_JUMPBUG_COLOR);
+	AddResetButton(prespeed, (i32)LayoutElement::Prespeed);
 
 	KZOptNode *keys = KZ::menu::AddCategory("HUD - Menu Cat Keys");
 	AddHudElementItems(keys, LayoutElement::Keys);
@@ -135,14 +186,17 @@ void KZHUDService::InitMenuPrefs()
 	KZ::menu::AddToggle(keys, "HUD - Menu Label Fill", "mhudKeysFill", true);
 	KZ::menu::AddChoice(keys, "HUD - Menu Label Idle", &GetKeysIdleChoices, &GetKeysIdleCurrent, &OnKeysIdlePick);
 	KZ::menu::SetItemPref(keys, "mhudKeysIdle", KZOptStorage::Int, 0);
+	AddResetButton(keys, (i32)LayoutElement::Keys);
 
 	KZOptNode *checkpoint = KZ::menu::AddCategory("HUD - Menu Cat Checkpoint");
 	AddHudElementItems(checkpoint, LayoutElement::Checkpoint);
 	KZ::menu::AddColor(checkpoint, "HUD - Menu Label Color", "mhudCheckpointColor", MHUD_DEF_BASE_COLOR);
+	AddResetButton(checkpoint, (i32)LayoutElement::Checkpoint);
 
 	KZOptNode *crosshair = KZ::menu::AddCategory("HUD - Menu Cat Crosshair");
 	KZ::menu::AddToggle(crosshair, "HUD - Menu Label Enabled", "mhudCrosshair", false);
 	KZ::menu::AddSize(crosshair, "HUD - Menu Label Scale", "mhudCrosshairScale", 100, 0, 500);
 	KZ::menu::SetItemUnit(crosshair, "%");
 	KZ::menu::SetItemPref(crosshair, "mhudCrosshairScale", KZOptStorage::Int, 100);
+	AddResetButton(crosshair, (i32)LayoutElement::Count);
 }

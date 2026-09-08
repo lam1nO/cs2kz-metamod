@@ -12,20 +12,36 @@ const MHUDLayoutPrefs &KZHUDService::GetLayoutPrefs()
 	return this->layoutPrefs;
 }
 
+// Миграция обводки: до задачи 4 обводка была ОДНИМ тумблером hudOutline на все пять элементов.
+// Молча упасть на дефолт нельзя — игрок, выключивший обводку, получил бы её обратно, а это
+// самый незаметный способ испортить худ (см. журнал решений задачи). Проверено фактом: HTML-путь
+// (kz_hud.cpp) hudOutline вообще не читает — обводка там не рисуется, ключ был нужен только
+// panorama-худу. Значит после этой миграции hudOutline в горячем пути нигде больше не читается —
+// он остаётся исключительно источником одноразового переноса значения в mhud*Outline.
+//
+// HasPreference в нашей базе нет (см. git grep) — отсутствие поэлементного ключа определяем
+// чтением с двумя РАЗНЫМИ дефолтами: если ключ реально сохранён, оба чтения вернут одно и то же
+// (настоящее) значение, независимо от дефолта; если ключа нет, оба чтения вернут свои дефолты —
+// и разойдутся. Расхождение = ключа нет, берём значение из общего hudOutline (миграция),
+// совпадение = ключ есть, доверяем ему.
+//
+// Один ответ на два потребителя (худ ниже и пункт меню, hud/prefs/hud_prefs.cpp): второе,
+// независимое чтение mhud*Outline с дефолтом true расходилось бы с применённым значением.
+bool KZHUDService::GetElementOutlinePref(LayoutElement element)
+{
+	auto *opts = this->MHUDSettingsSource()->optionService;
+	const char *outlineKey = LAYOUT_ELEMENTS[(i32)element].outlineKey;
+	const bool withTrueDefault = opts->GetPreferenceBool(outlineKey, true);
+	const bool withFalseDefault = opts->GetPreferenceBool(outlineKey, false);
+	return (withTrueDefault == withFalseDefault) ? withTrueDefault : opts->GetPreferenceBool("hudOutline", true);
+}
+
 void KZHUDService::RefreshLayoutPrefs()
 {
 	// Источник настроек — ВСЕГДА сам игрок (MHUDSettingsSource() не смотрит на спектейт,
 	// см. её объявление в kz_hud.h): тумблеры/цвета/раскладка панорама-худа — не то, что
 	// наблюдается за другим игроком, в отличие от источника ДАННЫХ (MHUDDataSource()).
 	auto *opts = this->MHUDSettingsSource()->optionService;
-	// Миграция обводки: до задачи 4 обводка была ОДНИМ тумблером hudOutline на все пять
-	// элементов. Молча упасть на дефолт нельзя — игрок, выключивший обводку, получил бы её
-	// обратно, а это самый незаметный способ испортить худ (см. журнал решений задачи).
-	// Проверено фактом: HTML-путь (kz_hud.cpp) hudOutline вообще не читает — обводка там не
-	// рисуется, ключ был нужен только panorama-худу. Значит после этой миграции hudOutline
-	// в горячем пути нигде больше не читается — он остаётся исключительно как источник
-	// одноразового переноса значения в mhud*Outline ниже.
-	const bool legacyOutline = opts->GetPreferenceBool("hudOutline", true);
 	for (i32 e = 0; e < (i32)LayoutElement::Count; e++)
 	{
 		const LayoutElementDef &def = LAYOUT_ELEMENTS[e];
@@ -37,14 +53,9 @@ void KZHUDService::RefreshLayoutPrefs()
 		// Шрифт разрешается в css-класс уже здесь: UpdateLayoutElement (Task 4) кладёт его на
 		// панель напрямую, повторный резолв в геймтике не нужен и не делается.
 		element.fontClass = panorama::ResolveFontClass(opts->GetPreferenceStr(def.fontKey, LAYOUT_DEFAULT_FONT), LAYOUT_DEFAULT_FONT);
-		// HasPreference в нашей базе нет (см. git grep) — отсутствие поэлементного ключа
-		// определяем чтением с двумя РАЗНЫМИ дефолтами: если ключ реально сохранён, оба чтения
-		// вернут одно и то же (настоящее) значение, независимо от дефолта; если ключа нет, оба
-		// чтения просто вернут свои дефолты — и разойдутся. Расхождение = ключа нет, берём
-		// значение из общего hudOutline (миграция), совпадение = ключ есть, доверяем ему.
-		const bool outlineWithTrueDefault = opts->GetPreferenceBool(def.outlineKey, true);
-		const bool outlineWithFalseDefault = opts->GetPreferenceBool(def.outlineKey, false);
-		element.outline = (outlineWithTrueDefault == outlineWithFalseDefault) ? outlineWithTrueDefault : legacyOutline;
+		// Миграция общего hudOutline — в GetElementOutlinePref (выше): тот же ответ показывает
+		// пункт меню, второе чтение с другим дефолтом развело бы меню с худом.
+		element.outline = this->GetElementOutlinePref((LayoutElement)e);
 		element.opacity = Clamp((i32)opts->GetPreferenceInt(def.opacityKey, 100), 0, 100);
 	}
 

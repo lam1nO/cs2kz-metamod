@@ -427,6 +427,11 @@ public:
 	const MHUDLayoutPrefs &GetLayoutPrefs();
 	void RefreshLayoutPrefs();
 	bool IsLayoutElementEnabled(LayoutElement element);
+	// Эффективное значение поэлементной обводки С УЧЁТОМ миграции с общего hudOutline
+	// (реализация и разбор миграции — layout/prefs.cpp). Публичный, потому что тот же ответ
+	// обязан показывать пункт меню (hud/prefs/hud_prefs.cpp): голое чтение mhud*Outline с
+	// дефолтом true показывало игроку "Вкл" при фактически выключенной обводке.
+	bool GetElementOutlinePref(LayoutElement element);
 
 	// Точка сборки panorama-худа (Task 6): true — сущность есть и худ обновлён (даже если
 	// весь спрятан — это тоже валидное обновление); false — сущность создать не удалось,
@@ -701,10 +706,6 @@ private:
 		const char *itemType[KZ_MENU_ITEMS] {};
 		bool itemOn[KZ_MENU_ITEMS] {};
 		const char *itemSwatch[KZ_MENU_ITEMS] {};
-		// item_div%i в разметке НЕ имеет класса hidden по умолчанию (в отличие от cat/item/sw/li,
-		// у которых hidden уже в markup) — реальное начальное состояние "показан", поэтому кэш
-		// стартует с false, а не true (см. RenderMenuItems).
-		bool itemDivHidden[KZ_MENU_ITEMS] {};
 		bool itemHasSub[KZ_MENU_ITEMS] {};
 		bool itemDisabled[KZ_MENU_ITEMS] {};
 
