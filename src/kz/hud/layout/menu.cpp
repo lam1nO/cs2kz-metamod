@@ -46,6 +46,7 @@
 #include "entitykeyvalues.h"
 #include "utils/utils.h"
 #include "utils/simplecmds.h"
+#include "utils/logging.h"
 #include "cs2kz.h"
 
 #include <utility>
@@ -344,6 +345,15 @@ CCSCustomHudLayout *KZHUDService::EnsureMenuLayout(bool &created)
 	layout->DispatchSpawn(pKeyValues);
 	this->ownedMenuLayout = layout;
 	created = true;
+	// Диф-кэш (menuApplied/menuVars) — состояние ПРЕДЫДУЩЕЙ сущности (смена карты её не
+	// переживает, см. CYBER.md/транзит), а сам кэш переживает: без сброса ЗДЕСЬ, сразу на
+	// споне, первое открытие меню после смены карты решило бы, что классы/переменные уже
+	// выставлены как надо, и не отправило бы их — пустая рамка до реконнекта. Сбрасываем в
+	// момент реального создания сущности, а не полагаемся на `created`, дошедший до
+	// вызывающего: OpenLayoutMenu зовёт Ensure и тут же RenderMenu, который зовёт Ensure
+	// повторно и всегда видит created=false (сущность уже кэширована первым вызовом).
+	this->menuApplied = MenuAppliedState();
+	this->menuVars.clear();
 	return layout;
 }
 
@@ -379,7 +389,14 @@ void KZHUDService::DestroyOwnedMenuLayout()
 
 void KZHUDService::SetMenuClass(CCSCustomHudLayout *layout, const char *panelId, const char *className, bool on)
 {
-	layout->SetHasClass(panelId, className, on ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass);
+	// SetHasClass возвращает false, когда сущность упёрлась в HUD_LAYOUT_MAX_INTERNED_STRINGS
+	// (1024) — дальше меню молча перестаёт обновляться. Отказ обязан быть видимым (канон
+	// проекта), а не тихим фризом оформления.
+	if (!layout->SetHasClass(panelId, className, on ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass))
+	{
+		KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_menu_class_dropped reason=intern_limit panel=%s class=%s slot=%i\n",
+					panelId, className, this->player->GetPlayerSlot().Get());
+	}
 }
 
 void KZHUDService::SetMenuBoolClass(CCSCustomHudLayout *layout, const char *panelId, const char *className, bool &cache, bool want)
@@ -416,7 +433,11 @@ void KZHUDService::SetMenuVar(CCSCustomHudLayout *layout, const char *panelId, c
 		return;
 	}
 	cached = value;
-	layout->SetDialogVariableString(panelId, var, value);
+	if (!layout->SetDialogVariableString(panelId, var, value))
+	{
+		KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_menu_var_dropped reason=intern_limit panel=%s var=%s slot=%i\n", panelId, var,
+					this->player->GetPlayerSlot().Get());
+	}
 }
 
 // === Рендер ==================================================================================
