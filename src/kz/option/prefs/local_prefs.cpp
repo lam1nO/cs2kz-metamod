@@ -118,6 +118,13 @@ void KZLocalOptionsMenu_Register()
 	// --- Messages --------------------------------------------------------------------------
 	KZOptNode *messages = KZ::menu::AddSub(game, "Options - Menu Cat Messages");
 	KZ::menu::AddToggle(messages, "Options - Menu Label MissedTime", "missedTimeAnnounce", true);
+	// mapOverlay — строки "[CS2KZ] split|N|время" в КОНСОЛЬ (kz_timer.cpp, 7 мест): их читают
+	// внешние оверлеи стримеров, в игре ничего не рисуется. Преф жив и переключался только
+	// командой `!mapoverlay` — пункта в меню у него не было. Голый AddToggle: кэша нет, читатели
+	// каждый раз зовут GetPreferenceBool. Дефолт false — тот же, что у `!mapoverlay`
+	// (kz_timer.cpp:2564) и у остальных читателей (GetPreferenceBool без второго аргумента).
+	KZ::menu::AddToggle(messages, "Options - Menu Label MapOverlay", "mapOverlay", false);
+	KZ::menu::SetItemSubtext(messages, "Options - Menu Label MapOverlay Sub");
 
 	// --- Paint -------------------------------------------------------------------------------
 	KZOptNode *paint = KZ::menu::AddSub(game, "Options - Menu Cat Paint");

@@ -118,6 +118,8 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 	KZMiscMenu_Register();
 	KZLocalOptionsMenu_Register();
 	KZJumpstatsMenu_Register();
+	// Оформление самого меню — последней категорией: трогают реже всего остального.
+	KZMenuChromeMenu_Register();
 	KZLanguageService::Init();
 	KZBeamService::Init();
 	KZPistolService::Init();

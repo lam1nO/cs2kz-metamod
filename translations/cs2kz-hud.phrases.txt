@@ -662,6 +662,125 @@
 		"ua"		"Масштаб"
 	}
 
+	// Общее (General): мимикрия под наблюдаемого и компактный СТАНДАРТНЫЙ худ.
+	"HUD - Menu Label MimicSpec"
+	{
+		"en"		"Mimic spectated player"
+		"ru"		"Как у наблюдаемого"
+		"chi"		"跟随被观察者设置"
+		"ua"		"Як у спостережуваного"
+	}
+	"HUD - Menu Label MimicSpec Sub"
+	{
+		"en"		"Use their HUD settings while spectating them, crosshair included"
+		"ru"		"В спектейте брать настройки худа того, за кем смотришь — включая его прицел"
+		"chi"		"观察他人时使用对方的 HUD 设置，包括准星"
+		"ua"		"У спостереженні брати налаштування худу того, за ким дивишся — разом із прицілом"
+	}
+	"HUD - Menu Label CompactPanel"
+	{
+		"en"		"Compact panel"
+		"ru"		"Компактная панель"
+		"chi"		"紧凑面板"
+		"ua"		"Компактна панель"
+	}
+	"HUD - Menu Label CompactPanel Sub"
+	{
+		"en"		"Standard HUD only: two lines instead of the full panel"
+		"ru"		"Только для стандартного худа: две строки вместо полной панели"
+		"chi"		"仅标准 HUD：两行代替完整面板"
+		"ua"		"Лише для стандартного худу: два рядки замість повної панелі"
+	}
+	"HUD - Menu Label ResetAll"
+	{
+		"en"		"Reset all HUD settings"
+		"ru"		"Сбросить все настройки худа"
+		"chi"		"重置所有 HUD 设置"
+		"ua"		"Скинути всі налаштування худу"
+	}
+	// Таймер: сотые доли и часы.
+	"HUD - Menu Label TimerDetail"
+	{
+		"en"		"Detailed time"
+		"ru"		"Подробное время"
+		"chi"		"详细时间"
+		"ua"		"Докладний час"
+	}
+	// Один ключ на два пункта — Speed и Prespeed (как "HUD - Menu Label Color" на четыре).
+	"HUD - Menu Label Decimal"
+	{
+		"en"		"Decimal places"
+		"ru"		"Доли после запятой"
+		"chi"		"小数位"
+		"ua"		"Частки після коми"
+	}
+	"HUD - Menu Label PrespeedBrackets"
+	{
+		"en"		"Parentheses"
+		"ru"		"Круглые скобки"
+		"chi"		"圆括号"
+		"ua"		"Круглі дужки"
+	}
+	"HUD - Menu Label PrespeedHideWalkOff"
+	{
+		"en"		"Hide when walking off"
+		"ru"		"Скрывать при сходе с края"
+		"chi"		"走下边缘时隐藏"
+		"ua"		"Ховати при сході з краю"
+	}
+	"HUD - Menu Label PrespeedHideWalkOff Sub"
+	{
+		"en"		"Only show prespeed after a jump or a ladder"
+		"ru"		"Показывать прескорость только после прыжка или лестницы"
+		"chi"		"仅在跳跃或梯子之后显示起跳前速度"
+		"ua"		"Показувати передшвидкість лише після стрибка або драбини"
+	}
+
+	// Оформление самого меню настроек (menuFont/menuColor/menuSounds/menuPopupShift,
+	// KZMenuChromeMenu_Register в hud/layout/menu.cpp).
+	"HUD - Menu Cat MenuChrome"
+	{
+		"en"		"Menu"
+		"ru"		"Меню"
+		"chi"		"菜单"
+		"ua"		"Меню"
+	}
+	"HUD - Menu Label MenuFont"
+	{
+		"en"		"Menu font"
+		"ru"		"Шрифт меню"
+		"chi"		"菜单字体"
+		"ua"		"Шрифт меню"
+	}
+	"HUD - Menu Label MenuColor"
+	{
+		"en"		"Menu color"
+		"ru"		"Цвет меню"
+		"chi"		"菜单颜色"
+		"ua"		"Колір меню"
+	}
+	"HUD - Menu Label MenuSounds"
+	{
+		"en"		"Menu sounds"
+		"ru"		"Звуки меню"
+		"chi"		"菜单音效"
+		"ua"		"Звуки меню"
+	}
+	"HUD - Menu Label MenuPopupShift"
+	{
+		"en"		"Shift for popups"
+		"ru"		"Сдвиг под попап"
+		"chi"		"弹窗时偏移"
+		"ua"		"Зсув під попап"
+	}
+	"HUD - Menu Label MenuPopupShift Sub"
+	{
+		"en"		"Move the menu left while a popup is open, so it fits a 4:3 screen"
+		"ru"		"Сдвигать меню влево, пока открыт попап — чтобы он влезал на 4:3"
+		"chi"		"弹窗打开时将菜单左移，以适配 4:3 屏幕"
+		"ua"		"Зсувати меню ліворуч, поки відкритий попап — щоб він влазив на 4:3"
+	}
+
 	// Меню закрыто автоматически (уход в спектейт/смерть без цели наблюдения, kz_player.cpp):
 	// раньше закрывалось молча, без объяснения игроку.
 	"HUD - Menu Closed Spectate"
