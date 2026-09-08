@@ -96,6 +96,9 @@ static_global class KZOptionServiceEventListener_HUD : public KZOptionServiceEve
 	virtual void OnPlayerPreferencesLoaded(KZPlayer *player)
 	{
 		player->hudService->ResetShowPanel();
+		// Кэш префов layout-худа (Task 5): без обновления здесь правка настройки не видна
+		// до перезахода — ровно тот класс багов, что уже был в этом худе.
+		player->hudService->RefreshLayoutPrefs();
 	}
 } optionEventListener;
 

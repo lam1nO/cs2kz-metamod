@@ -45,15 +45,17 @@ static_global constexpr const char *UPSTREAM_AVAILABLE_FONTS[] = {"lato", "verda
 #define MHUD_DEF_KEYS_OFFSET_Y     -6.0f
 #define MHUD_DEF_KEYS_SCALE        0.075f
 
-static_global const Color MHUD_DEF_BASE_COLOR(255, 255, 255, 255);
-static_global const Color MHUD_DEF_PERF_COLOR(0x40, 0xFF, 0x40, 0xFF);
-static_global const Color MHUD_DEF_JUMPBUG_COLOR(0xFF, 0xFF, 0x20, 0xFF);
-static_global const Color MHUD_DEF_CJ_COLOR(0x71, 0xEE, 0xB8, 0xFF);
-static_global const Color MHUD_DEF_TIMER_TP_COLOR(255, 255, 255, 255);
-static_global const Color MHUD_DEF_TIMER_PRO_COLOR(0x5F, 0x99, 0xD9, 0xFF);
-static_global const Color MHUD_DEF_TIMER_PAUSED_COLOR(0xFF, 0xFF, 0x00, 0xFF);
-static_global const Color MHUD_DEF_TIMER_STOPPED_COLOR(0xFF, 0xA0, 0xA0, 0xFF);
-static_global const Color MHUD_DEF_KEYS_OVERLAP_COLOR(0xFF, 0x40, 0x40, 0xFF);
+// Значения — см. объявления в kz_hud.h (подняты туда в Task 5: нужны и layout/prefs.cpp).
+// Раньше были static_global (файловая линковка); теперь внешняя, значения те же.
+const Color MHUD_DEF_BASE_COLOR(255, 255, 255, 255);
+const Color MHUD_DEF_PERF_COLOR(0x40, 0xFF, 0x40, 0xFF);
+const Color MHUD_DEF_JUMPBUG_COLOR(0xFF, 0xFF, 0x20, 0xFF);
+const Color MHUD_DEF_CJ_COLOR(0x71, 0xEE, 0xB8, 0xFF);
+const Color MHUD_DEF_TIMER_TP_COLOR(255, 255, 255, 255);
+const Color MHUD_DEF_TIMER_PRO_COLOR(0x5F, 0x99, 0xD9, 0xFF);
+const Color MHUD_DEF_TIMER_PAUSED_COLOR(0xFF, 0xFF, 0x00, 0xFF);
+const Color MHUD_DEF_TIMER_STOPPED_COLOR(0xFF, 0xA0, 0xA0, 0xFF);
+const Color MHUD_DEF_KEYS_OVERLAP_COLOR(0xFF, 0x40, 0x40, 0xFF);
 
 // === Helpers ========================================================================
 
@@ -805,6 +807,9 @@ static_function void MHUDToggle(KZPlayer *p, const char *prefKey, bool defaultVa
 {
 	bool next = !p->optionService->GetPreferenceBool(prefKey, defaultValue);
 	p->optionService->SetPreferenceBool(prefKey, next);
+	// Общая точка для всех hud*-тумблеров меню: часть ключей (hudTimer/hudSpeed/hudOutline и
+	// т.п.) общие с layout-худом, кэш префов которого иначе не увидит смену до перезахода.
+	p->hudService->RefreshLayoutPrefs();
 	p->languageService->PrintChat(true, false, next ? enabledKey : disabledKey);
 }
 
@@ -862,6 +867,8 @@ static_function void SetColorPref(KZPlayer *p, const CCommand *args, int argOffs
 		return;
 	}
 	p->optionService->SetPreferenceInt(prefKey, PackColor(c));
+	// Цветовые ключи ОБЩИЕ с layout-худом — обновить его кэш префов тут же.
+	p->hudService->RefreshLayoutPrefs();
 	char colorStr[32];
 	V_snprintf(colorStr, sizeof(colorStr), "(%d, %d, %d, %d)", c.r(), c.g(), c.b(), c.a());
 	p->languageService->PrintChat(true, false, setKey, colorStr);

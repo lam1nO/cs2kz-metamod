@@ -9,6 +9,20 @@
 class IEntityResourceManifest;
 class CCSCustomHudLayout;
 
+// Дефолтные цвета — ОБЩИЕ для particle- и panorama-путей худа (Task 5): ключи префов
+// совпадают, поэтому настройки игрока переезжают между путями сами, без миграции.
+// Определения (значения) остаются в particles.cpp — оттуда их подняли только объявлениями,
+// значения не менялись ни на бит (иначе у игроков поехали бы цвета particle-худа).
+extern const Color MHUD_DEF_BASE_COLOR;
+extern const Color MHUD_DEF_PERF_COLOR;
+extern const Color MHUD_DEF_JUMPBUG_COLOR;
+extern const Color MHUD_DEF_CJ_COLOR;
+extern const Color MHUD_DEF_TIMER_TP_COLOR;
+extern const Color MHUD_DEF_TIMER_PRO_COLOR;
+extern const Color MHUD_DEF_TIMER_PAUSED_COLOR;
+extern const Color MHUD_DEF_TIMER_STOPPED_COLOR;
+extern const Color MHUD_DEF_KEYS_OVERLAP_COLOR;
+
 // Элементы panorama-худа (сущность custom_hud_layout, Task 4). НЕ путать с локальным
 // `MHUDElement` из particles.cpp (другой состав/порядок) — тот же символ здесь сломал бы
 // particle-путь переопределением, поэтому у layout-худа своё имя.
