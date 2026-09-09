@@ -646,6 +646,10 @@ KZ::hudshare::ApplyStats KZ::hudshare::Apply(KZPlayer *to, const char *snapshot,
 			if (!KZ::prefs::ValidateValue(to, keys[k], pairs[p].value.c_str(), invalidReason))
 			{
 				stats.invalid++;
+				// -2, а не -1: «отвергнут валидацией» обязан отличаться от «ключа нет в
+				// снимке», иначе ниже он посчитается ВТОРОЙ раз как defaulted, и сумма в
+				// отчёте игроку не сойдётся с числом ключей.
+				chosen[k] = -2;
 				if (keyLogs++ < HUDSHARE_MAX_KEY_LOGS)
 				{
 					KZ_LOG_WARN(LogChannel::Option, "[cyb] hud_share_key_rejected reason=%s key=%s source=%s steam_id=%llu\n", invalidReason,
@@ -689,10 +693,11 @@ KZ::hudshare::ApplyStats KZ::hudshare::Apply(KZPlayer *to, const char *snapshot,
 		char defaultValue[256];
 		for (size_t k = 0; k < keys.size(); k++)
 		{
-			// Ключ снимка не прошёл валидацию (уже посчитан в invalid) — дефолт ему ставим, но
-			// в defaulted НЕ считаем: одна и та же настройка не должна попасть и в «пропущено»,
-			// и в «сброшено на стандарт» отчёта игроку.
-			bool countAsDefaulted = chosen[k] < 0;
+			// Ключ снимка не прошёл валидацию (chosen[k] == -2, уже посчитан в invalid) —
+			// дефолт ему ставим, но в defaulted НЕ считаем: одна и та же настройка не должна
+			// попасть и в «пропущено», и в «сброшено на стандарт» отчёта игроку. В defaulted
+			// идут только ключи, которых в снимке НЕ БЫЛО (chosen[k] == -1).
+			bool countAsDefaulted = chosen[k] == -1;
 			if (chosen[k] >= 0)
 			{
 				if (KZ::prefs::ApplyValue(to, keys[k], pairs[(size_t)chosen[k]].value.c_str()))
