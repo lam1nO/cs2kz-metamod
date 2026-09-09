@@ -259,6 +259,9 @@ void KZPlayer::OnPhysicsSimulatePost()
 	// к DrawPanels ниже (иначе худ показывал бы время на тик позади).
 	this->pracService->OnPhysicsSimulatePost();
 	KZ::replaysystem::OnPhysicsSimulatePost(this);
+	// Отложенный запрос panorama-меню реплея — ДО ветвления: на переходных кадрах смены команды
+	// игрок ни жив, ни наблюдает, и ни одна из веток ниже не выполняется.
+	this->hudService->TickReplayMenuPending();
 	if (this->specService->GetSpectatedPlayer())
 	{
 		KZHUDService::DrawPanels(this->specService->GetSpectatedPlayer(), this);

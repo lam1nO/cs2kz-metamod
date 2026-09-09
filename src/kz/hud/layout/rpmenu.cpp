@@ -106,14 +106,80 @@ namespace
 
 // === Доступность / открытие / закрытие ======================================================
 
-bool KZHUDService::CanOpenReplayMenu()
+const char *KZHUDService::ReplayMenuUnavailableReason()
 {
-	if (g_KZPlugin.unloading || !KZHUDService::IsMHUDAvailable())
+	if (g_KZPlugin.unloading)
 	{
-		return false;
+		return "unloading";
+	}
+	if (!KZHUDService::IsMHUDAvailable())
+	{
+		return "no_addon";
+	}
+	if (!KZ::replaysystem::data::IsReplayPlaying())
+	{
+		return "no_replay";
 	}
 	KZPlayer *target = this->player->specService->GetSpectatedPlayer();
-	return target && KZ::replaysystem::IsReplayBot(target) && KZ::replaysystem::data::IsReplayPlaying();
+	if (!target || !KZ::replaysystem::IsReplayBot(target))
+	{
+		return "not_spectating_bot";
+	}
+	return NULL;
+}
+
+bool KZHUDService::CanOpenReplayMenu()
+{
+	return this->ReplayMenuUnavailableReason() == NULL;
+}
+
+// Сколько тиков ждать фактического спектейта бота (64 тика/с → ~3 с). Смена команды
+// применяется движком в пределах одного-двух кадров, запас — на ретрансляцию/лаг.
+static constexpr i32 KZ_RPMENU_PENDING_TICKS = 192;
+
+void KZHUDService::RequestReplayMenu()
+{
+	this->replayMenuPending = true;
+	this->replayMenuPendingTicks = 0;
+}
+
+void KZHUDService::TickReplayMenuPending()
+{
+	if (!this->replayMenuPending)
+	{
+		return;
+	}
+	const char *reason = this->ReplayMenuUnavailableReason();
+	if (!reason)
+	{
+		this->replayMenuPending = false;
+		// Уже открытое cs2menus-!rpmenu гасим ДО panorama — клавиши не должны уходить в оба.
+		KZ::replaysystem::menu::CancelReplayControlsMenuCs2menus(this->player);
+		if (!this->OpenReplayMenu())
+		{
+			// Причина уже в логе OpenReplayMenu (layout_entity_failed) — отдаём cs2menus.
+			KZ::replaysystem::menu::OpenReplayControlsMenuCs2menus(this->player);
+		}
+		return;
+	}
+	if (KZ_STREQ(reason, "not_spectating_bot") && ++this->replayMenuPendingTicks <= KZ_RPMENU_PENDING_TICKS)
+	{
+		return; // спектейт ещё применяется — ждём
+	}
+	this->replayMenuPending = false;
+	if (KZ_STREQ(reason, "no_replay") || KZ_STREQ(reason, "unloading"))
+	{
+		// Реплей кончился/остановлен за окно ожидания (или плагин выгружается) — управлять
+		// нечем, cs2menus-меню «из ниоткуда» спустя секунды было бы ошибкой. Только лог.
+		KZ_LOG_INFO(LogChannel::General, "[cyb] replay_menu_fallback backend=none reason=%s waited_ticks=%i slot=%i\n", reason,
+					this->replayMenuPendingTicks, this->player->GetPlayerSlot().Get());
+		return;
+	}
+	// Не дождались спектейта (или аддон пропал) — фолбэк на cs2menus, причина в лог: иначе
+	// «почему у меня старое меню» не отличить от бага выбора бэкенда.
+	KZ_LOG_INFO(LogChannel::General, "[cyb] replay_menu_fallback backend=cs2menus reason=%s waited_ticks=%i slot=%i\n", reason,
+				this->replayMenuPendingTicks, this->player->GetPlayerSlot().Get());
+	KZ::replaysystem::menu::OpenReplayControlsMenuCs2menus(this->player);
 }
 
 bool KZHUDService::OpenReplayMenu()

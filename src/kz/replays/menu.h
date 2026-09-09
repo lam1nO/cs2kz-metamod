@@ -33,7 +33,16 @@ namespace KZ::replaysystem::menu
 	//   - cs2menus (ниже в этом файле) — во всех остальных случаях (нет аддона, игрок не
 	//     смотрит бота); тихий no-op, если и cs2menus не загружен.
 	// Повторный вызов при открытом panorama-меню ЗАКРЫВАЕТ его (тумблер, как !hudmenu).
+	// Если спектейт бота ещё применяется (сразу после `!replay`), запрос откладывается —
+	// KZHUDService::RequestReplayMenu, открытие произойдёт с первого тика фактического
+	// спектейта, фолбэк на cs2menus по таймауту с reason в логе.
 	void OpenReplayControlsMenu(KZPlayer *player);
+
+	// Явно cs2menus-бэкенд (без выбора бэкенда); его зовут селектор OpenReplayControlsMenu и
+	// KZHUDService::TickReplayMenuPending как фолбэк. Тихий no-op без cs2menus.
+	void OpenReplayControlsMenuCs2menus(KZPlayer *player);
+	// Закрыть cs2menus-!rpmenu игрока, если оно сейчас активно (перед открытием panorama).
+	void CancelReplayControlsMenuCs2menus(KZPlayer *player);
 
 	// Пункты меню реплея — общий словарь обоих бэкендов. Порядок = порядок строк panorama-меню.
 	enum class ReplayMenuLine

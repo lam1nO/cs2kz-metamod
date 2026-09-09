@@ -8,6 +8,7 @@
 #include "data.h"
 #include "utils/utils.h"
 #include "utils/simplecmds.h"
+#include "utils/logging.h" // replay_menu_fallback — причина выбора cs2menus-бэкенда
 
 #include <vendor/mm-cs2menus/src/public/ics2menus.h>
 
@@ -291,22 +292,49 @@ void KZ::replaysystem::menu::OpenReplayControlsMenu(KZPlayer *player)
 		player->hudService->CloseReplayMenu("toggle");
 		return;
 	}
-	if (player->hudService->CanOpenReplayMenu())
+	const char *reason = player->hudService->ReplayMenuUnavailableReason();
+	if (!reason)
 	{
 		// Уже открытое cs2menus-!rpmenu (открыли без аддона или до спектейта бота) гасим ДО
-		// panorama — иначе клавиши уходят в оба меню. Хэндл не трогаем: следующее открытие
-		// cs2menus-пути пересоздаёт меню само.
-		const int slot = player->GetPlayerSlot().Get();
-		if (g_pMenus && IsReplayControlsMenuOpen(slot))
-		{
-			g_pMenus->CancelMenu(slot);
-		}
+		// panorama — иначе клавиши уходят в оба меню.
+		CancelReplayControlsMenuCs2menus(player);
 		if (player->hudService->OpenReplayMenu())
 		{
 			return;
 		}
+		// Сущность не создалась — причина уже в логе OpenReplayMenu, ниже cs2menus.
 	}
-	if (g_pMenus == nullptr)
+	else if (KZ_STREQ(reason, "not_spectating_bot"))
+	{
+		// Типовой случай автооткрытия после `!replay`: SpectateBot уже вызван, но движок
+		// применит смену команды позже — цель наблюдения ещё не бот. Ждём тиком худа.
+		player->hudService->RequestReplayMenu();
+		return;
+	}
+	else
+	{
+		KZ_LOG_INFO(LogChannel::General, "[cyb] replay_menu_fallback backend=cs2menus reason=%s slot=%i\n", reason, player->GetPlayerSlot().Get());
+	}
+	OpenReplayControlsMenuCs2menus(player);
+}
+
+void KZ::replaysystem::menu::CancelReplayControlsMenuCs2menus(KZPlayer *player)
+{
+	if (!player || g_pMenus == nullptr)
+	{
+		return;
+	}
+	// Хэндл не трогаем: следующее открытие cs2menus-пути пересоздаёт меню само.
+	const int slot = player->GetPlayerSlot().Get();
+	if (IsReplayControlsMenuOpen(slot))
+	{
+		g_pMenus->CancelMenu(slot);
+	}
+}
+
+void KZ::replaysystem::menu::OpenReplayControlsMenuCs2menus(KZPlayer *player)
+{
+	if (!player || g_pMenus == nullptr)
 	{
 		return;
 	}

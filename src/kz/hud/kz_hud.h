@@ -596,6 +596,16 @@ public:
 	// открывать нельзя: клавиши уйдут в оба.
 	// Доступно, когда есть аддон и игрок СЕЙЧАС наблюдает реплей-бота с идущим плейбеком.
 	bool CanOpenReplayMenu();
+	// Почему недоступно: NULL — доступно; иначе машинный reason для лога/выбора фолбэка
+	// (unloading | no_addon | no_replay | not_spectating_bot).
+	const char *ReplayMenuUnavailableReason();
+	// Отложенное открытие: перевод в наблюдатели (SpectateBot → JoinTeam) движок применяет
+	// НЕ в том же вызове — сразу после `!replay` цель наблюдения ещё не бот, и CanOpen ложно.
+	// Запрос ждёт до KZ_RPMENU_PENDING_TICKS тиков (TickReplayMenuPending из
+	// KZPlayer::OnPhysicsSimulatePost), открывает panorama, как только спектейт бота
+	// фактически включился, иначе уходит на cs2menus с reason в логе.
+	void RequestReplayMenu();
+	void TickReplayMenuPending();
 	// Открыть (не тумблер: тумблер — KZ::replaysystem::menu::OpenReplayControlsMenu, он же
 	// выбирает бэкенд cs2menus/panorama). false — открыть нечем (см. CanOpenReplayMenu).
 	bool OpenReplayMenu();
@@ -764,6 +774,8 @@ private:
 	// Сущность меню реплея ЭТОГО игрока (см. OpenReplayMenu); гасится вместе с остальными.
 	CHandle<CBaseEntity> ownedReplayLayout {};
 	bool replayMenuOpen {};
+	bool replayMenuPending {};     // см. RequestReplayMenu
+	i32 replayMenuPendingTicks {}; // сколько тиков запрос уже ждёт спектейта бота
 	i32 replayMenuLine {};       // выбранная строка (ReplayMenuLine)
 	u64 replayMenuHeld {};       // маска удержанных кнопок прошлого тика — фронт нажатия свой,
 								 // а не IsButtonNewlyPressed: тот живёт внутри обработки usercmd

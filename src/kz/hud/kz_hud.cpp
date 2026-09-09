@@ -433,7 +433,9 @@ void KZHUDService::Reset()
 	// префах, и по тому же правилу, что и кэши выше — слот реально освобождается, чужой снимок
 	// «как было» (и чужой кулдаун выдачи кода) новому игроку в этом слоте не принадлежат.
 	KZ::hudshare::ClearSlotState(this->player->GetPlayerSlot());
-	// Меню реплея (layout/rpmenu.cpp) — третья сущность, та же причина.
+	// Меню реплея (layout/rpmenu.cpp) — третья сущность, та же причина. Отложенный запрос
+	// (RequestReplayMenu) тоже принадлежит ушедшему игроку.
+	this->replayMenuPending = false;
 	this->CloseReplayMenu("disconnect");
 }
 
@@ -475,6 +477,7 @@ void KZHUDService::OnRoundStart()
 		// Меню реплея: сущность снёс движок, бота кикнет OnRoundStart реплеев тем же хуком
 		// ниже (hooks.cpp) — флаг сбрасываем здесь безусловно, иначе следующий !rpmenu
 		// «закроет» несуществующее меню.
+		player->hudService->replayMenuPending = false;
 		player->hudService->CloseReplayMenu("round_start");
 	}
 }
