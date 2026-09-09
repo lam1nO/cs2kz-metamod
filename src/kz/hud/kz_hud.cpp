@@ -433,6 +433,8 @@ void KZHUDService::Reset()
 	// префах, и по тому же правилу, что и кэши выше — слот реально освобождается, чужой снимок
 	// «как было» (и чужой кулдаун выдачи кода) новому игроку в этом слоте не принадлежат.
 	KZ::hudshare::ClearSlotState(this->player->GetPlayerSlot());
+	// Меню реплея (layout/rpmenu.cpp) — третья сущность, та же причина.
+	this->CloseReplayMenu("disconnect");
 }
 
 // Сброс кэша отправки нижней панели БЕЗ *Active-флага: раунд-старт (OnRoundStart, в т.ч.
@@ -470,6 +472,10 @@ void KZHUDService::OnRoundStart()
 		{
 			player->hudService->CloseLayoutMenu();
 		}
+		// Меню реплея: сущность снёс движок, бота кикнет OnRoundStart реплеев тем же хуком
+		// ниже (hooks.cpp) — флаг сбрасываем здесь безусловно, иначе следующий !rpmenu
+		// «закроет» несуществующее меню.
+		player->hudService->CloseReplayMenu("round_start");
 	}
 }
 
@@ -1896,6 +1902,11 @@ void KZHUDService::ClearBottomPanel()
 void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 {
 	KZHUDService *cfg = target->hudService;
+
+	// Меню реплея спектатора (layout/rpmenu.cpp) — до всех ветвлений по типу худа: у него
+	// своя сущность, оно не зависит от hudType получателя и обязано тикать (ввод + рендер),
+	// пока игрок наблюдает бота; само же закрывается, когда player перестал быть ботом.
+	cfg->UpdateReplayMenu(player);
 
 	bool available = KZHUDService::IsMHUDAvailable();
 	// hudType: 0 = Standard (HTML-панель), 2 = Off (ничего), 3 = Panorama (custom_hud_layout

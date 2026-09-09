@@ -16,7 +16,7 @@
 // HUD_LAYOUT_MAX_INTERNED_STRINGS (1024, sdk/entity/ccscustomhudlayout.h) — дальше схема
 // молча перестаёт меняться. Отказ обязан быть видимым (канон проекта), а не тихим фризом
 // оформления.
-static_function void LogHudInternFailure(KZPlayer *player, const char *panelId, const char *className)
+void LogHudInternFailure(KZPlayer *player, const char *panelId, const char *className)
 {
 	KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_hud_class_dropped reason=intern_limit panel=%s class=%s slot=%i\n",
 				panelId, className, player ? player->GetPlayerSlot().Get() : -1);
@@ -78,8 +78,29 @@ void KZHUDService::SetLayoutValueClass(CCSCustomHudLayout *layout, const char *p
 void KZHUDService::UpdateLayoutElement(CCSCustomHudLayout *layout, LayoutElement element, bool show, const char *text, const Color &color, bool force)
 {
 	const LayoutElementDef &def = LAYOUT_ELEMENTS[(i32)element];
-	LayoutElementState &state = this->layoutElements[(i32)element];
+	const MHUDLayoutPrefs::Element &cached = this->GetLayoutPrefs().elements[(i32)element];
+	LayoutLabelStyle style;
+	style.x = cached.x;
+	style.y = cached.y;
+	style.size = cached.size;
+	// cached.fontClass — уже РЕЗОЛВЛЕННЫЙ css-класс (RefreshLayoutPrefs, Task 5 зовёт
+	// panorama::ResolveFontClass один раз при обновлении префов). Повторный резолв здесь
+	// сравнил бы готовый класс со слагом и всегда проигрывал бы fallback'у.
+	style.fontClass = cached.fontClass;
+	style.opacity = cached.opacity;
+	// Обводка — поэлементный преф (mhud*Outline), layout/prefs.cpp наполняет cached.outline
+	// из ключа outlineKey (с миграцией из старого общего hudOutline при первом чтении).
+	style.outline = cached.outline;
+	style.color = color;
+	this->ApplyLayoutLabel(layout, def.panelId, def.varName, this->layoutElements[(i32)element], style, show, text, force);
+}
 
+// Общая запись одного текстового лейбла panorama-разметки: элементы худа (UpdateLayoutElement,
+// стиль из префов игрока) и строки меню реплея (layout/rpmenu.cpp, стиль задаёт код) идут
+// через ЭТУ функцию — второй копии машинерии классов/переменных быть не должно.
+void KZHUDService::ApplyLayoutLabel(CCSCustomHudLayout *layout, const char *panelId, const char *varName, LayoutElementState &state,
+									const LayoutLabelStyle &style, bool show, const char *text, bool force)
+{
 	// force — сразу после EnsureOwnedLayout(created=true): свежая сущность у схемы уже
 	// прибита к дефолтным классам разметки, а наш кэш думает, что ничего слать не надо
 	// (совпал с прошлым состоянием прошлой сущности/дефолтом) — форс сбрасывает кэш, чтобы
@@ -92,9 +113,9 @@ void KZHUDService::UpdateLayoutElement(CCSCustomHudLayout *layout, LayoutElement
 	if (state.hidden != !show)
 	{
 		state.hidden = !show;
-		if (!layout->SetHasClass(def.panelId, "hidden", state.hidden ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass))
+		if (!layout->SetHasClass(panelId, "hidden", state.hidden ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass))
 		{
-			LogHudInternFailure(this->player, def.panelId, "hidden");
+			LogHudInternFailure(this->player, panelId, "hidden");
 		}
 	}
 	// Скрытый элемент не теряет значения — включить его обратно ничего не стоит.
@@ -107,55 +128,49 @@ void KZHUDService::UpdateLayoutElement(CCSCustomHudLayout *layout, LayoutElement
 	if (text && state.text != text)
 	{
 		state.text = text;
-		if (!layout->SetDialogVariableString(def.panelId, def.varName, text))
+		if (!layout->SetDialogVariableString(panelId, varName, text))
 		{
-			LogHudInternFailure(this->player, def.panelId, def.varName);
+			LogHudInternFailure(this->player, panelId, varName);
 		}
 	}
 
-	const MHUDLayoutPrefs::Element &cached = this->GetLayoutPrefs().elements[(i32)element];
-	this->SetLayoutValueClass(layout, def.panelId, state.x, cached.x, "x", true);
-	this->SetLayoutValueClass(layout, def.panelId, state.y, cached.y, "y", true);
-	this->SetLayoutValueClass(layout, def.panelId, state.fontSize, cached.size, "font-size", false);
+	this->SetLayoutValueClass(layout, panelId, state.x, style.x, "x", true);
+	this->SetLayoutValueClass(layout, panelId, state.y, style.y, "y", true);
+	this->SetLayoutValueClass(layout, panelId, state.fontSize, style.size, "font-size", false);
 
-	const u32 packed = ((u32)color.r() << 24) | ((u32)color.g() << 16) | ((u32)color.b() << 8) | (u32)color.a();
+	const u32 packed = ((u32)style.color.r() << 24) | ((u32)style.color.g() << 16) | ((u32)style.color.b() << 8) | (u32)style.color.a();
 	if (!state.colorComputed || state.lastColorPacked != packed)
 	{
 		state.colorComputed = true;
 		state.lastColorPacked = packed;
-		state.colorClassComputed = panorama::ResolveColorClass(color);
+		state.colorClassComputed = panorama::ResolveColorClass(style.color);
 	}
-	this->SetLayoutClass(layout, def.panelId, state.colorClass, state.colorClassComputed);
-	// cached.fontClass — уже РЕЗОЛВЛЕННЫЙ css-класс (RefreshLayoutPrefs, Task 5 зовёт
-	// panorama::ResolveFontClass один раз при обновлении префов). Повторный резолв здесь
-	// сравнил бы готовый класс со слагом и всегда проигрывал бы fallback'у.
-	this->SetLayoutClass(layout, def.panelId, state.fontClass, cached.fontClass);
+	this->SetLayoutClass(layout, panelId, state.colorClass, state.colorClassComputed);
+	this->SetLayoutClass(layout, panelId, state.fontClass, style.fontClass);
 
-	const i32 opacity = Clamp(cached.opacity, 0, 100);
+	const i32 opacity = Clamp(style.opacity, 0, 100);
 	if (state.opacity != opacity)
 	{
 		char className[32];
 		if (state.opacity != INT_MIN)
 		{
 			V_snprintf(className, sizeof(className), "opacity--%ipct", state.opacity);
-			layout->SetHasClass(def.panelId, className, k_eHudPanelClassStatus_DoesNotHaveClass);
+			layout->SetHasClass(panelId, className, k_eHudPanelClassStatus_DoesNotHaveClass);
 		}
 		V_snprintf(className, sizeof(className), "opacity--%ipct", opacity);
-		if (!layout->SetHasClass(def.panelId, className, k_eHudPanelClassStatus_HasClass))
+		if (!layout->SetHasClass(panelId, className, k_eHudPanelClassStatus_HasClass))
 		{
-			LogHudInternFailure(this->player, def.panelId, className);
+			LogHudInternFailure(this->player, panelId, className);
 		}
 		state.opacity = opacity;
 	}
 
-	// Обводка — поэлементный преф (mhud*Outline), layout/prefs.cpp наполняет cached.outline
-	// из ключа outlineKey (с миграцией из старого общего hudOutline при первом чтении).
-	if (state.outline != cached.outline)
+	if (state.outline != style.outline)
 	{
-		state.outline = cached.outline;
-		if (!layout->SetHasClass(def.panelId, "outline", cached.outline ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass))
+		state.outline = style.outline;
+		if (!layout->SetHasClass(panelId, "outline", style.outline ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass))
 		{
-			LogHudInternFailure(this->player, def.panelId, "outline");
+			LogHudInternFailure(this->player, panelId, "outline");
 		}
 	}
 }
@@ -300,15 +315,19 @@ void KZHUDService::LayoutCleanup()
 			// игрок остался бы так и после выгрузки плагина (сущность и захват на ней —
 			// не наши больше, но клиент их не увидит снятыми, пока кто-то не уберёт entity).
 			player->hudService->DestroyOwnedMenuLayout();
+			// Меню реплея (layout/rpmenu.cpp) — третья персональная сущность, та же причина.
+			player->hudService->DestroyOwnedReplayLayout();
 		}
 	}
 }
 
 bool KZHUDService::OwnsLayoutEntity(CEntityHandle handle)
 {
-	// Своих сущностей ДВЕ: сам худ (ownedLayout) и отдельное меню настроек (ownedMenuLayout,
-	// Task 11) — транзит (KZ::quiet) гасит всё, чего нет в этом списке, и без второй проверки
-	// сущность меню игроку не долетала бы вовсе (пустые/невалидные хэндлы по-прежнему false).
+	// Своих сущностей ТРИ: сам худ (ownedLayout), отдельное меню настроек (ownedMenuLayout,
+	// Task 11) и меню реплея спектатора (ownedReplayLayout, layout/rpmenu.cpp) — транзит
+	// (KZ::quiet) гасит всё, чего нет в этом списке, и без проверки каждой сущность игроку не
+	// долетала бы вовсе (пустые/невалидные хэндлы по-прежнему false).
 	return (this->ownedLayout.IsValid() && this->ownedLayout.ToInt() == handle.ToInt())
-		   || (this->ownedMenuLayout.IsValid() && this->ownedMenuLayout.ToInt() == handle.ToInt());
+		   || (this->ownedMenuLayout.IsValid() && this->ownedMenuLayout.ToInt() == handle.ToInt())
+		   || (this->ownedReplayLayout.IsValid() && this->ownedReplayLayout.ToInt() == handle.ToInt());
 }

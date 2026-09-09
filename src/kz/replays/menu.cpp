@@ -2,6 +2,7 @@
 // «один хэндл меню на слот»: старое меню !options, откуда он пришёл, снято с команды.
 #include "kz/kz.h"
 #include "kz/language/kz_language.h"
+#include "kz/hud/kz_hud.h" // KZHUDService::OpenReplayMenu — panorama-бэкенд !rpmenu
 #include "menu.h"
 #include "commands.h"
 #include "data.h"
@@ -181,9 +182,131 @@ static_function void OnRpMenuSelect(MenuHandle menu, int slot, int item)
 	g_pMenus->SetItemText(menu, RPMENU_ITEM_SPEED, SpeedItemText(p).c_str());
 }
 
+// === Общая семантика пунктов (оба бэкенда) ==================================================
+
+void KZ::replaysystem::menu::ApplyReplayMenuInput(KZPlayer *player, ReplayMenuLine line, ReplayMenuInput input)
+{
+	if (!player)
+	{
+		return;
+	}
+	using namespace KZ::replaysystem;
+	const bool select = input == ReplayMenuInput::Select;
+	const int dir = input == ReplayMenuInput::Inc ? 1 : -1;
+
+	switch (line)
+	{
+		case ReplayMenuLine::PauseStep:
+			if (select)
+			{
+				commands::ToggleReplayPause(player);
+			}
+			else
+			{
+				// Как A/D по строке паузы в cs2menus: шаг на тик, без чата на каждый шаг
+				// (автоповтор на удержании).
+				commands::StepReplay(player, dir, false);
+			}
+			break;
+		case ReplayMenuLine::Seek:
+			if (select)
+			{
+				// «С начала»: снять паузу (иначе «заново» не начнётся) и перемотать на 0.
+				if (data::IsReplayPlaying())
+				{
+					data::GetCurrentReplay()->replayPaused = false;
+				}
+				commands::JumpToReplayTime(player, "0");
+			}
+			else
+			{
+				char seek[16];
+				V_snprintf(seek, sizeof(seek), "%+d", dir * (int)RPMENU_SEEK_STEP_10);
+				commands::JumpToReplayTime(player, seek);
+			}
+			break;
+		case ReplayMenuLine::Speed:
+			if (select)
+			{
+				commands::SetReplaySpeed(player, 1.0f, false);
+			}
+			else
+			{
+				int idx = NearestSpeedIndex(commands::GetReplaySpeed()) + dir;
+				idx = idx < 0 ? 0 : (idx >= RPMENU_SPEEDS_COUNT ? RPMENU_SPEEDS_COUNT - 1 : idx);
+				commands::SetReplaySpeed(player, RPMENU_SPEEDS[idx], false);
+			}
+			break;
+		case ReplayMenuLine::End:
+			if (select)
+			{
+				commands::StopReplay(player);
+			}
+			break;
+		default:
+			break;
+	}
+}
+
+std::string KZ::replaysystem::menu::GetReplayMenuLineText(KZPlayer *player, ReplayMenuLine line)
+{
+	using namespace KZ::replaysystem;
+	const char *lang = player->languageService->GetLanguage();
+	switch (line)
+	{
+		case ReplayMenuLine::PauseStep:
+		{
+			bool paused = data::IsReplayPlaying() && data::GetCurrentReplay()->replayPaused;
+			return KZLanguageService::PrepareMessageWithLang(lang, paused ? "Replay Panel - Resume" : "Replay Panel - Pause");
+		}
+		case ReplayMenuLine::Seek:
+			return KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Seek", (int)RPMENU_SEEK_STEP_10);
+		case ReplayMenuLine::Speed:
+		{
+			char speedText[16];
+			commands::FormatReplaySpeed(commands::GetReplaySpeed(), speedText, sizeof(speedText));
+			return KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Speed", speedText);
+		}
+		case ReplayMenuLine::End:
+			return KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - End");
+		default:
+			return "";
+	}
+}
+
+// === Точка входа: выбор бэкенда =============================================================
+
 void KZ::replaysystem::menu::OpenReplayControlsMenu(KZPlayer *player)
 {
-	if (g_pMenus == nullptr || !player)
+	if (!player)
+	{
+		return;
+	}
+	// Panorama-бэкенд — приоритетный: повторный !rpmenu при открытом меню закрывает его
+	// (тумблер), иначе открываем, если игрок наблюдает бота и есть аддон. Только когда
+	// panorama недоступна, уходим на cs2menus ниже (оба сразу открывать нельзя — клавиши
+	// W/S/E/A/D ушли бы в оба меню).
+	if (player->hudService->IsReplayMenuOpen())
+	{
+		player->hudService->CloseReplayMenu("toggle");
+		return;
+	}
+	if (player->hudService->CanOpenReplayMenu())
+	{
+		// Уже открытое cs2menus-!rpmenu (открыли без аддона или до спектейта бота) гасим ДО
+		// panorama — иначе клавиши уходят в оба меню. Хэндл не трогаем: следующее открытие
+		// cs2menus-пути пересоздаёт меню само.
+		const int slot = player->GetPlayerSlot().Get();
+		if (g_pMenus && IsReplayControlsMenuOpen(slot))
+		{
+			g_pMenus->CancelMenu(slot);
+		}
+		if (player->hudService->OpenReplayMenu())
+		{
+			return;
+		}
+	}
+	if (g_pMenus == nullptr)
 	{
 		return;
 	}

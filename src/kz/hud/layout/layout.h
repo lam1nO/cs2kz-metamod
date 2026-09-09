@@ -32,3 +32,7 @@
 #define LAYOUT_DEFAULT_FONT "lato-bold"
 // Разметка живёт в чужом аддоне 3469155349; путь совпадает с апстримным.
 #define KZ_MHUD_LAYOUT "panorama/layout/custom_game/cs2kz/mhud.vxml_c"
+
+// Отказ SetHasClass/SetDialogVariableString по упору в HUD_LAYOUT_MAX_INTERNED_STRINGS —
+// общий лог для entity.cpp и rpmenu.cpp (реализация в entity.cpp).
+void LogHudInternFailure(KZPlayer *player, const char *panelId, const char *className);

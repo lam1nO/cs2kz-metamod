@@ -881,6 +881,36 @@
 		"en"		"End"
 		"ru"		"Завершить"
 	}
+	// Panorama-меню реплея (hud/layout/rpmenu.cpp): четыре строки у левого края, в каждой —
+	// подсказка клавиш. Текст обязан быть одной строкой без разметки (dialog-переменная
+	// panorama, html там нет); ширину строки выравнивает код добивкой NBSP.
+	"Replay Panel - Pause"
+	{
+		"en"		"Pause  E | tick step  A/D"
+		"ru"		"Пауза  E | шаг по тикам  A/D"
+	}
+	"Replay Panel - Resume"
+	{
+		"en"		"Resume  E | tick step  A/D"
+		"ru"		"Продолжить  E | шаг по тикам  A/D"
+	}
+	"Replay Panel - Seek"
+	{
+		"#format"	"step:d"
+		"en"		"Seek {step}s  A/D | restart  E"
+		"ru"		"Перемотка {step}с  A/D | с начала  E"
+	}
+	"Replay Panel - Speed"
+	{
+		"#format"	"speed:s"
+		"en"		"Speed {speed}x  A/D | 1x  E"
+		"ru"		"Скорость {speed}x  A/D | 1x  E"
+	}
+	"Replay Panel - End"
+	{
+		"en"		"End  E"
+		"ru"		"Завершить  E"
+	}
 	// Поиск реплея по НИКУ (`!replay <подстрока>`) через наш api — путь, на котором
 	// раньше был безусловный отказ «Invalid UUID».
 	"Replay Search Menu - Title"

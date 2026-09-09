@@ -56,6 +56,21 @@ struct LayoutElementDef
 
 extern const LayoutElementDef LAYOUT_ELEMENTS[(i32)LayoutElement::Count];
 
+// Стиль одного текстового лейбла panorama-разметки для KZHUDService::ApplyLayoutLabel: элементы
+// худа собирают его из префов игрока (UpdateLayoutElement), меню реплея (layout/rpmenu.cpp) —
+// задаёт кодом (подсветка выбранной строки). x/y — проценты от центра, size — пиксели,
+// fontClass — уже резолвленный css-класс (panorama::ResolveFontClass).
+struct LayoutLabelStyle
+{
+	i32 x {};
+	i32 y {};
+	i32 size {};
+	const char *fontClass {};
+	i32 opacity {100};
+	bool outline {};
+	Color color {};
+};
+
 // Показания скорости — общий результат для ЛЮБОГО худа (Task 6/R3): HTML-путь и
 // panorama-layout читают его из ОДНОГО метода (KZHUDService::GetSpeedInfo), а не считают
 // каждый по-своему — иначе это лишняя расходящаяся ветка вдобавок к тем, которые уже
@@ -569,6 +584,39 @@ public:
 	// иначе не контролируется ничем. Реализация — layout/menu.cpp.
 	void CheckMenuCaptureInvariant();
 
+	// === Меню управления реплеем спектатора на panorama (layout/rpmenu.cpp) ===========
+	// Третья персональная сущность custom_hud_layout с ТОЙ ЖЕ разметкой mhud.vxml_c, что и
+	// худ: четыре её лейбла (таймер/скорость/преспид/чекпоинт) — строки меню у левого края,
+	// блок клавиш — подсветка собственных WASD спектатора. Своей разметки у нас нет (чужой
+	// аддон 3469155349), а страница меню настроек (menu.vxml_c) прибита к центру — её
+	// стили не подключают лист позиций. Пункты и их семантика — KZ::replaysystem::menu
+	// (replays/menu.h: ReplayMenuLine/ApplyReplayMenuInput), здесь только ввод и рендер.
+	// Ввод — W/S по строкам, E выбор, A/D регулировка — читается с наблюдательской пешки
+	// без курсорного захвата (в отличие от меню настроек), поэтому cs2menus-меню поверх
+	// открывать нельзя: клавиши уйдут в оба.
+	// Доступно, когда есть аддон и игрок СЕЙЧАС наблюдает реплей-бота с идущим плейбеком.
+	bool CanOpenReplayMenu();
+	// Открыть (не тумблер: тумблер — KZ::replaysystem::menu::OpenReplayControlsMenu, он же
+	// выбирает бэкенд cs2menus/panorama). false — открыть нечем (см. CanOpenReplayMenu).
+	bool OpenReplayMenu();
+	// Закрывает и сносит сущность (меню открывается редко, держать её живой незачем);
+	// безопасно без сущности и без открытого меню. reason — в лог.
+	void CloseReplayMenu(const char *reason);
+
+	bool IsReplayMenuOpen() const
+	{
+		return this->replayMenuOpen;
+	}
+
+	// Тик меню: зовётся из DrawPanels для ПОЛУЧАТЕЛЯ (this) с источником данных source
+	// (наблюдаемый или сам игрок). Закрывает меню, как только игрок перестал наблюдать
+	// бота или плейбек кончился; иначе читает ввод и перерисовывает строки.
+	void UpdateReplayMenu(KZPlayer *source);
+	// Снести сущность меню реплея и сбросить её диф-кэш (та же ловушка, что у
+	// DestroyOwnedLayout: кэш живёт только вместе с сущностью). Зовётся из Reset(),
+	// LayoutCleanup() и CloseReplayMenu().
+	void DestroyOwnedReplayLayout();
+
 private:
 	// Единственная точка расчёта SpeedInfo (Task 6/R3, см. комментарий у struct SpeedInfo):
 	// HTML-путь (BuildVersionCHud) и panorama-layout (layout/mhud.cpp)
@@ -668,6 +716,11 @@ private:
 	// СВОЙ переключатель, этот — какая цель фактически применена сейчас.
 	CPlayerSlot layoutMimicSource {-1};
 
+	// Единственная машинерия записи текстового лейбла (hidden/текст/позиция/кегль/цвет/
+	// шрифт/прозрачность/обводка) с диф-кэшем state — см. entity.cpp.
+	void ApplyLayoutLabel(CCSCustomHudLayout *layout, const char *panelId, const char *varName, LayoutElementState &state,
+						  const LayoutLabelStyle &style, bool show, const char *text, bool force);
+
 	// Кэш префов (Task 5 наполняет); объявление поля — здесь, чтобы UpdateLayoutElement (Task 4)
 	// уже мог читать this->GetLayoutPrefs().
 	MHUDLayoutPrefs layoutPrefs {};
@@ -703,6 +756,27 @@ private:
 	};
 
 	LayoutKeysState layoutKeys {};
+	// Кегль контейнера/кнопок и шрифт глифов блока клавиш — общий для худа и меню реплея
+	// (реализация в layout/mhud.cpp).
+	void ApplyKeysSizing(CCSCustomHudLayout *layout, LayoutKeysState &state, i32 size, const char *fontClass);
+
+	// === Меню реплея (layout/rpmenu.cpp) — состояние ==================================
+	// Сущность меню реплея ЭТОГО игрока (см. OpenReplayMenu); гасится вместе с остальными.
+	CHandle<CBaseEntity> ownedReplayLayout {};
+	bool replayMenuOpen {};
+	i32 replayMenuLine {};       // выбранная строка (ReplayMenuLine)
+	u64 replayMenuHeld {};       // маска удержанных кнопок прошлого тика — фронт нажатия свой,
+								 // а не IsButtonNewlyPressed: тот живёт внутри обработки usercmd
+	i32 replayMenuHoldTicks {};  // тики удержания A/D — автоповтор регулировки, как в cs2menus
+	// Диф-кэш строк (4 лейбла разметки) и блока клавиш — живёт ТОЛЬКО с сущностью.
+	LayoutElementState replayLines[(i32)LayoutElement::Count] {};
+	LayoutKeysState replayKeys {};
+	// Статические классы блока клавиш (hide-idle/keys-letters) выставлены на текущей сущности.
+	bool replayKeysStyled {};
+
+	CCSCustomHudLayout *EnsureReplayLayout(bool &created);
+	void ReadReplayMenuInput();
+	void RenderReplayMenu(CCSCustomHudLayout *layout, bool force);
 
 	// Кэш класс-суффиксов крестика (Task 10) — та же ловушка, что у layoutElements[]/
 	// layoutKeys: живёт ТОЛЬКО вместе с сущностью, обнулять в DestroyOwnedLayout, иначе

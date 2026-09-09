@@ -274,18 +274,26 @@ void KZHUDService::UpdateKeysElement(CCSCustomHudLayout *layout, KZPlayer *sourc
 		}
 	}
 
-	// Размер элемента (уже clamped/snapped к LAYOUT_SIZE_MIN/MAX в RefreshLayoutPrefs) — на
-	// контейнер (масштаб кнопок) и на каждую кнопку отдельно (масштаб глифа): в panorama
-	// font-size не наследуется детьми через класс родителя, апстрим тоже дублирует явно.
+	// Размер элемента (уже clamped/snapped к LAYOUT_SIZE_MIN/MAX в RefreshLayoutPrefs) и шрифт
+	// глифов — общим хелпером с меню реплея (layout/rpmenu.cpp).
 	const MHUDLayoutPrefs::Element &cached = prefs.elements[(i32)LayoutElement::Keys];
-	const i32 size = cached.size;
+	this->ApplyKeysSizing(layout, this->layoutKeys, cached.size, cached.fontClass);
+}
 
-	if (this->layoutKeys.boxSize != size)
+// Кегль блока клавиш — на контейнер (масштаб кнопок, key-size--N) и на каждую кнопку отдельно
+// (масштаб глифа, font-size--Npx): в panorama font-size не наследуется детьми через класс
+// родителя, апстрим тоже дублирует явно. Шрифт-класс — на глифы (см. KEY_GLYPHS). state —
+// диф-кэш ТОЙ сущности, на которую пишем (layoutKeys у худа, replayKeys у меню реплея).
+void KZHUDService::ApplyKeysSizing(CCSCustomHudLayout *layout, LayoutKeysState &state, i32 size, const char *fontClass)
+{
+	const char *const keysPanel = LAYOUT_ELEMENTS[(i32)LayoutElement::Keys].panelId;
+
+	if (state.boxSize != size)
 	{
 		char className[32];
-		if (this->layoutKeys.boxSize != INT_MIN)
+		if (state.boxSize != INT_MIN)
 		{
-			V_snprintf(className, sizeof(className), "key-size--%i", this->layoutKeys.boxSize);
+			V_snprintf(className, sizeof(className), "key-size--%i", state.boxSize);
 			layout->SetHasClass(keysPanel, className, k_eHudPanelClassStatus_DoesNotHaveClass);
 		}
 		V_snprintf(className, sizeof(className), "key-size--%i", size);
@@ -294,17 +302,17 @@ void KZHUDService::UpdateKeysElement(CCSCustomHudLayout *layout, KZPlayer *sourc
 			KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_hud_class_dropped reason=intern_limit panel=%s class=%s slot=%i\n", keysPanel,
 						className, this->player->GetPlayerSlot().Get());
 		}
-		this->layoutKeys.boxSize = size;
+		state.boxSize = size;
 	}
 
-	if (this->layoutKeys.fontSize != size)
+	if (state.fontSize != size)
 	{
 		char className[32];
 		for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(KEY_PANELS); i++)
 		{
-			if (this->layoutKeys.fontSize != INT_MIN)
+			if (state.fontSize != INT_MIN)
 			{
-				V_snprintf(className, sizeof(className), "font-size--%ipx", this->layoutKeys.fontSize);
+				V_snprintf(className, sizeof(className), "font-size--%ipx", state.fontSize);
 				layout->SetHasClass(KEY_PANELS[i], className, k_eHudPanelClassStatus_DoesNotHaveClass);
 			}
 			V_snprintf(className, sizeof(className), "font-size--%ipx", size);
@@ -314,26 +322,26 @@ void KZHUDService::UpdateKeysElement(CCSCustomHudLayout *layout, KZPlayer *sourc
 							KEY_PANELS[i], className, this->player->GetPlayerSlot().Get());
 			}
 		}
-		this->layoutKeys.fontSize = size;
+		state.fontSize = size;
 	}
 
 	// fontClass — уже резолвленный css-класс (RefreshLayoutPrefs зовёт ResolveFontClass один
 	// раз), как и у остальных элементов (см. entity.cpp/UpdateLayoutElement).
-	if (this->layoutKeys.fontClass != cached.fontClass)
+	if (state.fontClass != fontClass)
 	{
 		for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(KEY_GLYPHS); i++)
 		{
-			if (this->layoutKeys.fontClass)
+			if (state.fontClass)
 			{
-				layout->SetHasClass(KEY_GLYPHS[i], this->layoutKeys.fontClass, k_eHudPanelClassStatus_DoesNotHaveClass);
+				layout->SetHasClass(KEY_GLYPHS[i], state.fontClass, k_eHudPanelClassStatus_DoesNotHaveClass);
 			}
-			if (!layout->SetHasClass(KEY_GLYPHS[i], cached.fontClass, k_eHudPanelClassStatus_HasClass))
+			if (!layout->SetHasClass(KEY_GLYPHS[i], fontClass, k_eHudPanelClassStatus_HasClass))
 			{
 				KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_hud_class_dropped reason=intern_limit panel=%s class=%s slot=%i\n",
-							KEY_GLYPHS[i], cached.fontClass, this->player->GetPlayerSlot().Get());
+							KEY_GLYPHS[i], fontClass, this->player->GetPlayerSlot().Get());
 			}
 		}
-		this->layoutKeys.fontClass = cached.fontClass;
+		state.fontClass = fontClass;
 	}
 }
 
@@ -341,7 +349,10 @@ void KZHUDService::UpdateCheckpointElement(CCSCustomHudLayout *layout, KZPlayer 
 {
 	std::string text = source->hudService->GetCheckpointText(this->player->languageService->GetLanguage());
 	const Color color = this->GetLayoutPrefs().checkpoint;
-	const bool show = this->IsLayoutElementEnabled(LayoutElement::Checkpoint) && !text.empty();
+	// Под открытым меню реплея (layout/rpmenu.cpp) строка CP/TP гаснет: её место по смыслу
+	// занимает меню (решение пользователя 09.09 — «вместо cp/tp»), а у бота эти счётчики и
+	// так вторичны. Остальные элементы худа живут как есть.
+	const bool show = this->IsLayoutElementEnabled(LayoutElement::Checkpoint) && !text.empty() && !this->IsReplayMenuOpen();
 	this->UpdateLayoutElement(layout, LayoutElement::Checkpoint, show, text.c_str(), color, force);
 }
 

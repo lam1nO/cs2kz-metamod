@@ -27,8 +27,39 @@ namespace KZ::replaysystem::menu
 	// вызывающий сам решает, что делать, и грузит первого кандидата.
 	bool OpenReplaySearchMenu(KZPlayer *player, const std::vector<SearchHit> &hits);
 
-	// Меню управления реплеем (!rpmenu); тихий no-op, если cs2menus не загружен.
+	// Меню управления реплеем (!rpmenu). Два бэкенда с одной семантикой пунктов:
+	//   - panorama (KZHUDService::OpenReplayMenu, hud/layout/rpmenu.cpp) — когда игрок
+	//     наблюдает реплей-бота и есть аддон: список у левого края, W/S/E/A/D без курсора;
+	//   - cs2menus (ниже в этом файле) — во всех остальных случаях (нет аддона, игрок не
+	//     смотрит бота); тихий no-op, если и cs2menus не загружен.
+	// Повторный вызов при открытом panorama-меню ЗАКРЫВАЕТ его (тумблер, как !hudmenu).
 	void OpenReplayControlsMenu(KZPlayer *player);
+
+	// Пункты меню реплея — общий словарь обоих бэкендов. Порядок = порядок строк panorama-меню.
+	enum class ReplayMenuLine
+	{
+		PauseStep, // E — пауза/продолжить, A/D — шаг на тик записи (шаг сам ставит паузу)
+		Seek,      // A/D — перемотка ±RPMENU_SEEK_STEP_10 сек (menu.cpp), E — с начала
+		Speed,     // A/D — пресет скорости, E — сброс на 1x
+		End,       // E — остановить плейбек и убрать бота
+		Count
+	};
+
+	enum class ReplayMenuInput
+	{
+		Select, // E
+		Dec,    // A
+		Inc     // D
+	};
+
+	// Применить ввод к строке. Семантика одна на оба бэкенда, здесь же живут пресеты
+	// скорости (см. RPMENU_SPEEDS в menu.cpp). Сообщения игроку — как у чат-команд
+	// (пауза/продолжить объявляются, шаг и скорость — нет: значение видно в строке).
+	void ApplyReplayMenuInput(KZPlayer *player, ReplayMenuLine line, ReplayMenuInput input);
+
+	// Текст строки panorama-меню на языке игрока, с живыми значениями (пауза/скорость) и
+	// подсказками клавиш. Без маркера выбора — его ставит рендер.
+	std::string GetReplayMenuLineText(KZPlayer *player, ReplayMenuLine line);
 
 	// Открыто ли у слота ИМЕННО !rpmenu (а не любое другое cs2menus-меню). Сравнение по
 	// ХЭНДЛУ созданного нами меню — заголовок для этого не годится: он переводится и
