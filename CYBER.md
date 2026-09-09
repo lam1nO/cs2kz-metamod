@@ -753,6 +753,14 @@ cs2kz-linux-builder .`, иначе компилируется КОПИЯ ИЗ О
   с ревизии 3 по тому же флагу решают и prac-часы. Лог старта попытки —
   `[cyb] prac_attempt_start steam_id=… course=…` (INFO): в prac ничего не сабмитится, других
   следов у попытки нет.
+- **Плейбек реплея: две шкалы тиков.** Сырая — индекс `tickData` (включает записанные паузы:
+  плейбек их ПРОПУСКАЕТ по `g_pauseSegments`, `playback.cpp`). Эффективная — без паузных
+  сегментов (`playback::EffectiveTickCount/RawTickToEffective/EffectiveTickToRaw`). Всё, что видит
+  зритель — время и длительность в меню реплея и `!rpinfo`, перемотка `!rpgoto ±N`, `!rpgototick`,
+  шаг `!rpstep` — считается в ЭФФЕКТИВНОЙ и в сырой переводится только на границе (`NavigateReplay`).
+  Иначе (канарейка 09.09): длительность включала вырезанные паузы, а «−10 с» из кадра после
+  паузы длиннее 10 с приземлялось внутрь неё, `SnapSeekTargetOutOfPause` возвращал на кадр
+  возобновления — назад отмотать было нельзя. `SnapSeekTargetOutOfPause` остался страховкой.
 - **Центральные реплеи PB/WR** (`src/kz/replays/cyb_replay_{common,upload,download}.*`,
   cyb.26): авто-upload при новом локальном PB и серверном рекорде (WR = overall/nub;
   pro отдельно НЕ выгружается) через api `POST /replays/v1/upload` (Bearer

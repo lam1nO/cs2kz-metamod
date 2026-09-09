@@ -151,6 +151,48 @@ namespace KZ::replaysystem::playback
 		return tick;
 	}
 
+	u32 EffectiveTickCount()
+	{
+		auto replay = data::GetCurrentReplay();
+		u32 skipped = 0;
+		for (const PauseSegment &seg : g_pauseSegments)
+		{
+			skipped += seg.endTick - seg.startTick;
+		}
+		return replay->tickCount > skipped ? replay->tickCount - skipped : 0;
+	}
+
+	u32 RawTickToEffective(u32 rawTick)
+	{
+		u32 skipped = 0;
+		for (const PauseSegment &seg : g_pauseSegments)
+		{
+			if (rawTick < seg.startTick)
+			{
+				break;
+			}
+			// Внутри сегмента — считаем как его начало (интерьер паузы не показывается).
+			skipped += (rawTick < seg.endTick ? rawTick : seg.endTick) - seg.startTick;
+		}
+		return rawTick - skipped;
+	}
+
+	u32 EffectiveTickToRaw(u32 effectiveTick)
+	{
+		// Сегменты упорядочены и не пересекаются: каждый, чьё начало уже позади, сдвигает сырой
+		// индекс на свою длину. Результат никогда не попадает внутрь паузы.
+		u32 raw = effectiveTick;
+		for (const PauseSegment &seg : g_pauseSegments)
+		{
+			if (raw < seg.startTick)
+			{
+				break;
+			}
+			raw += seg.endTick - seg.startTick;
+		}
+		return raw;
+	}
+
 	void ResetPauseCursor(u32 tick)
 	{
 		g_nextPauseSegment = 0;

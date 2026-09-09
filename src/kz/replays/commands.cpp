@@ -418,7 +418,10 @@ namespace KZ::replaysystem::commands
 		}
 
 		auto replay = data::GetCurrentReplay();
-		u32 targetTick;
+		// Вся арифметика — в ЭФФЕКТИВНОЙ шкале (без вырезанных пауз, см. playback.h): иначе «−10 с»
+		// из кадра сразу после паузы приземлялось внутрь неё и снапом возвращалось на тот же кадр.
+		const u32 effectiveCount = playback::EffectiveTickCount();
+		u32 effectiveTarget;
 		bool isRelative = (input[0] == '+' || input[0] == '-');
 
 		if (isRelative)
@@ -438,21 +441,21 @@ namespace KZ::replaysystem::commands
 			}
 
 			// Calculate target tick based on current replay position + seek amount
-			i32 ticksToSeek = (i32)(seekSeconds / ENGINE_FIXED_TICK_INTERVAL);
-			i32 newTargetTick = (i32)replay->currentTick + ticksToSeek;
+			i64 ticksToSeek = (i64)(seekSeconds / ENGINE_FIXED_TICK_INTERVAL);
+			i64 newTarget = (i64)playback::RawTickToEffective(replay->currentTick) + ticksToSeek;
 
 			// Clamp to valid range
-			if (newTargetTick < 0)
+			if (newTarget < 0)
 			{
-				targetTick = 0;
+				effectiveTarget = 0;
 			}
-			else if (newTargetTick >= (i32)replay->tickCount)
+			else if (newTarget >= (i64)effectiveCount)
 			{
-				targetTick = replay->tickCount - 1;
+				effectiveTarget = effectiveCount > 0 ? effectiveCount - 1 : 0;
 			}
 			else
 			{
-				targetTick = (u32)newTargetTick;
+				effectiveTarget = (u32)newTarget;
 			}
 		}
 		else
@@ -464,19 +467,20 @@ namespace KZ::replaysystem::commands
 				player->languageService->PrintChat(true, false, "Replay - Invalid Absolute Time");
 				return;
 			}
-			targetTick = (u32)(targetSeconds / ENGINE_FIXED_TICK_INTERVAL);
+			effectiveTarget = (u32)(targetSeconds / ENGINE_FIXED_TICK_INTERVAL);
 		}
 
 		char time[32];
-		utils::FormatTime(targetTick * ENGINE_FIXED_TICK_INTERVAL, time, sizeof(time), false);
+		utils::FormatTime(effectiveTarget * ENGINE_FIXED_TICK_INTERVAL, time, sizeof(time), false);
 		char maxTime[32];
-		utils::FormatTime((replay->tickCount - 1) * ENGINE_FIXED_TICK_INTERVAL, maxTime, sizeof(maxTime), false);
-		if (targetTick >= replay->tickCount)
+		utils::FormatTime((effectiveCount > 0 ? effectiveCount - 1 : 0) * ENGINE_FIXED_TICK_INTERVAL, maxTime, sizeof(maxTime), false);
+		if (effectiveTarget >= effectiveCount)
 		{
 			player->languageService->PrintChat(true, false, "Replay - Time Out Of Range", time, maxTime);
 			return;
 		}
 
+		const u32 targetTick = playback::EffectiveTickToRaw(effectiveTarget);
 		NavigateReplay(player, targetTick);
 
 		if (isRelative)
@@ -487,7 +491,7 @@ namespace KZ::replaysystem::commands
 			{
 				seekSeconds = -seekSeconds;
 			}
-			player->languageService->PrintChat(true, false, "Replay - Seeked To Tick", seekSeconds, targetTick, time);
+			player->languageService->PrintChat(true, false, "Replay - Seeked To Tick", seekSeconds, effectiveTarget, time);
 		}
 		else
 		{
@@ -509,6 +513,9 @@ namespace KZ::replaysystem::commands
 		}
 
 		auto replay = data::GetCurrentReplay();
+		// Номера тиков здесь — ЭФФЕКТИВНЫЕ (без вырезанных пауз), те же, что печатает !rpinfo; в сырой
+		// индекс переводим только перед NavigateReplay (см. playback.h).
+		const u32 effectiveCount = playback::EffectiveTickCount();
 		u32 targetTick;
 		bool isRelative = (input[0] == '+' || input[0] == '-');
 
@@ -529,16 +536,16 @@ namespace KZ::replaysystem::commands
 			}
 
 			// Calculate target tick based on current replay position + tick offset
-			i32 newTargetTick = (i32)replay->currentTick + tickOffset;
+			i64 newTargetTick = (i64)playback::RawTickToEffective(replay->currentTick) + (i64)tickOffset;
 
 			// Clamp to valid range
 			if (newTargetTick < 0)
 			{
 				targetTick = 0;
 			}
-			else if (newTargetTick >= (i32)replay->tickCount)
+			else if (newTargetTick >= (i64)effectiveCount)
 			{
-				targetTick = replay->tickCount - 1;
+				targetTick = effectiveCount > 0 ? effectiveCount - 1 : 0;
 			}
 			else
 			{
@@ -558,13 +565,13 @@ namespace KZ::replaysystem::commands
 			targetTick = (u32)tickValue;
 		}
 
-		if (targetTick >= replay->tickCount)
+		if (targetTick >= effectiveCount)
 		{
-			player->languageService->PrintChat(true, false, "Replay - Tick Out Of Range", targetTick, replay->tickCount - 1);
+			player->languageService->PrintChat(true, false, "Replay - Tick Out Of Range", targetTick, effectiveCount > 0 ? effectiveCount - 1 : 0);
 			return;
 		}
 
-		NavigateReplay(player, targetTick);
+		NavigateReplay(player, playback::EffectiveTickToRaw(targetTick));
 		char time[32];
 		utils::FormatTime(targetTick * ENGINE_FIXED_TICK_INTERVAL, time, sizeof(time), false);
 		player->languageService->PrintChat(true, false, "Replay - Jumped To Tick", targetTick, time);
@@ -585,13 +592,16 @@ namespace KZ::replaysystem::commands
 
 		auto replay = data::GetCurrentReplay();
 
+		// Позиция/длительность — в эффективной шкале без вырезанных пауз (см. playback.h).
+		const u32 effectiveTick = playback::RawTickToEffective(replay->currentTick);
+		const u32 effectiveLast = playback::EffectiveTickCount() > 0 ? playback::EffectiveTickCount() - 1 : 0;
 		char timeStr[64], maxTime[64];
-		utils::FormatTime(replay->currentTick * ENGINE_FIXED_TICK_INTERVAL, timeStr, sizeof(timeStr), false);
-		utils::FormatTime((replay->tickCount - 1) * ENGINE_FIXED_TICK_INTERVAL, maxTime, sizeof(maxTime), false);
+		utils::FormatTime(effectiveTick * ENGINE_FIXED_TICK_INTERVAL, timeStr, sizeof(timeStr), false);
+		utils::FormatTime(effectiveLast * ENGINE_FIXED_TICK_INTERVAL, maxTime, sizeof(maxTime), false);
 		char timestamp[64];
 		time_t time = replay->header.timestamp();
 		strftime(timestamp, 64, "%Y-%m-%d %H:%M:%S", localtime(&time));
-		player->languageService->PrintChat(true, false, "Replay - Current Info", replay->currentTick, replay->tickCount - 1, timeStr, maxTime);
+		player->languageService->PrintChat(true, false, "Replay - Current Info", effectiveTick, effectiveLast, timeStr, maxTime);
 		player->languageService->PrintConsole(false, false, "Replay - General Info Console", replay->uuid.ToString().c_str(),
 											  replay->header.player().name().c_str(), replay->header.player().steamid64(), timestamp,
 											  replay->header.server_version(), replay->header.plugin_version());
@@ -765,11 +775,14 @@ namespace KZ::replaysystem::commands
 		{
 			player->languageService->PrintChat(true, false, "Replay - Paused");
 		}
-		// Арифметика в i64: frames приходит из чата, i32-сложение переполнялось бы (UB).
-		i64 target = (i64)replay->currentTick + (i64)frames;
-		target = (std::min)((std::max)(target, (i64)0), (i64)replay->tickCount - 1);
+		// Арифметика в i64: frames приходит из чата, i32-сложение переполнялось бы (UB). Шаг — в
+		// эффективной шкале: шаг назад с кадра после паузы уходит на кадр ДО неё, а не снапается
+		// обратно (см. playback.h).
+		const i64 effectiveLast = (i64)playback::EffectiveTickCount() - 1;
+		i64 target = (i64)playback::RawTickToEffective(replay->currentTick) + (i64)frames;
+		target = (std::min)((std::max)(target, (i64)0), (std::max)(effectiveLast, (i64)0));
 
-		NavigateReplay(player, (u32)target);
+		NavigateReplay(player, playback::EffectiveTickToRaw((u32)target));
 		// NavigateReplay проходит через ResetReplayState, а тот снимает паузу — для сика
 		// это верно (зритель перематывает и смотрит дальше), для шага нет: стопкадр обязан
 		// остаться стопкадром. Возвращаем паузу после навигации, а не до.
@@ -778,8 +791,9 @@ namespace KZ::replaysystem::commands
 		if (announce)
 		{
 			char time[32];
-			utils::FormatTime(replay->currentTick * ENGINE_FIXED_TICK_INTERVAL, time, sizeof(time), false);
-			player->languageService->PrintChat(true, false, "Replay - Stepped", frames, replay->currentTick, time);
+			const u32 effectiveTick = playback::RawTickToEffective(replay->currentTick);
+			utils::FormatTime(effectiveTick * ENGINE_FIXED_TICK_INTERVAL, time, sizeof(time), false);
+			player->languageService->PrintChat(true, false, "Replay - Stepped", frames, effectiveTick, time);
 		}
 	}
 

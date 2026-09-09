@@ -8,6 +8,7 @@
 #include "commands.h"
 #include "kz_replaysystem.h" // GetPaused — строка состояния карточки
 #include "data.h"
+#include "playback.h" // эффективная шкала тиков (без пауз) для строки состояния
 #include "utils/utils.h"
 #include "utils/simplecmds.h"
 
@@ -161,16 +162,15 @@ std::string KZ::replaysystem::menu::GetReplayMenuStatusText(KZPlayer *player)
 	const char *lang = player->languageService->GetLanguage();
 	char speedText[16];
 	commands::FormatReplaySpeed(commands::GetReplaySpeed(), speedText, sizeof(speedText));
-	// Позиция и длительность ПЛЕЙБЕКА по тикам записи (как у видеоплеера), а не время рана:
-	// GetEndTime() — финальное время забега и до финиша равно 0 (баг «0:00» на канарейке),
-	// GetTime() — таймер рана, он стоит до стартовой зоны. Время — до десятых: строка живая,
-	// сотые мельтешат и не читаются.
+	// Позиция и длительность ПЛЕЙБЕКА в эффективной шкале (без вырезанных пауз, playback.h), а не
+	// время рана: GetEndTime() — финальное время забега и до финиша равно 0 (баг «0:00»), GetTime()
+	// — таймер рана, он стоит до стартовой зоны. Длительность — последний достижимый тик, как у
+	// перемотки и !rpinfo. Время — до десятых: строка живая, сотые мельтешат и не читаются.
 	char time[32], end[32];
 	const auto *replay = data::GetCurrentReplay();
-	const f64 position = data::IsReplayPlaying() ? (f64)replay->currentTick * ENGINE_FIXED_TICK_INTERVAL : 0.0;
-	// Длительность — последний достижимый тик (tickCount - 1), как у перемотки и !rpinfo, чтобы на
-	// последнем кадре позиция сходилась с длительностью.
-	const f64 total = data::IsReplayPlaying() && replay->tickCount > 0 ? (f64)(replay->tickCount - 1) * ENGINE_FIXED_TICK_INTERVAL : 0.0;
+	const u32 effectiveCount = data::IsReplayPlaying() ? playback::EffectiveTickCount() : 0;
+	const f64 position = data::IsReplayPlaying() ? (f64)playback::RawTickToEffective(replay->currentTick) * ENGINE_FIXED_TICK_INTERVAL : 0.0;
+	const f64 total = effectiveCount > 0 ? (f64)(effectiveCount - 1) * ENGINE_FIXED_TICK_INTERVAL : 0.0;
 	utils::FormatTime(position, time, sizeof(time), false);
 	utils::FormatTime(total, end, sizeof(end), false);
 	return KZLanguageService::PrepareMessageWithLang(lang, GetPaused() ? "Replay Panel - Status Paused" : "Replay Panel - Status", speedText, time,
@@ -182,8 +182,8 @@ std::string KZ::replaysystem::menu::GetReplayMenuStatusMaxText(KZPlayer *player)
 	using namespace KZ::replaysystem;
 	const char *lang = player->languageService->GetLanguage();
 	char end[32];
-	const auto *replay = data::GetCurrentReplay();
-	const f64 total = data::IsReplayPlaying() && replay->tickCount > 0 ? (f64)(replay->tickCount - 1) * ENGINE_FIXED_TICK_INTERVAL : 0.0;
+	const u32 effectiveCount = data::IsReplayPlaying() ? playback::EffectiveTickCount() : 0;
+	const f64 total = effectiveCount > 0 ? (f64)(effectiveCount - 1) * ENGINE_FIXED_TICK_INTERVAL : 0.0;
 	utils::FormatTime(total, end, sizeof(end), false);
 	// «0.25» — самый длинный из пресетов RPMENU_SPEEDS; но !rpspeed принимает произвольное число
 	// («0.125»), поэтому берём длиннее из пресета и текущего значения.

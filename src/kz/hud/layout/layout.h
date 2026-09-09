@@ -30,14 +30,15 @@
 // Меню реплея спектатора (layout/rpmenu.cpp): дефолты префов rpmenuX/Y/Size/Step/Font —
 // пункт «Меню реплея» в настройках (hud/prefs/hud_prefs.cpp). X/Y — проценты от центра,
 // size — пиксели, step — шаг строк в процентах. Значения подбирает пользователь на канарейке.
-#define RPMENU_DEF_X    -42
+// Дефолты = настройки пользователя с канарейки 09.09 (rpmenuX/Size/Step/Font/Background из его префов).
+#define RPMENU_DEF_X    -34
 #define RPMENU_DEF_Y    -8
-#define RPMENU_DEF_SIZE 18
-#define RPMENU_DEF_STEP 3
+#define RPMENU_DEF_SIZE 20
+#define RPMENU_DEF_STEP 2
 #define RPMENU_DEF_FONT "stratum2-mono"
 #define RPMENU_STEP_MIN 1
 #define RPMENU_STEP_MAX 12
-#define RPMENU_DEF_BACKGROUND 20 // непрозрачность подложки, % (решение пользователя 09.09)
+#define RPMENU_DEF_BACKGROUND 30 // непрозрачность подложки, %
 
 // Шрифты меню реплея — ТОЛЬКО моноширинные (решение 09.09 после канарейки cyb.169: в
 // пропорциональном шрифте строки «в разнобой» и скачут при смене выбора). Левый край карточки
