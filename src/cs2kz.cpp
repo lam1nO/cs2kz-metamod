@@ -24,6 +24,8 @@
 #include "kz/tip/kz_tip.h"
 #include "kz/option/kz_option.h"
 #include "kz/option/menu/model.h" // KZ::menu::Cleanup — снос реестра настроек на выгрузке
+#include "kz/option/pref_registry.h" // KZ::prefs::Cleanup — кэш реестра держит указатели на его узлы
+#include "kz/hud/share/hud_share.h"  // KZ::hudshare::Cleanup — то же для белого списка обмена
 #include "kz/outbox/kz_outbox.h"
 #include "kz/language/kz_language.h"
 #include "kz/mappingapi/kz_mappingapi.h"
@@ -190,6 +192,10 @@ bool KZPlugin::Unload(char *error, size_t maxlen)
 	KZGlobalService::Cleanup();
 	KZLanguageService::Cleanup();
 	KZOptionService::Cleanup();
+	// Кэши, которые держат указатели на узлы реестра, — ДО самого реестра: после
+	// KZ::menu::Cleanup() эти указатели висячие.
+	KZ::hudshare::Cleanup();
+	KZ::prefs::Cleanup();
 	// Реестр настроек (KZ::menu, узлы под new на Load) — парное удаление, см. model.h.
 	KZ::menu::Cleanup();
 	KZ::replaysystem::Cleanup();
