@@ -1427,8 +1427,8 @@ void KZHUDService::CheckMenuCaptureInvariant()
 	// error, а не warn: по конвенции проекта warn — «отказали пользователю», а это сломалось
 	// У НАС (захват держится при закрытом меню — состояние, которого быть не должно).
 	KZ_LOG_ERROR(LogChannel::General, "[cyb] hud_menu_capture_leak reason=capture_without_open_menu slot=%i alive=%s spectating=%s\n",
-				slot.Get(), this->player->IsAlive() ? "true" : "false",
-				this->player->specService->GetSpectatedPlayer() ? "true" : "false");
+				 slot.Get(), this->player->IsAlive() ? "true" : "false",
+				 this->player->specService->GetSpectatedPlayer() ? "true" : "false");
 	layout->SetInputCaptureEnabled(slot, false);
 }
 
