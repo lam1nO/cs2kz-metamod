@@ -755,10 +755,10 @@
 	// 2026-09-09-hud-share §6).
 	"HUD - Menu Closed Spectate"
 	{
-		"en"		"{grey}HUD menu closed: you switched view."
-		"ru"		"{grey}Меню худа закрыто: вы сменили обзор."
-		"chi"		"{grey}HUD菜单已关闭：您切换了视角."
-		"ua"		"{grey}Меню худу закрито: ви змінили огляд."
+		"en"		"{grey}HUD menu closed: nobody is being spectated."
+		"ru"		"{grey}Меню худа закрыто: вы никого не наблюдаете."
+		"chi"		"{grey}HUD菜单已关闭：当前未观察任何玩家."
+		"ua"		"{grey}Меню худу закрито: ви нікого не спостерігаєте."
 	}
 	// Мимикрия (mhudMimicSpec) при открытом в спектейте меню: на экране худ наблюдаемого, а
 	// меню и читает, и пишет ТОЛЬКО свои настройки игрока (layout/menu.cpp — всегда
