@@ -9,10 +9,12 @@
 // девять (заголовок, состояние, 6 пунктов, подсказка), поэтому копий страницы ТРИ
 // (RPMENU_ENTITIES): клиент держит копии одной страницы раздельно (канарейка cyb.166).
 //
-// Карточка ЦЕНТРИРОВАНА по x: .element центрирует лейбл сам, и бороться с этим моношрифтом
-// и добивкой NBSP (первый вариант) не нужно — любой шрифт из настроек, симметричные «< >» на
-// выбранной регулируемой строке, ничего не прыгает. Выбор — цвет + прозрачность + кегль +2
-// (при центрировании рост кегля безопасен). Геометрия и шрифт пунктов — префы rpmenu*.
+// Левый край (решение пользователя 09.09): .element центрирует лейбл, поэтому все строки
+// добиваются NBSP до одной длины в кодовых точках и рисуются ОДНИМ шрифтом и ОДНИМ кеглем —
+// в моно-шрифте (дефолт stratum2-mono) левые края совпадают точно, в пропорциональном —
+// приблизительно. Выбор — только цвет и прозрачность (рост кегля сдвигал бы край); «< »/« >»
+// на выбранной регулируемой строке, у остальных на их месте NBSP той же ширины. Заголовок
+// отличается акцентным цветом и капсом, не шрифтом. Геометрия/шрифт/обводка — префы rpmenu*.
 //
 // Меню ВСЕГДА открыто, пока игрок наблюдает реплей-бота с идущим плейбеком: UpdateReplayMenu
 // (тик из DrawPanels) сам открывает и закрывает его; команды нет, cs2menus-меню удалено.
@@ -78,13 +80,6 @@ namespace
 		return row;
 	}
 
-	// Типографика: заголовок — фиксированный дисплейный шрифт для контраста с пунктами
-	// (пункты — шрифт из настроек игрока), кегль +6; состояние и подсказка — кегль −2.
-	const char *const RPMENU_TITLE_FONT = "stratum2-black-condensed";
-	constexpr i32 RPMENU_TITLE_SIZE_DELTA = 6;
-	constexpr i32 RPMENU_SELECTED_SIZE_DELTA = 2;
-	constexpr i32 RPMENU_SMALL_SIZE_DELTA = -2;
-
 	// Палитра: акцент — зелёный KZ (#24f097, есть в палитре аддона точно), остальное белое с
 	// прозрачностью: пункты 60 %, состояние 60 %, подсказка 45 %.
 	const Color RPMENU_COLOR_ACCENT(0x24, 0xF0, 0x97, 255);
@@ -108,9 +103,26 @@ namespace
 		return g_pMenus != nullptr && g_pMenus->GetActiveMenu(player->GetPlayerSlot().Get()) != kInvalidMenuHandle;
 	}
 
-	// Обрамление выбранной регулируемой строки — сигнал «сейчас можно A/D».
-	const char *const RPMENU_ADJ_OPEN = "< ";
-	const char *const RPMENU_ADJ_CLOSE = " >";
+	// Обрамление выбранной регулируемой строки — сигнал «сейчас можно A/D»; у остальных строк
+	// на этих местах NBSP той же ширины, чтобы текст начинался в одной колонке.
+	const char *const RPMENU_ADJ_OPEN = "<\xC2\xA0";  // <NBSP
+	const char *const RPMENU_ADJ_CLOSE = "\xC2\xA0>"; // NBSP>
+	const char *const RPMENU_PLAIN_PAD = "\xC2\xA0\xC2\xA0";
+	const char *const RPMENU_PAD = "\xC2\xA0";
+
+	// Длина в кодовых точках UTF-8 — добивка строк до одной ширины.
+	size_t Utf8Length(const std::string &s)
+	{
+		size_t n = 0;
+		for (unsigned char c : s)
+		{
+			if ((c & 0xC0) != 0x80)
+			{
+				n++;
+			}
+		}
+		return n;
+	}
 
 	// Удержанные кнопки наблюдательской пешки. GetPlayerPawn() у спектатора — игровая пешка
 	// (мёртвая или отсутствующая), кнопки же приходят на ТЕКУЩУЮ (observer) — берём её, как
@@ -387,7 +399,42 @@ void KZHUDService::RenderReplayMenu(CCSCustomHudLayout *(&layouts)[RPMENU_ENTITI
 	// Свои префы, не мимикрия: GetOwnLayoutPrefs (см. MHUDLayoutPrefs::ReplayMenu).
 	const MHUDLayoutPrefs::ReplayMenu &prefs = this->GetOwnLayoutPrefs().replayMenu;
 	const ReplayMenuLine selectedLine = (ReplayMenuLine)this->replayMenuLine;
-	auto sizeOf = [&](i32 delta) { return panorama::SnapToStep(prefs.size + delta, LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX); };
+
+	// Тексты — сперва все, затем добивка до общей ширины (см. шапку файла про левый край).
+	std::string texts[RPMENU_LINES];
+	size_t width = 0;
+	for (i32 i = 0; i < RPMENU_LINES; i++)
+	{
+		std::string body;
+		bool adjustable = false;
+		if (i == RPMENU_LINE_TITLE)
+		{
+			body = KZ::replaysystem::menu::GetReplayMenuTitleText(this->player);
+		}
+		else if (i == RPMENU_LINE_STATUS)
+		{
+			body = KZ::replaysystem::menu::GetReplayMenuStatusText(this->player);
+		}
+		else if (i == RPMENU_LINE_HINT)
+		{
+			body = KZ::replaysystem::menu::GetReplayMenuHintText(this->player, selectedLine);
+		}
+		else
+		{
+			const ReplayMenuLine line = (ReplayMenuLine)(i - RPMENU_LINE_ITEM0);
+			body = KZ::replaysystem::menu::GetReplayMenuLineText(this->player, line);
+			adjustable = line == selectedLine && KZ::replaysystem::menu::IsReplayMenuLineAdjustable(line);
+		}
+		texts[i] = adjustable ? RPMENU_ADJ_OPEN + body + RPMENU_ADJ_CLOSE : RPMENU_PLAIN_PAD + body + RPMENU_PLAIN_PAD;
+		width = (std::max)(width, Utf8Length(texts[i]));
+	}
+	for (i32 i = 0; i < RPMENU_LINES; i++)
+	{
+		for (size_t n = Utf8Length(texts[i]); n < width; n++)
+		{
+			texts[i] += RPMENU_PAD;
+		}
+	}
 
 	for (i32 i = 0; i < RPMENU_LINES; i++)
 	{
@@ -395,48 +442,34 @@ void KZHUDService::RenderReplayMenu(CCSCustomHudLayout *(&layouts)[RPMENU_ENTITI
 		const LayoutElement slot = RPMENU_LINE_SLOTS[i % RPMENU_SLOTS_PER_ENTITY];
 		const LayoutElementDef &def = LAYOUT_ELEMENTS[(i32)slot];
 
-		std::string text;
 		LayoutLabelStyle style;
 		style.x = prefs.x;
 		style.y = panorama::SnapToStep(prefs.y + LineRow(i) * prefs.step, -100, 100);
+		style.size = prefs.size;
 		style.fontClass = prefs.fontClass;
-		style.outline = true;
+		style.outline = prefs.outline;
 		if (i == RPMENU_LINE_TITLE)
 		{
-			text = KZ::replaysystem::menu::GetReplayMenuTitleText(this->player);
-			style.size = sizeOf(RPMENU_TITLE_SIZE_DELTA);
-			style.fontClass = panorama::ResolveFontClass(RPMENU_TITLE_FONT, RPMENU_TITLE_FONT);
 			style.opacity = 100;
 			style.color = RPMENU_COLOR_ACCENT;
 		}
 		else if (i == RPMENU_LINE_STATUS)
 		{
-			text = KZ::replaysystem::menu::GetReplayMenuStatusText(this->player);
-			style.size = sizeOf(RPMENU_SMALL_SIZE_DELTA);
 			style.opacity = RPMENU_OPACITY_STATUS;
 			style.color = RPMENU_COLOR_TEXT;
 		}
 		else if (i == RPMENU_LINE_HINT)
 		{
-			text = KZ::replaysystem::menu::GetReplayMenuHintText(this->player, selectedLine);
-			style.size = sizeOf(RPMENU_SMALL_SIZE_DELTA);
 			style.opacity = RPMENU_OPACITY_HINT;
 			style.color = RPMENU_COLOR_TEXT;
 		}
 		else
 		{
-			const ReplayMenuLine line = (ReplayMenuLine)(i - RPMENU_LINE_ITEM0);
-			const bool selected = line == selectedLine;
-			text = KZ::replaysystem::menu::GetReplayMenuLineText(this->player, line);
-			if (selected && KZ::replaysystem::menu::IsReplayMenuLineAdjustable(line))
-			{
-				text = RPMENU_ADJ_OPEN + text + RPMENU_ADJ_CLOSE;
-			}
-			style.size = selected ? sizeOf(RPMENU_SELECTED_SIZE_DELTA) : prefs.size;
+			const bool selected = (ReplayMenuLine)(i - RPMENU_LINE_ITEM0) == selectedLine;
 			style.opacity = selected ? 100 : RPMENU_OPACITY_IDLE;
 			style.color = selected ? RPMENU_COLOR_ACCENT : RPMENU_COLOR_TEXT;
 		}
-		this->ApplyLayoutLabel(layouts[entity], def.panelId, def.varName, this->replayLines[entity][(i32)slot], style, true, text.c_str(),
+		this->ApplyLayoutLabel(layouts[entity], def.panelId, def.varName, this->replayLines[entity][(i32)slot], style, true, texts[i].c_str(),
 							   force[entity]);
 	}
 }

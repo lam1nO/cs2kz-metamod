@@ -320,6 +320,9 @@ void KZHUDService::InitMenuPrefs()
 	// GetPreferenceFloat в RefreshLayoutPrefs.
 	KZ::menu::AddSize(rpmenu, "HUD - Menu Label LineStep", "rpmenuStep", RPMENU_DEF_STEP, RPMENU_STEP_MIN, RPMENU_STEP_MAX);
 	KZ::menu::SetItemUnit(rpmenu, "%");
+	// Голый преф без кэша-колбэков (в отличие от обводки элементов худа с миграцией hudOutline):
+	// читает layout/prefs.cpp напрямую. Дефолт выкл — см. там же.
+	KZ::menu::AddToggle(rpmenu, "HUD - Menu Label Outline", "rpmenuOutline", false);
 	AddResetButton(rpmenu, RPMENU_RESET_SLOT);
 
 	// Обмен худом — СВОЯ подкатегория, а не пункты в General. Довод: в General лежит «сбросить

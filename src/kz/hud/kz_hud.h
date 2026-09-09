@@ -183,6 +183,7 @@ struct MHUDLayoutPrefs
 		i32 size {};
 		i32 step {}; // вертикальный шаг строк, проценты
 		const char *fontClass {};
+		bool outline {}; // text-shadow разметки: размывает мелкий кегль, по умолчанию выкл
 	};
 
 	ReplayMenu replayMenu {};

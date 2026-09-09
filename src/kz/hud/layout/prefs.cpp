@@ -141,6 +141,9 @@ void KZHUDService::RefreshLayoutPrefs()
 		panorama::SnapToStep((i32)opts->GetPreferenceFloat("rpmenuSize", (f32)RPMENU_DEF_SIZE), LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX);
 	this->layoutPrefs.replayMenu.step = Clamp((i32)opts->GetPreferenceFloat("rpmenuStep", (f32)RPMENU_DEF_STEP), RPMENU_STEP_MIN, RPMENU_STEP_MAX);
 	this->layoutPrefs.replayMenu.fontClass = panorama::ResolveFontClass(opts->GetPreferenceStr("rpmenuFont", RPMENU_DEF_FONT), RPMENU_DEF_FONT);
+	// Обводка (text-shadow 4px) визуально «пикселит» мелкий кегль — по умолчанию выключена,
+	// в отличие от элементов худа (их обводка живёт на ярких картах).
+	this->layoutPrefs.replayMenu.outline = opts->GetPreferenceBool("rpmenuOutline", false);
 
 	// Последней строкой: набор целиком заполнен, мимикрия (GetLayoutPrefs) может его брать.
 	// Аналог апстримного `prefsDirty = false` в конце RefreshPrefs.

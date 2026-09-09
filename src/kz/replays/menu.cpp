@@ -6,7 +6,7 @@
 #include "kz/language/kz_language.h"
 #include "menu.h"
 #include "commands.h"
-#include "kz_replaysystem.h" // GetTime/GetEndTime/GetPaused — строка состояния карточки
+#include "kz_replaysystem.h" // GetPaused — строка состояния карточки
 #include "data.h"
 #include "utils/utils.h"
 #include "utils/simplecmds.h"
@@ -161,10 +161,18 @@ std::string KZ::replaysystem::menu::GetReplayMenuStatusText(KZPlayer *player)
 	const char *lang = player->languageService->GetLanguage();
 	char speedText[16];
 	commands::FormatReplaySpeed(commands::GetReplaySpeed(), speedText, sizeof(speedText));
-	// Время — до десятых: строка живая (каждый тик), сотые мельтешат и не читаются.
+	// Позиция и длительность ПЛЕЙБЕКА по тикам записи (как у видеоплеера), а не время рана:
+	// GetEndTime() — финальное время забега и до финиша равно 0 (баг «0:00» на канарейке),
+	// GetTime() — таймер рана, он стоит до стартовой зоны. Время — до десятых: строка живая,
+	// сотые мельтешат и не читаются.
 	char time[32], end[32];
-	utils::FormatTime(GetTime(), time, sizeof(time), false);
-	utils::FormatTime(GetEndTime(), end, sizeof(end), false);
+	const auto *replay = data::GetCurrentReplay();
+	const f64 position = data::IsReplayPlaying() ? (f64)replay->currentTick * ENGINE_FIXED_TICK_INTERVAL : 0.0;
+	// Длительность — последний достижимый тик (tickCount - 1), как у перемотки и !rpinfo, чтобы на
+	// последнем кадре позиция сходилась с длительностью.
+	const f64 total = data::IsReplayPlaying() && replay->tickCount > 0 ? (f64)(replay->tickCount - 1) * ENGINE_FIXED_TICK_INTERVAL : 0.0;
+	utils::FormatTime(position, time, sizeof(time), false);
+	utils::FormatTime(total, end, sizeof(end), false);
 	return KZLanguageService::PrepareMessageWithLang(lang, GetPaused() ? "Replay Panel - Status Paused" : "Replay Panel - Status", speedText, time,
 													 end);
 }
