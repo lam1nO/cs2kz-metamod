@@ -1,19 +1,21 @@
 // Меню управления реплеем спектатора на panorama (см. kz_hud.h, раздел «Меню управления
-// реплеем»). Семантика пунктов — KZ::replaysystem::menu (replays/menu.cpp), здесь — сущности,
-// чтение клавиш и рендер строк.
+// реплеем»). Семантика пунктов и тексты — KZ::replaysystem::menu (replays/menu.cpp), здесь —
+// сущности, чтение клавиш и рендер карточки.
 //
 // Почему сущности с разметкой ХУДА, а не страница меню настроек: в чужом аддоне 3469155349
 // стили живут по-файлово, и menu.vcss не подключает positions.vcss — список оттуда к левому
 // краю не сдвинуть (только #menu_root.shift на −125px). У mhud.vxml четыре текстовых лейбла с
-// позицией/цветом/кеглем/прозрачностью классами — из них и собран список. Пунктов шесть плюс
-// строка подсказки биндов, поэтому копий страницы ДВЕ (RPMENU_ENTITIES): клиент держит две
-// сущности одной страницы раздельно (проверено на канарейке cyb.166: худ и меню жили вместе).
+// позицией/цветом/кеглем/прозрачностью/шрифтом классами — из них и собрана карточка. Строк
+// девять (заголовок, состояние, 6 пунктов, подсказка), поэтому копий страницы ТРИ
+// (RPMENU_ENTITIES): клиент держит копии одной страницы раздельно (канарейка cyb.166).
 //
-// Выравнивание строк: .element центрирует лейбл, значит строки разной длины разъехались бы
-// по центру. Моноширинный шрифт + добивка NBSP до одной длины даёт левый край без своего
-// css. По той же причине выбранная строка НЕ увеличивается (первый вариант на канарейке уезжал
-// началом за экран) — подсветка только цветом и прозрачностью, как в cs2menus.
-// Геометрия и шрифт — префы игрока rpmenu* (пункт «Меню реплея» в настройках, RefreshLayoutPrefs).
+// Карточка ЦЕНТРИРОВАНА по x: .element центрирует лейбл сам, и бороться с этим моношрифтом
+// и добивкой NBSP (первый вариант) не нужно — любой шрифт из настроек, симметричные «< >» на
+// выбранной регулируемой строке, ничего не прыгает. Выбор — цвет + прозрачность + кегль +2
+// (при центрировании рост кегля безопасен). Геометрия и шрифт пунктов — префы rpmenu*.
+//
+// Меню ВСЕГДА открыто, пока игрок наблюдает реплей-бота с идущим плейбеком: UpdateReplayMenu
+// (тик из DrawPanels) сам открывает и закрывает его; команды нет, cs2menus-меню удалено.
 #include "kz/hud/layout/layout.h"
 #include "kz/hud/layout/panorama_tables.h"
 #include "kz/language/kz_language.h"
@@ -28,12 +30,17 @@
 #include "utils/logging.h"
 #include "cs2kz.h"
 
+#include <vendor/mm-cs2menus/src/public/ics2menus.h>
+
 #include <algorithm>
 
 #include "tier0/memdbgon.h"
 
 using KZ::replaysystem::menu::ReplayMenuInput;
 using KZ::replaysystem::menu::ReplayMenuLine;
+
+// Меню-движок cs2menus (определён в cs2kz.cpp); nullptr, если плагин не загружен.
+extern ICS2Menus *g_pMenus;
 
 // Автоповтор A/D на удержании (как adjust в cs2menus): период в тиках после 22-тиковой паузы.
 // Подбирается живьём: перемотка ±10 с на удержании не должна улетать за секунды.
@@ -46,39 +53,64 @@ namespace
 	constexpr LayoutElement RPMENU_LINE_SLOTS[] = {LayoutElement::Timer, LayoutElement::Speed, LayoutElement::Prespeed, LayoutElement::Checkpoint};
 	constexpr i32 RPMENU_SLOTS_PER_ENTITY = (i32)KZ_ARRAYSIZE(RPMENU_LINE_SLOTS);
 	constexpr i32 RPMENU_ITEMS = (i32)ReplayMenuLine::Count;
-	constexpr i32 RPMENU_LINES = RPMENU_ITEMS + 1; // + строка подсказки биндов
-	static_assert(RPMENU_LINES <= KZHUDService::RPMENU_ENTITIES * RPMENU_SLOTS_PER_ENTITY,
-				  "лейблов двух копий страницы должно хватать на пункты и подсказку");
 
-	// Подсветка: выбранная строка — зелёный KZ (#24f097, есть в палитре аддона точно);
-	// остальные — белые, приглушённые прозрачностью; подсказка — ещё тише и мельче.
-	const Color RPMENU_COLOR_SELECTED(0x24, 0xF0, 0x97, 255);
-	const Color RPMENU_COLOR_IDLE(255, 255, 255, 255);
-	constexpr i32 RPMENU_OPACITY_IDLE = 55;
-	constexpr i32 RPMENU_OPACITY_HINT = 40;
+	// Строки карточки: заголовок, состояние, пункты, подсказка. Ряд (в шагах step от y0) —
+	// с «воздухом» в один шаг после состояния и перед подсказкой (LineRow).
+	constexpr i32 RPMENU_LINE_TITLE = 0;
+	constexpr i32 RPMENU_LINE_STATUS = 1;
+	constexpr i32 RPMENU_LINE_ITEM0 = 2;
+	constexpr i32 RPMENU_LINE_HINT = RPMENU_LINE_ITEM0 + RPMENU_ITEMS;
+	constexpr i32 RPMENU_LINES = RPMENU_LINE_HINT + 1;
+	static_assert(RPMENU_LINES <= KZHUDService::RPMENU_ENTITIES * RPMENU_SLOTS_PER_ENTITY,
+				  "лейблов копий страницы должно хватать на заголовок, состояние, пункты и подсказку");
+
+	i32 LineRow(i32 line)
+	{
+		i32 row = line;
+		if (line >= RPMENU_LINE_ITEM0)
+		{
+			row++; // зазор после строки состояния
+		}
+		if (line >= RPMENU_LINE_HINT)
+		{
+			row++; // зазор перед подсказкой
+		}
+		return row;
+	}
+
+	// Типографика: заголовок — фиксированный дисплейный шрифт для контраста с пунктами
+	// (пункты — шрифт из настроек игрока), кегль +6; состояние и подсказка — кегль −2.
+	const char *const RPMENU_TITLE_FONT = "stratum2-black-condensed";
+	constexpr i32 RPMENU_TITLE_SIZE_DELTA = 6;
+	constexpr i32 RPMENU_SELECTED_SIZE_DELTA = 2;
+	constexpr i32 RPMENU_SMALL_SIZE_DELTA = -2;
+
+	// Палитра: акцент — зелёный KZ (#24f097, есть в палитре аддона точно), остальное белое с
+	// прозрачностью: пункты 60 %, состояние 60 %, подсказка 45 %.
+	const Color RPMENU_COLOR_ACCENT(0x24, 0xF0, 0x97, 255);
+	const Color RPMENU_COLOR_TEXT(255, 255, 255, 255);
+	constexpr i32 RPMENU_OPACITY_IDLE = 60;
+	constexpr i32 RPMENU_OPACITY_STATUS = 60;
+	constexpr i32 RPMENU_OPACITY_HINT = 45;
 
 	constexpr i32 RPMENU_REPEAT_DELAY_TICKS = 22;
 
-	// Обрамление: регулируемые строки — «< … >», остальные — NBSP той же ширины, чтобы
-	// текст всех строк начинался в одной колонке.
-	const char *const RPMENU_ADJ_OPEN = "<\xC2\xA0";  // <NBSP
-	const char *const RPMENU_ADJ_CLOSE = "\xC2\xA0>"; // NBSP>
-	const char *const RPMENU_PLAIN_PAD = "\xC2\xA0\xC2\xA0";
-	const char *const RPMENU_PAD = "\xC2\xA0";
+	// Повтор создания сущностей после отказа — раз в секунду, не каждый тик: меню теперь
+	// живёт весь просмотр, и отказ (схема разъехалась после апдейта CS2) иначе давал бы 64
+	// KZ_LOG_ERROR в секунду на каждого спектатора. Логируется только первый отказ.
+	constexpr i32 RPMENU_RETRY_TICKS = 64;
 
-	// Длина в кодовых точках UTF-8 — добивка строк до одной ширины в моно-шрифте.
-	size_t Utf8Length(const std::string &s)
+	// Открыто ли у слота любое cs2menus-меню (например, выбор реплея по нику): оно читает те же
+	// W/S/E/A/D, и пока оно на экране, карточка ввод не трогает — иначе E из поиска реплея
+	// ставил бы паузу или завершал просмотр.
+	bool HasForeignMenu(KZPlayer *player)
 	{
-		size_t n = 0;
-		for (unsigned char c : s)
-		{
-			if ((c & 0xC0) != 0x80)
-			{
-				n++;
-			}
-		}
-		return n;
+		return g_pMenus != nullptr && g_pMenus->GetActiveMenu(player->GetPlayerSlot().Get()) != kInvalidMenuHandle;
 	}
+
+	// Обрамление выбранной регулируемой строки — сигнал «сейчас можно A/D».
+	const char *const RPMENU_ADJ_OPEN = "< ";
+	const char *const RPMENU_ADJ_CLOSE = " >";
 
 	// Удержанные кнопки наблюдательской пешки. GetPlayerPawn() у спектатора — игровая пешка
 	// (мёртвая или отсутствующая), кнопки же приходят на ТЕКУЩУЮ (observer) — берём её, как
@@ -96,7 +128,7 @@ namespace
 	}
 } // namespace
 
-// === Доступность / открытие / закрытие ======================================================
+// === Доступность ============================================================================
 
 const char *KZHUDService::ReplayMenuUnavailableReason()
 {
@@ -118,111 +150,6 @@ const char *KZHUDService::ReplayMenuUnavailableReason()
 		return "not_spectating_bot";
 	}
 	return NULL;
-}
-
-bool KZHUDService::CanOpenReplayMenu()
-{
-	return this->ReplayMenuUnavailableReason() == NULL;
-}
-
-// Сколько тиков ждать фактического спектейта бота (64 тика/с → ~3 с). Смена команды
-// применяется движком в пределах одного-двух кадров, запас — на ретрансляцию/лаг.
-static constexpr i32 KZ_RPMENU_PENDING_TICKS = 192;
-
-void KZHUDService::RequestReplayMenu()
-{
-	this->replayMenuPending = true;
-	this->replayMenuPendingTicks = 0;
-}
-
-void KZHUDService::TickReplayMenuPending()
-{
-	if (!this->replayMenuPending)
-	{
-		return;
-	}
-	const char *reason = this->ReplayMenuUnavailableReason();
-	if (!reason)
-	{
-		this->replayMenuPending = false;
-		// Уже открытое cs2menus-!rpmenu гасим ДО panorama — клавиши не должны уходить в оба.
-		KZ::replaysystem::menu::CancelReplayControlsMenuCs2menus(this->player);
-		if (!this->OpenReplayMenu())
-		{
-			// Причина уже в логе OpenReplayMenu (layout_entity_failed) — отдаём cs2menus.
-			KZ::replaysystem::menu::OpenReplayControlsMenuCs2menus(this->player);
-		}
-		return;
-	}
-	if (KZ_STREQ(reason, "not_spectating_bot") && ++this->replayMenuPendingTicks <= KZ_RPMENU_PENDING_TICKS)
-	{
-		return; // спектейт ещё применяется — ждём
-	}
-	this->replayMenuPending = false;
-	if (KZ_STREQ(reason, "no_replay") || KZ_STREQ(reason, "unloading"))
-	{
-		// Реплей кончился/остановлен за окно ожидания (или плагин выгружается) — управлять
-		// нечем, cs2menus-меню «из ниоткуда» спустя секунды было бы ошибкой. Только лог.
-		KZ_LOG_INFO(LogChannel::General, "[cyb] replay_menu_fallback backend=none reason=%s waited_ticks=%i slot=%i\n", reason,
-					this->replayMenuPendingTicks, this->player->GetPlayerSlot().Get());
-		return;
-	}
-	// Не дождались спектейта (или аддон пропал) — фолбэк на cs2menus, причина в лог: иначе
-	// «почему у меня старое меню» не отличить от бага выбора бэкенда.
-	KZ_LOG_INFO(LogChannel::General, "[cyb] replay_menu_fallback backend=cs2menus reason=%s waited_ticks=%i slot=%i\n", reason,
-				this->replayMenuPendingTicks, this->player->GetPlayerSlot().Get());
-	KZ::replaysystem::menu::OpenReplayControlsMenuCs2menus(this->player);
-}
-
-bool KZHUDService::OpenReplayMenu()
-{
-	if (this->replayMenuOpen)
-	{
-		return true;
-	}
-	if (!this->CanOpenReplayMenu())
-	{
-		return false;
-	}
-	CCSCustomHudLayout *layouts[RPMENU_ENTITIES] {};
-	bool created[RPMENU_ENTITIES] {};
-	for (i32 i = 0; i < RPMENU_ENTITIES; i++)
-	{
-		layouts[i] = this->EnsureReplayLayout(i, created[i]);
-		if (!layouts[i])
-		{
-			// Отказ, не выбор: сущность не создалась (схема разъехалась после апдейта CS2 /
-			// MultiAddonManager нет) — вызывающий уйдёт на cs2menus, причина в логе. Уже
-			// созданную копию не оставляем висеть.
-			KZ_LOG_ERROR(LogChannel::General, "[cyb] replay_menu_unavailable reason=layout_entity_failed index=%i slot=%i\n", i,
-						 this->player->GetPlayerSlot().Get());
-			this->DestroyOwnedReplayLayout();
-			return false;
-		}
-	}
-	this->replayMenuOpen = true;
-	this->replayMenuLine = 0;
-	// Стартовая маска = то, что уже удержано: иначе зажатая при открытии клавиша (например,
-	// W из движения перед спектейтом) сработала бы как нажатие на первом же тике.
-	this->replayMenuHeld = HeldButtons(this->player);
-	this->replayMenuHoldTicks = 0;
-	KZ_LOG_INFO(LogChannel::General, "[cyb] replay_menu_open backend=panorama slot=%i\n", this->player->GetPlayerSlot().Get());
-	const bool forceAll[RPMENU_ENTITIES] = {true, true};
-	this->RenderReplayMenu(layouts, forceAll);
-	return true;
-}
-
-void KZHUDService::CloseReplayMenu(const char *reason)
-{
-	if (this->replayMenuOpen)
-	{
-		KZ_LOG_INFO(LogChannel::General, "[cyb] replay_menu_close reason=%s slot=%i\n", reason ? reason : "unknown",
-					this->player->GetPlayerSlot().Get());
-	}
-	this->replayMenuOpen = false;
-	this->replayMenuHeld = 0;
-	this->replayMenuHoldTicks = 0;
-	this->DestroyOwnedReplayLayout();
 }
 
 // === Сущности ==============================================================================
@@ -281,20 +208,98 @@ void KZHUDService::DestroyOwnedReplayLayout()
 	}
 }
 
-// === Тик: ввод + рендер ====================================================================
+// === Открытие / закрытие ====================================================================
+
+bool KZHUDService::OpenReplayMenu()
+{
+	if (this->replayMenuOpen)
+	{
+		return true;
+	}
+	CCSCustomHudLayout *layouts[RPMENU_ENTITIES] {};
+	bool created[RPMENU_ENTITIES] {};
+	for (i32 i = 0; i < RPMENU_ENTITIES; i++)
+	{
+		layouts[i] = this->EnsureReplayLayout(i, created[i]);
+		if (!layouts[i])
+		{
+			// Отказ, не выбор: сущность не создалась (схема разъехалась после апдейта CS2 /
+			// MultiAddonManager нет). Лог — один раз на серию отказов (см. RPMENU_RETRY_TICKS),
+			// уже созданные копии не оставляем висеть.
+			if (!this->replayMenuFailLogged)
+			{
+				KZ_LOG_ERROR(LogChannel::General, "[cyb] replay_menu_unavailable reason=layout_entity_failed index=%i slot=%i\n", i,
+							 this->player->GetPlayerSlot().Get());
+				this->replayMenuFailLogged = true;
+			}
+			this->replayMenuRetryTick = g_pKZUtils->GetServerGlobals()->tickcount;
+			this->DestroyOwnedReplayLayout();
+			return false;
+		}
+	}
+	if (this->replayMenuFailLogged)
+	{
+		KZ_LOG_INFO(LogChannel::General, "[cyb] replay_menu_recovered slot=%i\n", this->player->GetPlayerSlot().Get());
+		this->replayMenuFailLogged = false;
+	}
+	this->replayMenuOpen = true;
+	this->replayMenuLine = 0;
+	// Стартовая маска = то, что уже удержано: иначе зажатая при открытии клавиша (например,
+	// W из движения перед спектейтом) сработала бы как нажатие на первом же тике.
+	this->replayMenuHeld = HeldButtons(this->player);
+	this->replayMenuHoldTicks = 0;
+	KZ_LOG_INFO(LogChannel::General, "[cyb] replay_menu_open slot=%i\n", this->player->GetPlayerSlot().Get());
+	bool forceAll[RPMENU_ENTITIES];
+	for (i32 i = 0; i < RPMENU_ENTITIES; i++)
+	{
+		forceAll[i] = true;
+	}
+	this->RenderReplayMenu(layouts, forceAll);
+	return true;
+}
+
+void KZHUDService::CloseReplayMenu(const char *reason)
+{
+	if (this->replayMenuOpen)
+	{
+		KZ_LOG_INFO(LogChannel::General, "[cyb] replay_menu_close reason=%s slot=%i\n", reason ? reason : "unknown",
+					this->player->GetPlayerSlot().Get());
+	}
+	this->replayMenuOpen = false;
+	this->replayMenuHeld = 0;
+	this->replayMenuHoldTicks = 0;
+	this->replayMenuFailLogged = false;
+	this->replayMenuRetryTick = 0;
+	this->DestroyOwnedReplayLayout();
+}
+
+// === Тик: доступность → открыть/закрыть, ввод, рендер ======================================
 
 void KZHUDService::UpdateReplayMenu(KZPlayer *source)
 {
-	if (!this->replayMenuOpen)
+	// Меню живёт ровно пока игрок наблюдает бота с идущим плейбеком и есть аддон. source —
+	// то, что DrawPanels считает источником данных; для спектатора это наблюдаемый.
+	const bool wanted = source && source != this->player && KZ::replaysystem::IsReplayBot(source) && this->ReplayMenuUnavailableReason() == NULL;
+	if (!wanted)
 	{
+		if (this->replayMenuOpen)
+		{
+			const char *reason = this->ReplayMenuUnavailableReason();
+			this->CloseReplayMenu(reason ? reason : "target_changed");
+		}
 		return;
 	}
-	// Меню имеет смысл только пока игрок наблюдает бота с идущим плейбеком: ушёл на другого
-	// игрока / ожил / реплей кончился или остановлен — закрываем сами, без команды.
-	if (!source || source == this->player || !KZ::replaysystem::IsReplayBot(source) || !KZ::replaysystem::data::IsReplayPlaying())
+	if (!this->replayMenuOpen)
 	{
-		this->CloseReplayMenu(!KZ::replaysystem::data::IsReplayPlaying() ? "replay_stopped" : "target_changed");
-		return;
+		// После отказа сущности — повтор с бэкоффом, не каждый тик (см. RPMENU_RETRY_TICKS).
+		if (this->replayMenuFailLogged && g_pKZUtils->GetServerGlobals()->tickcount - this->replayMenuRetryTick < RPMENU_RETRY_TICKS)
+		{
+			return;
+		}
+		if (!this->OpenReplayMenu())
+		{
+			return; // причина уже в логе (первый отказ серии)
+		}
 	}
 	CCSCustomHudLayout *layouts[RPMENU_ENTITIES] {};
 	bool created[RPMENU_ENTITIES] {};
@@ -308,7 +313,17 @@ void KZHUDService::UpdateReplayMenu(KZPlayer *source)
 		}
 	}
 
-	this->ReadReplayMenuInput();
+	if (HasForeignMenu(this->player))
+	{
+		// Чужое cs2menus-меню на экране: клавиши его. Маску держим актуальной, чтобы после его
+		// закрытия удержанная клавиша не сработала ложным фронтом.
+		this->replayMenuHeld = HeldButtons(this->player);
+		this->replayMenuHoldTicks = 0;
+	}
+	else
+	{
+		this->ReadReplayMenuInput();
+	}
 	// Ввод мог остановить реплей («Завершить») — тогда меню уже закрыто и сущностей нет.
 	if (!this->replayMenuOpen)
 	{
@@ -371,48 +386,57 @@ void KZHUDService::RenderReplayMenu(CCSCustomHudLayout *(&layouts)[RPMENU_ENTITI
 {
 	// Свои префы, не мимикрия: GetOwnLayoutPrefs (см. MHUDLayoutPrefs::ReplayMenu).
 	const MHUDLayoutPrefs::ReplayMenu &prefs = this->GetOwnLayoutPrefs().replayMenu;
-
-	// Тексты — сперва все, чтобы добить до общей ширины (см. шапку файла про центрирование).
-	std::string texts[RPMENU_LINES];
-	size_t width = 0;
-	for (i32 i = 0; i < RPMENU_ITEMS; i++)
-	{
-		const ReplayMenuLine line = (ReplayMenuLine)i;
-		const std::string label = KZ::replaysystem::menu::GetReplayMenuLineText(this->player, line);
-		texts[i] = KZ::replaysystem::menu::IsReplayMenuLineAdjustable(line) ? RPMENU_ADJ_OPEN + label + RPMENU_ADJ_CLOSE
-																			: RPMENU_PLAIN_PAD + label + RPMENU_PLAIN_PAD;
-		width = (std::max)(width, Utf8Length(texts[i]));
-	}
-	// Подсказка — тем же кеглем и в той же добивке: только так моно-ячейки совпадают и левый
-	// край подсказки встаёт ровно под пунктами (она длиннее любого пункта и задаёт ширину).
-	texts[RPMENU_ITEMS] = RPMENU_PLAIN_PAD + KZ::replaysystem::menu::GetReplayMenuHintText(this->player) + RPMENU_PLAIN_PAD;
-	width = (std::max)(width, Utf8Length(texts[RPMENU_ITEMS]));
-	for (i32 i = 0; i < RPMENU_LINES; i++)
-	{
-		for (size_t n = Utf8Length(texts[i]); n < width; n++)
-		{
-			texts[i] += RPMENU_PAD;
-		}
-	}
+	const ReplayMenuLine selectedLine = (ReplayMenuLine)this->replayMenuLine;
+	auto sizeOf = [&](i32 delta) { return panorama::SnapToStep(prefs.size + delta, LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX); };
 
 	for (i32 i = 0; i < RPMENU_LINES; i++)
 	{
 		const i32 entity = i / RPMENU_SLOTS_PER_ENTITY;
 		const LayoutElement slot = RPMENU_LINE_SLOTS[i % RPMENU_SLOTS_PER_ENTITY];
 		const LayoutElementDef &def = LAYOUT_ELEMENTS[(i32)slot];
-		const bool hint = i == RPMENU_ITEMS;
-		const bool selected = !hint && i == this->replayMenuLine;
 
+		std::string text;
 		LayoutLabelStyle style;
 		style.x = prefs.x;
-		// Подсказка — с дополнительным зазором в один шаг от списка.
-		style.y = panorama::SnapToStep(prefs.y + i * prefs.step + (hint ? prefs.step : 0), -100, 100);
-		style.size = prefs.size;
+		style.y = panorama::SnapToStep(prefs.y + LineRow(i) * prefs.step, -100, 100);
 		style.fontClass = prefs.fontClass;
-		style.opacity = hint ? RPMENU_OPACITY_HINT : (selected ? 100 : RPMENU_OPACITY_IDLE);
 		style.outline = true;
-		style.color = selected ? RPMENU_COLOR_SELECTED : RPMENU_COLOR_IDLE;
-		this->ApplyLayoutLabel(layouts[entity], def.panelId, def.varName, this->replayLines[entity][(i32)slot], style, true, texts[i].c_str(),
+		if (i == RPMENU_LINE_TITLE)
+		{
+			text = KZ::replaysystem::menu::GetReplayMenuTitleText(this->player);
+			style.size = sizeOf(RPMENU_TITLE_SIZE_DELTA);
+			style.fontClass = panorama::ResolveFontClass(RPMENU_TITLE_FONT, RPMENU_TITLE_FONT);
+			style.opacity = 100;
+			style.color = RPMENU_COLOR_ACCENT;
+		}
+		else if (i == RPMENU_LINE_STATUS)
+		{
+			text = KZ::replaysystem::menu::GetReplayMenuStatusText(this->player);
+			style.size = sizeOf(RPMENU_SMALL_SIZE_DELTA);
+			style.opacity = RPMENU_OPACITY_STATUS;
+			style.color = RPMENU_COLOR_TEXT;
+		}
+		else if (i == RPMENU_LINE_HINT)
+		{
+			text = KZ::replaysystem::menu::GetReplayMenuHintText(this->player, selectedLine);
+			style.size = sizeOf(RPMENU_SMALL_SIZE_DELTA);
+			style.opacity = RPMENU_OPACITY_HINT;
+			style.color = RPMENU_COLOR_TEXT;
+		}
+		else
+		{
+			const ReplayMenuLine line = (ReplayMenuLine)(i - RPMENU_LINE_ITEM0);
+			const bool selected = line == selectedLine;
+			text = KZ::replaysystem::menu::GetReplayMenuLineText(this->player, line);
+			if (selected && KZ::replaysystem::menu::IsReplayMenuLineAdjustable(line))
+			{
+				text = RPMENU_ADJ_OPEN + text + RPMENU_ADJ_CLOSE;
+			}
+			style.size = selected ? sizeOf(RPMENU_SELECTED_SIZE_DELTA) : prefs.size;
+			style.opacity = selected ? 100 : RPMENU_OPACITY_IDLE;
+			style.color = selected ? RPMENU_COLOR_ACCENT : RPMENU_COLOR_TEXT;
+		}
+		this->ApplyLayoutLabel(layouts[entity], def.panelId, def.varName, this->replayLines[entity][(i32)slot], style, true, text.c_str(),
 							   force[entity]);
 	}
 }

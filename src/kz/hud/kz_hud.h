@@ -375,6 +375,9 @@ public:
 	// и шлётся только на изменении слепка либо heartbeat'ом раз в KZ_HUD_BOTTOM_HEARTBEAT
 	// (см. BottomPanelState выше). menuOpen — спектатор с открытым Html-меню: вместо CP/TP
 	// шлём plain-text худ наблюдаемого («время | скорость» + клавиши) тем же каналом и дедупом.
+	// МЁРТВЫЙ ТРАКТ с 09.09: единственный вызывающий с menuOpen=true (cs2menus-!rpmenu) удалён,
+	// DrawPanels под Html-меню теперь просто гасит низ; параметр и ветка ComputeBottomState
+	// оставлены до отдельной уборки, новых вызывающих не заводить.
 	// linesAbove — высота НАШЕЙ HTML-панели В СТРОКАХ: движок позиционирует оверлеи
 	// независимо, поэтому высокая панель накрывает низ, и из linesAbove считается отступ,
 	// разводящий их (см. BottomPadLines). Под открытым Html-меню (menuOpen) отступа нет
@@ -599,34 +602,22 @@ public:
 	void CheckMenuCaptureInvariant();
 
 	// === Меню управления реплеем спектатора на panorama (layout/rpmenu.cpp) ===========
-	// Третья персональная сущность custom_hud_layout с ТОЙ ЖЕ разметкой mhud.vxml_c, что и
-	// худ: четыре её лейбла (таймер/скорость/преспид/чекпоинт) — строки меню у левого края,
-	// блок клавиш — подсветка собственных WASD спектатора. Своей разметки у нас нет (чужой
-	// аддон 3469155349), а страница меню настроек (menu.vxml_c) прибита к центру — её
-	// стили не подключают лист позиций. Пункты и их семантика — KZ::replaysystem::menu
-	// (replays/menu.h: ReplayMenuLine/ApplyReplayMenuInput), здесь только ввод и рендер.
-	// Ввод — W/S по строкам, E выбор, A/D регулировка — читается с наблюдательской пешки
-	// без курсорного захвата (в отличие от меню настроек), поэтому cs2menus-меню поверх
-	// открывать нельзя: клавиши уйдут в оба.
-	// Копий страницы худа под меню: 4 лейбла на копию, пунктов с подсказкой 7 — поэтому две.
-	static constexpr i32 RPMENU_ENTITIES = 2;
-	// Доступно, когда есть аддон и игрок СЕЙЧАС наблюдает реплей-бота с идущим плейбеком.
-	bool CanOpenReplayMenu();
-	// Почему недоступно: NULL — доступно; иначе машинный reason для лога/выбора фолбэка
+	// Персональные сущности custom_hud_layout с ТОЙ ЖЕ разметкой mhud.vxml_c, что и худ: их
+	// лейблы (таймер/скорость/преспид/чекпоинт, 4 на копию) — строки карточки меню. Своей
+	// разметки у нас нет (чужой аддон 3469155349), а страница меню настроек (menu.vxml_c)
+	// прибита к центру — её стили не подключают лист позиций. Пункты и их семантика —
+	// KZ::replaysystem::menu (replays/menu.h: ReplayMenuLine/ApplyReplayMenuInput), здесь
+	// только ввод и рендер. Ввод — W/S по строкам, E выбор, A/D регулировка — читается с
+	// наблюдательской пешки без курсорного захвата.
+	// Меню ВСЕГДА открыто, пока игрок наблюдает реплей-бота с идущим плейбеком (решение
+	// пользователя 09.09): открывает и закрывает его сам тик UpdateReplayMenu, команды
+	// открытия/закрытия нет, старое cs2menus-!rpmenu удалено.
+	// Копий страницы худа: заголовок + состояние + 6 пунктов + подсказка = 9 строк по 4 лейбла.
+	static constexpr i32 RPMENU_ENTITIES = 3;
+	// Почему меню недоступно: NULL — доступно; иначе машинный reason для лога
 	// (unloading | no_addon | no_replay | not_spectating_bot).
 	const char *ReplayMenuUnavailableReason();
-	// Отложенное открытие: перевод в наблюдатели (SpectateBot → JoinTeam) движок применяет
-	// НЕ в том же вызове — сразу после `!replay` цель наблюдения ещё не бот, и CanOpen ложно.
-	// Запрос ждёт до KZ_RPMENU_PENDING_TICKS тиков (TickReplayMenuPending из
-	// KZPlayer::OnPhysicsSimulatePost), открывает panorama, как только спектейт бота
-	// фактически включился, иначе уходит на cs2menus с reason в логе.
-	void RequestReplayMenu();
-	void TickReplayMenuPending();
-	// Открыть (не тумблер: тумблер — KZ::replaysystem::menu::OpenReplayControlsMenu, он же
-	// выбирает бэкенд cs2menus/panorama). false — открыть нечем (см. CanOpenReplayMenu).
-	bool OpenReplayMenu();
-	// Закрывает и сносит сущность (меню открывается редко, держать её живой незачем);
-	// безопасно без сущности и без открытого меню. reason — в лог.
+	// Закрывает и сносит сущности; безопасно без сущностей и без открытого меню. reason — в лог.
 	void CloseReplayMenu(const char *reason);
 
 	bool IsReplayMenuOpen() const
@@ -635,8 +626,9 @@ public:
 	}
 
 	// Тик меню: зовётся из DrawPanels для ПОЛУЧАТЕЛЯ (this) с источником данных source
-	// (наблюдаемый или сам игрок). Закрывает меню, как только игрок перестал наблюдать
-	// бота или плейбек кончился; иначе читает ввод и перерисовывает строки.
+	// (наблюдаемый или сам игрок). Открывает меню, как только source — реплей-бот с идущим
+	// плейбеком и есть аддон; закрывает, как только это перестало быть так; иначе читает ввод
+	// и перерисовывает строки.
 	void UpdateReplayMenu(KZPlayer *source);
 	// Снести сущность меню реплея и сбросить её диф-кэш (та же ловушка, что у
 	// DestroyOwnedLayout: кэш живёт только вместе с сущностью). Зовётся из Reset(),
@@ -790,8 +782,8 @@ private:
 	// Сущности меню реплея ЭТОГО игрока (см. OpenReplayMenu); гасятся вместе с остальными.
 	CHandle<CBaseEntity> ownedReplayLayouts[RPMENU_ENTITIES] {};
 	bool replayMenuOpen {};
-	bool replayMenuPending {};     // см. RequestReplayMenu
-	i32 replayMenuPendingTicks {}; // сколько тиков запрос уже ждёт спектейта бота
+	bool replayMenuFailLogged {}; // серия отказов создания сущностей уже залогирована (см. rpmenu.cpp)
+	i32 replayMenuRetryTick {};   // тик последнего отказа — повтор создания с бэкоффом
 	i32 replayMenuLine {};       // выбранная строка (ReplayMenuLine)
 	u64 replayMenuHeld {};       // маска удержанных кнопок прошлого тика — фронт нажатия свой,
 								 // а не IsButtonNewlyPressed: тот живёт внутри обработки usercmd
@@ -800,6 +792,8 @@ private:
 	LayoutElementState replayLines[RPMENU_ENTITIES][(i32)LayoutElement::Count] {};
 
 	CCSCustomHudLayout *EnsureReplayLayout(i32 index, bool &created);
+	// Открыть (создать сущности, сбросить выбор); false — сущности не создались (reason в логе).
+	bool OpenReplayMenu();
 	void ReadReplayMenuInput();
 	// force — по индексу сущности: пересозданная копия требует полной перезаписи классов.
 	void RenderReplayMenu(CCSCustomHudLayout *(&layouts)[RPMENU_ENTITIES], const bool (&force)[RPMENU_ENTITIES]);

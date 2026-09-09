@@ -27,27 +27,13 @@ namespace KZ::replaysystem::menu
 	// вызывающий сам решает, что делать, и грузит первого кандидата.
 	bool OpenReplaySearchMenu(KZPlayer *player, const std::vector<SearchHit> &hits);
 
-	// Меню управления реплеем (!rpmenu). Два бэкенда с одной семантикой пунктов:
-	//   - panorama (KZHUDService::OpenReplayMenu, hud/layout/rpmenu.cpp) — когда игрок
-	//     наблюдает реплей-бота и есть аддон: список у левого края, W/S/E/A/D без курсора;
-	//   - cs2menus (ниже в этом файле) — во всех остальных случаях (нет аддона, игрок не
-	//     смотрит бота); тихий no-op, если и cs2menus не загружен.
-	// Повторный вызов при открытом panorama-меню ЗАКРЫВАЕТ его (тумблер, как !hudmenu).
-	// Если спектейт бота ещё применяется (сразу после `!replay`), запрос откладывается —
-	// KZHUDService::RequestReplayMenu, открытие произойдёт с первого тика фактического
-	// спектейта, фолбэк на cs2menus по таймауту с reason в логе.
-	void OpenReplayControlsMenu(KZPlayer *player);
-
-	// Явно cs2menus-бэкенд (без выбора бэкенда); его зовут селектор OpenReplayControlsMenu и
-	// KZHUDService::TickReplayMenuPending как фолбэк. Тихий no-op без cs2menus.
-	void OpenReplayControlsMenuCs2menus(KZPlayer *player);
-	// Закрыть cs2menus-!rpmenu игрока, если оно сейчас активно (перед открытием panorama).
-	void CancelReplayControlsMenuCs2menus(KZPlayer *player);
-
-	// Пункты меню реплея — общий словарь обоих бэкендов. Порядок = порядок строк panorama-меню.
-	// Бинды в подписях пунктов НЕ пишутся (решение пользователя 09.09) — их показывает одна
-	// строка подсказки под списком (GetReplayMenuHintText); регулируемые строки обрамляются
-	// «< >» в рендере (IsReplayMenuLineAdjustable).
+	// Меню управления реплеем живёт ТОЛЬКО на panorama (hud/layout/rpmenu.cpp) и всегда открыто,
+	// пока игрок наблюдает реплей-бота; команды открытия нет, `!rpmenu` лишь напоминает об этом.
+	// Старое cs2menus-меню удалено 09.09 (решение пользователя). Здесь — словарь пунктов, их
+	// семантика и тексты строк карточки; ввод и рендер — в rpmenu.cpp.
+	// Пункты меню реплея. Порядок = порядок строк карточки. Бинды в подписях НЕ пишутся — их
+	// показывает контекстная подсказка под списком (GetReplayMenuHintText); регулируемые
+	// строки обрамляются «< >» в рендере, когда выбраны (IsReplayMenuLineAdjustable).
 	enum class ReplayMenuLine
 	{
 		Pause,   // E — пауза/продолжить
@@ -79,14 +65,13 @@ namespace KZ::replaysystem::menu
 	// Текст строки panorama-меню на языке игрока, с живыми значениями (пауза/скорость), без
 	// биндов и без обрамления — их добавляет рендер.
 	std::string GetReplayMenuLineText(KZPlayer *player, ReplayMenuLine line);
-	// Строка подсказки биндов под списком.
-	std::string GetReplayMenuHintText(KZPlayer *player);
+	// Заголовок карточки: «РЕПЛЕЙ · <ник автора рана>».
+	std::string GetReplayMenuTitleText(KZPlayer *player);
+	// Строка состояния: «<скорость>x · <время> / <длительность>[ · пауза]» — живая.
+	std::string GetReplayMenuStatusText(KZPlayer *player);
+	// Контекстная подсказка биндов под списком — для ВЫБРАННОЙ строки.
+	std::string GetReplayMenuHintText(KZPlayer *player, ReplayMenuLine line);
 
-	// Открыто ли у слота ИМЕННО !rpmenu (а не любое другое cs2menus-меню). Сравнение по
-	// ХЭНДЛУ созданного нами меню — заголовок для этого не годится: он переводится и
-	// правится. false, если cs2menus нет, меню закрыто или открыто чужое.
-	// Зовётся из худа только когда меню реально открыто (GetActiveMenu берёт мьютекс cs2menus).
-	bool IsReplayControlsMenuOpen(int slot);
 } // namespace KZ::replaysystem::menu
 
 #endif // KZ_REPLAYMENU_H

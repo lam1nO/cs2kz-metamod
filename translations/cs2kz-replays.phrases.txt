@@ -832,59 +832,10 @@
 		"en"		"{grey}Downloading replay from central storage..."
 		"ru"		"{grey}Скачиваем повтор из центрального хранилища..."
 	}
-	"Replay Menu - Title"
-	{
-		"en"		"Replay controls"
-		"ru"		"Управление реплеем"
-	}
-	"Replay Menu - Pause"
-	{
-		"en"		"Pause"
-		"ru"		"Пауза"
-	}
-	"Replay Menu - Resume"
-	{
-		"en"		"Resume"
-		"ru"		"Продолжить"
-	}
-	"Replay Menu - Restart"
-	{
-		"en"		"From start"
-		"ru"		"С начала"
-	}
-	"Replay Menu - Seek"
-	{
-		"#format"	"step:d"
-		"en"		"Rewind: {step} sec"
-		"ru"		"Перемотка: {step} сек"
-	}
-	"Replay Menu - Speed"
-	{
-		"#format"	"speed:s"
-		"en"		"Speed: {speed}x"
-		"ru"		"Скорость: {speed}x"
-	}
-	// Строка паузы делает два дела: выбор — пауза/продолжить, ◄ ► — шаг на тик записи.
-	// Отдельной строки под шаг нет: бюджет меню — 5 видимых строк (CYBER.md).
-	"Replay Menu - Pause Step"
-	{
-		"en"		"Pause | tick step"
-		"ru"		"Пауза | шаг по тикам"
-	}
-	"Replay Menu - Resume Step"
-	{
-		"en"		"Resume | tick step"
-		"ru"		"Продолжить | шаг по тикам"
-	}
-	"Replay Menu - End"
-	{
-		"en"		"End"
-		"ru"		"Завершить"
-	}
-	// Panorama-меню реплея (hud/layout/rpmenu.cpp): шесть пунктов у левого края без биндов
-	// (их показывает одна строка подсказки внизу). Текст обязан быть одной строкой без
-	// разметки (dialog-переменная panorama, html там нет); ширину выравнивает код добивкой NBSP,
-	// регулируемые строки обрамляет «< >».
+	// Panorama-меню реплея (hud/layout/rpmenu.cpp) — центрированная карточка: заголовок,
+	// живая строка состояния, шесть пунктов без биндов, контекстная подсказка под выбранным.
+	// Текст обязан быть одной строкой без разметки (dialog-переменная panorama, html там нет);
+	// «< >» вокруг выбранной регулируемой строки добавляет код.
 	"Replay Panel - Pause"
 	{
 		"en"		"Pause"
@@ -922,10 +873,59 @@
 		"en"		"End replay"
 		"ru"		"Завершить"
 	}
-	"Replay Panel - Hint"
+	"Replay Panel - Title"
 	{
-		"en"		"W/S select   E apply   A/D adjust"
-		"ru"		"W/S выбор   E применить   A/D изменить"
+		"#format"	"name:s"
+		"en"		"REPLAY · {name}"
+		"ru"		"РЕПЛЕЙ · {name}"
+	}
+	"Replay Panel - Status"
+	{
+		"#format"	"speed:s,time:s,end:s"
+		"en"		"{speed}x · {time} / {end}"
+		"ru"		"{speed}x · {time} / {end}"
+	}
+	"Replay Panel - Status Paused"
+	{
+		"#format"	"speed:s,time:s,end:s"
+		"en"		"{speed}x · {time} / {end} · paused"
+		"ru"		"{speed}x · {time} / {end} · пауза"
+	}
+	// Контекстные подсказки — под выбранной строкой, по одной на пункт.
+	"Replay Panel - Hint Pause"
+	{
+		"en"		"E pause / resume"
+		"ru"		"E пауза / продолжить"
+	}
+	"Replay Panel - Hint Step"
+	{
+		"en"		"A/D step by tick · E step forward"
+		"ru"		"A/D шаг по тикам · E шаг вперёд"
+	}
+	"Replay Panel - Hint Seek"
+	{
+		"en"		"A/D seek back / forward"
+		"ru"		"A/D назад / вперёд"
+	}
+	"Replay Panel - Hint Restart"
+	{
+		"en"		"E restart from the beginning"
+		"ru"		"E начать с начала"
+	}
+	"Replay Panel - Hint Speed"
+	{
+		"en"		"A/D change speed · E reset to 1x"
+		"ru"		"A/D изменить скорость · E сброс на 1x"
+	}
+	"Replay Panel - Hint End"
+	{
+		"en"		"E stop the replay"
+		"ru"		"E завершить просмотр"
+	}
+	"Replay Panel - Auto"
+	{
+		"en"		"The replay menu opens by itself while you are watching a replay bot (W/S select, E apply, A/D adjust)."
+		"ru"		"Меню реплея открывается само, пока вы наблюдаете за реплей-ботом (W/S выбор, E применить, A/D изменить)."
 	}
 	// Поиск реплея по НИКУ (`!replay <подстрока>`) через наш api — путь, на котором
 	// раньше был безусловный отказ «Invalid UUID».

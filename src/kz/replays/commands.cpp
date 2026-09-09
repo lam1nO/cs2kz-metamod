@@ -387,12 +387,10 @@ namespace KZ::replaysystem::commands
 				bot::InitializeBotForReplay(replay->header);
 				playback::StartReplay();
 				playback::InitializeWeapons();
-				// Авто-открытие меню — только если спектейт бота реально включился
-				// (иначе живому игроку меню перекроет управление раном); !rpmenu — вручную.
-				if (bot::SpectateBot(player))
-				{
-					menu::OpenReplayControlsMenu(player);
-				}
+				// Меню управления реплеем открывать здесь нечем: смену команды движок применит
+				// позже, а panorama-меню (hud/layout/rpmenu.cpp) само открывается тиком худа, как
+				// только игрок фактически наблюдает бота, и живёт, пока он его наблюдает.
+				bot::SpectateBot(player);
 			}),
 			// Failure callback (runs on main thread via ProcessAsyncLoadCompletion)
 			data::LoadFailureCallback([playerUserID](const char* error) {

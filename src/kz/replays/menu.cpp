@@ -1,14 +1,15 @@
-// Меню !rpmenu — управление воспроизведением реплея (cs2menus). Здесь же живёт образец
-// «один хэндл меню на слот»: старое меню !options, откуда он пришёл, снято с команды.
+// Меню реплея: словарь пунктов, их семантика и тексты карточки panorama-меню
+// (hud/layout/rpmenu.cpp) + cs2menus-меню выбора реплея по нику (OpenReplaySearchMenu).
+// Старое cs2menus-!rpmenu удалено 09.09; сама команда !rpmenu лишь напоминает, что меню
+// открывается само при просмотре реплей-бота.
 #include "kz/kz.h"
 #include "kz/language/kz_language.h"
-#include "kz/hud/kz_hud.h" // KZHUDService::OpenReplayMenu — panorama-бэкенд !rpmenu
 #include "menu.h"
 #include "commands.h"
+#include "kz_replaysystem.h" // GetTime/GetEndTime/GetPaused — строка состояния карточки
 #include "data.h"
 #include "utils/utils.h"
 #include "utils/simplecmds.h"
-#include "utils/logging.h" // replay_menu_fallback — причина выбора cs2menus-бэкенда
 
 #include <vendor/mm-cs2menus/src/public/ics2menus.h>
 
@@ -21,19 +22,9 @@ extern ICS2Menus *g_pMenus;
 
 namespace
 {
-	// Пауза — первый пункт меню: подпись живая, пересобирается в OnRpMenuSelect.
-	constexpr int RPMENU_ITEM_PAUSE = 0;
-
-	// Шаг перемотки (сек) для регулируемой строки; знак delta задаёт направление
-	// (A/AdjustDec = назад, D/AdjustInc = вперёд).
-	// Вторая строка перемотки (30 сек) убрана, когда появилась строка скорости: бюджет
-	// видимых строк меню — 5 (см. CYBER.md, «Бюджет !rpmenu»), шестая уводит меню в
-	// пагинацию и прячет «Завершить» за «далее». ±30 сек остаётся тройным ► по этой
-	// строке и командой !rpgoto +30.
+	// Шаг перемотки (сек) регулируемой строки: A — назад, D — вперёд. ±30 сек остаётся
+	// командой !rpgoto +30.
 	constexpr float RPMENU_SEEK_STEP_10 = 10.0f;
-
-	// Строка скорости: индекс фиксирован, подпись живая (перерисовывается после A/D).
-	constexpr int RPMENU_ITEM_SPEED = 3;
 
 	// Пресеты скорости: A/D переключают по списку, а не прибавляют шаг — на замедлении
 	// осмысленны доли (0.25 ощутимо медленнее 0.5), а на ускорении — кратности.
@@ -54,136 +45,9 @@ namespace
 		}
 		return best;
 	}
-
-	std::string SpeedItemText(KZPlayer *player)
-	{
-		using namespace KZ::replaysystem;
-		char speedText[16];
-		commands::FormatReplaySpeed(commands::GetReplaySpeed(), speedText, sizeof(speedText));
-		const char *lang = player->languageService->GetLanguage();
-		return KZLanguageService::PrepareMessageWithLang(lang, "Replay Menu - Speed", speedText);
-	}
-
-	// Строка паузы делает два дела: E — пауза/продолжить, A/D — шаг на один тик записи.
-	// Отдельной строки под шаг нет намеренно — бюджет меню 5 строк (CYBER.md), а жест
-	// «встал на стопкадр и листаю» естественно живёт на той же строке, что и стопкадр.
-	std::string PauseItemText(KZPlayer *player)
-	{
-		using namespace KZ::replaysystem;
-		bool paused = data::IsReplayPlaying() && data::GetCurrentReplay()->replayPaused;
-		const char *lang = player->languageService->GetLanguage();
-		return KZLanguageService::PrepareMessageWithLang(lang, paused ? "Replay Menu - Resume Step" : "Replay Menu - Pause Step");
-	}
-
-	// Текст регулируемой строки перемотки: «Перемотка: N сек». Стрелки ◄ ► рисует
-	// сам движок cs2menus для adjustable-строк; значение (шаг) фиксировано.
-	std::string SeekItemText(KZPlayer *player, int step)
-	{
-		const char *lang = player->languageService->GetLanguage();
-		return KZLanguageService::PrepareMessageWithLang(lang, "Replay Menu - Seek", step);
-	}
-
-	// Хэндл нашего !rpmenu на слот — один на слот, пересоздаётся при повторном открытии
-	// (тот же паттерн «один хэндл на слот»). Живёт в области файла, а не внутри функции: по нему худ
-	// отличает !rpmenu от любого другого cs2menus-меню (см. IsReplayControlsMenuOpen).
-	// Сравнение по хэндлу корректно и на устаревшем значении: cs2menus раздаёт хэндлы
-	// монотонным счётчиком (`m_nextHandle++`, menu_manager.cpp) и НЕ переиспользует
-	// освобождённые id — чужое меню не может получить наш номер, а закрытое/уничтоженное
-	// наше просто перестаёт быть активным. Оговорка: счётчик живёт в объекте менеджера, и
-	// `meta unload/load` cs2menus начинает нумерацию заново, а этот массив её переживает.
-	// Практически это перекрыто тем, что после выгрузки cs2menus висячим становится сам
-	// `g_pMenus` (общая проблема форка, не этого места).
-	MenuHandle s_rpMenu[MAXPLAYERS + 1] = {};
 } // namespace
 
-// A/D по регулируемой строке перемотки: знак delta задаёт направление (D = +шаг
-// вперёд, A = −шаг назад). Переиспользуем seek-логику JumpToReplayTime, собрав
-// относительный сдвиг вида "+10"/"-30". min/max движку нужны для клампа значения,
-// но здесь значение не хранится (шаг фиксирован) — они не используются.
-static_function void OnRpMenuAdjust(MenuHandle menu, int slot, int item, f32 delta, f32 minValue, f32 maxValue)
-{
-	KZPlayer *p = g_pKZPlayerManager->ToPlayer(CPlayerSlot(slot));
-	if (!p)
-	{
-		return;
-	}
-
-	using namespace KZ::replaysystem;
-
-	// Регулируемых строк несколько (перемотка, скорость, шаг) — что именно крутят,
-	// говорит info строки, а не её индекс.
-	const char *key = g_pMenus->GetItemInfo(menu, item);
-	if (key && KZ_STREQ(key, "speed"))
-	{
-		int idx = NearestSpeedIndex(commands::GetReplaySpeed());
-		idx += (delta > 0.0f) ? 1 : -1;
-		idx = idx < 0 ? 0 : (idx >= RPMENU_SPEEDS_COUNT ? RPMENU_SPEEDS_COUNT - 1 : idx);
-		// announce=false: значение видно в самой строке, дублировать его в чат незачем.
-		commands::SetReplaySpeed(p, RPMENU_SPEEDS[idx], false);
-		g_pMenus->SetItemText(menu, RPMENU_ITEM_SPEED, SpeedItemText(p).c_str());
-		return;
-	}
-	if (key && KZ_STREQ(key, "pause"))
-	{
-		// A/D по строке паузы — шаг на тик. announce=false: строку в чат на каждый шаг
-		// печатать нельзя, cs2menus повторяет adjust на удержании клавиши.
-		commands::StepReplay(p, delta > 0.0f ? 1 : -1, false);
-		// Шаг сам ставит реплей на паузу — подпись строки обязана это отразить.
-		g_pMenus->SetItemText(menu, RPMENU_ITEM_PAUSE, PauseItemText(p).c_str());
-		return;
-	}
-
-	char seek[16];
-	V_snprintf(seek, sizeof(seek), "%+d", (int)delta);
-	commands::JumpToReplayTime(p, seek);
-}
-
-static_function void OnRpMenuSelect(MenuHandle menu, int slot, int item)
-{
-	KZPlayer *p = g_pKZPlayerManager->ToPlayer(CPlayerSlot(slot));
-	if (!p)
-	{
-		return;
-	}
-	const char *key = g_pMenus->GetItemInfo(menu, item);
-	if (!key || !key[0])
-	{
-		return;
-	}
-
-	using namespace KZ::replaysystem;
-
-	if (KZ_STREQ(key, "pause"))
-	{
-		commands::ToggleReplayPause(p);
-	}
-	else if (KZ_STREQ(key, "restart"))
-	{
-		// «С начала»: снять паузу (иначе «заново» не начнётся) и перемотать на 0.
-		if (data::IsReplayPlaying())
-		{
-			data::GetCurrentReplay()->replayPaused = false;
-		}
-		commands::JumpToReplayTime(p, "0");
-	}
-	else if (KZ_STREQ(key, "end"))
-	{
-		// «Завершить»: остановить плейбек, убрать бота, закрыть меню.
-		commands::StopReplay(p);
-		g_pMenus->CancelMenu(slot);
-		return;
-	}
-	// Регулируемые строки (info "seek" и "speed") реагируют на A/D в OnRpMenuAdjust;
-	// выбор E по ним ничего не делает — сюда попадём, но действий нет.
-
-	// Живые подписи — по фактическому состоянию: и пауза, и скорость могли смениться
-	// мимо меню (!rppause, !rpspeed, рестарт), а обновить их можно только отсюда и из
-	// OnRpMenuAdjust — своего тика у меню нет.
-	g_pMenus->SetItemText(menu, RPMENU_ITEM_PAUSE, PauseItemText(p).c_str());
-	g_pMenus->SetItemText(menu, RPMENU_ITEM_SPEED, SpeedItemText(p).c_str());
-}
-
-// === Общая семантика пунктов (оба бэкенда) ==================================================
+// === Семантика пунктов ======================================================================
 
 void KZ::replaysystem::menu::ApplyReplayMenuInput(KZPlayer *player, ReplayMenuLine line, ReplayMenuInput input)
 {
@@ -279,123 +143,52 @@ std::string KZ::replaysystem::menu::GetReplayMenuLineText(KZPlayer *player, Repl
 	}
 }
 
-std::string KZ::replaysystem::menu::GetReplayMenuHintText(KZPlayer *player)
+std::string KZ::replaysystem::menu::GetReplayMenuTitleText(KZPlayer *player)
 {
-	return KZLanguageService::PrepareMessageWithLang(player->languageService->GetLanguage(), "Replay Panel - Hint");
-}
-
-// === Точка входа: выбор бэкенда =============================================================
-
-void KZ::replaysystem::menu::OpenReplayControlsMenu(KZPlayer *player)
-{
-	if (!player)
-	{
-		return;
-	}
-	// Panorama-бэкенд — приоритетный: повторный !rpmenu при открытом меню закрывает его
-	// (тумблер), иначе открываем, если игрок наблюдает бота и есть аддон. Только когда
-	// panorama недоступна, уходим на cs2menus ниже (оба сразу открывать нельзя — клавиши
-	// W/S/E/A/D ушли бы в оба меню).
-	if (player->hudService->IsReplayMenuOpen())
-	{
-		player->hudService->CloseReplayMenu("toggle");
-		return;
-	}
-	const char *reason = player->hudService->ReplayMenuUnavailableReason();
-	if (!reason)
-	{
-		// Уже открытое cs2menus-!rpmenu (открыли без аддона или до спектейта бота) гасим ДО
-		// panorama — иначе клавиши уходят в оба меню.
-		CancelReplayControlsMenuCs2menus(player);
-		if (player->hudService->OpenReplayMenu())
-		{
-			return;
-		}
-		// Сущность не создалась — причина уже в логе OpenReplayMenu, ниже cs2menus.
-	}
-	else if (KZ_STREQ(reason, "not_spectating_bot"))
-	{
-		// Типовой случай автооткрытия после `!replay`: SpectateBot уже вызван, но движок
-		// применит смену команды позже — цель наблюдения ещё не бот. Ждём тиком худа.
-		player->hudService->RequestReplayMenu();
-		return;
-	}
-	else
-	{
-		KZ_LOG_INFO(LogChannel::General, "[cyb] replay_menu_fallback backend=cs2menus reason=%s slot=%i\n", reason, player->GetPlayerSlot().Get());
-	}
-	OpenReplayControlsMenuCs2menus(player);
-}
-
-void KZ::replaysystem::menu::CancelReplayControlsMenuCs2menus(KZPlayer *player)
-{
-	if (!player || g_pMenus == nullptr)
-	{
-		return;
-	}
-	// Хэндл не трогаем: следующее открытие cs2menus-пути пересоздаёт меню само.
-	const int slot = player->GetPlayerSlot().Get();
-	if (IsReplayControlsMenuOpen(slot))
-	{
-		g_pMenus->CancelMenu(slot);
-	}
-}
-
-void KZ::replaysystem::menu::OpenReplayControlsMenuCs2menus(KZPlayer *player)
-{
-	if (!player || g_pMenus == nullptr)
-	{
-		return;
-	}
-
-	int slot = player->GetPlayerSlot().Get();
-	if (slot < 0 || slot > MAXPLAYERS)
-	{
-		return;
-	}
-
-	// Один хэндл на слот — пересоздаём при повторном вызове.
-	if (s_rpMenu[slot] != kInvalidMenuHandle)
-	{
-		g_pMenus->DestroyMenu(s_rpMenu[slot]);
-		s_rpMenu[slot] = kInvalidMenuHandle;
-	}
-
+	using namespace KZ::replaysystem;
 	const char *lang = player->languageService->GetLanguage();
-	std::string title = KZLanguageService::PrepareMessageWithLang(lang, "Replay Menu - Title");
-	MenuHandle m = g_pMenus->CreateMenu(MenuType::Default, title.c_str(), &OnRpMenuSelect);
-	if (m == kInvalidMenuHandle)
+	const char *name = "";
+	if (data::IsReplayPlaying() && data::GetCurrentReplay()->header.has_player())
 	{
-		return;
+		name = data::GetCurrentReplay()->header.player().name().c_str();
 	}
+	return KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Title", name);
+}
 
-	// Порядок фиксирован: пауза обязана быть пунктом RPMENU_ITEM_PAUSE.
-	// Строка регулируемая: E (выбор) — пауза/продолжить, A/D — шаг на тик записи.
-	g_pMenus->AddAdjustableItem(m, PauseItemText(player).c_str(), "pause", 1.0f, -1.0f, 1.0f);
-	std::string restart = KZLanguageService::PrepareMessageWithLang(lang, "Replay Menu - Restart");
-	g_pMenus->AddItem(m, restart.c_str(), "restart", false);
+std::string KZ::replaysystem::menu::GetReplayMenuStatusText(KZPlayer *player)
+{
+	using namespace KZ::replaysystem;
+	const char *lang = player->languageService->GetLanguage();
+	char speedText[16];
+	commands::FormatReplaySpeed(commands::GetReplaySpeed(), speedText, sizeof(speedText));
+	// Время — до десятых: строка живая (каждый тик), сотые мельтешат и не читаются.
+	char time[32], end[32];
+	utils::FormatTime(GetTime(), time, sizeof(time), false);
+	utils::FormatTime(GetEndTime(), end, sizeof(end), false);
+	return KZLanguageService::PrepareMessageWithLang(lang, GetPaused() ? "Replay Panel - Status Paused" : "Replay Panel - Status", speedText, time,
+													 end);
+}
 
-	// Перемотка — одной регулируемой строкой: A (◄) — назад, D (►) — вперёд.
-	// Стрелки рисует движок; текст показывает фиксированный шаг.
-	std::string seek10 = SeekItemText(player, (int)RPMENU_SEEK_STEP_10);
-	g_pMenus->AddAdjustableItem(m, seek10.c_str(), "seek", RPMENU_SEEK_STEP_10, -RPMENU_SEEK_STEP_10, RPMENU_SEEK_STEP_10);
-
-	// Скорость воспроизведения: A (◄) — медленнее, D (►) — быстрее, по пресетам.
-	// Индекс строки обязан совпадать с RPMENU_ITEM_SPEED — по нему обновляется подпись.
-	std::string speed = SpeedItemText(player);
-	g_pMenus->AddAdjustableItem(m, speed.c_str(), "speed", 1.0f, -1.0f, 1.0f);
-
-	g_pMenus->SetAdjustCallback(m, &OnRpMenuAdjust);
-
-	// «Завершить» — останавливает реплей и закрывает меню (обрабатывается в OnRpMenuSelect).
-	std::string endLabel = KZLanguageService::PrepareMessageWithLang(lang, "Replay Menu - End");
-	g_pMenus->AddItem(m, endLabel.c_str(), "end", false);
-
-	// Не закрываем при выборе — меню держится, пока игрок сам не закроет (0/ESC).
-	g_pMenus->SetCloseOnSelect(m, false);
-
-	s_rpMenu[slot] = m;
-	g_pMenus->DisplayMenu(m, slot, 0);
+std::string KZ::replaysystem::menu::GetReplayMenuHintText(KZPlayer *player, ReplayMenuLine line)
+{
+	const char *lang = player->languageService->GetLanguage();
+	switch (line)
+	{
+		case ReplayMenuLine::Pause:
+			return KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Hint Pause");
+		case ReplayMenuLine::Step:
+			return KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Hint Step");
+		case ReplayMenuLine::Seek:
+			return KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Hint Seek");
+		case ReplayMenuLine::Restart:
+			return KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Hint Restart");
+		case ReplayMenuLine::Speed:
+			return KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Hint Speed");
+		case ReplayMenuLine::End:
+			return KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Hint End");
+		default:
+			return "";
+	}
 }
 
 // Выбор реплея из списка совпавших по нику (паттерн kz_spec_menu.cpp).
@@ -464,20 +257,8 @@ bool KZ::replaysystem::menu::OpenReplaySearchMenu(KZPlayer *player, const std::v
 	return true;
 }
 
-bool KZ::replaysystem::menu::IsReplayControlsMenuOpen(int slot)
-{
-	if (g_pMenus == nullptr || slot < 0 || slot > MAXPLAYERS)
-	{
-		return false;
-	}
-	MenuHandle mine = s_rpMenu[slot];
-	if (mine == kInvalidMenuHandle)
-	{
-		return false;
-	}
-	return g_pMenus->GetActiveMenu(slot) == mine;
-}
-
+// Команды открытия больше нет: panorama-меню реплея само открыто, пока игрок наблюдает бота
+// (hud/layout/rpmenu.cpp). Команда оставлена, чтобы привычный !rpmenu не отвечал молчанием.
 SCMD(kz_rpmenu, SCFL_REPLAY | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
@@ -485,6 +266,6 @@ SCMD(kz_rpmenu, SCFL_REPLAY | SCFL_HELP)
 	{
 		return MRES_SUPERCEDE;
 	}
-	KZ::replaysystem::menu::OpenReplayControlsMenu(player);
+	player->languageService->PrintChat(true, false, "Replay Panel - Auto");
 	return MRES_SUPERCEDE;
 }

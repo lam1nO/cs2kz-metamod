@@ -14,7 +14,6 @@
 #include "kz/prac/kz_prac.h"
 #include "kz/spec/kz_spec.h"
 #include "kz/replays/kz_replaysystem.h"
-#include "kz/replays/menu.h"              // IsReplayControlsMenuOpen — показания под меню только для !rpmenu
 #include "kz/replays/data.h"              // состояние плейбека: пауза реплея для источника скорости
 #include "kz/replays/playback.h"          // GetDisplayedFrameVelocity — скорость кадра на паузе
 #include "kz/style/kz_style.h"            // GetStyleName для лейбла стиля (деф. Normal) в строке 1
@@ -433,9 +432,7 @@ void KZHUDService::Reset()
 	// префах, и по тому же правилу, что и кэши выше — слот реально освобождается, чужой снимок
 	// «как было» (и чужой кулдаун выдачи кода) новому игроку в этом слоте не принадлежат.
 	KZ::hudshare::ClearSlotState(this->player->GetPlayerSlot());
-	// Меню реплея (layout/rpmenu.cpp) — третья сущность, та же причина. Отложенный запрос
-	// (RequestReplayMenu) тоже принадлежит ушедшему игроку.
-	this->replayMenuPending = false;
+	// Меню реплея (layout/rpmenu.cpp) — свои сущности, та же причина.
 	this->CloseReplayMenu("disconnect");
 }
 
@@ -477,7 +474,6 @@ void KZHUDService::OnRoundStart()
 		// Меню реплея: сущность снёс движок, бота кикнет OnRoundStart реплеев тем же хуком
 		// ниже (hooks.cpp) — флаг сбрасываем здесь безусловно, иначе следующий !rpmenu
 		// «закроет» несуществующее меню.
-		player->hudService->replayMenuPending = false;
 		player->hudService->CloseReplayMenu("round_start");
 	}
 }
@@ -1958,26 +1954,13 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	// Yield the center channel while a cs2menus HTML menu is open.
 	// ГЛУШЕНИЕ центр-канала — под ЛЮБЫМ Html-меню и для всех: HTML-панель одна на игрока, и
 	// пока она принадлежит меню, худ обязан уступить (иначе тексты лезут друг на друга).
-	// ПОКАЗАНИЯ (время/скорость/клавиши строкой в панели меню) — только спектатору и только
-	// под !rpmenu (решение пользователя 10.08): под !maps/!style они игроку не
-	// нужны, а строка отнимает пункт у самого меню. Под прочими меню поведение как до 5d6d02c —
-	// низ просто гасится. Признак — ХЭНДЛ нашего меню (IsReplayControlsMenuOpen), не заголовок:
-	// заголовок переводится и правится, сравнение по нему сломалось бы молча.
-	// GetActiveMenu берёт мьютекс cs2menus, поэтому зовётся ТОЛЬКО внутри этой ветки, то есть
-	// лишь когда меню реально открыто, — тактовой цены на каждого спектатора он не добавляет.
-	// Высоту меню не измеряем: отступ под меню отключён (см. ComputeBottomState).
+	// Показания «строкой в панели меню» (UpdateBottomPanel с menuOpen) больше не рисуются:
+	// единственный их потребитель — cs2menus-!rpmenu — удалён 09.09 (меню реплея живёт на
+	// panorama, hud/layout/rpmenu.cpp, и центр-канал не занимает). Под любым оставшимся
+	// Html-меню низ просто гасится; клир гасит ИМЕННО тот приёмник, в который писали.
 	if (g_pMenus && g_pMenus->GetActiveMenuType(target->GetPlayerSlot().Get()) == MenuType::Html)
 	{
-		if (player != target && KZ::replaysystem::menu::IsReplayControlsMenuOpen(target->GetPlayerSlot().Get()))
-		{
-			cfg->UpdateBottomPanel(player, /*menuOpen=*/true);
-		}
-		else
-		{
-			// В т.ч. переход «был !rpmenu → открыли другое меню»: клир гасит ИМЕННО тот приёмник,
-			// в который писали (строку меню), иначе показания остались бы висеть в чужой панели.
-			cfg->ClearBottomPanel();
-		}
+		cfg->ClearBottomPanel();
 		return;
 	}
 	const char *language = target->languageService->GetLanguage();
