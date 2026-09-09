@@ -192,26 +192,6 @@ static_function void ShareTakeOnActivate(KZPlayer *player, i64 tag)
 	KZ::hudshare::TakeFromSpectated(player);
 }
 
-static_function void ShareExportOnActivate(KZPlayer *player, i64 tag)
-{
-	// Второй, равноправный путь переноса (спека §4 «оба пути»): код !hudshare работает только у
-	// нас, а текстовый блок — на глобальных cs2kz-серверах. Печать идёт в КОНСОЛЬ, поэтому
-	// подпись пункта об этом говорит: иначе клик выглядел бы как пункт, который ничего не делает.
-	KZ::hudshare::ExportToConsole(player);
-}
-
-static_function void ShareUndoOnActivate(KZPlayer *player, i64 tag)
-{
-	// Пустой слот — отдельная фраза, та же, что у !hudundo: «ничего не произошло» без строки
-	// в чате игрок читает как сломанный пункт.
-	if (!KZ::hudshare::HasUndo(player))
-	{
-		player->languageService->PrintChat(true, false, "HUD Share - Undo Empty");
-		return;
-	}
-	KZ::hudshare::ApplyUndo(player);
-}
-
 void KZHUDService::InitMenuPrefs()
 {
 	// Дерево, а не плоский список (задача «дерево категорий»): все семь страниц худа —
@@ -338,8 +318,9 @@ void KZHUDService::InitMenuPrefs()
 	KZ::menu::SetItemSubtext(share, "HUD Share - Menu Label ShareCode Sub");
 	KZ::menu::AddButton(share, "HUD Share - Menu Label Take", &ShareTakeOnActivate);
 	KZ::menu::SetItemSubtext(share, "HUD Share - Menu Label Take Sub");
-	KZ::menu::AddButton(share, "HUD Share - Menu Label Export", &ShareExportOnActivate);
-	KZ::menu::SetItemSubtext(share, "HUD Share - Menu Label Export Sub");
-	KZ::menu::AddButton(share, "HUD Share - Menu Label Undo", &ShareUndoOnActivate);
-	KZ::menu::SetItemSubtext(share, "HUD Share - Menu Label Undo Sub");
+	// Пунктов «выгрузить в консоль» и «откатить» здесь НЕТ по решению пользователя 09.09:
+	// обмен кодом оказался удобнее текстового блока, а про откат игрок узнаёт из строки в чате
+	// («HUD Share - Undo Hint» печатается после каждого применения, hud_share.cpp). Команды
+	// !hudexport и !hudundo остались — снят только вход из меню, чтобы страница была короткой
+	// и на ней не было действий, которых игрок не искал.
 }

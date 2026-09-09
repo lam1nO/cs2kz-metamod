@@ -189,6 +189,8 @@
 		"chi"		"仅在观察某人时可用 (等同 !hudtake)"
 		"ua"		"Працює лише у спектейті (те саме робить !hudtake)"
 	}
+	// НЕ ИСПОЛЬЗУЕТСЯ: пункт снят из меню по решению пользователя 09.09 (обмен кодом
+	// удобнее, про откат говорит строка в чате). Команды !hudexport/!hudundo живы.
 	"HUD Share - Menu Label Export"
 	{
 		"en"		"Write settings to console"
@@ -196,6 +198,8 @@
 		"chi"		"把设置写入控制台"
 		"ua"		"Вигрузити налаштування в консоль"
 	}
+	// НЕ ИСПОЛЬЗУЕТСЯ: пункт снят из меню по решению пользователя 09.09 (обмен кодом
+	// удобнее, про откат говорит строка в чате). Команды !hudexport/!hudundo живы.
 	"HUD Share - Menu Label Export Sub"
 	{
 		"en"		"A text block for other cs2kz servers (also !hudexport)"
@@ -203,6 +207,8 @@
 		"chi"		"给其他 cs2kz 服务器用的文本块 (等同 !hudexport)"
 		"ua"		"Текстовий блок для інших cs2kz-серверів (те саме робить !hudexport)"
 	}
+	// НЕ ИСПОЛЬЗУЕТСЯ: пункт снят из меню по решению пользователя 09.09 (обмен кодом
+	// удобнее, про откат говорит строка в чате). Команды !hudexport/!hudundo живы.
 	"HUD Share - Menu Label Undo"
 	{
 		"en"		"Undo the last applied HUD"
@@ -210,6 +216,8 @@
 		"chi"		"撤销上一次应用的 HUD"
 		"ua"		"Відкотити останнє застосування"
 	}
+	// НЕ ИСПОЛЬЗУЕТСЯ: пункт снят из меню по решению пользователя 09.09 (обмен кодом
+	// удобнее, про откат говорит строка в чате). Команды !hudexport/!hudundo живы.
 	"HUD Share - Menu Label Undo Sub"
 	{
 		"en"		"Puts your HUD back the way it was, until you leave the server"
