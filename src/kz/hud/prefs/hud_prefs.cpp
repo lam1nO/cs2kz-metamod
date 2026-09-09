@@ -158,9 +158,9 @@ static_function void AddHudElementItems(KZOptNode *node, LayoutElement e)
 	KZ::menu::SetItemPref(node, def.opacityKey, KZOptStorage::Int, 100);
 }
 
-// === Обмен худом: три действия одной страницей ================================================
+// === Обмен худом: четыре действия одной страницей =============================================
 // Ядро — hud/share/hud_share.cpp, транспорт кода — hud/share/hud_share_commands.cpp; здесь
-// только пункты меню поверх тех же функций, что и чат-команды. Ни один из трёх пунктов не
+// только пункты меню поверх тех же функций, что и чат-команды. Ни один из четырёх пунктов не
 // хранит настройки (Button без префа), поэтому в белый список обмена они не попадают
 // (AddEntry пропускает storage == None, option/pref_registry.cpp) и отпечаток состава не двигают.
 static_function void ShareCodeOnActivate(KZPlayer *player, i64 tag)
@@ -175,6 +175,14 @@ static_function void ShareTakeOnActivate(KZPlayer *player, i64 tag)
 	// серым пункт стал бы только до следующей перерисовки меню. Поэтому пункт кликабелен всегда,
 	// а отказ печатает TakeFromSpectated — с причиной, а не молчанием.
 	KZ::hudshare::TakeFromSpectated(player);
+}
+
+static_function void ShareExportOnActivate(KZPlayer *player, i64 tag)
+{
+	// Второй, равноправный путь переноса (спека §4 «оба пути»): код !hudshare работает только у
+	// нас, а текстовый блок — на глобальных cs2kz-серверах. Печать идёт в КОНСОЛЬ, поэтому
+	// подпись пункта об этом говорит: иначе клик выглядел бы как пункт, который ничего не делает.
+	KZ::hudshare::ExportToConsole(player);
 }
 
 static_function void ShareUndoOnActivate(KZPlayer *player, i64 tag)
@@ -304,7 +312,7 @@ void KZHUDService::InitMenuPrefs()
 	AddResetButton(crosshair, (i32)LayoutElement::Count);
 
 	// Обмен худом — СВОЯ подкатегория, а не пункты в General. Довод: в General лежит «сбросить
-	// все настройки худа», и три действия обмена рядом с ней читались бы как часть сброса, а
+	// все настройки худа», и действия обмена рядом с ней читались бы как часть сброса, а
 	// главное — General это страница СВОЙСТВ худа (тип, мимикрия, компактная панель), тогда как
 	// обмен это ДЕЙСТВИЯ над всем худом целиком. Отдельная страница ещё и обязательна по месту:
 	// пункт «забрать худ наблюдаемого» ищут в спектейте, а меню в спектейте показывает ровно
@@ -315,6 +323,8 @@ void KZHUDService::InitMenuPrefs()
 	KZ::menu::SetItemSubtext(share, "HUD Share - Menu Label ShareCode Sub");
 	KZ::menu::AddButton(share, "HUD Share - Menu Label Take", &ShareTakeOnActivate);
 	KZ::menu::SetItemSubtext(share, "HUD Share - Menu Label Take Sub");
+	KZ::menu::AddButton(share, "HUD Share - Menu Label Export", &ShareExportOnActivate);
+	KZ::menu::SetItemSubtext(share, "HUD Share - Menu Label Export Sub");
 	KZ::menu::AddButton(share, "HUD Share - Menu Label Undo", &ShareUndoOnActivate);
 	KZ::menu::SetItemSubtext(share, "HUD Share - Menu Label Undo Sub");
 }

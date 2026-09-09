@@ -189,6 +189,20 @@
 		"chi"		"仅在观察某人时可用 (等同 !hudtake)"
 		"ua"		"Працює лише у спектейті (те саме робить !hudtake)"
 	}
+	"HUD Share - Menu Label Export"
+	{
+		"en"		"Write settings to console"
+		"ru"		"Выгрузить настройки в консоль"
+		"chi"		"把设置写入控制台"
+		"ua"		"Вигрузити налаштування в консоль"
+	}
+	"HUD Share - Menu Label Export Sub"
+	{
+		"en"		"A text block for other cs2kz servers (also !hudexport)"
+		"ru"		"Текстовый блок для других cs2kz-серверов (то же делает !hudexport)"
+		"chi"		"给其他 cs2kz 服务器用的文本块 (等同 !hudexport)"
+		"ua"		"Текстовий блок для інших cs2kz-серверів (те саме робить !hudexport)"
+	}
 	"HUD Share - Menu Label Undo"
 	{
 		"en"		"Undo the last applied HUD"
@@ -239,6 +253,14 @@
 		"ru"		"----- конец. На наших серверах тот же худ переносится кодом: !hudshare / !hudget -----"
 		"chi"		"----- 结束. 在我们自己的服务器上, 同样的 HUD 用代码搬: !hudshare / !hudget -----"
 		"ua"		"----- кінець. На наших серверах той самий худ переноситься кодом: !hudshare / !hudget -----"
+	}
+	// Повтор предупреждений ПОСЛЕ блока: до блока их не увидит игрок с прокрученной консолью.
+	"HUD Share - Export Footer Reminder"
+	{
+		"en"		"Reminder: setinfo is dropped on workshop maps (paste from the main menu or use -disable_workshop_command_filtering), and the console takes about 511 characters per paste."
+		"ru"		"Напоминание: на workshop-картах setinfo выбрасывается (вставляй из главного меню либо с -disable_workshop_command_filtering), а консоль берёт около 511 символов за вставку."
+		"chi"		"提醒: 在创意工坊地图上 setinfo 会被丢弃 (请从主菜单粘贴, 或使用 -disable_workshop_command_filtering), 且控制台每次粘贴只接受约 511 个字符."
+		"ua"		"Нагадування: на мапах з майстерні setinfo відкидається (вставляй з головного меню або з -disable_workshop_command_filtering), а консоль бере близько 511 символів за вставку."
 	}
 	"HUD Share - Exported"
 	{

@@ -222,12 +222,13 @@ SCMD(kz_hudundo, SCFL_HUD | SCFL_PREFERENCE)
 //   - строка штампа (kzp__stamp) обязательна и печатается ПЕРВОЙ: без неё импорт на той
 //     стороне не применит блок вовсе (ReadImport требует штамп больше сохранённого).
 // Печать в КОНСОЛЬ, а не в чат: 64 строки в чате — это спам на весь сервер и обрезка по длине.
-SCMD(kz_hudexport, SCFL_HUD | SCFL_PREFERENCE)
+// Тело вынесено в функцию по той же причине, что и выдача кода: вызывающих два — !hudexport и
+// пункт меню «Выгрузить настройки в консоль» (hud/prefs/hud_prefs.cpp).
+void KZ::hudshare::ExportToConsole(KZPlayer *player)
 {
-	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player)
 	{
-		return MRES_SUPERCEDE;
+		return;
 	}
 	const std::vector<KZ::prefs::Entry> &keys = KZ::hudshare::GetKeys();
 	if (keys.empty())
@@ -235,14 +236,14 @@ SCMD(kz_hudexport, SCFL_HUD | SCFL_PREFERENCE)
 		// Тот же отказ, что у остальных путей обмена: пустой список выглядел бы как «выгружено 0».
 		KZ_LOG_WARN(LogChannel::Option, "[cyb] hud_export_failed reason=registry_empty steam_id=%llu\n", player->GetSteamId64(false));
 		player->languageService->PrintChat(true, false, "HUD Share - Not Ready");
-		return MRES_SUPERCEDE;
+		return;
 	}
 	if (!player->optionService || !player->optionService->IsLoaded())
 	{
 		// Fail-closed, как в Capture: иначе выгрузили бы игроку набор дефолтов под видом его худа.
 		KZ_LOG_WARN(LogChannel::Option, "[cyb] hud_export_failed reason=prefs_not_loaded steam_id=%llu\n", player->GetSteamId64(false));
 		player->languageService->PrintChat(true, false, "HUD Share - Not Ready");
-		return MRES_SUPERCEDE;
+		return;
 	}
 
 	player->languageService->PrintConsole(false, false, "HUD Share - Export Header");
@@ -292,7 +293,17 @@ SCMD(kz_hudexport, SCFL_HUD | SCFL_PREFERENCE)
 		count++;
 	}
 	player->languageService->PrintConsole(false, false, "HUD Share - Export Footer");
+	// Предупреждения повторяются ПОСЛЕ блока намеренно: до блока их не увидит игрок с
+	// прокрученной консолью — а это ровно тот, кто потом скажет «вставил, ничего не
+	// применилось». Оба ограничения (фильтр setinfo на workshop-картах и ~511 символов за
+	// вставку) для нас не теоретические: все наши карты workshop.
+	player->languageService->PrintConsole(false, false, "HUD Share - Export Footer Reminder");
 	player->languageService->PrintChat(true, false, "HUD Share - Exported", count);
 	KZ_LOG_INFO(LogChannel::Option, "[cyb] hud_exported steam_id=%llu keys=%i of=%i\n", player->GetSteamId64(false), count, (i32)keys.size());
+}
+
+SCMD(kz_hudexport, SCFL_HUD | SCFL_PREFERENCE)
+{
+	KZ::hudshare::ExportToConsole(g_pKZPlayerManager->ToPlayer(controller));
 	return MRES_SUPERCEDE;
 }
