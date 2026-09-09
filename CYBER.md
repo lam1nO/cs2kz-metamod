@@ -901,6 +901,28 @@ cs2kz-linux-builder .`, иначе компилируется КОПИЯ ИЗ О
   чат, и в `replay->endTime` уходит `awrMs`, а вместо счётчика ТП — токен `{gold}AWR{grey}`:
   иначе таймер бота, весь ран шедший по AWR-шкале, на финише прыгнул бы на время с петлями.
 
+- **Воркер бэклога AWR** (`src/kz/replays/cyb_awr_backfill.{h,cpp}`) — досчёт AWR для уже
+  загруженных реплеев: `GET {cybEmitUrl}/replays/v1/awr-backlog?limit=1` → скачивание файла
+  по выданной ссылке → разбор и разрез на РАБОЧЕМ потоке (`data::LoadCutSourceFromMemory` +
+  `playback::ComputeCutFor` глобального состояния не трогают) → `POST
+  {cybEmitUrl}/replays/v1/awr` с `{"replayUuid","awrMs"}`. Оба запроса — с
+  `Authorization: Bearer {cybEmitToken}`. Один файл в работе, темп — один файл в секунду.
+  `awrMs: null` отправляется НАМЕРЕННО на отказ файла (`parse_failed`, `not_a_run`,
+  `empty_file`, `!cut.ok`): так api помечает строку посчитанной и битый файл не возвращается
+  в бэклог вечно. Отказ СЕТИ (не 2xx, network) результат не отправляет — файл остаётся в
+  бэклоге и будет взят позже.
+
+  Серверная опция **`cybAwrBackfillIntervalSec`** (дефолт `60`, `0` = автоподбор выключен) —
+  период автоматического взятия ОДНОГО файла. Массовый прогон делать командой
+  `kz_awr_backfill <count> [-dry-run]` (только серверная консоль/RCON): персистентные таймеры
+  форка после смены карты засыпают на длительность прошлой карты (память
+  `fork-timers-stall-after-map-change`), поэтому на автоподбор в расчёте «догнать бэклог»
+  полагаться нельзя. `-dry-run` считает и логирует, в api ничего не отправляет.
+  Лог на каждый файл: `[cyb_awr] backfill uuid=… time_ms=… awr_ms=… tps=… ok=… reason=… dry=…`,
+  нарушения инвариантов спеки §4.5 — отдельными `warn` c `reason=awr_gt_time` /
+  `no_tp_time_differs` / `tp_count_mismatch` (последний сверяет число ТП разреза с
+  `RunReplayData::num_teleports` из шапки файла).
+
 ## Инварианты (не ломать при мёрже апстрима)
 
 - **`nextlevel` НИКОГДА не берётся из `+map`.** Апстримный `GetDefaultMapName`

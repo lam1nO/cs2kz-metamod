@@ -195,6 +195,7 @@ def configure_main(sdk_target, sdk, cxx):
     os.path.join(builder.sourcePath, 'src', 'kz', 'replays', 'cyb_replay_upload.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'replays', 'cyb_replay_common.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'replays', 'cyb_replay_download.cpp'),
+    os.path.join(builder.sourcePath, 'src', 'kz', 'replays', 'cyb_awr_backfill.cpp'),
     
     os.path.join(builder.sourcePath, 'src', 'kz', 'recording', 'kz_recording.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'recording', 'events.cpp'),
