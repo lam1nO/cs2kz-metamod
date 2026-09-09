@@ -22,6 +22,8 @@ namespace
 {
 	// Темп насоса, когда есть работа: один файл в секунду (см. заголовок).
 	constexpr f64 AWR_BACKFILL_BUSY_INTERVAL = 1.0;
+	// Потолок аргумента команды: и от опечатки в разряде, и от усечения при (u32).
+	constexpr i64 AWR_BACKFILL_MAX_COUNT = 100000;
 
 	// ------------------------------------------------------------------
 	// Состояние (главный поток; g_result* — под мьютексом)
@@ -34,6 +36,9 @@ namespace
 	bool g_dryRun = false;
 	// Период автоподбора из опции; 0 = автоматически не берём (только командой).
 	i64 g_autoIntervalSec = 0;
+	// Период автоподбора выждан — следующий холостой тик берёт файл. Без этого флага
+	// автоподбор выгребал бы бэклог со скоростью насоса (1 файл/с), а не раз в период.
+	bool g_autoDue = false;
 	// Насос уже запущен — второй таймер на то же состояние не нужен.
 	bool g_timerStarted = false;
 
@@ -48,6 +53,9 @@ namespace
 		u32 teleports = 0;
 		// Число ТП из шапки реплея (RunReplayData::num_teleports); -1 = поля нет.
 		i32 headerTeleports = -1;
+		// Снапшот режима на момент ВЗЯТИЯ файла. Пока файл в полёте, kz_awr_backfill может
+		// переставить g_dryRun — и реальный файл ушёл бы как dry (или наоборот).
+		bool dryRun = false;
 	};
 
 	std::mutex g_resultMutex;
@@ -113,8 +121,8 @@ namespace
 	// ------------------------------------------------------------------
 
 	void FetchOne();
-	void StartDownload(const std::string &uuid, const std::string &url);
-	void SpawnWorker(const std::string &uuid, std::vector<char> data);
+	void StartDownload(const std::string &uuid, const std::string &url, bool dryRun);
+	void SpawnWorker(const std::string &uuid, std::vector<char> data, bool dryRun);
 	void PublishResult(const WorkerResult &res);
 	void SendResult(const WorkerResult &res);
 
@@ -127,6 +135,20 @@ namespace
 		if (g_remaining > 0)
 		{
 			g_remaining--;
+		}
+	}
+
+	// Файл ОБРАБОТАН (результат отправлен или посчитан вхолостую) — берём следующий сразу,
+	// не дожидаясь тика: иначе на файл уходило бы два тика (взять → отдать) вместо одного.
+	// Темп 1 файл/с сохраняется: забор результата у рабочего потока всё равно гейтится тиком.
+	// Зовётся ТОЛЬКО с путей завершения файла: на отказе бэклога/докачки сцепки нет, иначе
+	// битая сеть крутилась бы петлёй со скоростью HTTP-раундтрипа.
+	void FinishFileAndChain()
+	{
+		FinishAttempt();
+		if (!g_busy && g_remaining > 0)
+		{
+			FetchOne();
 		}
 	}
 
@@ -164,12 +186,22 @@ namespace
 			return AWR_BACKFILL_BUSY_INTERVAL;
 		}
 
+		// Холостой тик: работы нет и брать нечего — только здесь возвращается период
+		// автоподбора. Пока файл в работе, интервал обязан быть коротким, иначе результат
+		// разбора пролежал бы в g_result до конца периода и темп упал бы до одного файла
+		// на два периода.
 		if (g_autoIntervalSec > 0)
 		{
-			// Автоподбор: один файл за период, всегда «по-настоящему» (не dry-run).
-			g_remaining = 1;
-			g_dryRun = false;
-			FetchOne();
+			if (g_autoDue)
+			{
+				// Период выждан — берём ОДИН файл, всегда «по-настоящему» (не dry-run).
+				g_autoDue = false;
+				g_remaining = 1;
+				g_dryRun = false;
+				FetchOne();
+				return AWR_BACKFILL_BUSY_INTERVAL;
+			}
+			g_autoDue = true;
 			return (f64)g_autoIntervalSec;
 		}
 
@@ -198,13 +230,15 @@ namespace
 		}
 
 		g_busy = true;
+		// Снапшот режима на момент взятия файла — см. WorkerResult::dryRun.
+		const bool dryRun = g_dryRun;
 
 		HTTP::Request req(HTTP::Method::GET, url);
 		req.SetQuery("limit", "1");
 		SetAuthHeader(req);
 		// clang-format off
 		req.Send(
-			[](HTTP::Response resp)
+			[dryRun](HTTP::Response resp)
 			{
 				if (resp.status < 200 || resp.status >= 300)
 				{
@@ -246,7 +280,7 @@ namespace
 					return;
 				}
 
-				StartDownload(items[0].replayUuid, items[0].url);
+				StartDownload(items[0].replayUuid, items[0].url, dryRun);
 			},
 			[]()
 			{
@@ -256,13 +290,13 @@ namespace
 		// clang-format on
 	}
 
-	void StartDownload(const std::string &uuid, const std::string &url)
+	void StartDownload(const std::string &uuid, const std::string &url, bool dryRun)
 	{
 		// Ссылка выдана самим api (обычно presigned) — свой Bearer сюда не подставляем.
 		HTTP::Request req(HTTP::Method::GET, url);
 		// clang-format off
 		req.Send(
-			[uuid](HTTP::Response resp)
+			[uuid, dryRun](HTTP::Response resp)
 			{
 				if (resp.status < 200 || resp.status >= 300)
 				{
@@ -282,11 +316,12 @@ namespace
 					res.uuid = uuid;
 					res.ok = false;
 					res.reason = "empty_file";
+					res.dryRun = dryRun;
 					SendResult(res);
 					return;
 				}
 
-				SpawnWorker(uuid, std::move(*raw));
+				SpawnWorker(uuid, std::move(*raw), dryRun);
 			},
 			[uuid]()
 			{
@@ -296,44 +331,66 @@ namespace
 		// clang-format on
 	}
 
-	void SpawnWorker(const std::string &uuid, std::vector<char> data)
+	void SpawnWorker(const std::string &uuid, std::vector<char> data, bool dryRun)
 	{
 		// Разбор файла и разрез — на рабочем потоке: data::LoadCutSourceFromMemory и
 		// playback::ComputeCutFor глобального состояния не трогают (см. их комментарии),
 		// а распаковка нескольких мегабайт в игровом потоке дала бы просадку кадра.
 		std::thread worker(
-			[uuid, data = std::move(data)]()
+			[uuid, dryRun, data = std::move(data)]()
 			{
 				WorkerResult res;
 				res.uuid = uuid;
+				res.dryRun = dryRun;
 
-				KZ::replaysystem::data::CutSource src = KZ::replaysystem::data::LoadCutSourceFromMemory(data.data(), data.size());
-				if (!src.valid)
+				// try/catch обязателен: разбор аллоцирует по размерам ИЗ ФАЙЛА
+				// (compression.cpp:417 `new char[header.uncompressedSize]`,
+				// compression.cpp:458 `resize(elementCount)`), и на битом файле прилетит
+				// bad_alloc/length_error. Необработанное исключение в detached-потоке —
+				// std::terminate, то есть падение сервера из-за одного мусорного реплея.
+				try
 				{
+					KZ::replaysystem::data::CutSource src =
+						KZ::replaysystem::data::LoadCutSourceFromMemory(data.data(), data.size());
+					if (!src.valid)
+					{
+						res.reason = "parse_failed";
+						PublishResult(res);
+						return;
+					}
+
+					if (!src.header.has_run() || src.header.run().time() <= 0.0f)
+					{
+						// Не ран-реплей: времени рана нет, считать AWR не от чего.
+						res.reason = "not_a_run";
+						PublishResult(res);
+						return;
+					}
+
+					res.timeMs = (u64)((f64)src.header.run().time() * 1000.0 + 0.5);
+					res.headerTeleports = src.header.run().has_num_teleports() ? src.header.run().num_teleports() : -1;
+
+					KZ::replaysystem::awr::CutResult cut =
+						KZ::replaysystem::playback::ComputeCutFor(src.ticks.data(), (u32)src.ticks.size(), src.events.data(),
+																  (u32)src.events.size(), res.timeMs);
+					res.ok = cut.ok;
+					res.reason = cut.ok ? "ok" : cut.reason;
+					res.awrMs = cut.awrMs;
+					res.teleports = cut.teleports;
+					PublishResult(res);
+				}
+				catch (...)
+				{
+					// Битый файл: отдаём отказ, api пометит строку (awrMs:null) и файл
+					// перестанет возвращаться в бэклог. Сервер при этом жив.
+					res.ok = false;
 					res.reason = "parse_failed";
+					res.timeMs = 0;
+					res.awrMs = 0;
+					res.teleports = 0;
+					res.headerTeleports = -1;
 					PublishResult(res);
-					return;
 				}
-
-				if (!src.header.has_run() || src.header.run().time() <= 0.0f)
-				{
-					// Не ран-реплей: времени рана нет, считать AWR не от чего.
-					res.reason = "not_a_run";
-					PublishResult(res);
-					return;
-				}
-
-				res.timeMs = (u64)((f64)src.header.run().time() * 1000.0 + 0.5);
-				res.headerTeleports = src.header.run().has_num_teleports() ? src.header.run().num_teleports() : -1;
-
-				KZ::replaysystem::awr::CutResult cut =
-					KZ::replaysystem::playback::ComputeCutFor(src.ticks.data(), (u32)src.ticks.size(), src.events.data(),
-															  (u32)src.events.size(), res.timeMs);
-				res.ok = cut.ok;
-				res.reason = cut.ok ? "ok" : cut.reason;
-				res.awrMs = cut.awrMs;
-				res.teleports = cut.teleports;
-				PublishResult(res);
 			});
 		worker.detach();
 	}
@@ -352,7 +409,7 @@ namespace
 	{
 		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill uuid=%s time_ms=%llu awr_ms=%llu tps=%u ok=%d reason=%s dry=%d\n",
 					res.uuid.c_str(), (unsigned long long)res.timeMs, (unsigned long long)res.awrMs, (unsigned)res.teleports,
-					res.ok ? 1 : 0, res.reason, g_dryRun ? 1 : 0);
+					res.ok ? 1 : 0, res.reason, res.dryRun ? 1 : 0);
 
 		if (res.ok)
 		{
@@ -374,9 +431,9 @@ namespace
 			}
 		}
 
-		if (g_dryRun)
+		if (res.dryRun)
 		{
-			FinishAttempt();
+			FinishFileAndChain();
 			return;
 		}
 
@@ -410,12 +467,13 @@ namespace
 					KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] post failed uuid=%s reason=http_%u\n", uuid.c_str(),
 								(unsigned)resp.status);
 				}
-				FinishAttempt();
+				// Файл обработан (попытка списана в любом случае) — сразу следующий.
+				FinishFileAndChain();
 			},
 			[uuid]()
 			{
 				KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] post failed uuid=%s reason=network\n", uuid.c_str());
-				FinishAttempt();
+				FinishFileAndChain();
 			});
 		// clang-format on
 	}
@@ -440,6 +498,8 @@ void CybAwrBackfill::Run(u32 count, bool dryRun)
 	}
 
 	g_remaining = count;
+	// Режим меняется только для файлов, взятых ПОСЛЕ этой строки: у файла в полёте свой
+	// снапшот в WorkerResult::dryRun.
 	g_dryRun = dryRun;
 	// Насос может быть не запущен (cybAwrBackfillIntervalSec 0) — команда обязана работать.
 	EnsureTimer();
@@ -457,8 +517,12 @@ CON_COMMAND_F(kz_awr_backfill, "Compute AWR cut for N replays from the platform 
 		return;
 	}
 
-	const i64 count = args.ArgC() >= 2 ? strtoll(args.Arg(1), nullptr, 10) : -1;
-	if (count < 0)
+	// endptr обязателен: strtoll("abc") вернул бы 0, а 0 — это «остановить прогон», т.е.
+	// опечатка молча гасила бы воркер. Верхняя граница — чтобы (u32) ничего не усёк.
+	const char *countArg = args.ArgC() >= 2 ? args.Arg(1) : "";
+	char *countEnd = nullptr;
+	const i64 count = strtoll(countArg, &countEnd, 10);
+	if (countArg[0] == '\0' || !countEnd || *countEnd != '\0' || count < 0 || count > AWR_BACKFILL_MAX_COUNT)
 	{
 		KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] cmd_rejected reason=bad_count arg=%s\n", args.ArgC() >= 2 ? args.Arg(1) : "<none>");
 		return;

@@ -109,4 +109,9 @@
 	"cybEmitToken"	""
 	// Server ID reported in each event envelope (must match the token's server).
 	"cybServerId"	""
+	// AWR backlog worker: how often (seconds) the server picks ONE replay without a
+	// computed AWR time from the platform, cuts it and posts the result back.
+	// 0 disables the automatic pickup entirely; mass runs are done from RCON with
+	// `kz_awr_backfill <count> [-dry-run]` (which works even with 0 here).
+	"cybAwrBackfillIntervalSec"	"60"
 }
