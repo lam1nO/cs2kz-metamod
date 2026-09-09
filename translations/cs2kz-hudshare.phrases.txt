@@ -152,6 +152,57 @@
 		"chi"		"{grey}你现在用的是 {lime}{name}{grey} 的 HUD."
 		"ua"		"{grey}Тепер у тебе худ {lime}{name}{grey}."
 	}
+	// Пункты меню настроек (подкатегория «Обмен худом», hud/prefs/hud_prefs.cpp). Без цветовых
+	// тегов: панорама-меню рисует их обычным текстом, как остальные "HUD - Menu *".
+	"HUD Share - Menu Cat Share"
+	{
+		"en"		"Sharing"
+		"ru"		"Обмен худом"
+		"chi"		"HUD 分享"
+		"ua"		"Обмін худом"
+	}
+	"HUD Share - Menu Label ShareCode"
+	{
+		"en"		"Share my HUD"
+		"ru"		"Поделиться худом"
+		"chi"		"分享我的 HUD"
+		"ua"		"Поділитися худом"
+	}
+	"HUD Share - Menu Label ShareCode Sub"
+	{
+		"en"		"Prints a code in chat: anyone typing !hudget <code> gets this HUD"
+		"ru"		"Напечатает в чат код: кто введёт !hudget <код> — получит этот худ"
+		"chi"		"在聊天中打印代码: 输入 !hudget <代码> 即可得到这个 HUD"
+		"ua"		"Надрукує в чат код: хто введе !hudget <код> — отримає цей худ"
+	}
+	"HUD Share - Menu Label Take"
+	{
+		"en"		"Take spectated player's HUD"
+		"ru"		"Забрать худ наблюдаемого"
+		"chi"		"拿走被观察玩家的 HUD"
+		"ua"		"Забрати худ спостережуваного"
+	}
+	"HUD Share - Menu Label Take Sub"
+	{
+		"en"		"Only while spectating someone (also !hudtake)"
+		"ru"		"Работает только в спектейте (то же делает !hudtake)"
+		"chi"		"仅在观察某人时可用 (等同 !hudtake)"
+		"ua"		"Працює лише у спектейті (те саме робить !hudtake)"
+	}
+	"HUD Share - Menu Label Undo"
+	{
+		"en"		"Undo the last applied HUD"
+		"ru"		"Откатить последнее применение"
+		"chi"		"撤销上一次应用的 HUD"
+		"ua"		"Відкотити останнє застосування"
+	}
+	"HUD Share - Menu Label Undo Sub"
+	{
+		"en"		"Puts your HUD back the way it was, until you leave the server"
+		"ru"		"Вернёт худ как было — до выхода с сервера"
+		"chi"		"把 HUD 恢复原样, 直到你离开服务器"
+		"ua"		"Повернe худ як було — до виходу з сервера"
+	}
 	// Описания для таблиц !help/kz_help. Ключ по умолчанию строит scmd::RegisterCmd
 	// ("Command Description - <имя>", utils/simplecmds.cpp) — без фразы игрок увидел бы
 	// пустую строку в списке команд.

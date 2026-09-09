@@ -1,6 +1,7 @@
 // Чат-команды обмена настройками худа: !hudshare (выдать код), !hudget <код> (применить),
-// !hudtake (забрать худ наблюдаемого), !hudundo (откатить последнее применение). Регистрация — тем же путём, что соседние команды
-// худа (SCMD, utils/simplecmds.h): консольное имя kz_*, чат-триггер ! получается сам.
+// !hudtake (забрать худ наблюдаемого), !hudundo (откатить последнее применение),
+// !hudexport (выгрузить настройки текстом в консоль). Регистрация — тем же путём, что соседние
+// команды худа (SCMD, utils/simplecmds.h): консольное имя kz_*, чат-триггер ! получается сам.
 // Ядро (снимок/валидация/применение/предохранители) — hud_share.cpp; здесь только транспорт.
 //
 // Общего SCMD_COOLDOWN (0.2 с, utils/simplecmds.cpp) для !hudshare НЕ достаточно: это ЗАПИСЬ в
@@ -21,12 +22,14 @@
 
 #include "tier0/memdbgon.h"
 
-SCMD(kz_hudshare, SCFL_HUD | SCFL_PREFERENCE)
+// Выдача кода: тело команды вынесено в функцию, потому что вызывающих два — !hudshare и пункт
+// меню «Поделиться худом» (hud/prefs/hud_prefs.cpp). Живёт здесь, а не в ядре: это транспорт
+// (INSERT в общую MySQL флота), и ядро обмена о базе не знает.
+void KZ::hudshare::IssueShareCode(KZPlayer *player)
 {
-	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player)
 	{
-		return MRES_SUPERCEDE;
+		return;
 	}
 	const u64 steamID = player->GetSteamId64();
 	if (!steamID || !player->GetClient())
@@ -34,7 +37,7 @@ SCMD(kz_hudshare, SCFL_HUD | SCFL_PREFERENCE)
 		// Владелец снимка обязателен (журнал и будущая модерация) — без Steam-auth его нет.
 		KZ_LOG_WARN(LogChannel::Option, "[cyb] hud_share_store_failed reason=not_authenticated slot=%i\n", player->GetPlayerSlot().Get());
 		player->languageService->PrintChat(true, false, "HUD Share - Not Ready");
-		return MRES_SUPERCEDE;
+		return;
 	}
 
 	std::string snapshot;
@@ -44,7 +47,7 @@ SCMD(kz_hudshare, SCFL_HUD | SCFL_PREFERENCE)
 		// иначе мы выдали бы игроку код на набор дефолтов вместо его худа.
 		KZ_LOG_WARN(LogChannel::Option, "[cyb] hud_share_store_failed reason=capture_failed steam_id=%llu\n", steamID);
 		player->languageService->PrintChat(true, false, "HUD Share - Not Ready");
-		return MRES_SUPERCEDE;
+		return;
 	}
 
 	// Кулдаун берём ПОСЛЕ дешёвых проверок и перед единственной записью: отказ «настройки не
@@ -53,7 +56,7 @@ SCMD(kz_hudshare, SCFL_HUD | SCFL_PREFERENCE)
 	if (cooldown > 0.0f)
 	{
 		player->languageService->PrintChat(true, false, "HUD Share - Store Cooldown", cooldown);
-		return MRES_SUPERCEDE;
+		return;
 	}
 
 	char code[KZ::hudshare::CODE_LENGTH + 1];
@@ -96,7 +99,11 @@ SCMD(kz_hudshare, SCFL_HUD | SCFL_PREFERENCE)
 			KZ::hudshare::ReleaseShareCooldown(pl);
 			pl->languageService->PrintChat(true, false, "HUD Share - Store Failed");
 		});
+}
 
+SCMD(kz_hudshare, SCFL_HUD | SCFL_PREFERENCE)
+{
+	KZ::hudshare::IssueShareCode(g_pKZPlayerManager->ToPlayer(controller));
 	return MRES_SUPERCEDE;
 }
 

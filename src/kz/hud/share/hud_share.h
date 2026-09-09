@@ -23,7 +23,7 @@ namespace KZ::hudshare
 	enum class Source
 	{
 		ShareCode = 0, // !hudget <код>
-		SpecTake,      // !hudtake / пункт меню «забрать худ наблюдаемого» (соседняя задача)
+		SpecTake,      // !hudtake / пункт меню «Забрать худ наблюдаемого»
 		Undo,          // !hudundo
 		Console,       // выгрузка/вставка настроек текстом (соседняя задача)
 	};
@@ -68,6 +68,12 @@ namespace KZ::hudshare
 	//   - печатает игроку итог/отказ и логирует его с машинно-читаемым reason.
 	// sourceDetail — необязательная деталь для лога (код обмена, steam_id наблюдаемого); NULL можно.
 	ApplyStats Apply(KZPlayer *to, const char *snapshot, Source source, const char *sourceDetail);
+
+	// Выдать игроку код его худа: снимок + запись в общую MySQL + печать кода в чат. Кулдаун
+	// выдачи, отказы и лог — внутри. РЕАЛИЗАЦИЯ живёт в hud_share_commands.cpp (это транспорт,
+	// ядро о базе не знает), а объявление здесь потому, что вызывающих два: !hudshare и пункт
+	// меню «Поделиться худом» (hud/prefs/hud_prefs.cpp).
+	void IssueShareCode(KZPlayer *player);
 
 	// Забрать себе худ того, за кем игрок наблюдает (!hudtake и одноимённый пункт меню).
 	// Снимок снимается с ЦЕЛИ спектейта и уезжает в тот же Apply, что и код обмена, — белый
