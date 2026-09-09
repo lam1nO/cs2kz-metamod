@@ -26,7 +26,7 @@ namespace KZ::replaysystem::awr
 	struct CutResult
 	{
 		bool ok = false;
-		const char *reason = "";        // dest_not_found | counter_mismatch | empty
+		const char *reason = "";        // dest_not_found | counter_mismatch | no_run_window | empty
 		std::vector<Interval> dead;      // мёртвые интервалы, по возрастанию, без пересечений
 		uint32_t teleports = 0;          // число прибытий ТП по кадрам
 		uint64_t awrMs = 0;              // timeMs - мёртвое время (за вычетом пересечения с паузами)
@@ -34,8 +34,13 @@ namespace KZ::replaysystem::awr
 
 	// pauses — записанные паузы в индексах кадров (включительно), могут быть пустыми.
 	// tickInterval — секунд на серверный тик (ENGINE_FIXED_TICK_INTERVAL = 1/64).
-	CutResult ComputeAwrCut(const Frame *frames, uint32_t count, const Interval *pauses, uint32_t pauseCount, uint64_t timeMs,
-							double tickInterval);
+	// runStart/runEnd — окно САМОГО рана в индексах кадров, включительно (кадры TIMER_START и
+	// TIMER_END). Окно обязательно: в run-реплее есть ~5 с предзаписи до старта и ~4 с хвоста
+	// после финиша (RunRecorder), и телепорт в хвосте («!r» сразу после финиша) без окна
+	// объявил бы мёртвым весь ран — awrMs≈0, и такая строка выиграла бы минимум у api.
+	// Прибытия вне окна игнорируются, назначение телепорта ищется только в [runStart, T).
+	CutResult ComputeAwrCut(const Frame *frames, uint32_t count, const Interval *pauses, uint32_t pauseCount, uint64_t timeMs, double tickInterval,
+							uint32_t runStart, uint32_t runEnd);
 
 	// Живые интервалы (дополнение dead на [0, count-1]) — нужны !lead.
 	std::vector<Interval> LiveIntervals(const std::vector<Interval> &dead, uint32_t count);

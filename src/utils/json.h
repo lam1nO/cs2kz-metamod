@@ -25,6 +25,14 @@ public:
 		return this->inner.dump();
 	}
 
+	// Тихий аналог ContainsKey: ключ есть и он не null, БЕЗ WARN'а. Нужен там, где
+	// отсутствие/null — штатный ответ api (например awrMs у непосчитанного реплея), и
+	// предупреждение в логе только шумит.
+	bool HasValue(const std::string &key) const
+	{
+		return this->inner.is_object() && this->inner.contains(key) && !this->inner[key].is_null();
+	}
+
 	bool ContainsKey(const std::string &key, bool allowNull = false) const
 	{
 		if (!this->inner.is_object())

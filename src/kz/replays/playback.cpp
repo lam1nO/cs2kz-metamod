@@ -119,6 +119,51 @@ namespace KZ::replaysystem::playback
 		return out;
 	}
 
+	// Окно САМОГО рана в индексах кадров (включительно) по событиям таймера. Нужно потому, что
+	// run-реплей содержит ~5 с предзаписи до старта и ~4 с хвоста после финиша (RunRecorder,
+	// recorders.cpp): «!r» в хвосте — это прибытие телепорта, и без окна разрез объявил бы
+	// мёртвым весь ран. Берём первый TIMER_START и первый TIMER_END после него.
+	static_function bool RunWindowFromEvents(const TickData *ticks, u32 tickCount, const RpEvent *events, u32 numEvents, u32 &outStart, u32 &outEnd)
+	{
+		if (!ticks || tickCount == 0 || !events || numEvents == 0)
+		{
+			return false;
+		}
+		bool haveStart = false;
+		u32 startServerTick = 0, endServerTick = 0;
+		for (u32 i = 0; i < numEvents; i++)
+		{
+			const RpEvent *e = &events[i];
+			if (e->type != RPEVENT_TIMER_EVENT)
+			{
+				continue;
+			}
+			if (e->data.timer.type == RpEvent::RpEventData::TimerEvent::TIMER_START && !haveStart)
+			{
+				haveStart = true;
+				startServerTick = e->serverTick;
+			}
+			else if (e->data.timer.type == RpEvent::RpEventData::TimerEvent::TIMER_END && haveStart)
+			{
+				endServerTick = e->serverTick;
+				// Первый TIMER_END после старта — конец окна; дальше только хвост записи.
+				u32 startIdx = TickIndexForServerTick(ticks, tickCount, startServerTick);
+				// Для конца — ПОСЛЕДНИЙ кадр с serverTick <= тика события, иначе окно уехало бы
+				// в хвост на один кадр (первый кадр >= тика финиша — уже после финиша).
+				u32 endProbe = endServerTick < 0xFFFFFFFFu ? endServerTick + 1 : endServerTick;
+				u32 afterEnd = TickIndexForServerTick(ticks, tickCount, endProbe);
+				if (startIdx >= tickCount || afterEnd == 0)
+				{
+					return false;
+				}
+				outStart = startIdx;
+				outEnd = afterEnd - 1;
+				return outStart < outEnd;
+			}
+		}
+		return false;
+	}
+
 	awr::CutResult ComputeCutFor(const TickData *ticks, u32 tickCount, const RpEvent *events, u32 numEvents, u64 timeMs)
 	{
 		if (!ticks || tickCount == 0)
@@ -126,6 +171,15 @@ namespace KZ::replaysystem::playback
 			awr::CutResult empty;
 			empty.reason = "empty";
 			return empty;
+		}
+		u32 runStart = 0, runEnd = 0;
+		if (!RunWindowFromEvents(ticks, tickCount, events, numEvents, runStart, runEnd))
+		{
+			// Ран не размечен событиями (нет TIMER_START/TIMER_END, оборванный ран) — резать
+			// нечего: «по всему файлу» считать нельзя, там предзапись и хвост.
+			awr::CutResult noWindow;
+			noWindow.reason = "no_run_window";
+			return noWindow;
 		}
 		// Адаптер TickData→awr::Frame: сам разрез о движке и о нашей раскладке не знает
 		// (awr_cut.h собирается голым компилятором, там host-тесты).
@@ -142,7 +196,7 @@ namespace KZ::replaysystem::playback
 			frames[i].origin[2] = t.post.origin.z;
 		}
 		std::vector<awr::Interval> pauses = PauseIntervalsFromEvents(ticks, tickCount, events, numEvents);
-		return awr::ComputeAwrCut(frames.data(), tickCount, pauses.data(), (u32)pauses.size(), timeMs, ENGINE_FIXED_TICK_INTERVAL);
+		return awr::ComputeAwrCut(frames.data(), tickCount, pauses.data(), (u32)pauses.size(), timeMs, ENGINE_FIXED_TICK_INTERVAL, runStart, runEnd);
 	}
 
 	void BuildSkipSegments()

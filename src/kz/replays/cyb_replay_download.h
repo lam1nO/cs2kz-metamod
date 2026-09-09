@@ -51,10 +51,13 @@ namespace CybReplayDownload
 
 	// Ожидание AWR-режима для следующего LoadReplay: резолв асинхронный, а путь загрузки
 	// общий (кэш downloads/ и докачка оба зовут commands::LoadReplay, и туда нечем донести
-	// вид записи). Потребляется ОДИН раз: любой другой путь загрузки (`!replay <uuid>`,
-	// sr/spb…) зовёт TakePendingAwr тем же кодом и получает false.
-	void SetPendingAwr(bool on, u64 awrMs);
-	bool TakePendingAwr(u64 &awrMs);
+	// вид записи). Привязано к UUID: `!replay <uuid>` с диска идёт в LoadReplay напрямую,
+	// мимо резолва, и без привязки съел бы чужое ожидание. Take возвращает true только на
+	// тот же uuid и в ЛЮБОМ случае гасит состояние — протухнуть ожиданию негде.
+	void SetPendingAwr(const char *uuid, u64 awrMs);
+	bool TakePendingAwr(const char *uuid, u64 &awrMs);
+	// Снять ожидание, не потребляя (error-пути докачки: файла не будет, LoadReplay не позовут).
+	void ClearPendingAwr();
 
 	// !replay <uuid>: докачка конкретного реплея по UUID (api GET
 	// /replays/v1/by-uuid). Вызывается из LoadReplay, когда файла нет локально —

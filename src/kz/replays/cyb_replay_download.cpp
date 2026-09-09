@@ -19,23 +19,35 @@
 #include <string>
 
 // Ожидание AWR-режима (см. заголовок): ставится перед докачкой, снимается первым же
-// LoadReplay. Один активный реплей на сервер — состояние глобальное, как и сам плейбек.
-static_global bool g_pendingAwr = false;
+// LoadReplay ЭТОГО uuid. Один активный реплей на сервер — состояние глобальное, как и сам
+// плейбек. Хранится строка uuid, а не флаг: чужой `!replay <uuid>` не должен его подобрать.
+static_global char g_pendingAwrUuid[40] = {};
 static_global u64 g_pendingAwrMs = 0;
 
-void CybReplayDownload::SetPendingAwr(bool on, u64 awrMs)
+void CybReplayDownload::SetPendingAwr(const char *uuid, u64 awrMs)
 {
-	g_pendingAwr = on;
-	g_pendingAwrMs = on ? awrMs : 0;
+	if (!uuid || uuid[0] == '\0')
+	{
+		CybReplayDownload::ClearPendingAwr();
+		return;
+	}
+	V_strncpy(g_pendingAwrUuid, uuid, sizeof(g_pendingAwrUuid));
+	g_pendingAwrMs = awrMs;
 }
 
-bool CybReplayDownload::TakePendingAwr(u64 &awrMs)
+void CybReplayDownload::ClearPendingAwr()
 {
-	const bool on = g_pendingAwr;
-	awrMs = on ? g_pendingAwrMs : 0;
-	g_pendingAwr = false;
+	g_pendingAwrUuid[0] = '\0';
 	g_pendingAwrMs = 0;
-	return on;
+}
+
+bool CybReplayDownload::TakePendingAwr(const char *uuid, u64 &awrMs)
+{
+	const bool match = g_pendingAwrUuid[0] != '\0' && uuid && uuid[0] != '\0' && KZ_STREQI(g_pendingAwrUuid, uuid);
+	awrMs = match ? g_pendingAwrMs : 0;
+	// Гасим ВСЕГДА: ожидание одноразовое, и мимо своего uuid ему жить незачем.
+	CybReplayDownload::ClearPendingAwr();
+	return match;
 }
 
 namespace
@@ -75,6 +87,11 @@ namespace
 			{
 				KZ::replaysystem::commands::LoadReplay(player, replayUuid.c_str());
 			}
+			else
+			{
+				// Игрок ушёл — LoadReplay не позовут, ожидание AWR снимаем сами.
+				CybReplayDownload::ClearPendingAwr();
+			}
 			return;
 		}
 
@@ -90,9 +107,11 @@ namespace
 			[userID, replayUuid](HTTP::Response resp)
 			{
 				KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
+				// Файла не будет — LoadReplay не позовут, ожидание AWR гасим в каждой ветке.
 				if (resp.status < 200 || resp.status >= 300)
 				{
 					KZ_LOG_INFO(LogChannel::Replays, "[cyb_replay] download HTTP %u for %s\n", (unsigned)resp.status, replayUuid.c_str());
+					CybReplayDownload::ClearPendingAwr();
 					if (player) player->languageService->PrintChat(true, false, "Replay Request - Error");
 					return;
 				}
@@ -101,6 +120,7 @@ namespace
 				if (!raw.has_value() || raw->empty())
 				{
 					KZ_LOG_INFO(LogChannel::Replays, "[cyb_replay] empty download body for %s\n", replayUuid.c_str());
+					CybReplayDownload::ClearPendingAwr();
 					if (player) player->languageService->PrintChat(true, false, "Replay Request - Error");
 					return;
 				}
@@ -116,6 +136,7 @@ namespace
 				if (!utils::WriteBufferToFile(replayPath, *raw))
 				{
 					KZ_LOG_WARN(LogChannel::Replays, "[cyb_replay] failed to write downloaded replay to %s\n", replayPath);
+					CybReplayDownload::ClearPendingAwr();
 					if (player) player->languageService->PrintChat(true, false, "Replay Request - Error");
 					return;
 				}
@@ -124,10 +145,15 @@ namespace
 				{
 					KZ::replaysystem::commands::LoadReplay(player, replayUuid.c_str());
 				}
+				else
+				{
+					CybReplayDownload::ClearPendingAwr();
+				}
 			},
 			[userID, replayUuid]()
 			{
 				KZ_LOG_INFO(LogChannel::Replays, "[cyb_replay] network error downloading %s\n", replayUuid.c_str());
+				CybReplayDownload::ClearPendingAwr();
 				KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
 				if (player) player->languageService->PrintChat(true, false, "Replay Request - Error");
 			});
@@ -138,11 +164,9 @@ namespace
 	{
 		KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
 
-		// Любой резолв начинается с чистого ожидания: прошлая попытка могла умереть уже
-		// ПОСЛЕ выставления флага (сеть отвалилась на самой докачке файла, LoadReplay так
-		// и не позвали) — иначе протухший флаг включил бы AWR-режим следующему реплею.
-		u64 discardedAwrMs = 0;
-		CybReplayDownload::TakePendingAwr(discardedAwrMs);
+		// Любой резолв начинается с чистого ожидания: привязка к uuid уже не даёт подобрать
+		// чужое, но незачем и держать протухшее.
+		CybReplayDownload::ClearPendingAwr();
 
 		if (resp.status == 404)
 		{
@@ -234,10 +258,14 @@ namespace
 		if (kind == CybReplayDownload::Kind::AWR)
 		{
 			// Подпись до загрузки: истину (разрез по самому файлу) посчитает LoadReplay.
-			// Поля может и не быть — тогда 0, подпись просто не покажет время.
+			// `awrMs: null` — штатный ответ (разрез ещё не считали), поэтому проверяем ключ
+			// ТИХО: Get на null/отсутствующем ключе пишет WARN, а тревожиться тут не о чем.
 			f64 awrMs = 0.0;
-			json.Get("awrMs", awrMs);
-			CybReplayDownload::SetPendingAwr(true, awrMs > 0.0 ? (u64)awrMs : 0);
+			if (json.HasValue("awrMs"))
+			{
+				json.Get("awrMs", awrMs);
+			}
+			CybReplayDownload::SetPendingAwr(parsedUuid.ToString().c_str(), awrMs > 0.0 ? (u64)awrMs : 0);
 		}
 
 		DownloadAndPlay(userID, parsedUuid.ToString(), downloadUrl);

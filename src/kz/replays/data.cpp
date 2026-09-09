@@ -57,10 +57,7 @@ namespace KZ::replaysystem::data
 		if (replay->awrDead)
 		{
 			delete replay->awrDead;
-			replay->awrDead = nullptr;
 		}
-		replay->awrMode = false;
-		replay->awrMs = 0;
 		*replay = {};
 	}
 

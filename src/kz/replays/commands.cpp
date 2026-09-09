@@ -336,19 +336,23 @@ namespace KZ::replaysystem::commands
 
 		// Get player user ID for thread-safe callback access
 		CPlayerUserId playerUserID = player->GetClient()->GetUserID();
+		// UUID именно этой загрузки — по нему колбэк забирает ожидание AWR (оно привязано к
+		// uuid: `!replay <uuid>` с диска идёт сюда напрямую, мимо резолва).
+		const std::string loadedUuid = parsedUuid.ToString();
 
 		// Start async loading
 		// clang-format off
 		data::LoadReplayAsync(
 			replayPath,
 			// Success callback (runs on main thread via ProcessAsyncLoadCompletion)
-			data::LoadSuccessCallback([playerUserID]() {
+			data::LoadSuccessCallback([playerUserID, loadedUuid]() {
 				// AWR (`!replay awr`): вид записи доносит сюда одноразовое ожидание резолва —
-				// путь загрузки общий для всех видов и донести его иначе нечем. Забираем
-				// ПЕРВОЙ строкой, до любого раннего выхода (нет игрока, чужая карта), иначе
-				// протухшее ожидание включило бы AWR-режим следующему реплею.
+				// путь загрузки общий для всех видов и донести его иначе нечем. Ожидание
+				// привязано к uuid, поэтому чужой реплей его не подберёт; забираем всё равно
+				// ПЕРВОЙ строкой, до любого раннего выхода (нет игрока, чужая карта), чтобы
+				// оно не осталось висеть на неудавшейся загрузке.
 				u64 pendingAwrMs = 0;
-				const bool pendingAwr = CybReplayDownload::TakePendingAwr(pendingAwrMs);
+				const bool pendingAwr = CybReplayDownload::TakePendingAwr(loadedUuid.c_str(), pendingAwrMs);
 				KZPlayer* player = g_pKZPlayerManager->ToPlayer(playerUserID);
 				if (!player)
 				{
@@ -650,7 +654,8 @@ namespace KZ::replaysystem::commands
 		if (replay->awrMode)
 		{
 			// Подпись AWR: время рана БЕЗ вырезанных петель (посчитано по самому файлу).
-			CUtlString awrTime = utils::FormatTime((f64)replay->awrMs / 1000.0);
+			// Точность как у соседних времён этой же строки (!rpinfo) — до десятых.
+			CUtlString awrTime = utils::FormatTime((f64)replay->awrMs / 1000.0, false);
 			player->languageService->PrintChat(true, false, "Replay - AWR Label", awrTime.Get());
 		}
 		player->languageService->PrintConsole(false, false, "Replay - General Info Console", replay->uuid.ToString().c_str(),

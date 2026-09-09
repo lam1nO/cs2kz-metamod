@@ -138,8 +138,12 @@ namespace KZ::replaysystem::events
 					break;
 				}
 
+				// AWR: и в чате финиша, и в endTime (его читает худ через GetEndTime →
+				// GetTimerText) время ОБЯЗАНО быть без вырезанных петель — иначе таймер бота,
+				// весь ран шедший по AWR-шкале, на финише прыгнул бы на время с петлями.
+				const f32 finishTime = replay->awrMode ? (f32)((f64)replay->awrMs / 1000.0) : event->data.timer.time;
 				char formattedTime[32];
-				utils::FormatTime(event->data.timer.time, formattedTime, sizeof(formattedTime));
+				utils::FormatTime(finishTime, formattedTime, sizeof(formattedTime));
 
 				CUtlString combinedModeStyleText;
 				combinedModeStyleText.Format("{purple}%s{grey}", player.modeService->GetModeShortName());
@@ -151,9 +155,11 @@ namespace KZ::replaysystem::events
 					combinedModeStyleText += "{grey}";
 				}
 
-				replay->endTime = event->data.timer.time;
-				std::string teleportText = "{blue}PRO{grey}";
-				if (replay->currentTeleport > 0)
+				replay->endTime = finishTime;
+				// Число ТП в AWR-режиме бессмысленно (петли вырезаны) — метка вместо счётчика,
+				// тем же токеном, что PRO рядом.
+				std::string teleportText = replay->awrMode ? "{gold}AWR{grey}" : "{blue}PRO{grey}";
+				if (!replay->awrMode && replay->currentTeleport > 0)
 				{
 					teleportText = replay->currentTeleport == 1
 									   ? player.languageService->PrepareMessage("1 Teleport Text")
