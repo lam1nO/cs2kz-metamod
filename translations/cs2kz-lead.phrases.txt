@@ -1,0 +1,24 @@
+"Phrases"
+{
+	"Lead - Enabled"
+	{
+		"#format"	"points:d"
+		"en"		"{green}Route lead is on ({points} points). {grey}!lead off {default}to turn it off."
+		"ru"		"{green}Луч маршрута включён ({points} точек). {grey}!lead off {default}— выключить."
+	}
+	"Lead - Disabled"
+	{
+		"en"		"{grey}Route lead is off."
+		"ru"		"{grey}Луч маршрута выключен."
+	}
+	"Lead - No Replay"
+	{
+		"en"		"{grey}No replay to build a lead from for this course/mode."
+		"ru"		"{grey}Нет реплея для этого курса/режима — луч строить не из чего."
+	}
+	"Lead - Loading"
+	{
+		"en"		"{grey}Building the route lead..."
+		"ru"		"{grey}Строю луч маршрута..."
+	}
+}

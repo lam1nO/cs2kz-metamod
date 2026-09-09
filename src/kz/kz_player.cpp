@@ -9,6 +9,7 @@
 #include "invisible/kz_invisible.h"
 #include "jumpstats/kz_jumpstats.h"
 #include "language/kz_language.h"
+#include "lead/kz_lead.h"
 #include "measure/kz_measure.h"
 #include "zones/kz_zones.h"
 #include "mode/kz_mode.h"
@@ -53,6 +54,7 @@ void KZPlayer::Init()
 	delete this->checkpointService;
 	delete this->jumpstatsService;
 	delete this->languageService;
+	delete this->leadService;
 	delete this->databaseService;
 	delete this->quietService;
 	delete this->hudService;
@@ -84,6 +86,7 @@ void KZPlayer::Init()
 	this->jumpstatsService = new KZJumpstatsService(this);
 	this->databaseService = new KZDatabaseService(this);
 	this->languageService = new KZLanguageService(this);
+	this->leadService = new KZLeadService(this);
 	this->noclipService = new KZNoclipService(this);
 	this->quietService = new KZQuietService(this);
 	this->hudService = new KZHUDService(this);
@@ -121,6 +124,7 @@ void KZPlayer::Reset()
 	// Reset services that should not persist across player sessions.
 	this->anticheatService->Reset();
 	this->languageService->Reset();
+	this->leadService->Reset();
 	this->tipService->Reset();
 	this->modeService->Reset();
 	this->optionService->Reset();
@@ -310,6 +314,7 @@ void KZPlayer::OnPhysicsSimulatePost()
 	// нарушение видно в логах и лечится на месте, а не оставляет игрока с курсором.
 	this->hudService->CheckMenuCaptureInvariant();
 	this->measureService->OnPhysicsSimulatePost();
+	this->leadService->OnPhysicsSimulatePost();
 	this->quietService->OnPhysicsSimulatePost();
 	this->profileService->OnPhysicsSimulatePost();
 }
@@ -977,6 +982,8 @@ void KZPlayer::OnTeleport(const Vector *origin, const QAngle *angles, const Vect
 	if (origin)
 	{
 		this->beamService->OnTeleport();
+		// Луч !lead: непрерывность движения порвана, ближайшую вершину искать заново.
+		this->leadService->OnTeleport();
 	}
 	this->triggerService->OnTeleport();
 }

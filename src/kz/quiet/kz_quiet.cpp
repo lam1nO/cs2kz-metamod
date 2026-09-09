@@ -10,6 +10,7 @@
 #include "kz/pistol/kz_pistol.h"
 #include "kz/beam/kz_beam.h"
 #include "kz/measure/kz_measure.h"
+#include "kz/lead/kz_lead.h"
 #include "kz/ztopwatch/kz_ztopwatch.h"
 #include "kz/hud/kz_hud.h"
 #include "kz/option/kz_option.h"
@@ -96,6 +97,14 @@ void KZ::quiet::OnCheckTransmit(CCheckTransmitInfo **pInfo, int infoCount)
 			// получателя, и у игрока без превью и без показа сравнений быть не должно.
 			if (targetPlayer->zonesService && targetPlayer->zonesService->HasOwnedParticles()
 				&& targetPlayer->zonesService->OwnsParticle(particleSystem->GetRefEHandle()))
+			{
+				continue;
+			}
+			// Отрезки луча !lead — ровно по той же причине: метка CUSTOM_PARTICLE_SYSTEM_TEAM
+			// означает «не видит никто», и владельцу его собственный луч возвращает эта ветка.
+			// HasOwnedParticles() первым: у игрока без луча сравнений быть не должно.
+			if (targetPlayer->leadService && targetPlayer->leadService->HasOwnedParticles()
+				&& targetPlayer->leadService->OwnsParticle(particleSystem->GetRefEHandle()))
 			{
 				continue;
 			}

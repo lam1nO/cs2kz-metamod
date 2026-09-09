@@ -28,6 +28,9 @@
 #include "common.h"
 #include "sdk/datatypes.h"
 
+#include <functional>
+#include <vector>
+
 class KZPlayer;
 
 namespace CybReplayDownload
@@ -48,6 +51,16 @@ namespace CybReplayDownload
 	// заранее — см. commands.cpp). Для Kind::WR/WRPro параметр игнорируется:
 	// резолв рекорда сети не фильтрует по игроку.
 	void RequestAndPlay(KZPlayer *player, Kind kind, u64 targetSteamId64);
+
+	// Тот же резолв и та же докачка, но БЕЗ плейбека: байты файла уезжают колбэку
+	// (`!lead`, src/kz/lead). Ни SetPendingAwr, ни LoadReplay здесь не зовутся — реплей-бот
+	// не спавнится, состояние глобального плейбека не трогается.
+	//
+	// Колбэк зовётся на ГЛАВНОМ потоке (колбэк Steam HTTP). Игрок к этому моменту мог уйти —
+	// поэтому в него приходит CPlayerUserId, а не указатель: получатель обязан сам сделать
+	// ToPlayer и проверить результат. ПУСТОЙ буфер означает отказ (нет записи, сеть, мусор в
+	// ответе): фразу в чат выбирает вызывающая фича, сам RequestFile в чат НЕ пишет.
+	void RequestFile(KZPlayer *player, Kind kind, u64 targetSteamId64, std::function<void(CPlayerUserId, std::vector<char>)> onReady);
 
 	// Ожидание AWR-режима для следующего LoadReplay: резолв асинхронный, а путь загрузки
 	// общий (кэш downloads/ и докачка оба зовут commands::LoadReplay, и туда нечем донести
