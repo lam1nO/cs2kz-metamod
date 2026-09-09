@@ -102,6 +102,15 @@ public:
 		SaveKV3AsJSON(&this->prefKV, error, output);
 	}
 
+	// True once the player has a value for this preference, as opposed to falling back to a
+	// default. Порт с апстрима (origin/master:src/kz/option/kz_option.h:104-107): нужен
+	// обобщённому чтению по реестру (KZ::prefs::ReadValue) — без него «нет ключа» и
+	// «сохранён ноль» неразличимы, и снимок худа увозил бы нули вместо дефолтов.
+	bool HasPreference(const char *optionName)
+	{
+		return prefKV.FindMember(optionName) != NULL;
+	}
+
 	// Due to the way keyvalues3.h is written, we can't template these functions.
 	void SetPreferenceBool(const char *optionName, bool value)
 	{
