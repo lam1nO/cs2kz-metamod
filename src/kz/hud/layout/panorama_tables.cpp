@@ -460,6 +460,21 @@ const char *panorama::ResolveFontClass(const char *name, const char *fallback)
 	return PANORAMA_FONTS[0].className;
 }
 
+i32 panorama::GetFontCount()
+{
+	return PANORAMA_FONT_COUNT;
+}
+
+const char *panorama::GetFontSlugAt(i32 index)
+{
+	return (index >= 0 && index < PANORAMA_FONT_COUNT) ? PANORAMA_FONTS[index].slug : PANORAMA_FONTS[0].slug;
+}
+
+const char *panorama::GetFontDisplayNameAt(i32 index)
+{
+	return (index >= 0 && index < PANORAMA_FONT_COUNT) ? PANORAMA_FONTS[index].displayName : PANORAMA_FONTS[0].displayName;
+}
+
 const char *panorama::GetFontDisplayName(const char *name, const char *fallback)
 {
 	const char *slug = ResolveFontSlug(name, fallback);

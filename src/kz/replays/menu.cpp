@@ -69,8 +69,12 @@ void KZ::replaysystem::menu::ApplyReplayMenuInput(KZPlayer *player, ReplayMenuLi
 			}
 			break;
 		case ReplayMenuLine::Step:
-			// Шаг на тик без чата на каждый шаг (автоповтор на удержании); E — шаг вперёд.
-			commands::StepReplay(player, select ? 1 : dir, false);
+			// Шаг на тик без чата на каждый шаг (автоповтор на удержании); E не назначен
+			// (решение пользователя 10.09 — короче легенда).
+			if (!select)
+			{
+				commands::StepReplay(player, dir, false);
+			}
 			break;
 		case ReplayMenuLine::Seek:
 			if (!select)
@@ -92,11 +96,9 @@ void KZ::replaysystem::menu::ApplyReplayMenuInput(KZPlayer *player, ReplayMenuLi
 			}
 			break;
 		case ReplayMenuLine::Speed:
-			if (select)
-			{
-				commands::SetReplaySpeed(player, 1.0f, false);
-			}
-			else
+			// Только A/D по пресетам; сброс на 1x по E снят (решение пользователя 10.09) — 1x и так
+			// пресет в списке.
+			if (!select)
 			{
 				int idx = NearestSpeedIndex(commands::GetReplaySpeed()) + dir;
 				idx = idx < 0 ? 0 : (idx >= RPMENU_SPEEDS_COUNT ? RPMENU_SPEEDS_COUNT - 1 : idx);

@@ -899,8 +899,8 @@
 	}
 	"Replay Panel - Hint Step"
 	{
-		"en"		"A/D step by tick · E step forward"
-		"ru"		"A/D шаг по тикам · E шаг вперёд"
+		"en"		"A/D step by tick"
+		"ru"		"A/D шаг по тикам"
 	}
 	"Replay Panel - Hint Seek"
 	{
@@ -914,8 +914,8 @@
 	}
 	"Replay Panel - Hint Speed"
 	{
-		"en"		"A/D change speed · E reset to 1x"
-		"ru"		"A/D изменить скорость · E сброс на 1x"
+		"en"		"A/D change speed"
+		"ru"		"A/D изменить скорость"
 	}
 	"Replay Panel - Hint End"
 	{

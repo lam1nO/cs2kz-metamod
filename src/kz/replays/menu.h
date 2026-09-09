@@ -37,10 +37,10 @@ namespace KZ::replaysystem::menu
 	enum class ReplayMenuLine
 	{
 		Pause,   // E — пауза/продолжить
-		Step,    // A/D — шаг на тик записи назад/вперёд (шаг сам ставит паузу), E — шаг вперёд
+		Step,    // A/D — шаг на тик записи назад/вперёд (шаг сам ставит паузу)
 		Seek,    // A/D — перемотка ±RPMENU_SEEK_STEP_10 сек (menu.cpp)
 		Restart, // E — с начала
-		Speed,   // A/D — пресет скорости, E — сброс на 1x
+		Speed,   // A/D — пресет скорости
 		End,     // E — остановить плейбек и убрать бота
 		Count
 	};

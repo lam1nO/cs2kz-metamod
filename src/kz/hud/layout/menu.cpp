@@ -6,10 +6,9 @@
 //     KZ::menu::Add*, kz/option/menu/model.h — Task 1), этот файл только обходит
 //     KZ::menu::GetTree() и рендерит. prefs_transfer апстрима (экспорт/импорт настроек)
 //     по-прежнему НЕ переносим — не нужен: своей подсистемы экспорта настроек у нас нет.
-//   - list_popup/li%i (панель апстримного font-list-попапа, постраничный обзор ~30 семейств)
-//     задача 2 сознательно не переносила — у нас Font остался Cycle-пунктом (MENU_FONTS).
-//     Задача 3 использует ЭТУ ЖЕ панель под Choice (список, наполняемый getChoices) — панель
-//     жила в разметке неиспользованной, теперь работает; Font по-прежнему Cycle, без попапа.
+//   - list_popup/li%i — попап списка: Choice наполняет его getChoices, а Font (с 10.09, решение
+//     пользователя: «выбор из списка вместо переключалки по кругу») — всей таблицей PANORAMA_FONTS
+//     (BuildListChoices). Прежний Cycle-перебор по курированному MENU_FONTS удалён.
 //   - Позиция/размер/прозрачность используют ПОПАП-СТЕППЕР (+-1/+-5), как у апстрима, —
 //     без него эти пункты были бы нередактируемы, а спека прямо требует «для каждого элемента
 //     — позиция X/Y, размер, шрифт, прозрачность».
@@ -159,41 +158,38 @@ static_function i32 BuildMenuLeft(i32 selectedCategory, MenuLeftEntry (&slots)[K
 // (см. ActivateMenuItem/RenderMenuListPopup ниже) — свой HudTypeLabel/NextHudType и прежний
 // перебор по кругу здесь больше не нужны.
 
-// Курированный список вместо апстримного постраничного обзора всех семейств (~30):
-// сознательно урезано (см. комментарий вверху файла) — клик по пункту просто перебирает.
-// stratum2-bold-monodigit был дефолтом до смены LAYOUT_DEFAULT_FONT на lato-bold: без него
-// в цикле игрок, у которого он сохранён, терял свой шрифт первым же кликом (NextFontSlug не
-// нашёл бы текущий и вернул MENU_FONTS[0]). KZ_MENU_DEFAULT_FONT здесь по той же причине: цикл
-// один на все Font-пункты, а у нового пункта menuFont дефолт СВОЙ (stratum2-medium-tf) — без
-// него первый клик по «Шрифт меню» терял бы текущее значение вместо шага на следующее.
-// clang-format off
-// Раскладка зафиксирована руками: локальный clang-format (22) и CI-канон (18) переносят этот
-// массив по-разному, и любая правка состава давала красный check-code-quality.
-static_global const char *const MENU_FONTS[] = {
-	LAYOUT_DEFAULT_FONT,
-	"stratum2-bold-monodigit",
-	"stratum2-regular-monodigit",
-	"stratum2-bold",
-	"stratum2-medium",
-	"stratum2-mono-bold",
-	"noto-sans-bold",
-	"arial",
-	"forcestratum2",
-	KZ_MENU_DEFAULT_FONT,
-};
-// clang-format on
-
-static_function const char *NextFontSlug(const char *current)
+// Строки попапа списка для пункта: Choice — из getChoices/getCurrent; Font — вся таблица
+// шрифтов panorama (id = индекс в ней), текущий — резолв сохранённого слага. Один источник для
+// рендера, пагинации и клика (RenderMenuListPopup/MenuPopupPageStep/MenuListPick). Фолбэк
+// слага — тот же, что у значения в строке пункта (sdef, иначе LAYOUT_DEFAULT_FONT).
+static_function const char *FontItemFallback(const KZOptItem &it)
 {
-	const char *slug = panorama::ResolveFontSlug(current, LAYOUT_DEFAULT_FONT);
-	for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(MENU_FONTS); i++)
+	return it.sdef ? it.sdef : LAYOUT_DEFAULT_FONT;
+}
+
+static_function void BuildListChoices(KZPlayer *player, const KZOptItem &it, std::vector<KZChoice> &choices, i64 &current)
+{
+	choices.clear();
+	current = 0;
+	if (it.type == KZOptItemType::Font)
 	{
-		if (V_strcmp(slug, MENU_FONTS[i]) == 0)
+		const char *fallback = FontItemFallback(it);
+		const char *slug = panorama::ResolveFontSlug(player->optionService->GetPreferenceStr(it.prefKey, fallback), fallback);
+		for (i32 i = 0; i < panorama::GetFontCount(); i++)
 		{
-			return MENU_FONTS[(i + 1) % KZ_ARRAYSIZE(MENU_FONTS)];
+			choices.push_back({panorama::GetFontDisplayNameAt(i), (i64)i});
+			if (V_strcmp(slug, panorama::GetFontSlugAt(i)) == 0)
+			{
+				current = i;
+			}
 		}
+		return;
 	}
-	return MENU_FONTS[0];
+	if (it.getChoices)
+	{
+		it.getChoices(player, it.tag, choices);
+	}
+	current = it.getCurrent ? it.getCurrent(player, it.tag) : (choices.empty() ? 0 : choices[0].id);
 }
 
 // .type-toggle/.type-color — единственные подтверждённые strings-ом классы с реальным CSS-эффектом
@@ -697,8 +693,10 @@ void KZHUDService::RenderMenuItems(CCSCustomHudLayout *layout)
 					break;
 				case KZOptItemType::Font:
 				{
-					const char *slug = this->player->optionService->GetPreferenceStr(it.prefKey, it.sdef ? it.sdef : LAYOUT_DEFAULT_FONT);
-					value = panorama::GetFontDisplayName(slug, LAYOUT_DEFAULT_FONT);
+					// Фолбэк — тот же, что у подсветки в попапе (FontItemFallback), иначе строка и список
+					// расходились бы на легаси-слаге в БД.
+					const char *slug = this->player->optionService->GetPreferenceStr(it.prefKey, FontItemFallback(it));
+					value = panorama::GetFontDisplayName(slug, FontItemFallback(it));
 					break;
 				}
 				case KZOptItemType::Position:
@@ -840,11 +838,8 @@ void KZHUDService::RenderMenuListPopup(CCSCustomHudLayout *layout)
 		return;
 	}
 	std::vector<KZChoice> choices;
-	if (it->getChoices)
-	{
-		it->getChoices(this->player, it->tag, choices);
-	}
-	const i64 current = it->getCurrent ? it->getCurrent(this->player, it->tag) : (choices.empty() ? 0 : choices[0].id);
+	i64 current = 0;
+	BuildListChoices(this->player, *it, choices, current);
 	const i32 total = (i32)choices.size();
 	const i32 pages = MAX(1, (total + KZ_MENU_LIST - 1) / KZ_MENU_LIST);
 	this->menuPopupPage = Clamp(this->menuPopupPage, 0, pages - 1);
@@ -955,13 +950,9 @@ void KZHUDService::ActivateMenuItem(i32 slot)
 			this->OpenMenuPopup(MenuPopup::List, slot);
 			break;
 		case KZOptItemType::Font:
-		{
-			const char *cur = opts->GetPreferenceStr(it->prefKey, it->sdef ? it->sdef : LAYOUT_DEFAULT_FONT);
-			opts->SetPreferenceStr(it->prefKey, NextFontSlug(cur));
-			this->RefreshLayoutPrefs();
-			this->RenderMenu();
+			// Список всех шрифтов panorama (BuildListChoices), выбор — MenuListPick.
+			this->OpenMenuPopup(MenuPopup::List, slot);
 			break;
-		}
 		case KZOptItemType::Position:
 		case KZOptItemType::Size:
 		case KZOptItemType::Vector:
@@ -1042,10 +1033,8 @@ void KZHUDService::MenuPopupPageStep(i32 delta)
 			return;
 		}
 		std::vector<KZChoice> choices;
-		if (it->getChoices)
-		{
-			it->getChoices(this->player, it->tag, choices);
-		}
+		i64 current = 0;
+		BuildListChoices(this->player, *it, choices, current);
 		const i32 pages = MAX(1, ((i32)choices.size() + KZ_MENU_LIST - 1) / KZ_MENU_LIST);
 		this->menuPopupPage = Clamp(this->menuPopupPage + delta, 0, pages - 1);
 		this->RenderMenu();
@@ -1082,21 +1071,25 @@ void KZHUDService::MenuListPick(i32 slot)
 		return;
 	}
 	const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuSub, this->menuPopupItem);
-	if (!it || it->type != KZOptItemType::Choice)
+	if (!it || (it->type != KZOptItemType::Choice && it->type != KZOptItemType::Font))
 	{
 		return;
 	}
 	std::vector<KZChoice> choices;
-	if (it->getChoices)
-	{
-		it->getChoices(this->player, it->tag, choices);
-	}
+	i64 current = 0;
+	BuildListChoices(this->player, *it, choices, current);
 	const i32 idx = this->menuPopupPage * KZ_MENU_LIST + slot;
 	if (idx < 0 || idx >= (i32)choices.size())
 	{
 		return;
 	}
-	if (it->onPick)
+	if (it->type == KZOptItemType::Font)
+	{
+		// id = индекс в таблице шрифтов (BuildListChoices); пишем слаг напрямую — у Font-пункта
+		// нет onPick, кэш префов обновит RefreshLayoutPrefs ниже.
+		this->player->optionService->SetPreferenceStr(it->prefKey, panorama::GetFontSlugAt((i32)choices[idx].id));
+	}
+	else if (it->onPick)
 	{
 		it->onPick(this->player, it->tag, choices[idx].id);
 	}

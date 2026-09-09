@@ -90,13 +90,15 @@ namespace
 		return row;
 	}
 
-	// Палитра: акцент — зелёный KZ (#24f097, есть в палитре аддона точно), остальное белое с
-	// прозрачностью: пункты 60 %, состояние 60 %, подсказка 45 %.
-	const Color RPMENU_COLOR_ACCENT(0x24, 0xF0, 0x97, 255);
+	// Палитра (решение пользователя 10.09): весь текст НЕПРОЗРАЧНЫЙ — прозрачность делала строки
+	// «еле видными» рядом с чёткими цифрами худа; акцент — циан #00aaff (есть в палитре аддона
+	// точно; CS2-чат «{blue}» у бренда — ближайший к нему из 16 цветов чата) на заголовке, выбранном
+	// пункте и подсказке; остальные пункты и состояние — белые.
+	const Color RPMENU_COLOR_ACCENT(0x00, 0xAA, 0xFF, 255);
 	const Color RPMENU_COLOR_TEXT(255, 255, 255, 255);
-	constexpr i32 RPMENU_OPACITY_IDLE = 60;
-	constexpr i32 RPMENU_OPACITY_STATUS = 60;
-	constexpr i32 RPMENU_OPACITY_HINT = 45;
+	constexpr i32 RPMENU_OPACITY_IDLE = 100;
+	constexpr i32 RPMENU_OPACITY_STATUS = 100;
+	constexpr i32 RPMENU_OPACITY_HINT = 100;
 
 	constexpr i32 RPMENU_REPEAT_DELAY_TICKS = 22;
 
@@ -454,9 +456,9 @@ void KZHUDService::RenderReplayMenu(CCSCustomHudLayout *(&layouts)[RPMENU_ENTITI
 
 	// Подложка: тот же моно-шрифт, кегль под шаг строк (1 % экрана = 10.8 px panorama-высоты), чтобы
 	// полосы соседних строк смыкались; число NBSP — та же ширина в пикселях, что у текста (моно:
-	// ширина ∝ кеглю), плюс символ запаса с каждого края.
+	// ширина ∝ кеглю), без запаса по краям (решение пользователя 10.09: фон не должен торчать вправо).
 	const i32 plateSize = panorama::SnapToStep((i32)(prefs.step * 10.8f + 0.5f), LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX);
-	const size_t plateChars = (size_t)((f32)width * (f32)prefs.size / (f32)plateSize + 0.5f) + 2;
+	const size_t plateChars = (size_t)((f32)width * (f32)prefs.size / (f32)plateSize + 0.5f);
 	std::string plate;
 	for (size_t n = 0; n < plateChars; n++)
 	{
@@ -496,7 +498,7 @@ void KZHUDService::RenderReplayMenu(CCSCustomHudLayout *(&layouts)[RPMENU_ENTITI
 		{
 			body = KZ::replaysystem::menu::GetReplayMenuHintText(this->player, selectedLine);
 			style.opacity = RPMENU_OPACITY_HINT;
-			style.color = RPMENU_COLOR_TEXT;
+			style.color = RPMENU_COLOR_ACCENT;
 		}
 		else
 		{

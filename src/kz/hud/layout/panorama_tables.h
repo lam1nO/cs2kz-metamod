@@ -16,6 +16,10 @@ namespace panorama
 	const char *ResolveFontClass(const char *name, const char *fallback);
 	const char *ResolveFontSlug(const char *name, const char *fallback);
 	const char *GetFontDisplayName(const char *name, const char *fallback);
+	// Обход таблицы шрифтов по индексу — попап списка «Шрифт» в меню настроек (layout/menu.cpp).
+	i32 GetFontCount();
+	const char *GetFontSlugAt(i32 index);
+	const char *GetFontDisplayNameAt(i32 index);
 	// Позиции: шаг 1 внутри +-100, шаг 5 до +-500. Размеры: шаг 1 до 100, дальше 5.
 	i32 SnapToStep(i32 value, i32 lo, i32 hi);
 	i32 GetColorEntryCount();
