@@ -29,10 +29,16 @@
 // сущности само снимает захват (ревью: ничем не подтверждённое предположение, цена ошибки —
 // игрок навсегда застрял в курсоре и сам этого не заметит) — обе функции снимают его вручную.
 // CloseLayoutMenu() дополнительно зовётся из kz_hud.cpp (OnRoundStart — смена карты) и
-// kz_player.cpp (мёртв и никого не наблюдает, а также ушёл в спектейт другого игрока) — те же
-// точки, где база уже гасит persistent-состояние layout-худа (DestroyOwnedLayout). Без этого
-// покрытия игрок, у которого меню было открыто в момент одного из этих событий, застревает в
-// режиме курсора и не может играть вообще.
+// kz_player.cpp (мёртв и никого не наблюдает) — те же точки, где база уже гасит
+// persistent-состояние layout-худа (DestroyOwnedLayout). Без этого покрытия игрок, у которого
+// меню было открыто в момент одного из этих событий, застревает в режиме курсора и не может
+// играть вообще.
+// Путей снятия захвата ПЯТЬ: клик по m_close/повторная команда (!hm/!options/!hud), смерть без
+// цели наблюдения, смена карты (OnRoundStart), дисконнект (Reset), выгрузка плагина/килл-свитч
+// (LayoutCleanup); шестым, сеткой безопасности, идёт инвариант CheckMenuCaptureInvariant() ниже. Уход в
+// спектейт другого игрока путём закрытия БОЛЬШЕ НЕ ЯВЛЯЕТСЯ (спека 2026-09-09-hud-share §6,
+// см. комментарий в kz_player.cpp): меню в спектейте работает, а захват там держится
+// осознанно, пока меню открыто.
 //
 // Проводка клика от движка: Hook_ClientSvcUserMessage на своём KZ_UM_CUSTOM_HUD_CLICKED
 // (utils/hooks.cpp; НЕ SDK-шный CS_UM_CustomHudClicked — тот идёт через symlink-proto в
@@ -47,6 +53,7 @@
 #include "kz/option/kz_option.h"
 #include "kz/option/menu/model.h"
 #include "kz/language/kz_language.h"
+#include "kz/spec/kz_spec.h" // GetSpectatedPlayer — цель мимикрии (подпись в меню) и reason инварианта
 #include "sdk/entity/ccscustomhudlayout.h"
 #include "entitykeyvalues.h"
 #include "utils/utils.h"
@@ -450,6 +457,24 @@ void KZHUDService::SetMenuVar(CCSCustomHudLayout *layout, const char *panelId, c
 	}
 }
 
+// Мимикрия РЕАЛЬНО действует: на экране худ наблюдаемого, а меню и читает, и пишет только
+// свои настройки (this->player->optionService везде ниже) — значит правка не даёт видимого
+// эффекта, и об этом надо сказать. Отсечки один-в-один с GetLayoutPrefs (layout/prefs.cpp):
+// нет цели / цель — сам / цель — бот / у цели ещё не загружены префы.
+static_function bool IsMenuMimicActive(KZPlayer *player)
+{
+	if (!player->hudService->GetOwnLayoutPrefs().mimicSpec)
+	{
+		return false;
+	}
+	KZPlayer *target = player->specService->GetSpectatedPlayer();
+	if (!target || target == player || target->IsFakeClient())
+	{
+		return false;
+	}
+	return target->hudService->GetOwnLayoutPrefs().loaded;
+}
+
 // === Рендер ==================================================================================
 
 void KZHUDService::RenderMenu()
@@ -487,7 +512,16 @@ void KZHUDService::RenderMenu()
 	// не показать игроку, на какой он странице.
 	const KZOptNode *titleNode = ActiveMenuNode(this->menuCategory, this->menuSub);
 	const char *titleKey = (titleNode && titleNode->phraseKey) ? titleNode->phraseKey : KZ_MENU_TITLE_PHRASE;
-	const std::string title = KZLanguageService::PrepareMessageWithLang(this->player->languageService->GetLanguage(), titleKey);
+	std::string title = KZLanguageService::PrepareMessageWithLang(this->player->languageService->GetLanguage(), titleKey);
+	// Подпись про мимикрию (спека §6) — в САМ заголовок: своей панели/переменной под подзаголовок
+	// в разметке чужого аддона нет (menu.vxml_c), а заводить её мы не можем. Хвост короткий
+	// намеренно: заголовок узкий, длинную фразу движок обрезал бы. Полное объяснение уходит в
+	// чат при открытии меню (OpenLayoutMenu).
+	if (IsMenuMimicActive(this->player))
+	{
+		title += " ";
+		title += KZLanguageService::PrepareMessageWithLang(this->player->languageService->GetLanguage(), "HUD - Menu Mimic Suffix");
+	}
 	this->SetMenuVar(layout, "menu_title", "title", title.c_str());
 	// Шрифт и цвет корня — ПРЕФЫ игрока (порт апстримного RenderChrome, kz_menu.cpp:316-334).
 	// До этой задачи оба класса были зашиты (font-family--stratum2-medium-tf + pal-fg-9); теперь
@@ -1288,6 +1322,18 @@ void KZHUDService::OpenLayoutMenu(const char *categoryKey)
 		this->player->languageService->PrintChat(true, false, "MHUD - Unavailable");
 		return;
 	}
+	// Порт апстримного гейта (origin/master:src/kz/option/menu/kz_menu.cpp:1017-1020): без
+	// per-player состояния SetInputCaptureEnabled тихо ничего не делает (см.
+	// sdk/entity/ccscustomhudlayout.h) — игрок получил бы нарисованное, но некликабельное меню
+	// и никакого объяснения. Отказ обязан быть виден; фраза та же — она про «меню настроек
+	// недоступно», reason различает причины.
+	if (!layout->GetPlayerLayoutState(this->player->GetPlayerSlot()))
+	{
+		KZ_LOG_WARN(LogChannel::General, "[cyb] hud_menu_open_denied reason=no_player_layout_state slot=%i\n",
+					this->player->GetPlayerSlot().Get());
+		this->player->languageService->PrintChat(true, false, "MHUD - Unavailable");
+		return;
+	}
 	this->menuOpen = true;
 	FindMenuNode(categoryKey, this->menuCategory, this->menuSub);
 	this->menuPopup = MenuPopup::None;
@@ -1295,6 +1341,13 @@ void KZHUDService::OpenLayoutMenu(const char *categoryKey)
 	// Переводит игрока в режим курсора — симметричное false обязано случиться на КАЖДОМ пути
 	// закрытия (см. CloseLayoutMenu/DestroyOwnedMenuLayout и комментарий вверху файла).
 	layout->SetInputCaptureEnabled(this->player->GetPlayerSlot(), true);
+	// Меню в спектейте с включённой мимикрией: на экране чужой худ, правки идут в свои
+	// значения. Молчаливое «правка без эффекта» — худший из вариантов, поэтому кроме хвоста
+	// в заголовке меню (RenderMenu) объясняем это одной строкой в чат при открытии.
+	if (IsMenuMimicActive(this->player))
+	{
+		this->player->languageService->PrintChat(true, false, "HUD - Menu Mimic Note");
+	}
 	this->RenderMenu();
 }
 
@@ -1304,7 +1357,7 @@ void KZHUDService::CloseLayoutMenu()
 	{
 		return;
 	}
-	// Меню закрывают и с открытым попапом (клавиша/смерть/спектейт/смена карты) — onEdit
+	// Меню закрывают и с открытым попапом (клавиша/смерть без цели наблюдения/смена карты) — onEdit
 	// закрытия обязан прийти и на этом пути, иначе правка Vector-пункта (beamOffset) осядет
 	// в БД, а кэш сервиса останется старым до реконнекта.
 	if (const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuSub, this->menuPopupItem))
@@ -1332,6 +1385,51 @@ void KZHUDService::CloseLayoutMenu()
 		// движок возвращает управление только когда ВСЕ layout-сущности с capture его сняли.
 		layout->SetInputCaptureEnabled(this->player->GetPlayerSlot(), false);
 	}
+}
+
+// Инвариант (спека 2026-09-09-hud-share §6, канон проекта «закрытие инцидента = проверка»):
+// НЕ БЫВАЕТ включённого захвата ввода при закрытом меню. Класс отказа «игрок остался с
+// курсором и не может играть до перезахода» до этой задачи не контролировался ничем, а после
+// снятия закрытия меню при спектейте (kz_player.cpp) путей снятия захвата стало на один
+// меньше. Нарушение не глушим и не игнорируем: пишем warn с машинно-читаемым reason (по нему
+// заводится алерт/инвариант флота) и снимаем захват принудительно — игрок возвращается в игру
+// сам, без перезахода, а сам факт остаётся в логах для разбора.
+void KZHUDService::CheckMenuCaptureInvariant()
+{
+	if (this->menuOpen)
+	{
+		return;
+	}
+	// Проверка живёт в игровом такте, поэтому дросселируется: чтение схемы на каждого игрока
+	// каждый тик не нужно — залипший захват не самолечится и будет виден на следующем окне.
+	const f64 now = g_pKZUtils->GetServerGlobals()->curtime;
+	// curtime отсчитывается от загрузки карты: переживший смену карты дедлайн окажется «в
+	// будущем» и заглушил бы проверку до конца карты (та же ловушка, что у lastBottomSendTime
+	// в kz_hud.cpp) — дедлайн дальше одного окна считаем просроченным.
+	if (now < this->menuCaptureCheckTime && this->menuCaptureCheckTime - now <= KZ_MENU_CAPTURE_CHECK_INTERVAL)
+	{
+		return;
+	}
+	this->menuCaptureCheckTime = now + KZ_MENU_CAPTURE_CHECK_INTERVAL;
+	CBaseEntity *ent = this->ownedMenuLayout.Get();
+	if (!ent)
+	{
+		// Сущности нет — захвату негде жить: клиент возвращает управление, когда ни одна
+		// layout-сущность его не держит, а удалённая сущность его и не держит.
+		return;
+	}
+	CCSCustomHudLayout *layout = (CCSCustomHudLayout *)ent;
+	const CPlayerSlot slot = this->player->GetPlayerSlot();
+	if (!layout->IsInputCaptureEnabled(slot))
+	{
+		return;
+	}
+	// error, а не warn: по конвенции проекта warn — «отказали пользователю», а это сломалось
+	// У НАС (захват держится при закрытом меню — состояние, которого быть не должно).
+	KZ_LOG_ERROR(LogChannel::General, "[cyb] hud_menu_capture_leak reason=capture_without_open_menu slot=%i alive=%s spectating=%s\n",
+				 slot.Get(), this->player->IsAlive() ? "true" : "false",
+				 this->player->specService->GetSpectatedPlayer() ? "true" : "false");
+	layout->SetInputCaptureEnabled(slot, false);
 }
 
 // === Точка входа: чат-команда (проводка клика от движка — отдельная задача, см. шапку файла) ==
