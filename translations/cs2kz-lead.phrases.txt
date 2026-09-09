@@ -2,10 +2,12 @@
 {
 	// Описание для !help: ключ по умолчанию "Command Description - <имя команды>"
 	// (simplecmds.cpp:343). Без него строка в !help осталась бы пустой.
+	// Без цветовых тегов: этот ключ печатается и в консольную таблицу команд
+	// (simplecmds.cpp), где разметка ломала бы выравнивание колонок.
 	"Command Description - kz_lead"
 	{
-		"en"		"{grey}Show the route lead (!lead off to hide)"
-		"ru"		"{grey}Показать луч маршрута (!lead off — убрать)"
+		"en"		"Show the route lead (!lead off to hide)"
+		"ru"		"Показать луч маршрута (!lead off — убрать)"
 	}
 	"Lead - Enabled"
 	{

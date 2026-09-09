@@ -33,6 +33,9 @@
 #define KZ_LEAD_RDP_TOLERANCE 2.0f
 // Верхняя граница потолка отрезков: защита от опечатки в конфиге (лимит сущностей движка).
 #define KZ_LEAD_MAX_SEGMENTS_CAP 512
+// Какая доля потолка отрезков может уйти на хвост ПОЗАДИ ближайшей вершины (1/4).
+// Остальное резервируется под подсказку впереди.
+#define KZ_LEAD_BACK_BUDGET_DIV 4
 
 #define KZ_LEAD_PARTICLE "particles/ui/annotation/ui_annotation_line_segment.vpcf"
 // Свой targetname обязателен: по нему снятие отличает НАШИ отрезки от чужих энтити с
@@ -312,7 +315,7 @@ void KZLeadService::RebuildOwnedIndex()
 bool KZLeadService::OwnsParticle(const CEntityHandle &handle) const
 {
 	// Горячий путь CheckTransmit: на каждую помеченную частицу, на каждого получателя.
-	// Отсюда двоичный поиск (до 96 отрезков × десятки частиц × число игроков линейным
+	// Отсюда двоичный поиск (до 64 отрезков × десятки частиц × число игроков линейным
 	// сканом — десятки тысяч сравнений за тик).
 	return std::binary_search(this->ownedSorted.begin(), this->ownedSorted.end(), handle,
 							  [](const CEntityHandle &a, const CEntityHandle &b) { return a < b; });
@@ -548,13 +551,15 @@ void KZLeadService::UpdateWindow()
 	const u32 maxSegments = (u32)configured;
 	if (to - from > maxSegments)
 	{
-		// Потолок отрезков. Окно ОБЯЗАНО включать ближайшую вершину — иначе луч оторвался
-		// бы от игрока и подсказка потеряла бы смысл. Поэтому сначала обеспечиваем место
-		// для хвоста позади (плотная петля пути может дать больше maxSegments вершин на
-		// одну секунду), и только потом режем дальний передний конец.
-		if (this->nearest - from > maxSegments)
+		// Потолок отрезков. Смысл луча — подсказка ВПЕРЁД, поэтому хвосту позади ближайшей
+		// вершины оставляем не больше четверти бюджета: плотная петля пути (стояние,
+		// слайд) даёт на секунду назад больше вершин, чем весь потолок, и без этого
+		// резерва передний конец окна оказался бы пуст — луч выродился бы в след под
+		// ногами. Три четверти бюджета остаются впереди; режется дальний передний конец.
+		const u32 backBudget = maxSegments / KZ_LEAD_BACK_BUDGET_DIV;
+		if (this->nearest - from > backBudget)
 		{
-			from = this->nearest - maxSegments;
+			from = this->nearest - backBudget;
 		}
 		to = from + maxSegments;
 	}
