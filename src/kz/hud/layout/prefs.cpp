@@ -162,6 +162,7 @@ void KZHUDService::RefreshLayoutPrefs()
 	// Обводка (text-shadow 4px) визуально «пикселит» мелкий кегль — по умолчанию выключена,
 	// в отличие от элементов худа (их обводка живёт на ярких картах).
 	this->layoutPrefs.replayMenu.outline = opts->GetPreferenceBool("rpmenuOutline", false);
+	this->layoutPrefs.replayMenu.background = Clamp((i32)opts->GetPreferenceInt("rpmenuBackground", RPMENU_DEF_BACKGROUND), 0, 100);
 
 	// Последней строкой: набор целиком заполнен, мимикрия (GetLayoutPrefs) может его брать.
 	// Аналог апстримного `prefsDirty = false` в конце RefreshPrefs.

@@ -18,8 +18,8 @@
 // оформления.
 void LogHudInternFailure(KZPlayer *player, const char *panelId, const char *className)
 {
-	KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_hud_class_dropped reason=intern_limit panel=%s class=%s slot=%i\n",
-				panelId, className, player ? player->GetPlayerSlot().Get() : -1);
+	KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_hud_class_dropped reason=intern_limit panel=%s class=%s slot=%i\n", panelId, className,
+				player ? player->GetPlayerSlot().Get() : -1);
 }
 
 // clang-format off
@@ -147,6 +147,8 @@ void KZHUDService::ApplyLayoutLabel(CCSCustomHudLayout *layout, const char *pane
 	}
 	this->SetLayoutClass(layout, panelId, state.colorClass, state.colorClassComputed);
 	this->SetLayoutClass(layout, panelId, state.fontClass, style.fontClass);
+	// Фон лейбла (pal-bg-N) — только у подложек меню реплея; у элементов худа NULL → класс снят.
+	this->SetLayoutClass(layout, panelId, state.bgClass, style.bgClass);
 
 	const i32 opacity = Clamp(style.opacity, 0, 100);
 	if (state.opacity != opacity)

@@ -66,6 +66,7 @@ struct LayoutLabelStyle
 	i32 y {};
 	i32 size {};
 	const char *fontClass {};
+	const char *bgClass {}; // pal-bg-N (panorama::GetColorEntryBgClass) — подложка меню реплея; NULL — без фона
 	i32 opacity {100};
 	bool outline {};
 	Color color {};
@@ -184,6 +185,7 @@ struct MHUDLayoutPrefs
 		i32 step {}; // вертикальный шаг строк, проценты
 		const char *fontClass {};
 		bool outline {}; // text-shadow разметки: размывает мелкий кегль, по умолчанию выкл
+		i32 background {}; // непрозрачность чёрной подложки за строками, 0..100 (0 — без подложки)
 	};
 
 	ReplayMenu replayMenu {};
@@ -613,8 +615,10 @@ public:
 	// Меню ВСЕГДА открыто, пока игрок наблюдает реплей-бота с идущим плейбеком (решение
 	// пользователя 09.09): открывает и закрывает его сам тик UpdateReplayMenu, команды
 	// открытия/закрытия нет, старое cs2menus-!rpmenu удалено.
-	// Копий страницы худа: заголовок + состояние + 6 пунктов + подсказка = 9 строк по 4 лейбла.
-	static constexpr i32 RPMENU_ENTITIES = 3;
+	// Копий страницы худа: 9 строк (заголовок, состояние, 6 пунктов, подсказка), на копию — две
+	// строки: у каждой строки текст и ПОДЛОЖКА (лейбл из NBSP с фоном), подложка — в лейбле, который
+	// в разметке раньше текстового, чтобы текст гарантированно рисовался поверх (порядок детей).
+	static constexpr i32 RPMENU_ENTITIES = 5;
 	// Почему меню недоступно: NULL — доступно; иначе машинный reason для лога
 	// (unloading | no_addon | no_replay | not_spectating_bot).
 	const char *ReplayMenuUnavailableReason();
@@ -710,6 +714,7 @@ private:
 		std::string text {};
 		const char *colorClass {};
 		const char *fontClass {};
+		const char *bgClass {};
 		i32 fontSize {-1};
 		i32 x {INT_MIN};
 		i32 y {INT_MIN};
@@ -783,6 +788,7 @@ private:
 	// Сущности меню реплея ЭТОГО игрока (см. OpenReplayMenu); гасятся вместе с остальными.
 	CHandle<CBaseEntity> ownedReplayLayouts[RPMENU_ENTITIES] {};
 	bool replayMenuOpen {};
+	size_t replayMenuWidth {};    // ширина блока в кодовых точках, считается при открытии (ReplayMenuWidth)
 	bool replayMenuFailLogged {}; // серия отказов создания сущностей уже залогирована (см. rpmenu.cpp)
 	i32 replayMenuRetryTick {};   // тик последнего отказа — повтор создания с бэкоффом
 	i32 replayMenuLine {};       // выбранная строка (ReplayMenuLine)

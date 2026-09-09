@@ -177,6 +177,22 @@ std::string KZ::replaysystem::menu::GetReplayMenuStatusText(KZPlayer *player)
 													 end);
 }
 
+std::string KZ::replaysystem::menu::GetReplayMenuStatusMaxText(KZPlayer *player)
+{
+	using namespace KZ::replaysystem;
+	const char *lang = player->languageService->GetLanguage();
+	char end[32];
+	const auto *replay = data::GetCurrentReplay();
+	const f64 total = data::IsReplayPlaying() && replay->tickCount > 0 ? (f64)(replay->tickCount - 1) * ENGINE_FIXED_TICK_INTERVAL : 0.0;
+	utils::FormatTime(total, end, sizeof(end), false);
+	// «0.25» — самый длинный из пресетов RPMENU_SPEEDS; но !rpspeed принимает произвольное число
+	// («0.125»), поэтому берём длиннее из пресета и текущего значения.
+	char current[16];
+	commands::FormatReplaySpeed(commands::GetReplaySpeed(), current, sizeof(current));
+	const char *speed = V_strlen(current) > 4 ? current : "0.25";
+	return KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Status Paused", speed, end, end);
+}
+
 std::string KZ::replaysystem::menu::GetReplayMenuHintText(KZPlayer *player, ReplayMenuLine line)
 {
 	const char *lang = player->languageService->GetLanguage();

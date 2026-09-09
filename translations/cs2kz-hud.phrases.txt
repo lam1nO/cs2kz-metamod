@@ -466,6 +466,13 @@
 		"chi"		"轮廓"
 		"ua"		"Обведення"
 	}
+	"HUD - Menu Label Background"
+	{
+		"en"		"Background"
+		"ru"		"Фон"
+		"chi"		"背景"
+		"ua"		"Тло"
+	}
 	"HUD - Menu Label Opacity"
 	{
 		"en"		"Opacity"

@@ -374,6 +374,11 @@ void KZHUDService::InitMenuPrefs()
 	// Голый преф без кэша-колбэков (в отличие от обводки элементов худа с миграцией hudOutline):
 	// читает layout/prefs.cpp напрямую. Дефолт выкл — см. там же.
 	KZ::menu::AddToggle(rpmenu, "HUD - Menu Label Outline", "rpmenuOutline", false);
+	// Непрозрачность чёрной подложки за строками (0 — выкл). Int, как прозрачность элементов худа:
+	// читатель (layout/prefs.cpp) берёт GetPreferenceInt.
+	KZ::menu::AddSize(rpmenu, "HUD - Menu Label Background", "rpmenuBackground", RPMENU_DEF_BACKGROUND, 0, 100);
+	KZ::menu::SetItemUnit(rpmenu, "%");
+	KZ::menu::SetItemPref(rpmenu, "rpmenuBackground", KZOptStorage::Int, RPMENU_DEF_BACKGROUND);
 	AddResetButton(rpmenu, RPMENU_RESET_SLOT);
 
 	// Обмен худом — СВОЯ подкатегория, а не пункты в General. Довод: в General лежит «сбросить

@@ -69,6 +69,9 @@ namespace KZ::replaysystem::menu
 	std::string GetReplayMenuTitleText(KZPlayer *player);
 	// Строка состояния: «<скорость>x · <время> / <длительность>[ · пауза]» — живая.
 	std::string GetReplayMenuStatusText(KZPlayer *player);
+	// Самый длинный вариант строки состояния для этого реплея (скорость «0.25x», обе метки времени =
+	// длительность, суффикс паузы) — для постоянной ширины блока в рендере.
+	std::string GetReplayMenuStatusMaxText(KZPlayer *player);
 	// Контекстная подсказка биндов под списком — для ВЫБРАННОЙ строки.
 	std::string GetReplayMenuHintText(KZPlayer *player, ReplayMenuLine line);
 

@@ -5,9 +5,9 @@
 // Почему сущности с разметкой ХУДА, а не страница меню настроек: в чужом аддоне 3469155349
 // стили живут по-файлово, и menu.vcss не подключает positions.vcss — список оттуда к левому
 // краю не сдвинуть (только #menu_root.shift на −125px). У mhud.vxml четыре текстовых лейбла с
-// позицией/цветом/кеглем/прозрачностью/шрифтом классами — из них и собрана карточка. Строк
-// девять (заголовок, состояние, 6 пунктов, подсказка), поэтому копий страницы ТРИ
-// (RPMENU_ENTITIES): клиент держит копии одной страницы раздельно (канарейка cyb.166).
+// позицией/цветом/кеглем/прозрачностью/шрифтом/фоном классами — из них и собрана карточка. Строк
+// девять (заголовок, состояние, 6 пунктов, подсказка), у каждой текст и подложка — по две строки
+// на копию, копий ПЯТЬ (RPMENU_ENTITIES): клиент держит копии одной страницы раздельно (cyb.166).
 //
 // Левый край (решение пользователя 09.09): .element центрирует лейбл, поэтому все строки
 // добиваются NBSP до одной длины в кодовых точках и рисуются ОДНИМ шрифтом и ОДНИМ кеглем.
@@ -15,8 +15,12 @@
 // RPMENU_MONO_FONTS (layout.h; пропорциональный давал «буквы в разнобой» и скачки при смене
 // выбора, канарейка cyb.169). Выбор — только цвет и прозрачность (рост кегля сдвигал бы край);
 // «< »/« >» на выбранной регулируемой строке, у остальных на их месте NBSP той же ширины —
-// в моно общая длина строк постоянна, поэтому карточка не дёргается при смене пункта. Заголовок
-// отличается акцентным цветом и капсом, не шрифтом. Геометрия/шрифт/обводка — префы rpmenu*.
+// ширина блока — константа: считается по САМЫМ ДЛИННЫМ вариантам всех строк (все подсказки, все
+// пункты со скобками, состояние с самой длинной скоростью), а не по текущему тексту, иначе смена
+// подсказки меняла бы ширину и центрированный блок ездил бы влево-вправо (канарейка cyb.170).
+// Заголовок отличается акцентным цветом и капсом, не шрифтом. Подложка — чёрный pal-bg с
+// прозрачностью rpmenuBackground (палитра аддона непрозрачная, а opacity гасит и текст — поэтому
+// отдельный лейбл). Геометрия/шрифт/обводка/фон — префы rpmenu*.
 //
 // Меню ВСЕГДА открыто, пока игрок наблюдает реплей-бота с идущим плейбеком: UpdateReplayMenu
 // (тик из DrawPanels) сам открывает и закрывает его; команды нет, cs2menus-меню удалено.
@@ -53,9 +57,13 @@ static CConVar<int> kz_rpmenu_repeat_ticks("kz_rpmenu_repeat_ticks", FCVAR_NONE,
 
 namespace
 {
-	// Лейблы одной страницы под строки: сверху вниз. Строка i живёт в сущности i / 4, лейбле i % 4.
-	constexpr LayoutElement RPMENU_LINE_SLOTS[] = {LayoutElement::Timer, LayoutElement::Speed, LayoutElement::Prespeed, LayoutElement::Checkpoint};
-	constexpr i32 RPMENU_SLOTS_PER_ENTITY = (i32)KZ_ARRAYSIZE(RPMENU_LINE_SLOTS);
+	// Раскладка копии страницы: две строки на копию. У строки два лейбла — ПОДЛОЖКА (NBSP с фоном,
+	// слот, который в mhud.vxml идёт РАНЬШЕ) и ТЕКСТ (слот позже): в panorama поздний ребёнок
+	// рисуется поверх раннего, так текст гарантированно над фоном без z-index. Строка i →
+	// сущность i / 2, пара слотов i % 2. Keys не используется.
+	constexpr LayoutElement RPMENU_PLATE_SLOTS[] = {LayoutElement::Timer, LayoutElement::Speed};
+	constexpr LayoutElement RPMENU_TEXT_SLOTS[] = {LayoutElement::Prespeed, LayoutElement::Checkpoint};
+	constexpr i32 RPMENU_LINES_PER_ENTITY = (i32)KZ_ARRAYSIZE(RPMENU_TEXT_SLOTS);
 	constexpr i32 RPMENU_ITEMS = (i32)ReplayMenuLine::Count;
 
 	// Строки карточки: заголовок, состояние, пункты, подсказка. Ряд (в шагах step от y0) —
@@ -65,8 +73,8 @@ namespace
 	constexpr i32 RPMENU_LINE_ITEM0 = 2;
 	constexpr i32 RPMENU_LINE_HINT = RPMENU_LINE_ITEM0 + RPMENU_ITEMS;
 	constexpr i32 RPMENU_LINES = RPMENU_LINE_HINT + 1;
-	static_assert(RPMENU_LINES <= KZHUDService::RPMENU_ENTITIES * RPMENU_SLOTS_PER_ENTITY,
-				  "лейблов копий страницы должно хватать на заголовок, состояние, пункты и подсказку");
+	static_assert(RPMENU_LINES <= KZHUDService::RPMENU_ENTITIES * RPMENU_LINES_PER_ENTITY,
+				  "копий страницы должно хватать на заголовок, состояние, пункты и подсказку (по две строки на копию)");
 
 	i32 LineRow(i32 line)
 	{
@@ -126,6 +134,25 @@ namespace
 		return n;
 	}
 
+	// Обрезка до limit кодовых точек: ширина блока — инвариант, а не ожидание. Строка длиннее
+	// расчётной (произвольная !rpspeed, длинный ник) режется, а не сдвигает карточку.
+	void Utf8Truncate(std::string &s, size_t limit)
+	{
+		size_t n = 0;
+		for (size_t i = 0; i < s.size(); i++)
+		{
+			if (((unsigned char)s[i] & 0xC0) != 0x80)
+			{
+				if (n == limit)
+				{
+					s.resize(i);
+					return;
+				}
+				n++;
+			}
+		}
+	}
+
 	// Удержанные кнопки наблюдательской пешки. GetPlayerPawn() у спектатора — игровая пешка
 	// (мёртвая или отсутствующая), кнопки же приходят на ТЕКУЩУЮ (observer) — берём её, как
 	// cs2menus (GetInputPawn). 0 — пешки/сервисов нет.
@@ -141,6 +168,8 @@ namespace
 		return ms->m_nButtons().m_pButtonStates[0];
 	}
 } // namespace
+
+static_function size_t ReplayMenuWidth(KZPlayer *player);
 
 // === Доступность ============================================================================
 
@@ -262,6 +291,9 @@ bool KZHUDService::OpenReplayMenu()
 	// W из движения перед спектейтом) сработала бы как нажатие на первом же тике.
 	this->replayMenuHeld = HeldButtons(this->player);
 	this->replayMenuHoldTicks = 0;
+	// Ширина блока — один раз на открытие (язык и реплей за просмотр не меняются; смена языка
+	// подхватится следующим открытием), а не ~14 форматирований на тик.
+	this->replayMenuWidth = ReplayMenuWidth(this->player);
 	KZ_LOG_INFO(LogChannel::General, "[cyb] replay_menu_open slot=%i\n", this->player->GetPlayerSlot().Get());
 	bool forceAll[RPMENU_ENTITIES];
 	for (i32 i = 0; i < RPMENU_ENTITIES; i++)
@@ -396,82 +428,109 @@ void KZHUDService::ReadReplayMenuInput()
 	}
 }
 
+// Максимальная длина строки карточки в кодовых точках по ВСЕМ вариантам текстов (см. шапку файла):
+// подсказки всех пунктов, пункты со скобками, заголовок, состояние с самой длинной скоростью и
+// суффиксом паузы. Зависит от языка и реплея, но не от выбранного пункта и тика.
+static_function size_t ReplayMenuWidth(KZPlayer *player)
+{
+	using namespace KZ::replaysystem::menu;
+	size_t width = Utf8Length(RPMENU_PLAIN_PAD + GetReplayMenuTitleText(player) + RPMENU_PLAIN_PAD);
+	width = (std::max)(width, Utf8Length(RPMENU_PLAIN_PAD + GetReplayMenuStatusMaxText(player) + RPMENU_PLAIN_PAD));
+	for (i32 i = 0; i < RPMENU_ITEMS; i++)
+	{
+		const ReplayMenuLine line = (ReplayMenuLine)i;
+		width = (std::max)(width, Utf8Length(RPMENU_ADJ_OPEN + GetReplayMenuLineText(player, line) + RPMENU_ADJ_CLOSE));
+		width = (std::max)(width, Utf8Length(RPMENU_PLAIN_PAD + GetReplayMenuHintText(player, line) + RPMENU_PLAIN_PAD));
+	}
+	return width;
+}
+
 void KZHUDService::RenderReplayMenu(CCSCustomHudLayout *(&layouts)[RPMENU_ENTITIES], const bool (&force)[RPMENU_ENTITIES])
 {
 	// Свои префы, не мимикрия: GetOwnLayoutPrefs (см. MHUDLayoutPrefs::ReplayMenu).
 	const MHUDLayoutPrefs::ReplayMenu &prefs = this->GetOwnLayoutPrefs().replayMenu;
 	const ReplayMenuLine selectedLine = (ReplayMenuLine)this->replayMenuLine;
+	const size_t width = this->replayMenuWidth;
 
-	// Тексты — сперва все, затем добивка до общей ширины (см. шапку файла про левый край).
-	std::string texts[RPMENU_LINES];
-	size_t width = 0;
+	// Подложка: тот же моно-шрифт, кегль под шаг строк (1 % экрана = 10.8 px panorama-высоты), чтобы
+	// полосы соседних строк смыкались; число NBSP — та же ширина в пикселях, что у текста (моно:
+	// ширина ∝ кеглю), плюс символ запаса с каждого края.
+	const i32 plateSize = panorama::SnapToStep((i32)(prefs.step * 10.8f + 0.5f), LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX);
+	const size_t plateChars = (size_t)((f32)width * (f32)prefs.size / (f32)plateSize + 0.5f) + 2;
+	std::string plate;
+	for (size_t n = 0; n < plateChars; n++)
+	{
+		plate += RPMENU_PAD;
+	}
+	const bool plateShown = prefs.background > 0;
+	const char *const plateBg = panorama::GetColorEntryBgClass(panorama::FindColorEntry(Color(0, 0, 0, 255)));
+
 	for (i32 i = 0; i < RPMENU_LINES; i++)
 	{
+		const i32 entity = i / RPMENU_LINES_PER_ENTITY;
+		const LayoutElement textSlot = RPMENU_TEXT_SLOTS[i % RPMENU_LINES_PER_ENTITY];
+		const LayoutElement plateSlot = RPMENU_PLATE_SLOTS[i % RPMENU_LINES_PER_ENTITY];
+		const i32 y = panorama::SnapToStep(prefs.y + LineRow(i) * prefs.step, -100, 100);
+
 		std::string body;
 		bool adjustable = false;
-		if (i == RPMENU_LINE_TITLE)
-		{
-			body = KZ::replaysystem::menu::GetReplayMenuTitleText(this->player);
-		}
-		else if (i == RPMENU_LINE_STATUS)
-		{
-			body = KZ::replaysystem::menu::GetReplayMenuStatusText(this->player);
-		}
-		else if (i == RPMENU_LINE_HINT)
-		{
-			body = KZ::replaysystem::menu::GetReplayMenuHintText(this->player, selectedLine);
-		}
-		else
-		{
-			const ReplayMenuLine line = (ReplayMenuLine)(i - RPMENU_LINE_ITEM0);
-			body = KZ::replaysystem::menu::GetReplayMenuLineText(this->player, line);
-			adjustable = line == selectedLine && KZ::replaysystem::menu::IsReplayMenuLineAdjustable(line);
-		}
-		texts[i] = adjustable ? RPMENU_ADJ_OPEN + body + RPMENU_ADJ_CLOSE : RPMENU_PLAIN_PAD + body + RPMENU_PLAIN_PAD;
-		width = (std::max)(width, Utf8Length(texts[i]));
-	}
-	for (i32 i = 0; i < RPMENU_LINES; i++)
-	{
-		for (size_t n = Utf8Length(texts[i]); n < width; n++)
-		{
-			texts[i] += RPMENU_PAD;
-		}
-	}
-
-	for (i32 i = 0; i < RPMENU_LINES; i++)
-	{
-		const i32 entity = i / RPMENU_SLOTS_PER_ENTITY;
-		const LayoutElement slot = RPMENU_LINE_SLOTS[i % RPMENU_SLOTS_PER_ENTITY];
-		const LayoutElementDef &def = LAYOUT_ELEMENTS[(i32)slot];
-
 		LayoutLabelStyle style;
 		style.x = prefs.x;
-		style.y = panorama::SnapToStep(prefs.y + LineRow(i) * prefs.step, -100, 100);
+		style.y = y;
 		style.size = prefs.size;
 		style.fontClass = prefs.fontClass;
 		style.outline = prefs.outline;
 		if (i == RPMENU_LINE_TITLE)
 		{
+			body = KZ::replaysystem::menu::GetReplayMenuTitleText(this->player);
 			style.opacity = 100;
 			style.color = RPMENU_COLOR_ACCENT;
 		}
 		else if (i == RPMENU_LINE_STATUS)
 		{
+			body = KZ::replaysystem::menu::GetReplayMenuStatusText(this->player);
 			style.opacity = RPMENU_OPACITY_STATUS;
 			style.color = RPMENU_COLOR_TEXT;
 		}
 		else if (i == RPMENU_LINE_HINT)
 		{
+			body = KZ::replaysystem::menu::GetReplayMenuHintText(this->player, selectedLine);
 			style.opacity = RPMENU_OPACITY_HINT;
 			style.color = RPMENU_COLOR_TEXT;
 		}
 		else
 		{
-			const bool selected = (ReplayMenuLine)(i - RPMENU_LINE_ITEM0) == selectedLine;
+			const ReplayMenuLine line = (ReplayMenuLine)(i - RPMENU_LINE_ITEM0);
+			const bool selected = line == selectedLine;
+			body = KZ::replaysystem::menu::GetReplayMenuLineText(this->player, line);
+			adjustable = selected && KZ::replaysystem::menu::IsReplayMenuLineAdjustable(line);
 			style.opacity = selected ? 100 : RPMENU_OPACITY_IDLE;
 			style.color = selected ? RPMENU_COLOR_ACCENT : RPMENU_COLOR_TEXT;
 		}
-		this->ApplyLayoutLabel(layouts[entity], def.panelId, def.varName, this->replayLines[entity][(i32)slot], style, true, texts[i].c_str(),
+		std::string text = adjustable ? RPMENU_ADJ_OPEN + body + RPMENU_ADJ_CLOSE : RPMENU_PLAIN_PAD + body + RPMENU_PLAIN_PAD;
+		Utf8Truncate(text, width);
+		for (size_t n = Utf8Length(text); n < width; n++)
+		{
+			text += RPMENU_PAD;
+		}
+
+		// Подложка — ПЕРВОЙ (её слот в разметке раньше, порядок вызова роли не играет, но так
+		// читается): чёрный фон, прозрачность из префа, без обводки.
+		LayoutLabelStyle plateStyle;
+		plateStyle.x = prefs.x;
+		plateStyle.y = y;
+		plateStyle.size = plateSize;
+		plateStyle.fontClass = prefs.fontClass;
+		plateStyle.bgClass = plateBg;
+		plateStyle.opacity = prefs.background;
+		plateStyle.outline = false;
+		plateStyle.color = Color(0, 0, 0, 255);
+		const LayoutElementDef &plateDef = LAYOUT_ELEMENTS[(i32)plateSlot];
+		this->ApplyLayoutLabel(layouts[entity], plateDef.panelId, plateDef.varName, this->replayLines[entity][(i32)plateSlot], plateStyle, plateShown,
+							   plate.c_str(), force[entity]);
+
+		const LayoutElementDef &def = LAYOUT_ELEMENTS[(i32)textSlot];
+		this->ApplyLayoutLabel(layouts[entity], def.panelId, def.varName, this->replayLines[entity][(i32)textSlot], style, true, text.c_str(),
 							   force[entity]);
 	}
 }
