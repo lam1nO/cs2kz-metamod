@@ -94,6 +94,35 @@ static_function void FormatTimeHud(f64 time, char *output, u32 length)
 
 static CConVar<bool> kz_force_mhud("kz_force_mhud", FCVAR_NONE, "Force the panorama HUD even when MultiAddonManager is not available.", false);
 
+// Аварийный рычаг-диагностика (дефект «дёргается камера в ноуклипе сквозь стены», окно
+// cyb.150-152): позволяет отделить «сущность custom_hud_layout существует» от «отрисовка».
+// false — НИ ОДНА из двух наших сущностей (худ EnsureOwnedLayout / меню настроек
+// EnsureMenuLayout) не заводится, а уже существующие уничтожаются немедленно колбэком ниже.
+// Это НЕ фикс: рычаг только убирает сущность из уравнения для теста, корень дефекта
+// по-прежнему не найден. HTML-худ (hudType Standard) не зависит от этой сущности и продолжает
+// работать при false — см. DrawPanels/IsMHUDAvailable.
+static void OnHudLayoutEnabledChanged(CConVar<bool> *ref, CSplitScreenSlot nSlot, const bool *bNewValue, const bool *bOldValue)
+{
+	// Смена состояния конвара — одна строка на переключение, не на игрока и не в такте.
+	KZ_LOG_INFO(LogChannel::General, "[cyb] hud_layout_killswitch_changed enabled=%s\n", *bNewValue ? "true" : "false");
+	if (!*bNewValue)
+	{
+		// Рычаг бесполезен для диагностики, если оставить живые сущности до смены типа худа/
+		// реконнекта — гасим ВСЕХ немедленно. LayoutCleanup — тот же путь, что при выгрузке
+		// плагина (cs2kz.cpp): он же снимает захват ввода меню (DestroyOwnedMenuLayout) и
+		// обнуляет кэши классов/dialog-переменных вместе с сущностями.
+		KZHUDService::LayoutCleanup();
+	}
+	// Обратно в true — ничего доп. делать не нужно: EnsureOwnedLayout/EnsureMenuLayout сами
+	// заведут сущность на следующем DrawPanels/!hudmenu, без реконнекта игрока.
+}
+
+CConVar<bool> kz_hud_layout_enabled("kz_hud_layout_enabled", FCVAR_NONE,
+									 "Diagnostic kill-switch: разрешить создание сущности custom_hud_layout "
+									 "(panorama-худ и его меню настроек). false отключает обе сущности сразу "
+									 "и уничтожает уже созданные; HTML-худ продолжает работать.",
+									 true, OnHudLayoutEnabledChanged);
+
 // Подавка тряски камеры (viewpunch). Конвар движка cheat+replicated: из RCON/cfg он не
 // берётся («cheat protected, change ignored»), поэтому серверное значение пишем прямо в его
 // ConVarData, а клиенту досылаем персонально (см. OnProcessMovement).
@@ -148,7 +177,17 @@ void KZHUDService::Init()
 
 bool KZHUDService::IsMHUDAvailable()
 {
-	return g_pMultiAddonManager != nullptr || kz_force_mhud.Get();
+	// kz_hud_layout_enabled=false перекрывает ВСЁ (в т.ч. kz_force_mhud) — рычаг обязан
+	// гасить сущность безусловно. Единственные три вызывающих места (menu.cpp/entity.cpp —
+	// решают, создавать ли сущность, и DrawPanels ниже по файлу — решает, идти ли panorama-
+	// путём) уже реагируют на false здесь как на «недоступно», значит отдельного явного
+	// разбора в каждом из них не нужно.
+	return kz_hud_layout_enabled.Get() && (g_pMultiAddonManager != nullptr || kz_force_mhud.Get());
+}
+
+bool KZHUDService::IsHudLayoutKillSwitchOff()
+{
+	return !kz_hud_layout_enabled.Get();
 }
 
 // === Preferences, общие для HTML- и panorama-путей (задача 12 подняла их сюда из

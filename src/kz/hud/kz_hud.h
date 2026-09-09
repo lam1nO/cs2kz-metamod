@@ -311,7 +311,13 @@ public:
 
 	// Returns true when the panorama-layout HUD assets are available.
 	// Requires MultiAddonManager to be available, unless kz_force_mhud is set.
+	// ЛОЖНО также при kz_hud_layout_enabled=false (диагностический килл-свитч, kz_hud.cpp) —
+	// он гасит доступность безусловно, поверх остальных условий.
 	static bool IsMHUDAvailable();
+
+	// Только для machine-readable reason в отказе открыть меню (menu.cpp/OpenLayoutMenu) —
+	// отличить «выключено килл-свитчем» от прочих причин недоступности MHUD.
+	static bool IsHudLayoutKillSwitchOff();
 
 	// Тип худа (персистентный int-pref "hudType"). Цикл в меню: Standard → Panorama → Off.
 	// Off — не рисуется НИЧЕГО (ни HTML-панель, ни panorama-layout), см. DrawPanels.

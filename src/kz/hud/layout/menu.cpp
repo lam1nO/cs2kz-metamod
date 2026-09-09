@@ -1279,6 +1279,12 @@ void KZHUDService::OpenLayoutMenu(const char *categoryKey)
 	CCSCustomHudLayout *layout = this->EnsureMenuLayout(created);
 	if (!layout)
 	{
+		// Отказ игроку — существующей фразой (она про «меню настроек недоступно»), но
+		// молчаливым он быть не должен: reason различает диагностический килл-свитч
+		// (kz_hud_layout_enabled 0) от прочей недоступности MHUD (нет MultiAddonManager).
+		KZ_LOG_WARN(LogChannel::General, "[cyb] hud_menu_open_denied reason=%s slot=%i\n",
+					KZHUDService::IsHudLayoutKillSwitchOff() ? "hud_layout_disabled" : "mhud_unavailable",
+					this->player->GetPlayerSlot().Get());
 		this->player->languageService->PrintChat(true, false, "MHUD - Unavailable");
 		return;
 	}
