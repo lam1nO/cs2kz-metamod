@@ -3,8 +3,11 @@
 // худа (SCMD, utils/simplecmds.h): консольное имя kz_*, чат-триггер ! получается сам.
 // Ядро (снимок/валидация/применение/предохранители) — hud_share.cpp; здесь только транспорт.
 //
-// Кулдаун между командами свой НЕ заводим: scmd уже держит общий SCMD_COOLDOWN на игрока
-// (utils/simplecmds.cpp) — он и ограничивает спам записями в общую MySQL флота.
+// Общего SCMD_COOLDOWN (0.2 с, utils/simplecmds.cpp) для !hudshare НЕ достаточно: это ЗАПИСЬ в
+// общую MySQL флота, и бинд давал бы ~5 INSERT/с. Поэтому у выдачи кода свой кулдаун
+// (KZ::hudshare::TakeShareCooldown — он живёт в ядре вместе с остальным per-slot состоянием), а
+// сверху — квота живых кодов на владельца в самой базе (queries/hudshares.h). Чтению (!hudget)
+// и откату (!hudundo) хватает общего: !hudundo базу не трогает вовсе, !hudget только читает.
 #include "kz/hud/share/hud_share.h"
 #include "kz/db/kz_db.h"
 #include "kz/language/kz_language.h"
@@ -41,6 +44,15 @@ SCMD(kz_hudshare, SCFL_HUD | SCFL_PREFERENCE)
 		// иначе мы выдали бы игроку код на набор дефолтов вместо его худа.
 		KZ_LOG_WARN(LogChannel::Option, "[cyb] hud_share_store_failed reason=capture_failed steam_id=%llu\n", steamID);
 		player->languageService->PrintChat(true, false, "HUD Share - Not Ready");
+		return MRES_SUPERCEDE;
+	}
+
+	// Кулдаун берём ПОСЛЕ дешёвых проверок и перед единственной записью: отказ «настройки не
+	// загрузились» не должен съедать игроку следующие пять секунд.
+	const f32 cooldown = KZ::hudshare::TakeShareCooldown(player);
+	if (cooldown > 0.0f)
+	{
+		player->languageService->PrintChat(true, false, "HUD Share - Store Cooldown", cooldown);
 		return MRES_SUPERCEDE;
 	}
 

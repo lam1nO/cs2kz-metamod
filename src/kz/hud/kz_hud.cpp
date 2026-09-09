@@ -7,6 +7,7 @@
 #include "utils/logging.h" // KZ_LOG_* — отказ конвара подавки viewpunch не должен быть немым
 
 #include "kz/option/kz_option.h"
+#include "kz/hud/share/hud_share.h" // ClearSlotState — слот отката/кулдаун обмена гасятся вместе со слотом
 #include "kz/timer/kz_timer.h"
 #include "kz/language/kz_language.h"
 #include "kz/checkpoint/kz_checkpoint.h"
@@ -428,6 +429,10 @@ void KZHUDService::Reset()
 	// унаследует чужой menuOpen/diff-кэш, а у отключившегося сам захват уйдёт вместе с
 	// сущностью, но наш флаг остался бы висеть, если не сбросить явно.
 	this->DestroyOwnedMenuLayout();
+	// Состояние обмена настройками худа (KZ::hudshare): слот отката живёт в памяти сессии, не в
+	// префах, и по тому же правилу, что и кэши выше — слот реально освобождается, чужой снимок
+	// «как было» (и чужой кулдаун выдачи кода) новому игроку в этом слоте не принадлежат.
+	KZ::hudshare::ClearSlotState(this->player->GetPlayerSlot());
 }
 
 // Сброс кэша отправки нижней панели БЕЗ *Active-флага: раунд-старт (OnRoundStart, в т.ч.

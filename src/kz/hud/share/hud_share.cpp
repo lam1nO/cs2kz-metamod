@@ -30,6 +30,7 @@
 #include "kz/option/kz_option.h"
 #include "kz/language/kz_language.h"
 #include "utils/logging.h"
+#include "utils/utils.h" // g_pKZUtils->GetServerGlobals()->realtime — кулдаун выдачи кода
 
 #include <ctype.h>
 
@@ -54,9 +55,43 @@ static_global const char *const kHudShareBlocklist[] = {
 	// Маркер одноразовой перезаписи дефолтов (§5.6): импорт его не переносит и не сбрасывает —
 	// иначе либо переоткрыл бы миграцию, либо закрыл её навсегда.
 	KZHUDService::HUD_DEFAULTS_REV_KEY,
-	// Наш собственный слот отката: в снимок не входит (иначе откат откатывал бы сам себя).
-	KZ::hudshare::UNDO_PREF_KEY,
 };
+
+// Один слот отката на игрока, В ПАМЯТИ (обоснование — hud_share.h): снимок «как было ДО
+// последнего применения» + владелец. steamID здесь не для приватности, а от повторного
+// использования слота: ClearSlotState зовётся из KZHUDService::Reset(), но проверка владельца
+// делает слот безопасным даже если этот путь когда-нибудь перестанут звать.
+namespace
+{
+	struct UndoSlot
+	{
+		u64 steamID {};
+		std::string snapshot;
+	};
+} // namespace
+
+static_global UndoSlot s_undo[MAXPLAYERS + 1];
+
+// Штамп последней выдачи кода на слот. realtime, а не curtime: curtime обнуляется на смене
+// карты, и переживший её штамп оказался бы «в будущем», заглушив команду до конца сессии (тот
+// же разбор — CanRunCommand, utils/simplecmds.cpp).
+static_global f32 s_lastShareTime[MAXPLAYERS + 1] {};
+
+#define HUDSHARE_STORE_COOLDOWN 5.0f
+
+static_function UndoSlot *GetUndoSlot(KZPlayer *player)
+{
+	if (!player)
+	{
+		return NULL;
+	}
+	const i32 slot = player->GetPlayerSlot().Get();
+	if (slot < 0 || slot > MAXPLAYERS)
+	{
+		return NULL;
+	}
+	return &s_undo[slot];
+}
 
 // Порог «элемент виден» и минимум, который выставляет пол по видимости (§5.2). Прозрачность
 // хранится в процентах (0 — не видно, 100 — непрозрачно), см. layout/prefs.cpp.
@@ -98,16 +133,18 @@ const std::vector<KZ::prefs::Entry> &KZ::hudshare::GetKeys()
 	{
 		return s_keys;
 	}
-	s_keysBuilt = true;
 
 	std::vector<KZ::prefs::Entry> all;
 	if (!KZ::prefs::CollectCategory(KZ::hudshare::HUD_CATEGORY_KEY, all))
 	{
 		// Категория ещё не зарегистрирована (или ключ разошёлся с InitMenuPrefs) — обмен
 		// физически пуст. Отказ громкий: тихий пустой список выглядел бы как «применено 0 из 0».
+		// Флаг НЕ латчим: иначе один неудачный вызов (например до InitMenuPrefs) похоронил бы
+		// обмен до выгрузки плагина, а GetSchemaFingerprint() навсегда отдавал бы 0.
 		KZ_LOG_WARN(LogChannel::Option, "[cyb] hud_share_registry_missing reason=category_not_found key=%s\n", KZ::hudshare::HUD_CATEGORY_KEY);
 		return s_keys;
 	}
+	s_keysBuilt = true;
 
 	std::string fingerprintSource;
 	for (const KZ::prefs::Entry &entry : all)
@@ -144,6 +181,48 @@ void KZ::hudshare::Cleanup()
 	s_keys.clear();
 	s_keysBuilt = false;
 	s_fingerprint = 0;
+	for (i32 i = 0; i <= MAXPLAYERS; i++)
+	{
+		s_undo[i] = UndoSlot();
+		s_lastShareTime[i] = 0.0f;
+	}
+}
+
+void KZ::hudshare::ClearSlotState(CPlayerSlot slot)
+{
+	const i32 index = slot.Get();
+	if (index < 0 || index > MAXPLAYERS)
+	{
+		return;
+	}
+	s_undo[index] = UndoSlot();
+	s_lastShareTime[index] = 0.0f;
+}
+
+f32 KZ::hudshare::TakeShareCooldown(KZPlayer *player)
+{
+	if (!player)
+	{
+		return 0.0f;
+	}
+	const i32 slot = player->GetPlayerSlot().Get();
+	if (slot < 0 || slot > MAXPLAYERS)
+	{
+		return 0.0f;
+	}
+	const f32 now = g_pKZUtils->GetServerGlobals()->realtime;
+	const f32 last = s_lastShareTime[slot];
+	// now < last — часы пошли назад (смена карты): кулдаун считаем снятым, а не гигантским.
+	if (last != 0.0f && now >= last)
+	{
+		const f32 remaining = HUDSHARE_STORE_COOLDOWN - (now - last);
+		if (remaining > 0.0f)
+		{
+			return remaining;
+		}
+	}
+	s_lastShareTime[slot] = now;
+	return 0.0f;
 }
 
 // === Код обмена ==============================================================================
@@ -236,6 +315,21 @@ bool KZ::hudshare::Capture(KZPlayer *from, std::string &out)
 			// Ни значения, ни дефолта — пункт в снимок не попадает, у получателя останется
 			// дефолт (см. шапку файла). Отказ видимый, не молчаливый.
 			KZ_LOG_WARN(LogChannel::Option, "[cyb] hud_share_capture_skipped reason=no_value key=%s steam_id=%llu\n", entry.key,
+						from->GetSteamId64(false));
+			continue;
+		}
+		// Пустое значение писателю и читателю нельзя: ParseSnapshot считает `|ключ=` битым
+		// снимком и отвергает ВЕСЬ снимок (писатель и читатель обязаны сходиться). Единственный
+		// источник пустого — строковый преф, сохранённый как "" (шрифт), поэтому подставляем
+		// дефолт пункта.
+		if (!value[0])
+		{
+			KZ::prefs::ReadDefaultValue(entry, value, sizeof(value));
+		}
+		if (!value[0])
+		{
+			// И дефолта нет — ключ в снимок не попадает, у получателя он встанет дефолтом сам.
+			KZ_LOG_WARN(LogChannel::Option, "[cyb] hud_share_capture_skipped reason=empty key=%s steam_id=%llu\n", entry.key,
 						from->GetSteamId64(false));
 			continue;
 		}
@@ -373,6 +467,14 @@ static_function bool ParseSnapshot(const char *snapshot, u32 &fingerprint, std::
 		SnapshotPair pair;
 		pair.key.assign(cursor, (size_t)(eq - cursor));
 		pair.value.assign(valueStart, (size_t)(valueEnd - valueStart));
+		// Вход НЕДОВЕРЕННЫЙ (сейчас из БД, с соседней задачей — из консоли игрока): тот же
+		// инвариант, что у писателя. Иначе ключ с управляющим символом (например \n) уехал бы
+		// в строку лога и сломал машинный разбор reason=/key=.
+		if (!IsCleanToken(pair.key.c_str()) || !IsCleanToken(pair.value.c_str()))
+		{
+			reason = "token_charset";
+			return false;
+		}
 		pairs.push_back(pair);
 		cursor = valueEnd;
 	}
@@ -557,8 +659,9 @@ KZ::hudshare::ApplyStats KZ::hudshare::Apply(KZPlayer *to, const char *snapshot,
 		}
 	}
 
-	// Слот отката снимается ДО записи и уезжает в БД тем же пакетом. Откат сам себе слота не
-	// пишет: иначе !hudundo превратился бы в переключатель двух состояний.
+	// Слот отката снимается ДО записи и живёт В ПАМЯТИ сессии (обоснование — hud_share.h):
+	// в Players.Preferences ему нельзя, поле общее на все настройки и уже близко к лимиту.
+	// Откат сам себе слота не пишет: иначе !hudundo стал бы переключателем двух состояний.
 	std::string previous;
 	const bool savePrevious = (source != KZ::hudshare::Source::Undo) && KZ::hudshare::Capture(to, previous);
 
@@ -572,6 +675,10 @@ KZ::hudshare::ApplyStats KZ::hudshare::Apply(KZPlayer *to, const char *snapshot,
 		char defaultValue[256];
 		for (size_t k = 0; k < keys.size(); k++)
 		{
+			// Ключ снимка не прошёл валидацию (уже посчитан в invalid) — дефолт ему ставим, но
+			// в defaulted НЕ считаем: одна и та же настройка не должна попасть и в «пропущено»,
+			// и в «сброшено на стандарт» отчёта игроку.
+			bool countAsDefaulted = chosen[k] < 0;
 			if (chosen[k] >= 0)
 			{
 				if (KZ::prefs::ApplyValue(to, keys[k], pairs[(size_t)chosen[k]].value.c_str()))
@@ -581,11 +688,13 @@ KZ::hudshare::ApplyStats KZ::hudshare::Apply(KZPlayer *to, const char *snapshot,
 				}
 				// Валидация прошла, а запись нет — расхождение внутри реестра, а не вина снимка.
 				stats.invalid++;
+				countAsDefaulted = false;
 				KZ_LOG_ERROR(LogChannel::Option, "[cyb] hud_share_key_write_failed reason=apply_value key=%s steam_id=%llu\n", keys[k].key, steamID);
 			}
 			// Ключа в снимке нет (или он не применился) — ставим ДЕФОЛТ пункта, а не оставляем
 			// своё значение: иначе получатель получил бы смесь двух худов (см. шапку файла).
-			if (KZ::prefs::ReadDefaultValue(keys[k], defaultValue, sizeof(defaultValue)) && KZ::prefs::ApplyValue(to, keys[k], defaultValue))
+			if (KZ::prefs::ReadDefaultValue(keys[k], defaultValue, sizeof(defaultValue)) && KZ::prefs::ApplyValue(to, keys[k], defaultValue)
+				&& countAsDefaulted)
 			{
 				stats.defaulted++;
 			}
@@ -593,20 +702,31 @@ KZ::hudshare::ApplyStats KZ::hudshare::Apply(KZPlayer *to, const char *snapshot,
 
 		colorAlphaFixed = NormalizeColorAlpha(to, keys);
 		floored = ApplyVisibilityFloor(to);
+	}
 
-		if (savePrevious)
+	// Слот отката — после пакета: он вне префов, в БД не уезжает, и записывать его надо только
+	// когда применение реально состоялось.
+	if (savePrevious)
+	{
+		if (UndoSlot *undo = GetUndoSlot(to))
 		{
-			opts->SetPreferenceStr(KZ::hudshare::UNDO_PREF_KEY, previous.c_str());
+			undo->steamID = steamID;
+			undo->snapshot = previous;
 		}
-		else if (source == KZ::hudshare::Source::Undo)
+	}
+	else if (source == KZ::hudshare::Source::Undo)
+	{
+		// Слот израсходован: второй !hudundo обязан сказать «нечего откатывать», а не вернуть
+		// худ, который только что откатили. Гасим ТОЛЬКО снимок — кулдаун выдачи кода к откату
+		// отношения не имеет.
+		if (UndoSlot *undo = GetUndoSlot(to))
 		{
-			// Слот израсходован: второй !hudundo обязан сказать «нечего откатывать», а не
-			// вернуть худ, который только что откатили.
-			opts->SetPreferenceStr(KZ::hudshare::UNDO_PREF_KEY, "");
+			*undo = UndoSlot();
 		}
 	}
 
-	stats.floored = floored || colorAlphaFixed > 0;
+	stats.floored = floored;
+	stats.colorAlphaFixed = colorAlphaFixed;
 	stats.ok = true;
 
 	// Интерн-пул сущности custom_hud_layout не освобождает строки (лимит 1024, ~22 строки на
@@ -644,6 +764,10 @@ KZ::hudshare::ApplyStats KZ::hudshare::Apply(KZPlayer *to, const char *snapshot,
 	}
 	if (stats.floored)
 	{
+		// Только реальный пол по видимости. Нормализация нулевой альфы цвета сюда НЕ входит:
+		// альфа в панораме не рисуется вовсе (ResolveColorClass её отбрасывает), и сообщать
+		// игроку «не было видно ни одного элемента» из-за неё значило бы рассказать о том,
+		// чего не было. Она остаётся в логе (alpha_fixed=N).
 		to->languageService->PrintChat(true, false, "HUD Share - Visibility Floor");
 	}
 	if (savePrevious)
@@ -655,12 +779,11 @@ KZ::hudshare::ApplyStats KZ::hudshare::Apply(KZPlayer *to, const char *snapshot,
 
 bool KZ::hudshare::HasUndo(KZPlayer *player)
 {
-	if (!player || !player->optionService || !player->optionService->IsLoaded())
-	{
-		return false;
-	}
-	const char *stored = player->optionService->GetPreferenceStr(KZ::hudshare::UNDO_PREF_KEY, "");
-	return stored && stored[0];
+	const UndoSlot *undo = GetUndoSlot(player);
+	// Владелец обязан совпасть: слот индексируется номером игрового слота, а его переиспользует
+	// следующий игрок (ClearSlotState из KZHUDService::Reset это и делает — проверка держит
+	// инвариант, а не лечит известный случай).
+	return undo && !undo->snapshot.empty() && undo->steamID == player->GetSteamId64(false);
 }
 
 KZ::hudshare::ApplyStats KZ::hudshare::ApplyUndo(KZPlayer *player)
@@ -671,8 +794,8 @@ KZ::hudshare::ApplyStats KZ::hudshare::ApplyUndo(KZPlayer *player)
 		stats.reason = "undo_empty";
 		return stats;
 	}
-	// Копия, а не указатель в prefKV: Apply пишет в те же префы, и строка из-под него могла бы
-	// уехать вместе с реаллокацией таблицы.
-	const std::string stored = player->optionService->GetPreferenceStr(KZ::hudshare::UNDO_PREF_KEY, "");
-	return KZ::hudshare::Apply(player, stored.c_str(), KZ::hudshare::Source::Undo, "slot");
+	// КОПИЯ, а не ссылка в слот: Apply на своём пути гасит слот, и строка из-под нас была бы
+	// очищена прямо во время применения.
+	const std::string stored = GetUndoSlot(player)->snapshot;
+	return KZ::hudshare::Apply(player, stored.c_str(), KZ::hudshare::Source::Undo, "session_slot");
 }

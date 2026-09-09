@@ -32,8 +32,16 @@ void KZDatabaseService::StoreHudShare(u64 ownerSteamID64, const char *code, i32 
 	std::vector<char> query(bufferSize);
 	V_snprintf(query.data(), (int)query.size(), sql_hudshares_insert, cleanCode.c_str(), ownerSteamID64, (u32)schemaVersion, cleanSnapshot.c_str());
 
+	// Квота на владельца — в ТОЙ ЖЕ транзакции и ПОСЛЕ вставки: либо код появился и лишние
+	// вытеснены, либо не произошло ни того ни другого. Обоснование квоты — queries/hudshares.h.
+	const char *pruneQuery =
+		(KZDatabaseService::GetDatabaseType() == KZ::Database::DatabaseType::MySQL) ? mysql_hudshares_prune_owner : sqlite_hudshares_prune_owner;
+	char prune[1024];
+	V_snprintf(prune, sizeof(prune), pruneQuery, ownerSteamID64, ownerSteamID64, hudshares_max_per_owner);
+
 	Transaction txn;
 	txn.queries.push_back(query.data());
+	txn.queries.push_back(prune);
 
 	db->ExecuteTransaction(txn, onSuccess, onFailure);
 }

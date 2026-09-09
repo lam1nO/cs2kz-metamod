@@ -41,6 +41,36 @@ constexpr char sql_hudshares_insert[] = R"(
 	VALUES ('%s', %llu, %u, '%s')
 )";
 
+// Сколько ЖИВЫХ кодов держим на одного владельца. Квота, а не удобство: общий SCMD_COOLDOWN —
+// 0.2 с, то есть бинд на !hudshare давал бы ~5 INSERT/с по ~1.4 КБ в ту же общую базу, где
+// лежат рекорды флота, и единственным тормозом был бы 30-дневный TTL. Восемь — заведомо больше
+// любого живого сценария («дал код другу», «выложил в дискорд»), и при этом верхняя граница на
+// владельца: 8 строк ~12 КБ. Цена: девятый код вытесняет самый старый — код, выданный давно,
+// может перестать работать раньше TTL. Записано в CYBER.md.
+constexpr int hudshares_max_per_owner = 8;
+
+// Вытеснение лишних кодов владельца — В ТОЙ ЖЕ транзакции, ПОСЛЕ вставки (новый код обязан
+// попасть в число сохраняемых). Порядок параметров: OwnerSteamID64, OwnerSteamID64, лимит.
+// MySQL не разрешает ссылаться на изменяемую таблицу в подзапросе напрямую — отсюда обёртка
+// производной таблицей; у SQLite её нет и она не нужна. `Code DESC` как второй ключ сортировки:
+// у MySQL TIMESTAMP гранулярность 1 с, без детерминированного тайбрейкера LIMIT был бы
+// неустойчив на кодах, выданных в одну секунду.
+constexpr char mysql_hudshares_prune_owner[] = R"(
+	DELETE FROM HudShares
+	WHERE OwnerSteamID64 = %llu AND Code NOT IN (
+		SELECT Code FROM (
+			SELECT Code FROM HudShares WHERE OwnerSteamID64 = %llu ORDER BY Created DESC, Code DESC LIMIT %d
+		) AS keep
+	)
+)";
+
+constexpr char sqlite_hudshares_prune_owner[] = R"(
+	DELETE FROM HudShares
+	WHERE OwnerSteamID64 = %llu AND Code NOT IN (
+		SELECT Code FROM HudShares WHERE OwnerSteamID64 = %llu ORDER BY Created DESC, Code DESC LIMIT %d
+	)
+)";
+
 // Чтение по коду. Пустой result set = кода нет или он истёк (истёкшие удаляет чистка ниже).
 constexpr char sql_hudshares_fetch[] = R"(
 	SELECT Snapshot, OwnerSteamID64, SchemaVersion FROM HudShares

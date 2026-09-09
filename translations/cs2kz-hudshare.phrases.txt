@@ -18,6 +18,15 @@
 		"chi"		"{grey}无法保存代码. {default}请重试{grey}."
 		"ua"		"{grey}Не вдалося зберегти код. {default}Спробуй ще раз{grey}."
 	}
+	// Свой кулдаун выдачи кода (не общий SCMD_COOLDOWN): каждая выдача — запись в общую MySQL.
+	"HUD Share - Store Cooldown"
+	{
+		"#format"	"seconds:.1f"
+		"en"		"{grey}Slow down: a new code in {lime}{seconds}{grey} s."
+		"ru"		"{grey}Не так часто: новый код через {lime}{seconds}{grey} с."
+		"chi"		"{grey}太快了: {lime}{seconds}{grey} 秒后可以获取新代码."
+		"ua"		"{grey}Не так часто: новий код через {lime}{seconds}{grey} с."
+	}
 	"HUD Share - Not Ready"
 	{
 		"en"		"{grey}Your settings are not loaded yet. Try again in a couple of seconds."
@@ -110,7 +119,7 @@
 		"en"		"{grey}Not what you wanted? {default}!hudundo{grey} puts it back."
 		"ru"		"{grey}Не понравилось? {default}!hudundo{grey} вернёт как было."
 		"chi"		"{grey}不喜欢? {default}!hudundo{grey} 可以还原."
-		"ua"		"{grey}Не сподобалось? {default}!hudundo{grey} повернe як було."
+		"ua"		"{grey}Не сподобалось? {default}!hudundo{grey} поверне як було."
 	}
 	// Описания для таблиц !help/kz_help. Ключ по умолчанию строит scmd::RegisterCmd
 	// ("Command Description - <имя>", utils/simplecmds.cpp) — без фразы игрок увидел бы
