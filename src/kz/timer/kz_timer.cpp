@@ -2539,6 +2539,8 @@ void KZDatabaseServiceEventListener_Timer::OnMapSetup()
 	// Раз на загрузку карты (OnMapSetup стреляет один раз после успешного SetupMap()) -
 	// TTL-чистка SavedRuns, fire-and-forget (Task 5).
 	KZSavedRunService::PurgeExpired();
+	// Тем же заходом — TTL-чистка снимков обмена настройками худа (HudShares, 30 дней).
+	KZDatabaseService::PurgeExpiredHudShares();
 }
 
 void KZDatabaseServiceEventListener_Timer::OnClientSetup(Player *player, u64 steamID64, bool isBanned)

@@ -171,6 +171,18 @@ public:
 	// (см. KZDatabaseServiceEventListener_Timer::OnMapSetup в kz_timer.cpp). Fire-and-forget.
 	static void PurgeExpiredSavedRuns();
 
+	// Обмен настройками худа (спека 2026-09-09-hud-share-design.md §4): снимок под коротким
+	// кодом в общей MySQL флота. Store — ИМЕННО INSERT, поэтому коллизия кода приходит в
+	// onFailure, а не затирает чужой снимок. Fetch отдаёт "сырой" результат в onSuccess
+	// (queries[0]->GetResultSet(): Snapshot/OwnerSteamID64/SchemaVersion по индексам 0..2, либо
+	// пустой result set — кода нет). Резолв KZPlayer* по userID — за вызывающей стороной:
+	// DB-слой не держит указатель на игрока между вызовом и ответом (см. setup_client.cpp).
+	static void StoreHudShare(u64 ownerSteamID64, const char *code, i32 schemaVersion, const std::string &snapshot,
+							  TransactionSuccessCallbackFunc onSuccess, TransactionFailureCallbackFunc onFailure);
+	static void FetchHudShare(const char *code, TransactionSuccessCallbackFunc onSuccess, TransactionFailureCallbackFunc onFailure);
+	// TTL-чистка снимков старше 30 дней, раз на загрузку карты. Fire-and-forget.
+	static void PurgeExpiredHudShares();
+
 	static void Ban(u64 steamID64, const char *reason = nullptr, f32 duration = 0.0f, const UUID_t banId = UUID_t(false),
 					const UUID_t replayUuid = UUID_t(false), TransactionSuccessCallbackFunc onSuccess = OnGenericTxnSuccess,
 					TransactionFailureCallbackFunc onFailure = OnGenericTxnFailure);

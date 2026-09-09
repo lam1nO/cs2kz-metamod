@@ -1,0 +1,139 @@
+// Обмен настройками худа: !hudshare / !hudget <код> / !hudundo.
+// Код печатается латиницей верхним регистром, из алфавита без похожих символов
+// (нет 0/O, 1/I/L, 5/S) — см. KZ::hudshare::GenerateCode, src/kz/hud/share/hud_share.cpp.
+"Phrases"
+{
+	"HUD Share - Code Created"
+	{
+		"#format"	"code:s"
+		"en"		"{grey}Your HUD code: {lime}{code}{grey}. Anyone typing {lime}!hudget {code}{grey} gets the same HUD."
+		"ru"		"{grey}Код твоего худа: {lime}{code}{grey}. Кто введёт {lime}!hudget {code}{grey} — получит такой же худ."
+		"chi"		"{grey}你的 HUD 代码: {lime}{code}{grey}. 任何人输入 {lime}!hudget {code}{grey} 就能得到同样的 HUD."
+		"ua"		"{grey}Код твого худу: {lime}{code}{grey}. Хто введе {lime}!hudget {code}{grey} — отримає такий самий худ."
+	}
+	"HUD Share - Store Failed"
+	{
+		"en"		"{grey}Could not save the code. {default}Try again{grey}."
+		"ru"		"{grey}Не получилось сохранить код. {default}Попробуй ещё раз{grey}."
+		"chi"		"{grey}无法保存代码. {default}请重试{grey}."
+		"ua"		"{grey}Не вдалося зберегти код. {default}Спробуй ще раз{grey}."
+	}
+	"HUD Share - Not Ready"
+	{
+		"en"		"{grey}Your settings are not loaded yet. Try again in a couple of seconds."
+		"ru"		"{grey}Настройки ещё не загрузились. Попробуй через пару секунд."
+		"chi"		"{grey}你的设置还没加载完. 请过几秒再试."
+		"ua"		"{grey}Налаштування ще не завантажились. Спробуй за кілька секунд."
+	}
+	"HUD Share - Usage Get"
+	{
+		"en"		"{grey}Usage: {default}!hudget <code>{grey}. Get a code with {default}!hudshare{grey}."
+		"ru"		"{grey}Применение: {default}!hudget <код>{grey}. Свой код даёт {default}!hudshare{grey}."
+		"chi"		"{grey}用法: {default}!hudget <代码>{grey}. 用 {default}!hudshare{grey} 获取自己的代码."
+		"ua"		"{grey}Використання: {default}!hudget <код>{grey}. Свій код дає {default}!hudshare{grey}."
+	}
+	"HUD Share - Code Invalid"
+	{
+		"en"		"{grey}That is not a code: a code is {lime}6 characters{grey}. Check you did not mix a letter up with a digit."
+		"ru"		"{grey}Это не код: код — {lime}6 символов{grey}. Проверь, не перепутал ли букву с цифрой."
+		"chi"		"{grey}这不是代码: 代码是 {lime}6 个字符{grey}. 检查一下是不是把字母和数字弄混了."
+		"ua"		"{grey}Це не код: код — {lime}6 символів{grey}. Перевір, чи не сплутав літеру з цифрою."
+	}
+	"HUD Share - Code Not Found"
+	{
+		"en"		"{grey}Code {darkred}not found{grey}: it expired (codes live 30 days) or has a typo."
+		"ru"		"{grey}Код {darkred}не найден{grey}: он истёк (коды живут 30 дней) либо набран с ошибкой."
+		"chi"		"{grey}{darkred}未找到{grey}该代码: 它已过期 (代码保存 30 天) 或者输入有误."
+		"ua"		"{grey}Код {darkred}не знайдено{grey}: він застарів (коди живуть 30 днів) або набраний з помилкою."
+	}
+	"HUD Share - Applied"
+	{
+		"#format"	"applied:d,total:d"
+		"en"		"{grey}HUD applied: {lime}{applied}{grey} of {lime}{total}{grey} settings."
+		"ru"		"{grey}Худ применён: {lime}{applied}{grey} из {lime}{total}{grey} настроек."
+		"chi"		"{grey}HUD 已应用: {lime}{total}{grey} 项设置中的 {lime}{applied}{grey} 项."
+		"ua"		"{grey}Худ застосовано: {lime}{applied}{grey} з {lime}{total}{grey} налаштувань."
+	}
+	"HUD Share - Applied Partial"
+	{
+		"#format"	"applied:d,total:d,skipped:d,defaulted:d"
+		"en"		"{grey}HUD applied: {lime}{applied}{grey} of {lime}{total}{grey}; skipped {darkred}{skipped}{grey}, reset to default {lime}{defaulted}{grey}."
+		"ru"		"{grey}Худ применён: {lime}{applied}{grey} из {lime}{total}{grey}; пропущено {darkred}{skipped}{grey}, сброшено на стандарт {lime}{defaulted}{grey}."
+		"chi"		"{grey}HUD 已应用: {lime}{total}{grey} 项中的 {lime}{applied}{grey} 项; 跳过 {darkred}{skipped}{grey}, 恢复默认 {lime}{defaulted}{grey}."
+		"ua"		"{grey}Худ застосовано: {lime}{applied}{grey} з {lime}{total}{grey}; пропущено {darkred}{skipped}{grey}, скинуто на стандарт {lime}{defaulted}{grey}."
+	}
+	"HUD Share - Schema Drift"
+	{
+		"en"		"{grey}The code is from another HUD version: whatever it did not carry was reset to default."
+		"ru"		"{grey}Код от другой версии худа: чего в нём не было — сброшено на стандартное."
+		"chi"		"{grey}该代码来自其他 HUD 版本: 它没带上的设置已恢复默认."
+		"ua"		"{grey}Код від іншої версії худу: чого в ньому не було — скинуто на стандартне."
+	}
+	"HUD Share - Visibility Floor"
+	{
+		"en"		"{grey}Nothing was visible in that HUD, so the {lime}timer and speed{grey} were turned back on: an empty screen is not a HUD."
+		"ru"		"{grey}В этом худе не видно ни одного элемента — включил {lime}таймер и скорость{grey}: пустой экран это не худ."
+		"chi"		"{grey}那个 HUD 里什么都看不见, 所以重新打开了 {lime}计时器和速度{grey}: 空屏幕不算 HUD."
+		"ua"		"{grey}У цьому худі не видно жодного елемента — увімкнув {lime}таймер і швидкість{grey}: порожній екран це не худ."
+	}
+	"HUD Share - Apply Failed"
+	{
+		"#format"	"reason:s"
+		"en"		"{grey}Could not apply the HUD {darkred}({reason}){grey}. Nothing was changed."
+		"ru"		"{grey}Худ применить не удалось {darkred}({reason}){grey}. Ничего не изменилось."
+		"chi"		"{grey}无法应用该 HUD {darkred}({reason}){grey}. 什么都没有改动."
+		"ua"		"{grey}Худ застосувати не вдалося {darkred}({reason}){grey}. Нічого не змінилось."
+	}
+	"HUD Share - Version Unsupported"
+	{
+		"en"		"{grey}That code is from another plugin version. {default}Ask for a fresh one{grey}."
+		"ru"		"{grey}Этот код от другой версии плагина. {default}Попроси новый{grey}."
+		"chi"		"{grey}该代码来自其他插件版本. {default}请索取新的{grey}."
+		"ua"		"{grey}Цей код від іншої версії плагіна. {default}Попроси новий{grey}."
+	}
+	"HUD Share - Undo Empty"
+	{
+		"en"		"{grey}Nothing to undo: you have not applied anyone's HUD yet."
+		"ru"		"{grey}Откатывать нечего: ты ещё не применял чужой худ."
+		"chi"		"{grey}没有可撤销的内容: 你还没应用过别人的 HUD."
+		"ua"		"{grey}Відкочувати нічого: ти ще не застосовував чужий худ."
+	}
+	"HUD Share - Undone"
+	{
+		"en"		"{grey}HUD is back {lime}the way it was{grey}."
+		"ru"		"{grey}Вернул худ {lime}как было{grey}."
+		"chi"		"{grey}HUD 已恢复{lime}原样{grey}."
+		"ua"		"{grey}Повернув худ {lime}як було{grey}."
+	}
+	"HUD Share - Undo Hint"
+	{
+		"en"		"{grey}Not what you wanted? {default}!hudundo{grey} puts it back."
+		"ru"		"{grey}Не понравилось? {default}!hudundo{grey} вернёт как было."
+		"chi"		"{grey}不喜欢? {default}!hudundo{grey} 可以还原."
+		"ua"		"{grey}Не сподобалось? {default}!hudundo{grey} повернe як було."
+	}
+	// Описания для таблиц !help/kz_help. Ключ по умолчанию строит scmd::RegisterCmd
+	// ("Command Description - <имя>", utils/simplecmds.cpp) — без фразы игрок увидел бы
+	// пустую строку в списке команд.
+	"Command Description - kz_hudshare"
+	{
+		"en"		"Give out a code for your HUD settings."
+		"ru"		"Выдать код своих настроек худа."
+		"chi"		"生成你的 HUD 设置代码."
+		"ua"		"Видати код своїх налаштувань худу."
+	}
+	"Command Description - kz_hudget"
+	{
+		"en"		"Apply HUD settings from a code."
+		"ru"		"Применить настройки худа по коду."
+		"chi"		"通过代码应用 HUD 设置."
+		"ua"		"Застосувати налаштування худу за кодом."
+	}
+	"Command Description - kz_hudundo"
+	{
+		"en"		"Undo the last applied HUD settings."
+		"ru"		"Откатить последнее применение настроек худа."
+		"chi"		"撤销上一次应用的 HUD 设置."
+		"ua"		"Відкотити останнє застосування налаштувань худу."
+	}
+}
