@@ -203,6 +203,51 @@
 		"chi"		"把 HUD 恢复原样, 直到你离开服务器"
 		"ua"		"Повернe худ як було — до виходу з сервера"
 	}
+	// Выгрузка настроек текстом (!hudexport). Печатается в КОНСОЛЬ, поэтому без цветовых тегов.
+	// Формат строк — апстримный (setinfo kzp_<ключ>), его понимают глобальные cs2kz-серверы.
+	"HUD Share - Export Header"
+	{
+		"en"		"----- HUD settings: paste the lines below into another server's console -----"
+		"ru"		"----- Настройки худа: вставь строки ниже в консоль другого сервера -----"
+		"chi"		"----- HUD 设置: 把下面几行粘贴到其他服务器的控制台 -----"
+		"ua"		"----- Налаштування худу: встав рядки нижче в консоль іншого сервера -----"
+	}
+	"HUD Share - Export Workshop Note"
+	{
+		"en"		"On workshop maps the client drops setinfo: paste this from the main menu before joining, or add -disable_workshop_command_filtering to your CS2 launch options."
+		"ru"		"На workshop-картах клиент выбрасывает setinfo: вставляй из главного меню до захода на сервер либо добавь -disable_workshop_command_filtering в параметры запуска CS2."
+		"chi"		"在创意工坊地图上客户端会过滤 setinfo: 请在进入服务器前从主菜单粘贴, 或在 CS2 启动项里加上 -disable_workshop_command_filtering."
+		"ua"		"На мапах з майстерні клієнт відкидає setinfo: вставляй з головного меню до заходу на сервер або додай -disable_workshop_command_filtering у параметри запуску CS2."
+	}
+	"HUD Share - Export Length Note"
+	{
+		"en"		"The console takes about 511 characters per paste, so paste a few lines at a time or put them in a config file."
+		"ru"		"Консоль берёт около 511 символов за одну вставку — вставляй по несколько строк или положи их в конфиг."
+		"chi"		"控制台每次粘贴只接受约 511 个字符, 所以一次粘几行, 或者放进配置文件里."
+		"ua"		"Консоль бере близько 511 символів за одну вставку — вставляй по кілька рядків або поклади їх у конфіг."
+	}
+	"HUD Share - Export Stamp Note"
+	{
+		"en"		"The stamp line applies the block once instead of on every connect. Keep it when moving your own settings; drop it when handing them to someone else."
+		"ru"		"Строка со штампом нужна, чтобы блок применился один раз, а не при каждом заходе. Переносишь свои настройки — оставь её; отдаёшь другому — убери."
+		"chi"		"带时间戳的那一行让这段设置只应用一次, 而不是每次连接都应用. 搬自己的设置就留着, 给别人就删掉."
+		"ua"		"Рядок зі штампом потрібен, щоб блок застосувався один раз, а не при кожному заході. Переносиш свої налаштування — залиш його; віддаєш іншому — прибери."
+	}
+	"HUD Share - Export Footer"
+	{
+		"en"		"----- end. On our own servers the same HUD travels by code: !hudshare / !hudget -----"
+		"ru"		"----- конец. На наших серверах тот же худ переносится кодом: !hudshare / !hudget -----"
+		"chi"		"----- 结束. 在我们自己的服务器上, 同样的 HUD 用代码搬: !hudshare / !hudget -----"
+		"ua"		"----- кінець. На наших серверах той самий худ переноситься кодом: !hudshare / !hudget -----"
+	}
+	"HUD Share - Exported"
+	{
+		"#format"	"count:d"
+		"en"		"{grey}Wrote {lime}{count}{grey} HUD settings to your console: open it and copy the block."
+		"ru"		"{grey}Выгрузил {lime}{count}{grey} настроек худа в консоль: открой её и скопируй блок."
+		"chi"		"{grey}已把 {lime}{count}{grey} 项 HUD 设置写进你的控制台: 打开并复制那段内容."
+		"ua"		"{grey}Вигрузив {lime}{count}{grey} налаштувань худу в консоль: відкрий її та скопіюй блок."
+	}
 	// Описания для таблиц !help/kz_help. Ключ по умолчанию строит scmd::RegisterCmd
 	// ("Command Description - <имя>", utils/simplecmds.cpp) — без фразы игрок увидел бы
 	// пустую строку в списке команд.
@@ -226,6 +271,13 @@
 		"ru"		"Забрать худ игрока, за которым наблюдаешь."
 		"chi"		"拿走你正在观察的玩家的 HUD."
 		"ua"		"Забрати худ гравця, за яким спостерігаєш."
+	}
+	"Command Description - kz_hudexport"
+	{
+		"en"		"Write your HUD settings to console as text."
+		"ru"		"Выгрузить настройки худа текстом в консоль."
+		"chi"		"将你的 HUD 设置以文本写入控制台."
+		"ua"		"Вигрузити налаштування худу текстом у консоль."
 	}
 	"Command Description - kz_hudundo"
 	{

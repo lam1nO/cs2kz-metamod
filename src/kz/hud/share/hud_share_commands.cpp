@@ -18,6 +18,8 @@
 
 #include "vendor/sql_mm/src/public/sql_mm.h"
 
+#include <time.h>
+
 #include "tier1/strtools.h"
 
 #include "tier0/memdbgon.h"
@@ -207,5 +209,90 @@ SCMD(kz_hudundo, SCFL_HUD | SCFL_PREFERENCE)
 	}
 	// Отчёт игроку и лог печатает сам Apply — здесь добавлять нечего.
 	KZ::hudshare::ApplyUndo(player);
+	return MRES_SUPERCEDE;
+}
+
+// === Выгрузка настроек текстом (второй путь обмена, спека §4: «оба пути») ====================
+// Строки `setinfo kzp_<ключ> <значение>;` — ФОРМАТ АПСТРИМА один в один
+// (origin/master:src/kz/option/prefs_transfer.cpp, ExportPrefs + KZ_PREF_CVAR_PREFIX), потому
+// что читает их не наш сервер, а глобальные cs2kz-серверы: у них есть userinfo-импорт, у нас
+// его нет (наш обмен — короткий код через общую MySQL). Отсюда два следствия:
+//   - команда ОДНОСТОРОННЯЯ: выгрузка, вставлять этот блок обратно нам некуда (у себя тот же
+//     худ переносится кодом !hudshare/!hudget);
+//   - строка штампа (kzp__stamp) обязательна и печатается ПЕРВОЙ: без неё импорт на той
+//     стороне не применит блок вовсе (ReadImport требует штамп больше сохранённого).
+// Печать в КОНСОЛЬ, а не в чат: 64 строки в чате — это спам на весь сервер и обрезка по длине.
+SCMD(kz_hudexport, SCFL_HUD | SCFL_PREFERENCE)
+{
+	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
+	if (!player)
+	{
+		return MRES_SUPERCEDE;
+	}
+	const std::vector<KZ::prefs::Entry> &keys = KZ::hudshare::GetKeys();
+	if (keys.empty())
+	{
+		// Тот же отказ, что у остальных путей обмена: пустой список выглядел бы как «выгружено 0».
+		KZ_LOG_WARN(LogChannel::Option, "[cyb] hud_export_failed reason=registry_empty steam_id=%llu\n", player->GetSteamId64(false));
+		player->languageService->PrintChat(true, false, "HUD Share - Not Ready");
+		return MRES_SUPERCEDE;
+	}
+	if (!player->optionService || !player->optionService->IsLoaded())
+	{
+		// Fail-closed, как в Capture: иначе выгрузили бы игроку набор дефолтов под видом его худа.
+		KZ_LOG_WARN(LogChannel::Option, "[cyb] hud_export_failed reason=prefs_not_loaded steam_id=%llu\n", player->GetSteamId64(false));
+		player->languageService->PrintChat(true, false, "HUD Share - Not Ready");
+		return MRES_SUPERCEDE;
+	}
+
+	player->languageService->PrintConsole(false, false, "HUD Share - Export Header");
+	player->languageService->PrintConsole(false, false, "HUD Share - Export Workshop Note");
+	player->languageService->PrintConsole(false, false, "HUD Share - Export Length Note");
+	player->languageService->PrintConsole(false, false, "HUD Share - Export Stamp Note");
+	player->PrintConsole(false, false, "setinfo kzp__stamp %lli;", (long long)time(NULL));
+
+	i32 count = 0;
+	char value[256];
+	for (const KZ::prefs::Entry &entry : keys)
+	{
+		if (!KZ::prefs::ReadValue(player, entry, value, sizeof(value)))
+		{
+			// Ни значения, ни дефолта — в блоке ключа не будет, у той стороны останется своё.
+			KZ_LOG_WARN(LogChannel::Option, "[cyb] hud_export_skipped reason=no_value key=%s steam_id=%llu\n", entry.key,
+						player->GetSteamId64(false));
+			continue;
+		}
+		if (!value[0])
+		{
+			// Пустая строка (шрифт, сохранённый как ""): `setinfo kzp_x ;` на той стороне — мусор.
+			KZ_LOG_WARN(LogChannel::Option, "[cyb] hud_export_skipped reason=empty key=%s steam_id=%llu\n", entry.key, player->GetSteamId64(false));
+			continue;
+		}
+		if (entry.item && entry.item->type == KZOptItemType::Color)
+		{
+			// Одно представление цвета на выход: у игрока, ни разу не применявшего чужой худ,
+			// в префах лежит ЗНАКОВОЕ (белый = -1, см. option/pref_registry.cpp), и вставлять
+			// такое на чужой сервер значило бы зависеть от того, маскирует ли он при чтении.
+			int64 packed = 0;
+			if (V_StringToValue<int64>(value, packed))
+			{
+				V_snprintf(value, sizeof(value), "%llu", (unsigned long long)(u32)packed);
+			}
+		}
+		// Строковые значения (шрифты) — в кавычках, как у апстрима: слаг без пробелов кавычек
+		// не требует, но токеном строка безопаснее, а формат обязан совпадать с читателем.
+		if (entry.storage == KZOptStorage::Str)
+		{
+			player->PrintConsole(false, false, "setinfo kzp_%s \"%s\";", entry.key, value);
+		}
+		else
+		{
+			player->PrintConsole(false, false, "setinfo kzp_%s %s;", entry.key, value);
+		}
+		count++;
+	}
+	player->languageService->PrintConsole(false, false, "HUD Share - Export Footer");
+	player->languageService->PrintChat(true, false, "HUD Share - Exported", count);
+	KZ_LOG_INFO(LogChannel::Option, "[cyb] hud_exported steam_id=%llu keys=%i of=%i\n", player->GetSteamId64(false), count, (i32)keys.size());
 	return MRES_SUPERCEDE;
 }

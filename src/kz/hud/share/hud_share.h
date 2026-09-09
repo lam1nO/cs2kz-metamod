@@ -25,7 +25,7 @@ namespace KZ::hudshare
 		ShareCode = 0, // !hudget <код>
 		SpecTake,      // !hudtake / пункт меню «Забрать худ наблюдаемого»
 		Undo,          // !hudundo
-		Console,       // выгрузка/вставка настроек текстом (соседняя задача)
+		Console,       // резерв под применение снимка из консоли: !hudexport только ВЫГРУЖАЕТ
 	};
 
 	struct ApplyStats
