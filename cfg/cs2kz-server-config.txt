@@ -115,5 +115,6 @@
 	// `kz_awr_backfill <count> [-dry-run]` (which works even with 0 here).
 	"cybAwrBackfillIntervalSec"	"60"
 	// !lead: max route segments in the sliding window per player (network entities).
-	"cybLeadMaxSegments"	"96"
+	// Cost of CheckTransmit grows as segments x receivers - raise only after measuring.
+	"cybLeadMaxSegments"	"64"
 }

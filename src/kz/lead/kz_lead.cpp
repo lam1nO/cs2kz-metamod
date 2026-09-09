@@ -35,6 +35,11 @@
 #define KZ_LEAD_MAX_SEGMENTS_CAP 512
 
 #define KZ_LEAD_PARTICLE "particles/ui/annotation/ui_annotation_line_segment.vpcf"
+// Свой targetname обязателен: по нему снятие отличает НАШИ отрезки от чужих энтити с
+// переиспользованным индексом (хендл может разрешиться в постороннюю сущность). Через
+// classname их не различить — NameMatches сверяет m_name, а не класс. Идиома от
+// KZ::zones::RemoveBoxEdges.
+#define KZ_LEAD_TARGETNAME "cyb_lead_seg"
 
 using namespace KZ::replaysystem;
 
@@ -50,6 +55,7 @@ namespace
 		}
 		CEntityKeyValues *pKeyValues = new CEntityKeyValues();
 		pKeyValues->SetString("effect_name", KZ_LEAD_PARTICLE);
+		pKeyValues->SetString("targetname", KZ_LEAD_TARGETNAME);
 		pKeyValues->SetVector("origin", start);
 		pKeyValues->SetInt("tint_cp", 16);
 		pKeyValues->SetColor("tint_cp_color", color);
@@ -59,6 +65,17 @@ namespace
 		line->m_iTeamNum(CUSTOM_PARTICLE_SYSTEM_TEAM);
 		line->DispatchSpawn(pKeyValues);
 		return line->GetRefEHandle();
+	}
+
+	// Снятие одного отрезка. Хендл сам по себе ничего не гарантирует: индекс энтити
+	// переиспользуется, и без сверки targetname мы могли бы снести чужую сущность.
+	void RemoveLeadSegment(const CEntityHandle &handle)
+	{
+		CEntityInstance *inst = GameEntitySystem() ? GameEntitySystem()->GetEntityInstance(handle) : nullptr;
+		if (inst && inst->m_pEntity && inst->m_pEntity->NameMatches(KZ_LEAD_TARGETNAME))
+		{
+			g_pKZUtils->RemoveEntity(inst);
+		}
 	}
 
 	// Цвет отрезка берётся у НАЧАЛЬНОЙ вершины: отрезок показывает, чем игрок был занят,
@@ -234,10 +251,34 @@ namespace
 
 void KZLeadService::Reset()
 {
-	this->ClearSegments();
+	// Дисконнект и late load: мир жив, сущности обязаны уйти.
+	this->ResetState(false);
+}
+
+void KZLeadService::OnMapChanged()
+{
+	// Граница строго `i < MAXPLAYERS`: ToPlayer(CPlayerSlot) внутри берёт slot.Get() + 1 по
+	// массиву players[MAXPLAYERS + 1]. Подробный разбор границы и второго оверлоада —
+	// в KZ::zones::ResetEditors, откуда взят этот обход.
+	for (i32 i = 0; i < MAXPLAYERS; i++)
+	{
+		KZPlayer *player = g_pKZPlayerManager->ToPlayer(CPlayerSlot(i));
+		if (player && player->leadService)
+		{
+			// keepEntities: мир прошлой карты уже разобран, RemoveEntity по его хендлам
+			// пошёл бы в никуда (или в чужую энтити нового мира).
+			player->leadService->ResetState(true);
+		}
+	}
+}
+
+void KZLeadService::ResetState(bool keepEntities)
+{
+	this->ClearSegments(keepEntities);
 	this->path.clear();
 	this->path.shrink_to_fit();
 	this->enabled = false;
+	this->loading = false;
 	// Незавершённая загрузка протухает: её результат отбросит проверка поколения.
 	this->generation++;
 	this->pending.reset();
@@ -249,13 +290,13 @@ void KZLeadService::Reset()
 	this->modeName[0] = '\0';
 }
 
-void KZLeadService::ClearSegments()
+void KZLeadService::ClearSegments(bool keepEntities)
 {
-	for (const CEntityHandle &handle : this->segments)
+	if (!keepEntities)
 	{
-		if (handle.Get())
+		for (const CEntityHandle &handle : this->segments)
 		{
-			g_pKZUtils->RemoveEntity(handle.Get());
+			RemoveLeadSegment(handle);
 		}
 	}
 	this->segments.clear();
@@ -279,6 +320,12 @@ bool KZLeadService::OwnsParticle(const CEntityHandle &handle) const
 
 void KZLeadService::Disable(const char *reason)
 {
+	if (!this->enabled && !this->loading && !this->pending)
+	{
+		// `!lead off` при выключенном луче: «выключен» было бы неправдой.
+		this->player->languageService->PrintChat(true, false, "Lead - Not Enabled");
+		return;
+	}
 	KZ_LOG_DEBUG(LogChannel::Replays, "[lead] disable reason=%s steam_id=%llu\n", reason, this->player->GetSteamId64());
 	this->Reset();
 	// Все пути Disable — от игрока (!lead off, повторный !lead, смена режима), поэтому
@@ -293,13 +340,15 @@ void KZLeadService::Toggle(CybReplayDownload::Kind kind)
 		this->Disable("toggle");
 		return;
 	}
-	if (this->pending)
+	if (this->loading || this->pending)
 	{
-		// Загрузка уже идёт — второй запрос ничего не ускорит.
+		// Загрузка уже идёт (сеть или разбор) — второй запрос ничего не ускорит, но завёл бы
+		// ещё один резолв, ещё одну докачку и ещё один поток.
 		this->player->languageService->PrintChat(true, false, "Lead - Loading");
 		return;
 	}
 
+	this->loading = true;
 	const u32 gen = ++this->generation;
 	this->player->languageService->PrintChat(true, false, "Lead - Loading");
 	CybReplayDownload::RequestFile(this->player, kind, this->player->GetSteamId64(),
@@ -318,15 +367,20 @@ void KZLeadService::OnFileReady(u32 gen, std::vector<char> &&bytes)
 {
 	if (gen != this->generation)
 	{
-		return; // луч успели выключить и/или запросить заново
+		// Луч успели выключить и/или запросить заново: флаг loading принадлежит уже НЕ
+		// этому запросу, снимать его нельзя.
+		return;
 	}
 	if (bytes.empty())
 	{
+		this->loading = false;
 		this->player->languageService->PrintChat(true, false, "Lead - No Replay");
 		return;
 	}
 	this->pending = std::make_shared<PendingLoad>();
 	this->pending->generation = gen;
+	// Дальше гейтом служит сам pending — сетевая фаза кончилась.
+	this->loading = false;
 	std::thread(BuildPathWorker, std::move(bytes), this->pending).detach();
 }
 
@@ -359,7 +413,7 @@ void KZLeadService::PollPending()
 		this->player->languageService->PrintChat(true, false, "Lead - No Replay");
 		return;
 	}
-	if (cutWarn)
+	if (cutWarn && cutWarn[0])
 	{
 		KZ_LOG_WARN(LogChannel::Replays, "[lead] lead_load_failed reason=cut_failed detail=%s steam_id=%llu\n", cutWarn,
 					this->player->GetSteamId64());
@@ -369,7 +423,7 @@ void KZLeadService::PollPending()
 
 void KZLeadService::OnPathLoaded(std::vector<Vertex> &&newPath)
 {
-	this->ClearSegments();
+	this->ClearSegments(false);
 	this->path = std::move(newPath);
 	this->enabled = true;
 	this->resync = true;
@@ -482,7 +536,7 @@ void KZLeadService::UpdateWindow()
 		to++;
 	}
 
-	i64 configured = KZOptionService::GetOptionInt("cybLeadMaxSegments", 96);
+	i64 configured = KZOptionService::GetOptionInt("cybLeadMaxSegments", 64);
 	if (configured < 1)
 	{
 		configured = 1;
@@ -494,8 +548,14 @@ void KZLeadService::UpdateWindow()
 	const u32 maxSegments = (u32)configured;
 	if (to - from > maxSegments)
 	{
-		// Режем спереди: пройденный хвост нужен только чтобы понять, где игрок, а
-		// подсказка — впереди.
+		// Потолок отрезков. Окно ОБЯЗАНО включать ближайшую вершину — иначе луч оторвался
+		// бы от игрока и подсказка потеряла бы смысл. Поэтому сначала обеспечиваем место
+		// для хвоста позади (плотная петля пути может дать больше maxSegments вершин на
+		// одну секунду), и только потом режем дальний передний конец.
+		if (this->nearest - from > maxSegments)
+		{
+			from = this->nearest - maxSegments;
+		}
 		to = from + maxSegments;
 	}
 
@@ -520,7 +580,7 @@ void KZLeadService::ApplyWindow(u32 newFrom, u32 newTo)
 	const bool overlap = aligned && !this->segments.empty() && newFrom >= this->windowFrom && newFrom < this->windowTo;
 	if (!overlap)
 	{
-		this->ClearSegments();
+		this->ClearSegments(false);
 	}
 	else
 	{
@@ -529,19 +589,13 @@ void KZLeadService::ApplyWindow(u32 newFrom, u32 newTo)
 		{
 			for (u32 i = 0; i < drop && i < this->segments.size(); i++)
 			{
-				if (this->segments[i].Get())
-				{
-					g_pKZUtils->RemoveEntity(this->segments[i].Get());
-				}
+				RemoveLeadSegment(this->segments[i]);
 			}
 			this->segments.erase(this->segments.begin(), this->segments.begin() + (std::min)((size_t)drop, this->segments.size()));
 		}
 		while (this->segments.size() > want)
 		{
-			if (this->segments.back().Get())
-			{
-				g_pKZUtils->RemoveEntity(this->segments.back().Get());
-			}
+			RemoveLeadSegment(this->segments.back());
 			this->segments.pop_back();
 		}
 	}
@@ -558,7 +612,7 @@ void KZLeadService::ApplyWindow(u32 newFrom, u32 newTo)
 	this->RebuildOwnedIndex();
 }
 
-SCMD(kz_lead, SCFL_REPLAY)
+SCMD(kz_lead, SCFL_REPLAY | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player)

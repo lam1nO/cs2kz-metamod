@@ -55,6 +55,14 @@ public:
 
 	virtual void Reset() override;
 
+	// Смена карты. НЕ Reset: на выделенном сервере KZPlayer::Reset зовётся только с
+	// дисконнекта (player_manager.cpp) и с late load (cs2kz.cpp), а Hook_StartupServer
+	// игроков не сбрасывает — то же ограничение задокументировано у weapon/hud/zones.
+	// Без этого после changelevel остался бы включённый луч с маршрутом ЧУЖОЙ карты, а
+	// снятие пошло бы RemoveEntity по хендлам уже мёртвого мира. Сущности здесь не
+	// удаляются: мира, которому они принадлежали, больше нет.
+	static void OnMapChanged();
+
 	// `!lead` / `!lead pb|wr|awr`: включить, если выключен, иначе выключить.
 	void Toggle(CybReplayDownload::Kind kind);
 	// `!lead off`, смена карты/режима, дисконнект, телепорт-петля данных.
@@ -80,11 +88,12 @@ public:
 	}
 
 private:
+	void ResetState(bool keepEntities);
 	void PollPending();
 	void UpdateWindow();
 	void UpdateNearest(const Vector &origin);
 	void ApplyWindow(u32 newFrom, u32 newTo);
-	void ClearSegments();
+	void ClearSegments(bool keepEntities);
 	void RebuildOwnedIndex();
 
 	std::vector<Vertex> path;
@@ -98,6 +107,10 @@ private:
 	u32 nearest = 0;
 	bool resync = true;
 	bool enabled = false;
+	// Сетевая фаза: резолв/докачка уже идут, пути ещё нет. Без этого гейта каждый
+	// повторный !lead в окне между Toggle и колбэком заводил бы новый резолв, новую
+	// докачку и новый поток разбора.
+	bool loading = false;
 	u32 ticksSinceUpdate = 0;
 	std::shared_ptr<PendingLoad> pending;
 	u32 generation = 0;

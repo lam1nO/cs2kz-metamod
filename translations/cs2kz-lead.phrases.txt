@@ -1,5 +1,12 @@
 "Phrases"
 {
+	// Описание для !help: ключ по умолчанию "Command Description - <имя команды>"
+	// (simplecmds.cpp:343). Без него строка в !help осталась бы пустой.
+	"Command Description - kz_lead"
+	{
+		"en"		"{grey}Show the route lead (!lead off to hide)"
+		"ru"		"{grey}Показать луч маршрута (!lead off — убрать)"
+	}
 	"Lead - Enabled"
 	{
 		"#format"	"points:d"
@@ -10,6 +17,11 @@
 	{
 		"en"		"{grey}Route lead is off."
 		"ru"		"{grey}Луч маршрута выключен."
+	}
+	"Lead - Not Enabled"
+	{
+		"en"		"{grey}Route lead is not on. {default}!lead {grey}turns it on."
+		"ru"		"{grey}Луч маршрута не включён. {default}!lead {grey}— включить."
 	}
 	"Lead - No Replay"
 	{
