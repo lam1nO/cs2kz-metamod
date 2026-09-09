@@ -96,7 +96,9 @@ static_function void OutlineOnActivate(KZPlayer *player, i64 tag)
 // зовёт RefreshLayoutPrefs сразу после onActivate кнопки. В General своей кнопки «сбросить
 // страницу» нет: там лежит общий Reset All (ниже), а HudType не сбрасывается вовсе — у его
 // Choice-пункта нет префа, и ResetNode такие пункты пропускает.
-static_global KZOptNode *s_resettableNodes[(i32)LayoutElement::Count + 1] {};
+// Слоты: пять элементов, прицел (Count), меню реплея (Count + 1) — см. RPMENU_RESET_SLOT ниже.
+static_global KZOptNode *s_resettableNodes[(i32)LayoutElement::Count + 2] {};
+static constexpr i32 RPMENU_RESET_SLOT = (i32)LayoutElement::Count + 1;
 
 // Сброс — тоже откатываемое действие (спека обмена §4), поэтому перед ResetNode снимаем слот
 // отката тем же и единственным способом, что и применение чужого худа
@@ -133,7 +135,7 @@ static_function void AddResetButton(KZOptNode *node, i32 slot)
 // Живёт в General, а не на родительской категории «Худ»: у категории с подкатегориями своих
 // пунктов не бывает вовсе (ActiveMenuNode, layout/menu.cpp — родитель возвращает NULL, пока не
 // выбрана подкатегория), так что пункт на ней был бы недостижим для игрока.
-// Сбрасывает страницы всех пяти элементов + прицел (s_resettableNodes) и саму General.
+// Сбрасывает страницы всех пяти элементов + прицел + меню реплея (s_resettableNodes) и саму General.
 // HudType при этом НЕ сбрасывается: его Choice-пункт зарегистрирован без prefKey, а ResetNode
 // пункты без префа пропускает — иначе «сбросить оформление» могло бы выключить игроку худ.
 static_global KZOptNode *s_hudGeneralNode {};
@@ -305,6 +307,20 @@ void KZHUDService::InitMenuPrefs()
 	KZ::menu::SetItemUnit(crosshair, "%");
 	KZ::menu::SetItemPref(crosshair, "mhudCrosshairScale", KZOptStorage::Int, 100);
 	AddResetButton(crosshair, (i32)LayoutElement::Count);
+
+	// Меню реплея спектатора (layout/rpmenu.cpp) — своя страница: позиция/размер/шрифт списка и
+	// шаг строк. Ключи читает layout/prefs.cpp:RefreshLayoutPrefs (rpmenu*), дефолты — RPMENU_DEF_*
+	// (layout/layout.h). Чистые префы без кэша-колбэков — кнопка сброса страницы допустима, и
+	// «Сбросить всё» её тоже накрывает (s_resettableNodes).
+	KZOptNode *rpmenu = KZ::menu::AddSub(hud, "HUD - Menu Cat ReplayMenu");
+	KZ::menu::AddPosition(rpmenu, "HUD - Menu Label Position", "rpmenuX", "rpmenuY", RPMENU_DEF_X, RPMENU_DEF_Y);
+	KZ::menu::AddSize(rpmenu, "HUD - Menu Label Size", "rpmenuSize", RPMENU_DEF_SIZE, LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX);
+	KZ::menu::AddFont(rpmenu, "HUD - Menu Label Font", "rpmenuFont", RPMENU_DEF_FONT);
+	// Шаг строк в процентах экрана (как позиция), хранится Float, как размер — читается
+	// GetPreferenceFloat в RefreshLayoutPrefs.
+	KZ::menu::AddSize(rpmenu, "HUD - Menu Label LineStep", "rpmenuStep", RPMENU_DEF_STEP, RPMENU_STEP_MIN, RPMENU_STEP_MAX);
+	KZ::menu::SetItemUnit(rpmenu, "%");
+	AddResetButton(rpmenu, RPMENU_RESET_SLOT);
 
 	// Обмен худом — СВОЯ подкатегория, а не пункты в General. Довод: в General лежит «сбросить
 	// все настройки худа», и действия обмена рядом с ней читались бы как часть сброса, а

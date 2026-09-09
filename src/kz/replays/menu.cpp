@@ -197,19 +197,25 @@ void KZ::replaysystem::menu::ApplyReplayMenuInput(KZPlayer *player, ReplayMenuLi
 
 	switch (line)
 	{
-		case ReplayMenuLine::PauseStep:
+		case ReplayMenuLine::Pause:
 			if (select)
 			{
 				commands::ToggleReplayPause(player);
 			}
-			else
-			{
-				// Как A/D по строке паузы в cs2menus: шаг на тик, без чата на каждый шаг
-				// (автоповтор на удержании).
-				commands::StepReplay(player, dir, false);
-			}
+			break;
+		case ReplayMenuLine::Step:
+			// Шаг на тик без чата на каждый шаг (автоповтор на удержании); E — шаг вперёд.
+			commands::StepReplay(player, select ? 1 : dir, false);
 			break;
 		case ReplayMenuLine::Seek:
+			if (!select)
+			{
+				char seek[16];
+				V_snprintf(seek, sizeof(seek), "%+d", dir * (int)RPMENU_SEEK_STEP_10);
+				commands::JumpToReplayTime(player, seek);
+			}
+			break;
+		case ReplayMenuLine::Restart:
 			if (select)
 			{
 				// «С начала»: снять паузу (иначе «заново» не начнётся) и перемотать на 0.
@@ -218,12 +224,6 @@ void KZ::replaysystem::menu::ApplyReplayMenuInput(KZPlayer *player, ReplayMenuLi
 					data::GetCurrentReplay()->replayPaused = false;
 				}
 				commands::JumpToReplayTime(player, "0");
-			}
-			else
-			{
-				char seek[16];
-				V_snprintf(seek, sizeof(seek), "%+d", dir * (int)RPMENU_SEEK_STEP_10);
-				commands::JumpToReplayTime(player, seek);
 			}
 			break;
 		case ReplayMenuLine::Speed:
@@ -255,13 +255,17 @@ std::string KZ::replaysystem::menu::GetReplayMenuLineText(KZPlayer *player, Repl
 	const char *lang = player->languageService->GetLanguage();
 	switch (line)
 	{
-		case ReplayMenuLine::PauseStep:
+		case ReplayMenuLine::Pause:
 		{
 			bool paused = data::IsReplayPlaying() && data::GetCurrentReplay()->replayPaused;
 			return KZLanguageService::PrepareMessageWithLang(lang, paused ? "Replay Panel - Resume" : "Replay Panel - Pause");
 		}
+		case ReplayMenuLine::Step:
+			return KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Step");
 		case ReplayMenuLine::Seek:
 			return KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Seek", (int)RPMENU_SEEK_STEP_10);
+		case ReplayMenuLine::Restart:
+			return KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Restart");
 		case ReplayMenuLine::Speed:
 		{
 			char speedText[16];
@@ -273,6 +277,11 @@ std::string KZ::replaysystem::menu::GetReplayMenuLineText(KZPlayer *player, Repl
 		default:
 			return "";
 	}
+}
+
+std::string KZ::replaysystem::menu::GetReplayMenuHintText(KZPlayer *player)
+{
+	return KZLanguageService::PrepareMessageWithLang(player->languageService->GetLanguage(), "Replay Panel - Hint");
 }
 
 // === Точка входа: выбор бэкенда =============================================================

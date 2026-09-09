@@ -134,6 +134,14 @@ void KZHUDService::RefreshLayoutPrefs()
 	this->layoutPrefs.crosshair = opts->GetPreferenceBool("mhudCrosshair", true);
 	this->layoutPrefs.crosshairScale = panorama::SnapToStep((i32)opts->GetPreferenceInt("mhudCrosshairScale", 100), 0, 500);
 
+	// Меню реплея спектатора (layout/rpmenu.cpp) — та же сетка, что у элементов худа.
+	this->layoutPrefs.replayMenu.x = panorama::SnapToStep((i32)opts->GetPreferenceFloat("rpmenuX", (f32)RPMENU_DEF_X), -100, 100);
+	this->layoutPrefs.replayMenu.y = panorama::SnapToStep((i32)opts->GetPreferenceFloat("rpmenuY", (f32)RPMENU_DEF_Y), -100, 100);
+	this->layoutPrefs.replayMenu.size =
+		panorama::SnapToStep((i32)opts->GetPreferenceFloat("rpmenuSize", (f32)RPMENU_DEF_SIZE), LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX);
+	this->layoutPrefs.replayMenu.step = Clamp((i32)opts->GetPreferenceFloat("rpmenuStep", (f32)RPMENU_DEF_STEP), RPMENU_STEP_MIN, RPMENU_STEP_MAX);
+	this->layoutPrefs.replayMenu.fontClass = panorama::ResolveFontClass(opts->GetPreferenceStr("rpmenuFont", RPMENU_DEF_FONT), RPMENU_DEF_FONT);
+
 	// Последней строкой: набор целиком заполнен, мимикрия (GetLayoutPrefs) может его брать.
 	// Аналог апстримного `prefsDirty = false` в конце RefreshPrefs.
 	this->layoutPrefs.loaded = true;

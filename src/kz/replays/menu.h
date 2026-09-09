@@ -45,14 +45,24 @@ namespace KZ::replaysystem::menu
 	void CancelReplayControlsMenuCs2menus(KZPlayer *player);
 
 	// Пункты меню реплея — общий словарь обоих бэкендов. Порядок = порядок строк panorama-меню.
+	// Бинды в подписях пунктов НЕ пишутся (решение пользователя 09.09) — их показывает одна
+	// строка подсказки под списком (GetReplayMenuHintText); регулируемые строки обрамляются
+	// «< >» в рендере (IsReplayMenuLineAdjustable).
 	enum class ReplayMenuLine
 	{
-		PauseStep, // E — пауза/продолжить, A/D — шаг на тик записи (шаг сам ставит паузу)
-		Seek,      // A/D — перемотка ±RPMENU_SEEK_STEP_10 сек (menu.cpp), E — с начала
-		Speed,     // A/D — пресет скорости, E — сброс на 1x
-		End,       // E — остановить плейбек и убрать бота
+		Pause,   // E — пауза/продолжить
+		Step,    // A/D — шаг на тик записи назад/вперёд (шаг сам ставит паузу), E — шаг вперёд
+		Seek,    // A/D — перемотка ±RPMENU_SEEK_STEP_10 сек (menu.cpp)
+		Restart, // E — с начала
+		Speed,   // A/D — пресет скорости, E — сброс на 1x
+		End,     // E — остановить плейбек и убрать бота
 		Count
 	};
+
+	inline bool IsReplayMenuLineAdjustable(ReplayMenuLine line)
+	{
+		return line == ReplayMenuLine::Step || line == ReplayMenuLine::Seek || line == ReplayMenuLine::Speed;
+	}
 
 	enum class ReplayMenuInput
 	{
@@ -66,9 +76,11 @@ namespace KZ::replaysystem::menu
 	// (пауза/продолжить объявляются, шаг и скорость — нет: значение видно в строке).
 	void ApplyReplayMenuInput(KZPlayer *player, ReplayMenuLine line, ReplayMenuInput input);
 
-	// Текст строки panorama-меню на языке игрока, с живыми значениями (пауза/скорость) и
-	// подсказками клавиш. Без маркера выбора — его ставит рендер.
+	// Текст строки panorama-меню на языке игрока, с живыми значениями (пауза/скорость), без
+	// биндов и без обрамления — их добавляет рендер.
 	std::string GetReplayMenuLineText(KZPlayer *player, ReplayMenuLine line);
+	// Строка подсказки биндов под списком.
+	std::string GetReplayMenuHintText(KZPlayer *player);
 
 	// Открыто ли у слота ИМЕННО !rpmenu (а не любое другое cs2menus-меню). Сравнение по
 	// ХЭНДЛУ созданного нами меню — заголовок для этого не годится: он переводится и

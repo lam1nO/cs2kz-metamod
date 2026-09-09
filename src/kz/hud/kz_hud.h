@@ -173,6 +173,20 @@ struct MHUDLayoutPrefs
 	// на первом чтении; у нас кэш наполняется событием OnPlayerPreferencesLoaded.
 	bool loaded {};
 
+	// Меню реплея спектатора (layout/rpmenu.cpp): геометрия и шрифт списка — префы rpmenu*
+	// (пункт «Меню реплея» в настройках). Читаются ТОЛЬКО из своего набора (GetOwnLayoutPrefs):
+	// мимикрировать чужое меню смысла нет.
+	struct ReplayMenu
+	{
+		i32 x {};
+		i32 y {};
+		i32 size {};
+		i32 step {}; // вертикальный шаг строк, проценты
+		const char *fontClass {};
+	};
+
+	ReplayMenu replayMenu {};
+
 	// Крестик (Task 10) — независим от элементов худа выше, но живёт в той же структуре
 	// префов: ключи те же, что читает RefreshLayoutPrefs.
 	bool crosshair {};
@@ -594,6 +608,8 @@ public:
 	// Ввод — W/S по строкам, E выбор, A/D регулировка — читается с наблюдательской пешки
 	// без курсорного захвата (в отличие от меню настроек), поэтому cs2menus-меню поверх
 	// открывать нельзя: клавиши уйдут в оба.
+	// Копий страницы худа под меню: 4 лейбла на копию, пунктов с подсказкой 7 — поэтому две.
+	static constexpr i32 RPMENU_ENTITIES = 2;
 	// Доступно, когда есть аддон и игрок СЕЙЧАС наблюдает реплей-бота с идущим плейбеком.
 	bool CanOpenReplayMenu();
 	// Почему недоступно: NULL — доступно; иначе машинный reason для лога/выбора фолбэка
@@ -771,8 +787,8 @@ private:
 	void ApplyKeysSizing(CCSCustomHudLayout *layout, LayoutKeysState &state, i32 size, const char *fontClass);
 
 	// === Меню реплея (layout/rpmenu.cpp) — состояние ==================================
-	// Сущность меню реплея ЭТОГО игрока (см. OpenReplayMenu); гасится вместе с остальными.
-	CHandle<CBaseEntity> ownedReplayLayout {};
+	// Сущности меню реплея ЭТОГО игрока (см. OpenReplayMenu); гасятся вместе с остальными.
+	CHandle<CBaseEntity> ownedReplayLayouts[RPMENU_ENTITIES] {};
 	bool replayMenuOpen {};
 	bool replayMenuPending {};     // см. RequestReplayMenu
 	i32 replayMenuPendingTicks {}; // сколько тиков запрос уже ждёт спектейта бота
@@ -780,15 +796,13 @@ private:
 	u64 replayMenuHeld {};       // маска удержанных кнопок прошлого тика — фронт нажатия свой,
 								 // а не IsButtonNewlyPressed: тот живёт внутри обработки usercmd
 	i32 replayMenuHoldTicks {};  // тики удержания A/D — автоповтор регулировки, как в cs2menus
-	// Диф-кэш строк (4 лейбла разметки) и блока клавиш — живёт ТОЛЬКО с сущностью.
-	LayoutElementState replayLines[(i32)LayoutElement::Count] {};
-	LayoutKeysState replayKeys {};
-	// Статические классы блока клавиш (hide-idle/keys-letters) выставлены на текущей сущности.
-	bool replayKeysStyled {};
+	// Диф-кэш лейблов каждой сущности — живёт ТОЛЬКО с сущностью.
+	LayoutElementState replayLines[RPMENU_ENTITIES][(i32)LayoutElement::Count] {};
 
-	CCSCustomHudLayout *EnsureReplayLayout(bool &created);
+	CCSCustomHudLayout *EnsureReplayLayout(i32 index, bool &created);
 	void ReadReplayMenuInput();
-	void RenderReplayMenu(CCSCustomHudLayout *layout, bool force);
+	// force — по индексу сущности: пересозданная копия требует полной перезаписи классов.
+	void RenderReplayMenu(CCSCustomHudLayout *(&layouts)[RPMENU_ENTITIES], const bool (&force)[RPMENU_ENTITIES]);
 
 	// Кэш класс-суффиксов крестика (Task 10) — та же ловушка, что у layoutElements[]/
 	// layoutKeys: живёт ТОЛЬКО вместе с сущностью, обнулять в DestroyOwnedLayout, иначе

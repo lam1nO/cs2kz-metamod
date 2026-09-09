@@ -27,6 +27,17 @@
 #define LAYOUT_SIZE_MIN 8
 #define LAYOUT_SIZE_MAX 100
 
+// Меню реплея спектатора (layout/rpmenu.cpp): дефолты префов rpmenuX/Y/Size/Step/Font —
+// пункт «Меню реплея» в настройках (hud/prefs/hud_prefs.cpp). X/Y — проценты от центра,
+// size — пиксели, step — шаг строк в процентах. Значения подбирает пользователь на канарейке.
+#define RPMENU_DEF_X    -42
+#define RPMENU_DEF_Y    -8
+#define RPMENU_DEF_SIZE 18
+#define RPMENU_DEF_STEP 3
+#define RPMENU_DEF_FONT "stratum2-mono"
+#define RPMENU_STEP_MIN 1
+#define RPMENU_STEP_MAX 12
+
 // Дефолт синхронизирован с текущими настройками игрока (задача hud-defaults): было
 // stratum2-bold-monodigit, стало lato-bold (слаг panorama_tables.cpp, "Lato Bold*").
 #define LAYOUT_DEFAULT_FONT "lato-bold"

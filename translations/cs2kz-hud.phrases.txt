@@ -362,6 +362,20 @@
 		"chi"		"起跳前速度"
 		"ua"		"Передшвидкість"
 	}
+	"HUD - Menu Cat ReplayMenu"
+	{
+		"en"		"Replay menu"
+		"ru"		"Меню реплея"
+		"chi"		"回放菜单"
+		"ua"		"Меню реплею"
+	}
+	"HUD - Menu Label LineStep"
+	{
+		"en"		"Line spacing"
+		"ru"		"Интервал строк"
+		"chi"		"行距"
+		"ua"		"Інтервал рядків"
+	}
 	"HUD - Menu Cat Keys"
 	{
 		"en"		"Keys"

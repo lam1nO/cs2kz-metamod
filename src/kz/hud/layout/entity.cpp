@@ -323,11 +323,21 @@ void KZHUDService::LayoutCleanup()
 
 bool KZHUDService::OwnsLayoutEntity(CEntityHandle handle)
 {
-	// Своих сущностей ТРИ: сам худ (ownedLayout), отдельное меню настроек (ownedMenuLayout,
-	// Task 11) и меню реплея спектатора (ownedReplayLayout, layout/rpmenu.cpp) — транзит
+	// Своих сущностей несколько: сам худ (ownedLayout), отдельное меню настроек (ownedMenuLayout,
+	// Task 11) и две копии под меню реплея спектатора (ownedReplayLayouts, layout/rpmenu.cpp) — транзит
 	// (KZ::quiet) гасит всё, чего нет в этом списке, и без проверки каждой сущность игроку не
 	// долетала бы вовсе (пустые/невалидные хэндлы по-прежнему false).
-	return (this->ownedLayout.IsValid() && this->ownedLayout.ToInt() == handle.ToInt())
-		   || (this->ownedMenuLayout.IsValid() && this->ownedMenuLayout.ToInt() == handle.ToInt())
-		   || (this->ownedReplayLayout.IsValid() && this->ownedReplayLayout.ToInt() == handle.ToInt());
+	if ((this->ownedLayout.IsValid() && this->ownedLayout.ToInt() == handle.ToInt())
+		|| (this->ownedMenuLayout.IsValid() && this->ownedMenuLayout.ToInt() == handle.ToInt()))
+	{
+		return true;
+	}
+	for (const CHandle<CBaseEntity> &h : this->ownedReplayLayouts)
+	{
+		if (h.IsValid() && h.ToInt() == handle.ToInt())
+		{
+			return true;
+		}
+	}
+	return false;
 }

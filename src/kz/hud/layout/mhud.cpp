@@ -283,7 +283,7 @@ void KZHUDService::UpdateKeysElement(CCSCustomHudLayout *layout, KZPlayer *sourc
 // Кегль блока клавиш — на контейнер (масштаб кнопок, key-size--N) и на каждую кнопку отдельно
 // (масштаб глифа, font-size--Npx): в panorama font-size не наследуется детьми через класс
 // родителя, апстрим тоже дублирует явно. Шрифт-класс — на глифы (см. KEY_GLYPHS). state —
-// диф-кэш ТОЙ сущности, на которую пишем (layoutKeys у худа, replayKeys у меню реплея).
+// диф-кэш ТОЙ сущности, на которую пишем (layoutKeys у худа).
 void KZHUDService::ApplyKeysSizing(CCSCustomHudLayout *layout, LayoutKeysState &state, i32 size, const char *fontClass)
 {
 	const char *const keysPanel = LAYOUT_ELEMENTS[(i32)LayoutElement::Keys].panelId;
