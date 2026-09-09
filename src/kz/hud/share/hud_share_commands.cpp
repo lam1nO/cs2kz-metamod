@@ -1,5 +1,5 @@
 // Чат-команды обмена настройками худа: !hudshare (выдать код), !hudget <код> (применить),
-// !hudundo (откатить последнее применение). Регистрация — тем же путём, что соседние команды
+// !hudtake (забрать худ наблюдаемого), !hudundo (откатить последнее применение). Регистрация — тем же путём, что соседние команды
 // худа (SCMD, utils/simplecmds.h): консольное имя kz_*, чат-триггер ! получается сам.
 // Ядро (снимок/валидация/применение/предохранители) — hud_share.cpp; здесь только транспорт.
 //
@@ -168,6 +168,21 @@ SCMD(kz_hudget, SCFL_HUD | SCFL_PREFERENCE)
 			pl->languageService->PrintChat(true, false, "HUD Share - Not Ready");
 		});
 
+	return MRES_SUPERCEDE;
+}
+
+// Забрать худ наблюдаемого. Транспорта у команды нет вовсе (ни БД, ни кода): снимок снимается
+// с цели спектейта в этом же процессе, поэтому и кулдауна своего ей не нужно — хватает общего
+// SCMD_COOLDOWN. Вся логика и все отказы — в KZ::hudshare::TakeFromSpectated (ядро), потому что
+// у неё два вызывающих: эта команда и пункт меню (hud/prefs/hud_prefs.cpp).
+SCMD(kz_hudtake, SCFL_HUD | SCFL_PREFERENCE)
+{
+	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
+	if (!player)
+	{
+		return MRES_SUPERCEDE;
+	}
+	KZ::hudshare::TakeFromSpectated(player);
 	return MRES_SUPERCEDE;
 }
 

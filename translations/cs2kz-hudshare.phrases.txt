@@ -1,4 +1,4 @@
-// Обмен настройками худа: !hudshare / !hudget <код> / !hudundo.
+// Обмен настройками худа: !hudshare / !hudget <код> / !hudtake / !hudundo / !hudexport.
 // Код печатается латиницей верхним регистром, из алфавита без похожих символов
 // (нет 0/O, 1/I/L, 5/S) — см. KZ::hudshare::GenerateCode, src/kz/hud/share/hud_share.cpp.
 "Phrases"
@@ -121,6 +121,37 @@
 		"chi"		"{grey}不喜欢? {default}!hudundo{grey} 可以还原."
 		"ua"		"{grey}Не сподобалось? {default}!hudundo{grey} поверне як було."
 	}
+	// Забор худа наблюдаемого (!hudtake и одноимённый пункт меню).
+	"HUD Share - Not Spectating"
+	{
+		"en"		"{grey}You are not spectating anyone: {default}die or go to spectators{grey} and look at someone first."
+		"ru"		"{grey}Ты ни за кем не наблюдаешь: {default}зайди в спектейт{grey} и посмотри за игроком."
+		"chi"		"{grey}你没有在观察任何人: 先{default}进入观察者{grey}并看着某个玩家."
+		"ua"		"{grey}Ти ні за ким не спостерігаєш: {default}зайди у спектейт{grey} і подивись за гравцем."
+	}
+	"HUD Share - Take Bot"
+	{
+		"en"		"{grey}That is a bot: it has {darkred}no settings{grey} to take."
+		"ru"		"{grey}Это бот: у него {darkred}нет настроек{grey}, брать нечего."
+		"chi"		"{grey}那是个机器人: 它{darkred}没有设置{grey}可拿."
+		"ua"		"{grey}Це бот: у нього {darkred}немає налаштувань{grey}, брати нічого."
+	}
+	"HUD Share - Take Not Ready"
+	{
+		"#format"	"name:s"
+		"en"		"{grey}Settings of {lime}{name}{grey} are not loaded yet. Try again in a couple of seconds."
+		"ru"		"{grey}Настройки {lime}{name}{grey} ещё не загрузились. Попробуй через пару секунд."
+		"chi"		"{grey}{lime}{name}{grey} 的设置还没加载完. 请过几秒再试."
+		"ua"		"{grey}Налаштування {lime}{name}{grey} ще не завантажились. Спробуй за кілька секунд."
+	}
+	"HUD Share - Taken"
+	{
+		"#format"	"name:s"
+		"en"		"{grey}That is now the HUD of {lime}{name}{grey}."
+		"ru"		"{grey}Теперь у тебя худ {lime}{name}{grey}."
+		"chi"		"{grey}你现在用的是 {lime}{name}{grey} 的 HUD."
+		"ua"		"{grey}Тепер у тебе худ {lime}{name}{grey}."
+	}
 	// Описания для таблиц !help/kz_help. Ключ по умолчанию строит scmd::RegisterCmd
 	// ("Command Description - <имя>", utils/simplecmds.cpp) — без фразы игрок увидел бы
 	// пустую строку в списке команд.
@@ -137,6 +168,13 @@
 		"ru"		"Применить настройки худа по коду."
 		"chi"		"通过代码应用 HUD 设置."
 		"ua"		"Застосувати налаштування худу за кодом."
+	}
+	"Command Description - kz_hudtake"
+	{
+		"en"		"Take the HUD of the player you are spectating."
+		"ru"		"Забрать худ игрока, за которым наблюдаешь."
+		"chi"		"拿走你正在观察的玩家的 HUD."
+		"ua"		"Забрати худ гравця, за яким спостерігаєш."
 	}
 	"Command Description - kz_hudundo"
 	{

@@ -29,6 +29,7 @@
 #include "kz/hud/layout/layout.h" // LAYOUT_ELEMENTS/LayoutElement — пол по видимости
 #include "kz/option/kz_option.h"
 #include "kz/language/kz_language.h"
+#include "kz/spec/kz_spec.h" // GetSpectatedPlayer — цель забора худа (!hudtake)
 #include "utils/logging.h"
 #include "utils/utils.h" // g_pKZUtils->GetServerGlobals()->realtime — кулдаун выдачи кода
 
@@ -795,6 +796,61 @@ KZ::hudshare::ApplyStats KZ::hudshare::Apply(KZPlayer *to, const char *snapshot,
 	if (savePrevious)
 	{
 		to->languageService->PrintChat(true, false, "HUD Share - Undo Hint");
+	}
+	return stats;
+}
+
+// === Забрать худ наблюдаемого ================================================================
+
+KZ::hudshare::ApplyStats KZ::hudshare::TakeFromSpectated(KZPlayer *player)
+{
+	KZ::hudshare::ApplyStats stats;
+	if (!player || !player->specService)
+	{
+		stats.reason = "no_player";
+		return stats;
+	}
+	const u64 steamID = player->GetSteamId64(false);
+	// Та же проверка цели, что у мимикрии (hud/layout/prefs.cpp:GetLayoutPrefs) и у подписи в
+	// меню: GetSpectatedPlayer отдаёт NULL и живому игроку, и смотрящему на свой труп.
+	KZPlayer *target = player->specService->GetSpectatedPlayer();
+	if (!target || target == player)
+	{
+		stats.reason = "not_spectating";
+		KZ_LOG_WARN(LogChannel::Option, "[cyb] hud_share_take_failed reason=%s steam_id=%llu\n", stats.reason, steamID);
+		player->languageService->PrintChat(true, false, "HUD Share - Not Spectating");
+		return stats;
+	}
+	if (target->IsFakeClient())
+	{
+		// У ботов (в т.ч. у реплей-бота) своих настроек нет вовсе — «снимок» был бы набором
+		// дефолтов, выданным за худ наблюдаемого.
+		stats.reason = "target_is_bot";
+		KZ_LOG_WARN(LogChannel::Option, "[cyb] hud_share_take_failed reason=%s steam_id=%llu\n", stats.reason, steamID);
+		player->languageService->PrintChat(true, false, "HUD Share - Take Bot");
+		return stats;
+	}
+
+	std::string snapshot;
+	if (!KZ::hudshare::Capture(target, snapshot))
+	{
+		// Fail-closed: префы ЦЕЛИ ещё не приехали из БД (см. Capture) — забирать нечего.
+		stats.reason = "target_capture_failed";
+		KZ_LOG_WARN(LogChannel::Option, "[cyb] hud_share_take_failed reason=%s steam_id=%llu target=%llu\n", stats.reason, steamID,
+					target->GetSteamId64(false));
+		player->languageService->PrintChat(true, false, "HUD Share - Take Not Ready", target->GetName());
+		return stats;
+	}
+
+	// Детализация лога — цель забора: по ней разбирается жалоба «забрал чужой худ, получил не то».
+	char detail[64];
+	V_snprintf(detail, sizeof(detail), "target=%llu", target->GetSteamId64(false));
+	stats = KZ::hudshare::Apply(player, snapshot.c_str(), KZ::hudshare::Source::SpecTake, detail);
+	if (stats.ok)
+	{
+		// Чей худ теперь стоит — отдельной строкой: числа применённого печатает сам Apply, но
+		// без имени игрок не знает, у кого он его забрал (в спектейте цель меняется колесом).
+		player->languageService->PrintChat(true, false, "HUD Share - Taken", target->GetName());
 	}
 	return stats;
 }
