@@ -88,6 +88,7 @@ void KZPracService::SnapshotMapContexts()
 {
 	this->entryContexts.RemoveAll();
 	this->entryContextsValid = false;
+	KZPracService::EnsureMapContextsSupportChecked();
 	if (!KZPracService::mapContextsSupported)
 	{
 		return;

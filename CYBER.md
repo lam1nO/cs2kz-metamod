@@ -671,8 +671,13 @@ cs2kz-linux-builder .`, иначе компилируется КОПИЯ ИЗ О
   коллекции меняется движковым манипулятором через `CSchemaCollection`, не своим CUtlVector),
   выход/`!r`/смена режима/смерть возвращают РОВНО его (не стирают — честно взятое до prac живёт;
   на мёртвую пешку тоже пишем — CS2 респавнит ту же пешку).
-  Раскладка структуры сверяется с живой схемой в `KZPracService::Init`; не сошлась — фича
-  выключена (лог `prac_map_contexts_disabled`), а не запись в чужую память.
+  Раскладка структуры сверяется с живой схемой ЛЕНИВО при первом `!prac`
+  (`EnsureMapContextsSupportChecked`); не сошлась — фича выключена (лог
+  `prac_map_contexts_disabled`), а не запись в чужую память. **Инвариант schema: никаких
+  `schema::GetOffset/GetClassLayout/GetCollectionManipulator` из `Init()`/`Load`** — таблица
+  класса кэшируется навсегда, а без энтити-системы все поля получают `networked=false`, и `Set()`
+  перестаёт звать `NetworkStateChanged` (cyb.151: ноуклип «застревал» в стенах у всего флота;
+  `InitSchemaFieldsForClass` с тех пор отказывается кэшировать без `GameEntitySystem()`).
   **prac строгий (решение пользователя 07.08):** в prac по карте двигаются ТОЛЬКО по своим
   prac-точкам, всё остальное запрещено явным отказом (`KZPracService::RejectMapTeleport`, фраза
   `Prac - No Teleport`, лог `[cyb] prac_teleport_rejected reason=…`). Закрыты: `!r`/`!restart`,

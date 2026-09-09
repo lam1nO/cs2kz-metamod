@@ -105,9 +105,14 @@ private:
 	// смены, а смена карты сбрасывает prac целиком (Reset).
 	CUtlVector<ResponseContext_t> entryContexts;
 	bool entryContextsValid {};
-	// Схема живого сервера совпала с нашей раскладкой ResponseContext_t (сверка в Init). Иначе в
-	// вектор не пишем вовсе — лучше старый абуз, чем порча памяти пешки после апдейта Valve.
+	// Схема живого сервера совпала с нашей раскладкой ResponseContext_t. Иначе в вектор не пишем
+	// вовсе — лучше старый абуз, чем порча памяти пешки после апдейта Valve. Сверка ЛЕНИВАЯ
+	// (EnsureMapContextsSupportChecked при первом !prac), а не в Init: из Init таблица схемы
+	// CBaseEntity строится до появления энтити-системы и кэшируется с networked=false для всех
+	// полей — инцидент cyb.151, ноуклип «застревал» в стенах у всего флота.
 	static bool mapContextsSupported;
+	static bool mapContextsChecked;
+	static void EnsureMapContextsSupportChecked();
 
 public:
 	static void Init();

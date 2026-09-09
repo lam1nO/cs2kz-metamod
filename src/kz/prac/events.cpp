@@ -20,6 +20,28 @@ public:
 void KZPracService::Init()
 {
 	KZTimerService::RegisterEventListener(&pracTimerListener);
+	// Сверку раскладки ResponseContext_t здесь НЕ делаем — см. EnsureMapContextsSupportChecked.
+	// Инцидент 08.09 (cyb.151): schema::GetOffset("CBaseEntity", …) из Init при Load плагина
+	// построил таблицу полей CBaseEntity, пока GameEntitySystem() ещё NULL → IsFieldNetworked дала
+	// false ВСЕМ полям, таблица закэшировалась навсегда, Set() перестал звать NetworkStateChanged →
+	// клиент не узнавал о смене MoveType/FL_NOCLIP и «застревал» в стенах в ноуклипе. Всему флоту.
+}
+
+bool KZPracService::mapContextsChecked = false;
+
+void KZPracService::EnsureMapContextsSupportChecked()
+{
+	if (KZPracService::mapContextsChecked)
+	{
+		return;
+	}
+	// Зовётся из игры (первый !prac): энтити-система уже живая, таблицы схемы строятся с
+	// верными флагами networked. Пока её нет — не проверяем и не запоминаем результат.
+	if (!GameEntitySystem())
+	{
+		return;
+	}
+	KZPracService::mapContextsChecked = true;
 
 	// Сверка раскладки ResponseContext_t с живой схемой: пишем в вектор пешки сырыми структурами,
 	// и после апдейта Valve тихий сдвиг поля означал бы порчу памяти. Не сошлось — фича молча

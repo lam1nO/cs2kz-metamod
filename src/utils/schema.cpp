@@ -128,6 +128,17 @@ static void InitSchemaKeyValueMap(SchemaClassInfoData_t *pClassInfo, SchemaKeyVa
 
 static bool InitSchemaFieldsForClass(SchemaTableMap_t &tableMap, const char *className, uint32_t classKey)
 {
+	// Таблица класса строится один раз и живёт до выгрузки, а флаг networked каждого поля берётся
+	// из IsFieldNetworked, которая без энтити-системы честно отвечает false. Построить таблицу до
+	// её появления (вызов из Init при Load) — значит навсегда лишить Set() всех полей класса
+	// NetworkStateChanged: инцидент cyb.151 — ноуклип «застревал» в стенах у всего флота. Поэтому
+	// пока энтити-системы нет, ничего не кэшируем: вызывающий получит {0,0} и повторит позже.
+	if (!GameEntitySystem())
+	{
+		Warning("InitSchemaFieldsForClass(): '%s' requested before the entity system exists - not cached\n", className);
+		return false;
+	}
+
 	CSchemaSystemTypeScope *pType = g_pSchemaSystem->FindTypeScopeForModule(MODULE_PREFIX "server" MODULE_EXT);
 
 	if (!pType)
