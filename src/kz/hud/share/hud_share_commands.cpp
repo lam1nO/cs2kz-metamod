@@ -82,7 +82,9 @@ SCMD(kz_hudshare, SCFL_HUD | SCFL_PREFERENCE)
 		[userID, codeCopy, steamID](std::string error, int failIndex)
 		{
 			// Отказ, а не молчание: самая вероятная причина — коллизия кода (PRIMARY KEY), и
-			// лечится она повтором команды. Upsert тут был бы хуже — затёр бы чужой снимок.
+			// лечится она повтором команды, потому что повтор генерирует НОВЫЙ случайный код
+			// (GenerateCode) — та же коллизия не воспроизводится. Upsert тут был бы хуже:
+			// затёр бы чужой снимок под его же кодом.
 			KZ_LOG_WARN(LogChannel::Option, "[cyb] hud_share_store_failed reason=db_insert steam_id=%llu code=%s error=%s\n", steamID,
 						codeCopy.c_str(), error.c_str());
 			KZPlayer *pl = g_pKZPlayerManager->ToPlayer(userID);
@@ -90,6 +92,8 @@ SCMD(kz_hudshare, SCFL_HUD | SCFL_PREFERENCE)
 			{
 				return;
 			}
+			// Кулдаун отпускаем: выдача не состоялась, и повторить надо сразу, а не через 5 с.
+			KZ::hudshare::ReleaseShareCooldown(pl);
 			pl->languageService->PrintChat(true, false, "HUD Share - Store Failed");
 		});
 

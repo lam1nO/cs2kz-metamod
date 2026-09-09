@@ -180,7 +180,11 @@ public:
 	static void StoreHudShare(u64 ownerSteamID64, const char *code, i32 schemaVersion, const std::string &snapshot,
 							  TransactionSuccessCallbackFunc onSuccess, TransactionFailureCallbackFunc onFailure);
 	static void FetchHudShare(const char *code, TransactionSuccessCallbackFunc onSuccess, TransactionFailureCallbackFunc onFailure);
-	// TTL-чистка снимков старше 30 дней, раз на загрузку карты. Fire-and-forget.
+	// Уборка. ОТДЕЛЬНЫМИ транзакциями от вставки/чтения и fire-and-forget: их отказ не имеет
+	// права отменить выдачу или применение кода (разбор приоритета — шапка db/hud_share.cpp).
+	// PruneHudSharesForOwner зовётся из StoreHudShare после успешной вставки, отдельно её звать
+	// не нужно; PurgeExpiredHudShares — раз на загрузку карты.
+	static void PruneHudSharesForOwner(u64 ownerSteamID64);
 	static void PurgeExpiredHudShares();
 
 	static void Ban(u64 steamID64, const char *reason = nullptr, f32 duration = 0.0f, const UUID_t banId = UUID_t(false),

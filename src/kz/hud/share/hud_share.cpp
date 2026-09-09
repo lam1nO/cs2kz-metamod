@@ -225,6 +225,20 @@ f32 KZ::hudshare::TakeShareCooldown(KZPlayer *player)
 	return 0.0f;
 }
 
+void KZ::hudshare::ReleaseShareCooldown(KZPlayer *player)
+{
+	if (!player)
+	{
+		return;
+	}
+	const i32 slot = player->GetPlayerSlot().Get();
+	if (slot < 0 || slot > MAXPLAYERS)
+	{
+		return;
+	}
+	s_lastShareTime[slot] = 0.0f;
+}
+
 // === Код обмена ==============================================================================
 
 bool KZ::hudshare::NormalizeCode(const char *in, char *out, i32 outLen)
