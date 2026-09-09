@@ -851,6 +851,21 @@ cs2kz-linux-builder .`, иначе компилируется КОПИЯ ИЗ О
   (гейт `SavePrefs`) теперь ставится ПОСЛЕ `InitializeLocalPrefs`, а не до —
   отражает факт успешной загрузки, а не только апсерт строки игрока.
 
+- **AWR-разрез (вырезка телепорт-петель)**: `src/kz/replays/awr_cut.{h,cpp}` — чистая
+  функция `ComputeAwrCut` (обход от финиша назад по ссылкам телепортов, спека
+  `docs/superpowers/specs/2026-09-10-awr-replay-and-lead-design.md` §4) плюс
+  `LiveIntervals`. Модуль НАМЕРЕННО не включает `common.h` и заголовки SDK и работает на
+  `uint32_t`/`int32_t` вместо `u32`/`i32` — только так он собирается голым компилятором и
+  остаётся единственным тестируемым на хосте куском форка. Host-тест —
+  `tests/awr_cut_test.cpp`, в сборку плагина не входит, гоняется руками:
+
+  ```bash
+  clang++ -std=c++17 -O1 -Wall tests/awr_cut_test.cpp src/kz/replays/awr_cut.cpp -o /tmp/awr_cut_test && /tmp/awr_cut_test
+  ```
+
+  Ожидание: `awr_cut: all tests passed`. Тесты выражают спеку — при расхождении правится
+  алгоритм, не тест.
+
 ## Инварианты (не ломать при мёрже апстрима)
 
 - **`nextlevel` НИКОГДА не берётся из `+map`.** Апстримный `GetDefaultMapName`
