@@ -49,6 +49,13 @@ namespace KZ::replaysystem::playback
 	// бэкфилла и !lead, у которых нет g_currentReplay.
 	std::vector<awr::Interval> PauseIntervalsFromEvents(const TickData *ticks, u32 tickCount, const RpEvent *events, u32 numEvents);
 
+	// Окно САМОГО рана в индексах кадров (включительно) по событиям таймера плюс id курса
+	// этой пары START/END. false — окна нет (нет пары START/END, курсы пары разные, окно
+	// вырождено). Публична: тот же вывод окна нужен воркеру бэкфилла, !lead и сверке курса с
+	// шапкой в commands.cpp (реестр курсов доступен только на главном потоке).
+	bool RunWindowFromEvents(const TickData *ticks, u32 tickCount, const RpEvent *events, u32 numEvents, u32 &outStart, u32 &outEnd,
+							 i32 &outCourseId);
+
 	// Разрез AWR по уже разобранным данным реплея (адаптер TickData→awr::Frame внутри).
 	awr::CutResult ComputeCutFor(const TickData *ticks, u32 tickCount, const RpEvent *events, u32 numEvents, u64 timeMs);
 

@@ -26,7 +26,9 @@ namespace KZ::replaysystem::awr
 	struct CutResult
 	{
 		bool ok = false;
-		const char *reason = "";        // dest_not_found | counter_mismatch | no_run_window | empty
+		// dest_not_found | counter_mismatch | no_run_window | empty. Вызывающий может выставить
+		// сюда и свою причину отказа до вызова (not_a_run, course_mismatch — commands.cpp).
+		const char *reason = "";
 		std::vector<Interval> dead;      // мёртвые интервалы, по возрастанию, без пересечений
 		uint32_t teleports = 0;          // число прибытий ТП по кадрам
 		uint64_t awrMs = 0;              // timeMs - мёртвое время (за вычетом пересечения с паузами)

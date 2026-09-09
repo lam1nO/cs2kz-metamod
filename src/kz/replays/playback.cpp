@@ -119,49 +119,88 @@ namespace KZ::replaysystem::playback
 		return out;
 	}
 
-	// Окно САМОГО рана в индексах кадров (включительно) по событиям таймера. Нужно потому, что
-	// run-реплей содержит ~5 с предзаписи до старта и ~4 с хвоста после финиша (RunRecorder,
-	// recorders.cpp): «!r» в хвосте — это прибытие телепорта, и без окна разрез объявил бы
-	// мёртвым весь ран. Берём первый TIMER_START и первый TIMER_END после него.
-	static_function bool RunWindowFromEvents(const TickData *ticks, u32 tickCount, const RpEvent *events, u32 numEvents, u32 &outStart, u32 &outEnd)
+	// Окно САМОГО рана в индексах кадров (включительно) по событиям таймера.
+	//
+	// Окно обязательно: run-реплей содержит ~5 с предзаписи до старта и ~4 с хвоста после
+	// финиша (RunRecorder, recorders.cpp:66,88), и «!r» в хвосте — это прибытие телепорта,
+	// чьё назначение нашлось бы среди предстартовых кадров: мёртвым оказался бы весь ран.
+	//
+	// Берём ПОСЛЕДНИЙ TIMER_END файла и ПОСЛЕДНИЙ TIMER_START перед ним — не первые. Причина:
+	// рекордер рана создаётся с copyTimerEvents=true и копирует из кольцевого буфера ВСЕ
+	// таймерные события пятисекундной предзаписи (recorders.cpp:207-215, InsertTimerEvent
+	// пишет и в кольцо, и в живые рекордеры — kz_recording.cpp:489-497). Поэтому в начале
+	// файла законно лежат события ЧУЖОГО рана:
+	//  - предыдущий ран короче 5 с закончился прямо перед записанным: в предзаписи есть и
+	//    START(A), и END(A). По «первым» окном стал бы хвост чужого рана — счётчики внутри
+	//    самосогласованы, counter_mismatch не срабатывает, а мёртвое время старого рана
+	//    вычиталось бы из timeMs нового: занижённый awrMs выиграл бы минимум у api;
+	//  - брошенная попытка ≤5 с назад (TIMER_STOP убил её рекордер, но START(A) в предзаписи
+	//    остался): окно началось бы раньше реального старта, где tpCount ещё не обнулён
+	//    зоной старта (ResetCheckpoints) — ложный counter_mismatch.
+	// Свой END всегда последний: запись живёт лишь 4 с после финиша, новый ран за это время
+	// закончиться и попасть в тот же файл не может.
+	//
+	// Дополнительно сверяются id курса (event->data.timer.index) у START и END: пара обязана
+	// быть одного курса. Сверка с именем курса из шапки — в commands.cpp: id курса живёт
+	// только в событиях, имя — только в шапке, и разрешает одно в другое лишь реестр курсов.
+	bool RunWindowFromEvents(const TickData *ticks, u32 tickCount, const RpEvent *events, u32 numEvents, u32 &outStart, u32 &outEnd,
+							 i32 &outCourseId)
 	{
 		if (!ticks || tickCount == 0 || !events || numEvents == 0)
 		{
 			return false;
 		}
-		bool haveStart = false;
-		u32 startServerTick = 0, endServerTick = 0;
-		for (u32 i = 0; i < numEvents; i++)
+
+		// Последний TIMER_END файла.
+		i64 endEvent = -1;
+		for (i64 i = (i64)numEvents - 1; i >= 0; i--)
 		{
-			const RpEvent *e = &events[i];
-			if (e->type != RPEVENT_TIMER_EVENT)
+			if (events[i].type == RPEVENT_TIMER_EVENT && events[i].data.timer.type == RpEvent::RpEventData::TimerEvent::TIMER_END)
 			{
-				continue;
-			}
-			if (e->data.timer.type == RpEvent::RpEventData::TimerEvent::TIMER_START && !haveStart)
-			{
-				haveStart = true;
-				startServerTick = e->serverTick;
-			}
-			else if (e->data.timer.type == RpEvent::RpEventData::TimerEvent::TIMER_END && haveStart)
-			{
-				endServerTick = e->serverTick;
-				// Первый TIMER_END после старта — конец окна; дальше только хвост записи.
-				u32 startIdx = TickIndexForServerTick(ticks, tickCount, startServerTick);
-				// Для конца — ПОСЛЕДНИЙ кадр с serverTick <= тика события, иначе окно уехало бы
-				// в хвост на один кадр (первый кадр >= тика финиша — уже после финиша).
-				u32 endProbe = endServerTick < 0xFFFFFFFFu ? endServerTick + 1 : endServerTick;
-				u32 afterEnd = TickIndexForServerTick(ticks, tickCount, endProbe);
-				if (startIdx >= tickCount || afterEnd == 0)
-				{
-					return false;
-				}
-				outStart = startIdx;
-				outEnd = afterEnd - 1;
-				return outStart < outEnd;
+				endEvent = i;
+				break;
 			}
 		}
-		return false;
+		if (endEvent < 0)
+		{
+			return false;
+		}
+
+		// Последний TIMER_START перед ним.
+		i64 startEvent = -1;
+		for (i64 i = endEvent - 1; i >= 0; i--)
+		{
+			if (events[i].type == RPEVENT_TIMER_EVENT && events[i].data.timer.type == RpEvent::RpEventData::TimerEvent::TIMER_START)
+			{
+				startEvent = i;
+				break;
+			}
+		}
+		if (startEvent < 0)
+		{
+			return false;
+		}
+
+		// Пара обязана быть одного курса — иначе это не старт и финиш одного рана.
+		if (events[startEvent].data.timer.index != events[endEvent].data.timer.index)
+		{
+			return false;
+		}
+
+		u32 startIdx = TickIndexForServerTick(ticks, tickCount, events[startEvent].serverTick);
+		// Для конца — ПОСЛЕДНИЙ кадр с serverTick <= тика события: первый кадр >= тика финиша
+		// это уже хвост записи.
+		u32 endServerTick = events[endEvent].serverTick;
+		u32 endProbe = endServerTick < 0xFFFFFFFFu ? endServerTick + 1 : endServerTick;
+		u32 afterEnd = TickIndexForServerTick(ticks, tickCount, endProbe);
+		if (startIdx >= tickCount || afterEnd == 0)
+		{
+			return false;
+		}
+		outStart = startIdx;
+		outEnd = afterEnd - 1;
+		outCourseId = events[endEvent].data.timer.index;
+		return outStart < outEnd;
 	}
 
 	awr::CutResult ComputeCutFor(const TickData *ticks, u32 tickCount, const RpEvent *events, u32 numEvents, u64 timeMs)
@@ -173,10 +212,12 @@ namespace KZ::replaysystem::playback
 			return empty;
 		}
 		u32 runStart = 0, runEnd = 0;
-		if (!RunWindowFromEvents(ticks, tickCount, events, numEvents, runStart, runEnd))
+		i32 runCourseId = -1;
+		if (!RunWindowFromEvents(ticks, tickCount, events, numEvents, runStart, runEnd, runCourseId))
 		{
-			// Ран не размечен событиями (нет TIMER_START/TIMER_END, оборванный ран) — резать
-			// нечего: «по всему файлу» считать нельзя, там предзапись и хвост.
+			// Ран не размечен событиями (нет пары TIMER_START/TIMER_END, курсы пары разные,
+			// оборванный ран) — резать нечего: «по всему файлу» считать нельзя, там
+			// предзапись и хвост, в том числе чужого рана.
 			awr::CutResult noWindow;
 			noWindow.reason = "no_run_window";
 			return noWindow;

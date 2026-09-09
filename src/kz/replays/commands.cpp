@@ -9,6 +9,7 @@
 #include "kz/option/kz_option.h"
 #include "kz/db/kz_db.h"
 #include "kz/timer/kz_timer.h"
+#include "kz/mappingapi/kz_mappingapi.h" // GetCourseByCourseID — сверка курса окна рана с шапкой
 #include "commands.h"
 #include "data.h"
 #include "bot.h"
@@ -403,15 +404,42 @@ namespace KZ::replaysystem::commands
 				{
 					// Время рана — из шапки; у не-ранового реплея его нет, резать нечего.
 					const bool isRun = replay->header.has_run() && replay->header.run().time() > 0.0f;
-					awr::CutResult cut;
+					// Сверка курса окна с шапкой. Делается ЗДЕСЬ, а не внутри ComputeCutFor:
+					// в событиях курс — это id (`timer.index`), в шапке — имя, и разрешает id
+					// в имя только реестр курсов главного потока (ComputeCutFor обязан
+					// оставаться пригодным для рабочего потока бэкфилла). Окно уже выбрано по
+					// последней паре START/END (см. RunWindowFromEvents), но если её курс не
+					// тот, что в шапке, значит в окно попал не наш ран — не режем.
+					bool courseOk = false;
 					if (isRun)
 					{
-						cut = playback::ComputeCutFor(replay->tickData, replay->tickCount, replay->events, replay->numEvents,
-													  (u64)(replay->header.run().time() * 1000.0 + 0.5));
+						u32 winStart = 0, winEnd = 0;
+						i32 winCourseId = -1;
+						if (playback::RunWindowFromEvents(replay->tickData, replay->tickCount, replay->events, replay->numEvents, winStart, winEnd,
+														  winCourseId))
+						{
+							const KZCourseDescriptor *winCourse = KZ::course::GetCourseByCourseID(winCourseId);
+							const std::string &headerCourse = replay->header.run().course_name();
+							// Пустое имя в шапке (старые файлы) сверять нечем — довольствуемся
+							// проверкой пары START/END внутри RunWindowFromEvents.
+							courseOk = headerCourse.empty()
+									   || (winCourse && !winCourse->GetName().IsEmpty()
+										   && winCourse->GetName().IsEqual_FastCaseInsensitive(headerCourse.c_str()));
+						}
+					}
+					awr::CutResult cut;
+					if (!isRun)
+					{
+						cut.reason = "not_a_run";
+					}
+					else if (!courseOk)
+					{
+						cut.reason = "course_mismatch";
 					}
 					else
 					{
-						cut.reason = "not_a_run";
+						cut = playback::ComputeCutFor(replay->tickData, replay->tickCount, replay->events, replay->numEvents,
+													  (u64)(replay->header.run().time() * 1000.0 + 0.5));
 					}
 					if (!cut.ok)
 					{
