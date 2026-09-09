@@ -113,6 +113,12 @@ void KZDatabaseService::CheckMigrations(std::vector<ISQLQuery *> queries)
 	}
 	if (current > max)
 	{
+		// Односторонняя дверь: в базе применено БОЛЬШЕ миграций, чем знает этот код, — то есть
+		// плагин откатили на сборку старее той, что уже сходила на эту базу. Дальше ранний
+		// return, и инстанс живёт БЕЗ БД: раны не сохраняются, префы не грузятся и не пишутся.
+		// Раньше это было молча (один warn без машинных полей). Как лечить — CYBER.md,
+		// раздел про обмен настройками худа.
+		KZ_LOG_ERROR(LogChannel::DB, "[cyb] db_migrations_ahead reason=plugin_rolled_back applied=%u known=%u localdb=off\n", current, max);
 		KZ_LOG_WARN(LogChannel::DB, "Fatal error: Number of current migrations are higher than the maximum!\n");
 		return;
 	}
@@ -181,15 +187,17 @@ void KZDatabaseService::CheckMigrations(std::vector<ISQLQuery *> queries)
 			case DatabaseType::MySQL:
 			{
 				txn.queries.push_back(mysqlMigrations[i]);
-				V_snprintf(query, sizeof(query), sql_migrations_insert,
-						   CRC32_ProcessSingleBuffer(mysqlMigrations[i].c_str(), mysqlMigrations[i].length()));
+				// Вставка идемпотентна (INSERT IGNORE) — от гонки одновременного старта
+				// инстансов на общей базе, см. queries/migrations.h.
+				V_snprintf(query, sizeof(query), mysql_migrations_insert,
+						   CRC32_ProcessSingleBuffer(mysqlMigrations[i].c_str(), (int)mysqlMigrations[i].length()));
 				break;
 			}
 			case DatabaseType::SQLite:
 			{
 				txn.queries.push_back(sqliteMigrations[i]);
-				V_snprintf(query, sizeof(query), sql_migrations_insert,
-						   CRC32_ProcessSingleBuffer(sqliteMigrations[i].c_str(), sqliteMigrations[i].length()));
+				V_snprintf(query, sizeof(query), sqlite_migrations_insert,
+						   CRC32_ProcessSingleBuffer(sqliteMigrations[i].c_str(), (int)sqliteMigrations[i].length()));
 				break;
 			}
 		}
