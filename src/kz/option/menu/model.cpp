@@ -45,6 +45,14 @@ namespace KZ::menu
 		}
 	}
 
+	void SetItemStrResolver(KZOptNode *node, const char *(*resolveStr)(const char *))
+	{
+		if (!node->items.empty())
+		{
+			node->items.back().resolveStr = resolveStr;
+		}
+	}
+
 	void SetItemEnabledBy(KZOptNode *node, const char *prefKey)
 	{
 		if (node->items.empty())

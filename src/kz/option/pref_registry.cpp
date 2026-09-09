@@ -331,8 +331,16 @@ bool KZ::prefs::ValidateValue(KZPlayer *player, const KZ::prefs::Entry &entry, c
 			return CheckNumericRange(player, entry, (f64)parsed, reason);
 		}
 		case KZOptStorage::Str:
-			// Не Font-пункт: свободная строка. В обмене худа таких нет (см. hud/share/hud_share.cpp,
-			// белый список), поэтому дополнительной проверки здесь не заводим.
+			// Choice со Str-хранением (rpmenuFont — первый такой в категории HUD, то есть в белом
+			// списке обмена): строка обязана быть из списка пункта, иначе снимок писал бы в
+			// Players.Preferences любой мусор, а читатель молча уходил бы в дефолт (спека §5:
+			// применяется только то, что мог бы выдать реестр получателя). Без резолвера —
+			// свободная строка, как раньше.
+			if (item->type == KZOptItemType::Choice && item->resolveStr && !item->resolveStr(value))
+			{
+				reason = "choice_unknown";
+				return false;
+			}
 			return true;
 		case KZOptStorage::Vector:
 		{

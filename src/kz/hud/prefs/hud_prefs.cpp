@@ -4,6 +4,7 @@
 // дефолты — ничего не меняя) сюда, а рендер (layout/menu.cpp) обходит KZ::menu::GetTree().
 #include "kz/hud/kz_hud.h"
 #include "kz/hud/layout/layout.h"
+#include "kz/hud/layout/panorama_tables.h" // GetFontDisplayName — подписи моно-шрифтов меню реплея
 #include "kz/hud/share/hud_share.h"
 #include "kz/option/menu/model.h"
 #include "kz/option/kz_option.h"
@@ -194,6 +195,54 @@ static_function void ShareTakeOnActivate(KZPlayer *player, i64 tag)
 	KZ::hudshare::TakeFromSpectated(player);
 }
 
+// === Шрифт меню реплея: выбор из моноширинных (layout.h/RPMENU_MONO_FONTS) ====================
+// Не AddFont: тот предлагает все ~70 семейств, а выравнивание карточки по левому краю честно
+// работает только в моно (см. комментарий у RPMENU_MONO_FONTS). Choice со Str-хранением — как
+// preferredMode/preferredPistol в misc_prefs.cpp; id = индекс в таблице.
+static_function void RpMenuFontGetChoices(KZPlayer *player, i64 tag, std::vector<KZChoice> &out)
+{
+	for (i64 i = 0; i < RPMENU_MONO_FONT_COUNT; i++)
+	{
+		out.push_back({panorama::GetFontDisplayName(RPMENU_MONO_FONTS[i], RPMENU_MONO_FONTS[i]), i});
+	}
+}
+
+static_function i64 RpMenuFontGetCurrent(KZPlayer *player, i64 tag)
+{
+	const char *slug = ResolveReplayMenuFontSlug(player->optionService->GetPreferenceStr("rpmenuFont", RPMENU_DEF_FONT));
+	for (i64 i = 0; i < RPMENU_MONO_FONT_COUNT; i++)
+	{
+		if (KZ_STREQ(slug, RPMENU_MONO_FONTS[i]))
+		{
+			return i;
+		}
+	}
+	return 0;
+}
+
+static_function void RpMenuFontOnPick(KZPlayer *player, i64 tag, i64 id)
+{
+	if (id < 0 || id >= RPMENU_MONO_FONT_COUNT)
+	{
+		return;
+	}
+	// RefreshLayoutPrefs после пика зовёт сам ActivateMenuItem (layout/menu.cpp), как у любого Choice.
+	player->optionService->SetPreferenceStr("rpmenuFont", RPMENU_MONO_FONTS[id]);
+}
+
+// Для ValidateValue обмена настройками: строка не из таблицы моно — отказ, а не тихий дефолт в БД.
+static_function const char *RpMenuFontResolve(const char *value)
+{
+	for (i32 i = 0; value && i < RPMENU_MONO_FONT_COUNT; i++)
+	{
+		if (KZ_STREQI(value, RPMENU_MONO_FONTS[i]))
+		{
+			return RPMENU_MONO_FONTS[i];
+		}
+	}
+	return NULL;
+}
+
 void KZHUDService::InitMenuPrefs()
 {
 	// Дерево, а не плоский список (задача «дерево категорий»): все семь страниц худа —
@@ -315,7 +364,9 @@ void KZHUDService::InitMenuPrefs()
 	KZOptNode *rpmenu = KZ::menu::AddSub(hud, "HUD - Menu Cat ReplayMenu");
 	KZ::menu::AddPosition(rpmenu, "HUD - Menu Label Position", "rpmenuX", "rpmenuY", RPMENU_DEF_X, RPMENU_DEF_Y);
 	KZ::menu::AddSize(rpmenu, "HUD - Menu Label Size", "rpmenuSize", RPMENU_DEF_SIZE, LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX);
-	KZ::menu::AddFont(rpmenu, "HUD - Menu Label Font", "rpmenuFont", RPMENU_DEF_FONT);
+	KZ::menu::AddChoice(rpmenu, "HUD - Menu Label Font", &RpMenuFontGetChoices, &RpMenuFontGetCurrent, &RpMenuFontOnPick);
+	KZ::menu::SetItemPref(rpmenu, "rpmenuFont", KZOptStorage::Str, 0, RPMENU_DEF_FONT);
+	KZ::menu::SetItemStrResolver(rpmenu, &RpMenuFontResolve);
 	// Шаг строк в процентах экрана (как позиция), хранится Float, как размер — читается
 	// GetPreferenceFloat в RefreshLayoutPrefs.
 	KZ::menu::AddSize(rpmenu, "HUD - Menu Label LineStep", "rpmenuStep", RPMENU_DEF_STEP, RPMENU_STEP_MIN, RPMENU_STEP_MAX);

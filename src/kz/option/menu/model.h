@@ -66,6 +66,9 @@ struct KZOptItem
 	void (*getChoices)(KZPlayer *, i64 tag, std::vector<KZChoice> &) {};
 	i64 (*getCurrent)(KZPlayer *, i64 tag) {};
 	void (*onPick)(KZPlayer *, i64 tag, i64 id) {};
+	// Choice со Str-хранением: канонический слаг для сырой строки из снимка/БД, NULL — строка не из
+	// списка. Без него ValidateValue принимает любую строку (KZ::prefs, hud-share) — см. SetItemStrResolver.
+	const char *(*resolveStr)(const char *value) {};
 
 	void (*onActivate)(KZPlayer *, i64 tag) {}; // Button
 	// Called when a popup for this item opens (begin) and closes (begin=false).
@@ -115,6 +118,8 @@ namespace KZ::menu
 	void SetItemScale(KZOptNode *node, i32 scale);
 	// Keep gradients out of a color item's picker.
 	void SetItemSolidOnly(KZOptNode *node);
+	// Choice со Str-хранением: как проверить строку из обмена настройками (KZ::prefs::ValidateValue).
+	void SetItemStrResolver(KZOptNode *node, const char *(*resolveStr)(const char *));
 
 	// Writes every value item in this node back to its registered default. Items with no preference
 	// behind them are skipped.

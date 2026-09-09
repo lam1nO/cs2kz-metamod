@@ -38,6 +38,15 @@
 #define RPMENU_STEP_MIN 1
 #define RPMENU_STEP_MAX 12
 
+// Шрифты меню реплея — ТОЛЬКО моноширинные (решение 09.09 после канарейки cyb.169: в
+// пропорциональном шрифте строки «в разнобой» и скачут при смене выбора). Левый край карточки
+// строится добивкой NBSP до одной длины в кодовых точках, что точно только в моно; метрик глифов
+// у сервера нет (файлов шрифтов на ноде нет), так что выровнять пропорциональный шрифт нечем.
+// Таблица — в layout/prefs.cpp; преф rpmenuFont, не попавший в неё, читается как RPMENU_DEF_FONT.
+extern const char *const RPMENU_MONO_FONTS[];
+extern const i32 RPMENU_MONO_FONT_COUNT;
+const char *ResolveReplayMenuFontSlug(const char *slug);
+
 // Дефолт синхронизирован с текущими настройками игрока (задача hud-defaults): было
 // stratum2-bold-monodigit, стало lato-bold (слаг panorama_tables.cpp, "Lato Bold*").
 #define LAYOUT_DEFAULT_FONT "lato-bold"

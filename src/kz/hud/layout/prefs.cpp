@@ -8,6 +8,22 @@
 
 #include "tier0/memdbgon.h"
 
+// См. layout.h (RPMENU_MONO_FONTS): порядок = порядок в выборе «Шрифт» страницы «Меню реплея».
+const char *const RPMENU_MONO_FONTS[] = {"stratum2-mono", "stratum2-mono-light", "stratum2-mono-bold", "noto-mono"};
+const i32 RPMENU_MONO_FONT_COUNT = (i32)KZ_ARRAYSIZE(RPMENU_MONO_FONTS);
+
+const char *ResolveReplayMenuFontSlug(const char *slug)
+{
+	for (i32 i = 0; slug && i < RPMENU_MONO_FONT_COUNT; i++)
+	{
+		if (KZ_STREQI(slug, RPMENU_MONO_FONTS[i]))
+		{
+			return RPMENU_MONO_FONTS[i];
+		}
+	}
+	return RPMENU_DEF_FONT;
+}
+
 const MHUDLayoutPrefs &KZHUDService::GetOwnLayoutPrefs()
 {
 	return this->layoutPrefs;
@@ -140,7 +156,9 @@ void KZHUDService::RefreshLayoutPrefs()
 	this->layoutPrefs.replayMenu.size =
 		panorama::SnapToStep((i32)opts->GetPreferenceFloat("rpmenuSize", (f32)RPMENU_DEF_SIZE), LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX);
 	this->layoutPrefs.replayMenu.step = Clamp((i32)opts->GetPreferenceFloat("rpmenuStep", (f32)RPMENU_DEF_STEP), RPMENU_STEP_MIN, RPMENU_STEP_MAX);
-	this->layoutPrefs.replayMenu.fontClass = panorama::ResolveFontClass(opts->GetPreferenceStr("rpmenuFont", RPMENU_DEF_FONT), RPMENU_DEF_FONT);
+	// Только моно (см. RPMENU_MONO_FONTS в layout.h): чужой/старый слаг в префе → дефолт.
+	this->layoutPrefs.replayMenu.fontClass =
+		panorama::ResolveFontClass(ResolveReplayMenuFontSlug(opts->GetPreferenceStr("rpmenuFont", RPMENU_DEF_FONT)), RPMENU_DEF_FONT);
 	// Обводка (text-shadow 4px) визуально «пикселит» мелкий кегль — по умолчанию выключена,
 	// в отличие от элементов худа (их обводка живёт на ярких картах).
 	this->layoutPrefs.replayMenu.outline = opts->GetPreferenceBool("rpmenuOutline", false);
