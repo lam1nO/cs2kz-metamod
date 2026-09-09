@@ -206,8 +206,14 @@ static_function bool CheckNumericRange(KZPlayer *player, const KZ::prefs::Entry 
 	switch (item->type)
 	{
 		case KZOptItemType::Color:
-			// Цвет хранится упакованным u32 (RGBA). Всё, что вне — не цвет.
-			if (value < 0.0 || value > 4294967295.0)
+			// Цвет — упакованные 32 бита RGBA, и в префах живут ОБА представления одного и того
+			// же значения: ЗНАКОВОЕ (белый = -1, синий = -16776961 — так лежит у живых игроков,
+			// потому что упаковка уезжает в i64 через SetPreferenceInt) и беззнаковое
+			// (4294967295, так пишет ReadDefaultValue). Читателю они одинаковы: GetMHUDColorPref
+			// распаковывает маской (hud/kz_hud.cpp: UnpackColor). Отвергать знаковое значило бы
+			// не применить чужой цвет вовсе — ровно дефект «применилось 54 из 64». Не цвет —
+			// только то, что не влезает в 32 бита ни одним из двух прочтений.
+			if (value < -2147483648.0 || value > 4294967295.0)
 			{
 				reason = "range_color";
 				return false;
@@ -221,12 +227,20 @@ static_function bool CheckNumericRange(KZPlayer *player, const KZ::prefs::Entry 
 			}
 			return true;
 		case KZOptItemType::Size:
-			if (value < (f64)item->lo || value > (f64)item->hi)
+		{
+			// scale > 1: преф хранит ДРОБЬ экранного целого (model.h: «the preference stores
+			// value / scale»), а lo/hi заданы в экранных единицах — recordVolume/jsVolume лежат
+			// как 0.0-2.0 при границах 0-200 (local_prefs.cpp, jumpstats_prefs.cpp). Сравнивать
+			// сырое значение с границами значило бы мерить дробь процентами: 200 (двести
+			// процентов «в сыром виде», то есть 20000 %) прошло бы как валидное.
+			const f64 display = item->scale > 1 ? value * (f64)item->scale : value;
+			if (display < (f64)item->lo || display > (f64)item->hi)
 			{
 				reason = "range_size";
 				return false;
 			}
 			return true;
+		}
 		case KZOptItemType::Toggle:
 			// Тумблер с int-хранением (AddActionToggle + SetItemPref(..., Int, ...)) — всё
 			// равно два состояния.
@@ -320,6 +334,32 @@ bool KZ::prefs::ValidateValue(KZPlayer *player, const KZ::prefs::Entry &entry, c
 			// Не Font-пункт: свободная строка. В обмене худа таких нет (см. hud/share/hud_share.cpp,
 			// белый список), поэтому дополнительной проверки здесь не заводим.
 			return true;
+		case KZOptStorage::Vector:
+		{
+			// ReadValue и ApplyValue вектор умеют (три числа через пробел), а валидация до этого
+			// отвечала storage_unsupported — то есть «прочитать можно, записать можно, проверить
+			// нельзя». В обмене худа векторных пунктов нет (GetKeys их отсеивает явно), но
+			// расхождение внутри реестра лечим здесь, а не ждём первого потребителя.
+			Vector parsed;
+			if (!V_StringToValue<Vector>(value, parsed))
+			{
+				reason = "type_vector";
+				return false;
+			}
+			if (item->hi > item->lo)
+			{
+				const f64 components[3] = {(f64)parsed.x, (f64)parsed.y, (f64)parsed.z};
+				for (i32 i = 0; i < 3; i++)
+				{
+					if (components[i] < (f64)item->lo || components[i] > (f64)item->hi)
+					{
+						reason = "range_vector";
+						return false;
+					}
+				}
+			}
+			return true;
+		}
 		default:
 			reason = "storage_unsupported";
 			return false;
@@ -352,6 +392,15 @@ bool KZ::prefs::ApplyValue(KZPlayer *player, const KZ::prefs::Entry &entry, cons
 			if (!V_StringToValue<int64>(value, parsed))
 			{
 				return false;
+			}
+			if (entry.item && entry.item->type == KZOptItemType::Color)
+			{
+				// Сводим оба прочтения одного цвета (знаковое -1 и беззнаковое 4294967295, см.
+				// CheckNumericRange) к тем же 32 битам, что упаковывает PackColor
+				// (hud/kz_hud.cpp) и пишет SetMHUDColorPref: читатель их маскирует одинаково,
+				// но хранить у себя надо ровно одно представление, иначе одинаковые худы
+				// выглядели бы разными в снимке и в базе.
+				parsed = (int64)(u32)parsed;
 			}
 			opts->SetPreferenceInt(entry.key, parsed);
 			return true;

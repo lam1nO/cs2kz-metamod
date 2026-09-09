@@ -521,7 +521,10 @@ static_function i32 NormalizeColorAlpha(KZPlayer *player, const std::vector<KZ::
 		{
 			continue;
 		}
-		opts->SetPreferenceInt(entry.key, (packed & ~(i64)0xFF) | 0xFF);
+		// Маска 32 бит — то же одно представление цвета, что пишет ApplyValue
+		// (option/pref_registry.cpp): знаковое значение (-1) иначе уехало бы в преф
+		// РАСШИРЕННЫМ до 64 бит, то есть третьим написанием того же цвета.
+		opts->SetPreferenceInt(entry.key, ((packed & ~(i64)0xFF) | 0xFF) & 0xFFFFFFFF);
 		fixed++;
 	}
 	return fixed;

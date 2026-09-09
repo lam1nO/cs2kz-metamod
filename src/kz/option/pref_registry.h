@@ -44,8 +44,9 @@ namespace KZ::prefs
 	bool ReadDefaultValue(const Entry &entry, char *out, i32 outLen);
 
 	// Тип И диапазон по описанию пункта. reason — машинно-читаемая причина отказа
-	// (type_bool/type_int/type_float/range_position/range_size/range_color/range_toggle/
-	// choice_unknown/font_unknown/storage_unsupported/empty/no_item), для лога и чата.
+	// (type_bool/type_int/type_float/type_vector/range_position/range_size/range_color/
+	// range_vector/range_toggle/choice_unknown/font_unknown/storage_unsupported/empty/no_item),
+	// для лога и чата.
 	bool ValidateValue(KZPlayer *player, const Entry &entry, const char *value, const char *&reason);
 
 	// Пишет значение в префы игрока. НЕ валидирует — вызывающий обязан сперва позвать
