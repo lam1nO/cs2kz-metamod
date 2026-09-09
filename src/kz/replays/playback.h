@@ -2,12 +2,14 @@
 #define KZ_REPLAYPLAYBACK_H
 #include "common.h"
 #include "sdk/datatypes.h"
+#include "awr_cut.h"
 
 class KZPlayer;
 class PlayerCommand;
 class CMoveData;
 struct TickData;
 struct SubtickData;
+struct RpEvent;
 class CBasePlayerWeapon;
 struct EconInfo;
 
@@ -28,13 +30,27 @@ namespace KZ::replaysystem::playback
 	// Playback state management
 	void StartReplay();
 
-	// Пропуск записанных пауз при воспроизведении: сегменты строятся из событий
-	// TIMER_PAUSE→TIMER_RESUME. BuildPauseSegments — на старте, ClearPauseSegments — на
-	// остановке/конце. SnapSeekTargetOutOfPause/ResetPauseCursor — на навигации (сик).
-	void BuildPauseSegments();
+	// ПРОПУСКАЕМЫЕ сегменты воспроизведения. Записанные паузы (пары событий
+	// TIMER_PAUSE→TIMER_RESUME) — частный случай; в AWR-режиме к ним добавляются мёртвые
+	// интервалы разреза (replay->awrDead). BuildSkipSegments — на старте, ClearPauseSegments —
+	// на остановке/конце. SnapSeekTargetOutOfPause/ResetPauseCursor — на навигации (сик).
+	void BuildSkipSegments();
 	void ClearPauseSegments();
 	u32 SnapSeekTargetOutOfPause(u32 tick);
 	void ResetPauseCursor(u32 tick);
+	// Индекс кадра попадает в пропускаемый сегмент (события/прыжки оттуда не проигрываются).
+	bool IsTickIndexSkipped(u32 idx);
+
+	// Первый индекс кадра с serverTick >= заданного; tickCount, если такого нет.
+	u32 TickIndexForServerTick(const TickData *ticks, u32 tickCount, u32 serverTick);
+
+	// Записанные паузы в ИНДЕКСАХ кадров, включительно ([startIdx, endIdx-1]) — общий код
+	// для BuildSkipSegments и для разреза AWR. Публичен: тем же кодом пользуются воркер
+	// бэкфилла и !lead, у которых нет g_currentReplay.
+	std::vector<awr::Interval> PauseIntervalsFromEvents(const TickData *ticks, u32 tickCount, const RpEvent *events, u32 numEvents);
+
+	// Разрез AWR по уже разобранным данным реплея (адаптер TickData→awr::Frame внутри).
+	awr::CutResult ComputeCutFor(const TickData *ticks, u32 tickCount, const RpEvent *events, u32 numEvents, u64 timeMs);
 
 	// ЭФФЕКТИВНАЯ шкала тиков — запись без паузных сегментов (их плейбек пропускает). Всё, что
 	// видит зритель (время в меню/!rpinfo, перемотка ±N сек, шаг по тикам), считается в ней и

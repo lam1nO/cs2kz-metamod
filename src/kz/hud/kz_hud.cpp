@@ -634,15 +634,17 @@ Vector KZHUDService::GetDisplayVelocity(KZPlayer *src)
 
 std::string KZHUDService::GetCheckpointText(const char *language)
 {
-	// clang-format off
-	
-	return KZLanguageService::PrepareMessageWithLang(language, "HUD - Checkpoint Text",
-		KZ::replaysystem::IsReplayBot(this->player) ? KZ::replaysystem::GetCurrentCpIndex() : this->player->checkpointService->GetCurrentCpIndex(),
-		KZ::replaysystem::IsReplayBot(this->player) ? KZ::replaysystem::GetCheckpointCount() : this->player->checkpointService->GetCheckpointCount(),
-		KZ::replaysystem::IsReplayBot(this->player) ? KZ::replaysystem::GetTeleportCount() : this->player->checkpointService->GetTeleportCount()
-	);
-
-	// clang-format on
+	const bool isReplay = KZ::replaysystem::IsReplayBot(this->player);
+	const i32 cp = isReplay ? KZ::replaysystem::GetCurrentCpIndex() : this->player->checkpointService->GetCurrentCpIndex();
+	const i32 cpCount = isReplay ? KZ::replaysystem::GetCheckpointCount() : this->player->checkpointService->GetCheckpointCount();
+	// AWR-реплей: телепорты вырезаны, счётчик ТП кадра врал бы про то, что видит зритель —
+	// вместо числа метка «AWR» (отдельная фраза: в этой числовой позиции строка не форматируется).
+	if (isReplay && KZ::replaysystem::IsAwrMode())
+	{
+		return KZLanguageService::PrepareMessageWithLang(language, "HUD - Checkpoint AWR Text", cp, cpCount);
+	}
+	const i32 tp = isReplay ? KZ::replaysystem::GetTeleportCount() : (i32)this->player->checkpointService->GetTeleportCount();
+	return KZLanguageService::PrepareMessageWithLang(language, "HUD - Checkpoint Text", cp, cpCount, tp);
 }
 
 std::string KZHUDService::GetTimerText(const char *language)
@@ -1280,7 +1282,10 @@ std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSp
 		const i32 cp = isReplay ? KZ::replaysystem::GetCurrentCpIndex() : dataSource->checkpointService->GetCurrentCpIndex();
 		const i32 cpCount = isReplay ? KZ::replaysystem::GetCheckpointCount() : dataSource->checkpointService->GetCheckpointCount();
 		const i32 tp = isReplay ? KZ::replaysystem::GetTeleportCount() : (i32)dataSource->checkpointService->GetTeleportCount();
-		std::string cpTpText = KZLanguageService::PrepareMessageWithLang(language, "HUD - Bottom CP/TP Text", cp, cpCount, tp);
+		// AWR-реплей — метка вместо числа ТП (см. GetCheckpointText).
+		const bool awr = isReplay && KZ::replaysystem::IsAwrMode();
+		std::string cpTpText = awr ? KZLanguageService::PrepareMessageWithLang(language, "HUD - Bottom CP/TP AWR Text", cp, cpCount)
+								   : KZLanguageService::PrepareMessageWithLang(language, "HUD - Bottom CP/TP Text", cp, cpCount, tp);
 		V_snprintf(buf, sizeof(buf), "<font class='" KZ_HUD_FS_SECONDARY "'><font color='" KZ_HUD_C_WHITE "'>%s</font></font>", cpTpText.c_str());
 		addLine(buf);
 	}
@@ -1631,6 +1636,8 @@ void KZHUDService::ComputeBottomState(KZPlayer *player, KZPlayer *target, Bottom
 		out.cp = isReplay ? KZ::replaysystem::GetCurrentCpIndex() : player->checkpointService->GetCurrentCpIndex();
 		out.cpCount = isReplay ? KZ::replaysystem::GetCheckpointCount() : player->checkpointService->GetCheckpointCount();
 		out.tp = isReplay ? KZ::replaysystem::GetTeleportCount() : (i32)player->checkpointService->GetTeleportCount();
+		// Часть слепка: смена режима реплея обязана перерисовать низ (см. GetCheckpointText).
+		out.awr = isReplay && KZ::replaysystem::IsAwrMode();
 	}
 	out.padLines = BottomPadLines(linesAbove, out.showCpTp ? 1 : 0);
 }
@@ -1788,7 +1795,9 @@ void KZHUDService::FormatBottomText(const BottomPanelState &state, char *buf, i3
 	}
 	if (state.showCpTp)
 	{
-		std::string line = KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Bottom CP/TP Text", state.cp, state.cpCount, state.tp);
+		std::string line = state.awr
+							   ? KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Bottom CP/TP AWR Text", state.cp, state.cpCount)
+							   : KZLanguageService::PrepareMessageWithLang(state.lang, "HUD - Bottom CP/TP Text", state.cp, state.cpCount, state.tp);
 		V_strncpy(buf, PadAbove(line, state.padLines).c_str(), size);
 	}
 }

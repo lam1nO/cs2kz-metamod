@@ -109,6 +109,25 @@
 		"ko"		"CP {checkpoint_index}/{checkpoint_count} | TP {teleport_count}"
 		"lv"		"CP {checkpoint_index}/{checkpoint_count} | TP {teleport_count}"
 	}
+	// AWR-реплей: телепорты вырезаны, числа ТП у кадра нет — метка вместо него.
+	// Отдельная фраза, а не строковый аргумент: в этой позиции формат числовой.
+	"HUD - Bottom CP/TP AWR Text"
+	{
+		"#format"	"checkpoint_index:d,checkpoint_count:d"
+		"en"		"CP {checkpoint_index}/{checkpoint_count} | AWR"
+		"chi"		"存点 {checkpoint_index}/{checkpoint_count} | AWR"
+		"pl"		"CP {checkpoint_index}/{checkpoint_count} | AWR"
+		"ru"		"CP {checkpoint_index}/{checkpoint_count} | AWR"
+		"fi"		"CP {checkpoint_index}/{checkpoint_count} | AWR"
+		"sv"		"CP {checkpoint_index}/{checkpoint_count} | AWR"
+		"ua"		"CP {checkpoint_index}/{checkpoint_count} | AWR"
+		"tr"		"CP {checkpoint_index}/{checkpoint_count} | AWR"
+		"it"		"CP {checkpoint_index}/{checkpoint_count} | AWR"
+		"es"		"CP {checkpoint_index}/{checkpoint_count} | AWR"
+		"de"		"CP {checkpoint_index}/{checkpoint_count} | AWR"
+		"ko"		"CP {checkpoint_index}/{checkpoint_count} | AWR"
+		"lv"		"CP {checkpoint_index}/{checkpoint_count} | AWR"
+	}
 	"HUD - Speed Text"
 	{
 		// Speed: 234
@@ -183,6 +202,24 @@
 		"de"		"CP: {checkpoint_index}/{checkpoint_count} TPs: {teleport_count}"
 		"ko"		"CP: {checkpoint_index}/{checkpoint_count} TPs: {teleport_count}"
 		"lv"		"CP: {checkpoint_index}/{checkpoint_count} TPs: {teleport_count}"
+	}
+	// AWR-реплей — см. «HUD - Bottom CP/TP AWR Text».
+	"HUD - Checkpoint AWR Text"
+	{
+		"#format"	"checkpoint_index:d,checkpoint_count:d"
+		"en"		"CP: {checkpoint_index}/{checkpoint_count} AWR"
+		"chi"		"存点: {checkpoint_index}/{checkpoint_count} AWR"
+		"pl"		"CP: {checkpoint_index}/{checkpoint_count} AWR"
+		"ru"		"CP: {checkpoint_index}/{checkpoint_count} AWR"
+		"fi"		"CP: {checkpoint_index}/{checkpoint_count} AWR"
+		"sv"		"CP: {checkpoint_index}/{checkpoint_count} AWR"
+		"ua"		"CP: {checkpoint_index}/{checkpoint_count} AWR"
+		"tr"		"CP: {checkpoint_index}/{checkpoint_count} AWR"
+		"it"		"CP: {checkpoint_index}/{checkpoint_count} AWR"
+		"es"		"CP: {checkpoint_index}/{checkpoint_count} AWR"
+		"de"		"CP: {checkpoint_index}/{checkpoint_count} AWR"
+		"ko"		"CP: {checkpoint_index}/{checkpoint_count} AWR"
+		"lv"		"CP: {checkpoint_index}/{checkpoint_count} AWR"
 	}
 	"HUD - Timer Text"
 	{

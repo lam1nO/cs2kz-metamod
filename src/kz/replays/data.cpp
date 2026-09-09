@@ -52,6 +52,15 @@ namespace KZ::replaysystem::data
 			delete[] replay->events;
 			replay->events = nullptr;
 		}
+		// AWR-разрез принадлежит реплею (ReplayPlayback копируется по значению, владелец —
+		// текущий g_currentReplay), поэтому освобождается здесь же, вместе с кадрами.
+		if (replay->awrDead)
+		{
+			delete replay->awrDead;
+			replay->awrDead = nullptr;
+		}
+		replay->awrMode = false;
+		replay->awrMs = 0;
 		*replay = {};
 	}
 
@@ -133,6 +142,11 @@ namespace KZ::replaysystem::data
 		return g_currentReplay.currentTeleport;
 	}
 
+	bool IsAwrMode()
+	{
+		return g_currentReplay.awrMode;
+	}
+
 	f32 GetReplayTime()
 	{
 		if (g_currentReplay.startTime == 0.0f)
@@ -176,6 +190,99 @@ namespace KZ::replaysystem::data
 		}
 	}
 
+	// Шапка файла: u32 длины + protobuf + проверка версии. Общий первый шаг обоих
+	// разборов (полного плейбека и CutSource) — раскладка не имеет права разъехаться.
+	// cursor сдвигается на начало секции тиков.
+	static_function bool ParseHeaderPrefixed(const char *&cursor, const char *end, ReplayHeader &header)
+	{
+		if (cursor + (ptrdiff_t)sizeof(u32) > end)
+		{
+			return false;
+		}
+		u32 headerSize = 0;
+		memcpy(&headerSize, cursor, sizeof(headerSize));
+		cursor += sizeof(headerSize);
+
+		if (headerSize == 0 || headerSize > 5 * 1024 * 1024) // sanity limit 5MB
+		{
+			return false;
+		}
+		if (cursor + (ptrdiff_t)headerSize > end)
+		{
+			return false;
+		}
+
+		std::string serialized(cursor, cursor + headerSize);
+		cursor += headerSize;
+
+		if (!header.ParseFromString(serialized))
+		{
+			return false;
+		}
+		return header.version() >= 1 && header.version() <= KZ_REPLAY_VERSION;
+	}
+
+	// Пропуск zstd-секции без распаковки: 12-байтная шапка CompressedSectionHeader
+	// (compression.h) плюс сжатые байты. Нужен CutSource, чтобы перескочить оружие и
+	// джампстаты и добраться до событий.
+	static_function bool SkipCompressedSection(const char *&cursor, const char *end)
+	{
+		using SectionHeader = KZ::replaysystem::compression::CompressedSectionHeader;
+		if (cursor + (ptrdiff_t)sizeof(SectionHeader) > end)
+		{
+			return false;
+		}
+		SectionHeader header;
+		memcpy(&header, cursor, sizeof(header));
+		cursor += sizeof(header);
+		if (cursor + (ptrdiff_t)header.compressedSize > end)
+		{
+			return false;
+		}
+		cursor += header.compressedSize;
+		return true;
+	}
+
+	CutSource LoadCutSourceFromMemory(const char *data, size_t size)
+	{
+		CutSource out;
+		if (!data || size == 0)
+		{
+			return out;
+		}
+
+		const char *cursor = data;
+		const char *end = data + size;
+
+		if (!ParseHeaderPrefixed(cursor, end, out.header))
+		{
+			return out;
+		}
+
+		// Сабтики читаются той же функцией, что и тики, и здесь не нужны — вектор живёт
+		// до конца разбора и уходит вместе с ним.
+		std::vector<SubtickData> subticks;
+		if (!KZ::replaysystem::compression::ReadTickDataCompressed(cursor, end, out.ticks, subticks, out.header.version()))
+		{
+			return out;
+		}
+
+		// Оружие и джампстаты — мимо: разрезу и !lead они не нужны, а распаковка стоила бы
+		// памяти на рабочем потоке.
+		if (!SkipCompressedSection(cursor, end) || !SkipCompressedSection(cursor, end))
+		{
+			return out;
+		}
+
+		if (!KZ::replaysystem::compression::ReadEventsCompressed(cursor, end, out.events))
+		{
+			return out;
+		}
+
+		out.valid = true;
+		return out;
+	}
+
 	// Parses replay data from an in-memory byte array.
 	static_function ReplayPlayback LoadReplayFromMemory(const char *data, size_t size, UUID_t uuid, std::atomic<f32> &progress,
 														std::atomic<bool> &shouldCancel)
@@ -193,38 +300,13 @@ namespace KZ::replaysystem::data
 		}
 		KZ_LOG_DEBUG(LogChannel::Replays, "Loading replay protobuf header...\n");
 
-		// Try to read header size (u32). If this fails, the data is invalid or corrupted.
-		if (cursor + (ptrdiff_t)sizeof(u32) > end)
-		{
-			return result;
-		}
-		u32 headerSize = 0;
-		memcpy(&headerSize, cursor, sizeof(headerSize));
-		cursor += sizeof(headerSize);
-
-		if (headerSize == 0 || headerSize > 5 * 1024 * 1024) // sanity limit 5MB
-		{
-			return result;
-		}
-		if (cursor + (ptrdiff_t)headerSize > end)
-		{
-			return result;
-		}
-
-		std::string serialized(cursor, cursor + headerSize);
-		cursor += headerSize;
-
-		if (!result.header.ParseFromString(serialized))
+		// Шапка и проверка версии — общий помощник (см. ParseHeaderPrefixed).
+		if (!ParseHeaderPrefixed(cursor, end, result.header))
 		{
 			return result;
 		}
 
 		UpdateProgress(cursor, data, size, progress);
-
-		if (result.header.version() < 1 || result.header.version() > KZ_REPLAY_VERSION)
-		{
-			return result;
-		}
 
 		// Load tick data
 		if (shouldCancel)

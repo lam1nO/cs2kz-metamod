@@ -18,6 +18,26 @@
 
 #include <string>
 
+// Ожидание AWR-режима (см. заголовок): ставится перед докачкой, снимается первым же
+// LoadReplay. Один активный реплей на сервер — состояние глобальное, как и сам плейбек.
+static_global bool g_pendingAwr = false;
+static_global u64 g_pendingAwrMs = 0;
+
+void CybReplayDownload::SetPendingAwr(bool on, u64 awrMs)
+{
+	g_pendingAwr = on;
+	g_pendingAwrMs = on ? awrMs : 0;
+}
+
+bool CybReplayDownload::TakePendingAwr(u64 &awrMs)
+{
+	const bool on = g_pendingAwr;
+	awrMs = on ? g_pendingAwrMs : 0;
+	g_pendingAwr = false;
+	g_pendingAwrMs = 0;
+	return on;
+}
+
 namespace
 {
 	// Ключ резолва (см. заголовок cyb_replay_download.h — mode-гейт держится
@@ -118,10 +138,22 @@ namespace
 	{
 		KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
 
+		// Любой резолв начинается с чистого ожидания: прошлая попытка могла умереть уже
+		// ПОСЛЕ выставления флага (сеть отвалилась на самой докачке файла, LoadReplay так
+		// и не позвали) — иначе протухший флаг включил бы AWR-режим следующему реплею.
+		u64 discardedAwrMs = 0;
+		CybReplayDownload::TakePendingAwr(discardedAwrMs);
+
 		if (resp.status == 404)
 		{
 			if (player)
 			{
+				// AWR: фолбэка нет — в локальной БД плагина AWR не существует по построению.
+				if (kind == CybReplayDownload::Kind::AWR)
+				{
+					player->languageService->PrintChat(true, false, "Replay - AWR Not Found");
+					return;
+				}
 				// `!replay pbpro` РАБОТАЛ и до централизации: он не попадал под гейт
 				// «Global Mode Only», а LoadPBReplay при недоступном глобале молча
 				// фолбэчился на локальный серверный pro-PB. Поэтому центральный промах для
@@ -199,6 +231,15 @@ namespace
 			return;
 		}
 
+		if (kind == CybReplayDownload::Kind::AWR)
+		{
+			// Подпись до загрузки: истину (разрез по самому файлу) посчитает LoadReplay.
+			// Поля может и не быть — тогда 0, подпись просто не покажет время.
+			f64 awrMs = 0.0;
+			json.Get("awrMs", awrMs);
+			CybReplayDownload::SetPendingAwr(true, awrMs > 0.0 ? (u64)awrMs : 0);
+		}
+
 		DownloadAndPlay(userID, parsedUuid.ToString(), downloadUrl);
 	}
 } // namespace
@@ -240,7 +281,7 @@ void CybReplayDownload::RequestAndPlay(KZPlayer *player, Kind kind, u64 targetSt
 	req.SetQuery("map", key.map);
 	req.SetQuery("course", std::to_string(key.course));
 	req.SetQuery("mode", key.mode);
-	// Имена типов — контракт с api (resolveQuery в replays.controller.ts): pb|wr|pbpro|wrpro.
+	// Имена типов — контракт с api (resolveQuery в replays.controller.ts): pb|wr|pbpro|wrpro|awr.
 	const char *typeArg = "wr";
 	switch (kind)
 	{
@@ -255,6 +296,9 @@ void CybReplayDownload::RequestAndPlay(KZPlayer *player, Kind kind, u64 targetSt
 			break;
 		case Kind::WRPro:
 			typeArg = "wrpro";
+			break;
+		case Kind::AWR:
+			typeArg = "awr";
 			break;
 	}
 	req.SetQuery("type", typeArg);

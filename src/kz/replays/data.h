@@ -3,6 +3,7 @@
 
 #include "sdk/datatypes.h"
 #include "kz_replay.h"
+#include "awr_cut.h"
 #include "utils/uuid.h"
 #include <thread>
 #include <mutex>
@@ -67,6 +68,18 @@ namespace KZ::replaysystem::data
 		// playbackSpeed != 1: по ней интерполируются позиция/углы/скорость между кадрами,
 		// иначе замедление выглядело бы как замирание с рывком.
 		f32 tickFraction;
+
+		// AWR (`!replay awr`): реплей проигрывается с вырезкой телепорт-петель — мёртвые
+		// интервалы попадают в пропускаемые сегменты плейбека (playback::BuildSkipSegments).
+		bool awrMode;
+		// Время рана без мёртвых интервалов, мс. Истина — файл (посчитано на загрузке);
+		// значение из api служит только подписью до загрузки.
+		u64 awrMs;
+		// Мёртвые интервалы (индексы кадров, включительно). Куча, а не вектор по значению:
+		// ReplayPlayback копируется по значению в асинхронном загрузчике
+		// (AsyncLoadStatus::completedReplay) и обязан остаться тривиально копируемым.
+		// Владелец — сам ReplayPlayback, освобождается в FreeReplayData.
+		std::vector<awr::Interval> *awrDead;
 	};
 
 	// Границы скорости воспроизведения. Нижняя — чтобы кадр не держался дольше секунды
@@ -103,6 +116,21 @@ namespace KZ::replaysystem::data
 		std::mutex callbackMutex;
 	};
 
+	// Минимум для разреза AWR и для !lead: шапка, кадры и события — без сабтиков, оружия
+	// и джампстатов (их секции пропускаются без распаковки).
+	struct CutSource
+	{
+		ReplayHeader header;
+		std::vector<TickData> ticks;
+		std::vector<RpEvent> events;
+		bool valid = false;
+	};
+
+	// Разбор буфера файла: только шапка, секция тиков и секция событий. Потокобезопасен
+	// (не трогает g_currentReplay и никакого другого глобального состояния) — зовётся с
+	// рабочего потока воркера бэклога и загрузчика !lead.
+	CutSource LoadCutSourceFromMemory(const char *data, size_t size);
+
 	// Data management functions
 	void LoadReplayAsync(std::string path, LoadSuccessCallback onSuccess, LoadFailureCallback onFailure);
 	void LoadReplayMemoryAsync(std::vector<char> data, UUID_t uuid, LoadSuccessCallback onSuccess, LoadFailureCallback onFailure);
@@ -130,6 +158,8 @@ namespace KZ::replaysystem::data
 	f32 GetReplayTime();
 	f32 GetEndTime();
 	bool GetPaused();
+	// Реплей проигрывается в AWR-режиме (вырезка телепорт-петель) — нужно худу и меню.
+	bool IsAwrMode();
 } // namespace KZ::replaysystem::data
 
 #endif // KZ_REPLAYDATA_H

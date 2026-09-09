@@ -9,6 +9,7 @@
 #include "sdk/usercmd.h"
 #include <vector>
 #include <cmath>
+#include <algorithm>
 
 namespace KZ::replaysystem::playback
 {
@@ -16,30 +17,37 @@ namespace KZ::replaysystem::playback
 	// раздевания бота. Сбрасывается на старте реплея и при успешной выдаче.
 	static_global i32 g_lastFailedGiveItemDef = -1;
 
-	// Паузные сегменты в ИНДЕКСАХ тиков плейбека (не serverTick). Выводятся из пар
-	// событий TIMER_PAUSE→TIMER_RESUME один раз на старте/навигации, чтобы в тик-цикле
-	// проверка была O(1) по курсору без аллокаций. Единственный активный реплей — один
-	// глобальный бот, поэтому состояние статическое (как g_lastFailedGiveItemDef).
+	// ПРОПУСКАЕМЫЕ сегменты в ИНДЕКСАХ тиков плейбека (не serverTick). Записанная пауза
+	// (пара событий TIMER_PAUSE→TIMER_RESUME) — частный случай; в AWR-режиме сюда же
+	// попадают мёртвые интервалы разреза телепорт-петель. Строятся один раз на
+	// старте/навигации, чтобы в тик-цикле проверка была O(1) по курсору без аллокаций.
+	// Единственный активный реплей — один глобальный бот, поэтому состояние статическое
+	// (как g_lastFailedGiveItemDef). Имена g_pauseSegments/g_nextPauseSegment оставлены
+	// как есть намеренно: переименование ради переименования утопило бы дифф.
 	struct PauseSegment
 	{
-		u32 startTick; // индекс первого тика паузы
-		u32 endTick;   // индекс кадра возобновления (полуинтервал [startTick, endTick))
+		u32 startTick; // индекс первого пропускаемого кадра
+		u32 endTick;   // индекс первого кадра ПОСЛЕ сегмента (полуинтервал [startTick, endTick))
 	};
 
 	static_global std::vector<PauseSegment> g_pauseSegments;
 	// Курсор следующего непройденного сегмента (плейбек монотонен вперёд).
 	static_global size_t g_nextPauseSegment = 0;
 
-	// Первый индекс тика с tickData[idx].serverTick >= serverTick. serverTick в записи
+	// Первый индекс тика с ticks[idx].serverTick >= serverTick. serverTick в записи
 	// монотонно не убывает (движковый tickcount), поэтому бинарный поиск корректен.
 	// Может вернуть tickCount, если такого тика нет.
-	static_function u32 TickIndexForServerTick(const data::ReplayPlayback *replay, u32 serverTick)
+	u32 TickIndexForServerTick(const TickData *ticks, u32 tickCount, u32 serverTick)
 	{
-		u32 lo = 0, hi = replay->tickCount;
+		if (!ticks)
+		{
+			return 0;
+		}
+		u32 lo = 0, hi = tickCount;
 		while (lo < hi)
 		{
 			u32 mid = lo + (hi - lo) / 2;
-			if (replay->tickData[mid].serverTick < serverTick)
+			if (ticks[mid].serverTick < serverTick)
 			{
 				lo = mid + 1;
 			}
@@ -57,21 +65,19 @@ namespace KZ::replaysystem::playback
 		g_nextPauseSegment = 0;
 	}
 
-	void BuildPauseSegments()
+	std::vector<awr::Interval> PauseIntervalsFromEvents(const TickData *ticks, u32 tickCount, const RpEvent *events, u32 numEvents)
 	{
-		ClearPauseSegments();
-
-		auto replay = data::GetCurrentReplay();
-		if (!replay->events || replay->numEvents == 0 || !replay->tickData || replay->tickCount == 0)
+		std::vector<awr::Interval> out;
+		if (!events || numEvents == 0 || !ticks || tickCount == 0)
 		{
-			return;
+			return out;
 		}
 
 		bool inPause = false;
 		u32 pauseStartServerTick = 0;
-		for (u32 i = 0; i < replay->numEvents; i++)
+		for (u32 i = 0; i < numEvents; i++)
 		{
-			const RpEvent *e = &replay->events[i];
+			const RpEvent *e = &events[i];
 			if (e->type != RPEVENT_TIMER_EVENT)
 			{
 				continue;
@@ -90,12 +96,13 @@ namespace KZ::replaysystem::playback
 					if (inPause)
 					{
 						inPause = false;
-						u32 startIdx = TickIndexForServerTick(replay, pauseStartServerTick);
-						u32 endIdx = TickIndexForServerTick(replay, e->serverTick);
-						// Кадр возобновления обязан существовать; сегмент — хотя бы 1 тик.
-						if (endIdx < replay->tickCount && startIdx < endIdx)
+						u32 startIdx = TickIndexForServerTick(ticks, tickCount, pauseStartServerTick);
+						u32 endIdx = TickIndexForServerTick(ticks, tickCount, e->serverTick);
+						// Кадр возобновления обязан существовать; интервал — хотя бы 1 кадр.
+						// Границы включительны, поэтому кадр возобновления в паузу НЕ входит.
+						if (endIdx < tickCount && startIdx < endIdx)
 						{
-							g_pauseSegments.push_back({startIdx, endIdx});
+							out.push_back({startIdx, endIdx - 1});
 						}
 					}
 					break;
@@ -109,6 +116,83 @@ namespace KZ::replaysystem::playback
 					break;
 			}
 		}
+		return out;
+	}
+
+	awr::CutResult ComputeCutFor(const TickData *ticks, u32 tickCount, const RpEvent *events, u32 numEvents, u64 timeMs)
+	{
+		if (!ticks || tickCount == 0)
+		{
+			awr::CutResult empty;
+			empty.reason = "empty";
+			return empty;
+		}
+		// Адаптер TickData→awr::Frame: сам разрез о движке и о нашей раскладке не знает
+		// (awr_cut.h собирается голым компилятором, там host-тесты).
+		std::vector<awr::Frame> frames(tickCount);
+		for (u32 i = 0; i < tickCount; i++)
+		{
+			const TickData &t = ticks[i];
+			frames[i].serverTick = t.serverTick;
+			frames[i].cpIndex = t.checkpoint.index;
+			frames[i].cpCount = t.checkpoint.checkpointCount;
+			frames[i].tpCount = t.checkpoint.teleportCount;
+			frames[i].origin[0] = t.post.origin.x;
+			frames[i].origin[1] = t.post.origin.y;
+			frames[i].origin[2] = t.post.origin.z;
+		}
+		std::vector<awr::Interval> pauses = PauseIntervalsFromEvents(ticks, tickCount, events, numEvents);
+		return awr::ComputeAwrCut(frames.data(), tickCount, pauses.data(), (u32)pauses.size(), timeMs, ENGINE_FIXED_TICK_INTERVAL);
+	}
+
+	void BuildSkipSegments()
+	{
+		ClearPauseSegments();
+
+		auto replay = data::GetCurrentReplay();
+		if (!replay->tickData || replay->tickCount == 0)
+		{
+			return;
+		}
+
+		for (const awr::Interval &iv : PauseIntervalsFromEvents(replay->tickData, replay->tickCount, replay->events, replay->numEvents))
+		{
+			// Интервалы включительны, сегменты — полуинтервалы [startTick, endTick).
+			g_pauseSegments.push_back({iv.from, iv.to + 1});
+		}
+
+		// AWR: мёртвые интервалы разреза пропускаются той же машинерией, что паузы —
+		// эффективная шкала, сик и шаг считаются по сегментам и правок не требуют.
+		if (replay->awrMode && replay->awrDead)
+		{
+			for (const awr::Interval &iv : *replay->awrDead)
+			{
+				if (iv.from < replay->tickCount && iv.to < replay->tickCount && iv.from <= iv.to)
+				{
+					g_pauseSegments.push_back({iv.from, iv.to + 1});
+				}
+			}
+		}
+
+		// Пауза внутри вырезанной петли даёт пересечение — а весь остальной код (курсор
+		// AdvancePastPauses, RawTickToEffective, EffectiveTickToRaw) требует упорядоченных
+		// и НЕ пересекающихся сегментов. Сортируем и сливаем пересекающиеся и смежные.
+		std::sort(g_pauseSegments.begin(), g_pauseSegments.end(),
+				  [](const PauseSegment &a, const PauseSegment &b) { return a.startTick < b.startTick; });
+		size_t merged = 0;
+		for (size_t i = 0; i < g_pauseSegments.size(); i++)
+		{
+			if (merged > 0 && g_pauseSegments[i].startTick <= g_pauseSegments[merged - 1].endTick)
+			{
+				if (g_pauseSegments[i].endTick > g_pauseSegments[merged - 1].endTick)
+				{
+					g_pauseSegments[merged - 1].endTick = g_pauseSegments[i].endTick;
+				}
+				continue;
+			}
+			g_pauseSegments[merged++] = g_pauseSegments[i];
+		}
+		g_pauseSegments.resize(merged);
 	}
 
 	// Пропуск паузных сегментов при монотонном продвижении вперёд. O(1) амортизированно
@@ -131,6 +215,25 @@ namespace KZ::replaysystem::playback
 			g_nextPauseSegment++;
 		}
 		return tick;
+	}
+
+	bool IsTickIndexSkipped(u32 idx)
+	{
+		// Сегменты упорядочены и не пересекаются (BuildSkipSegments) — бинарный поиск.
+		size_t lo = 0, hi = g_pauseSegments.size();
+		while (lo < hi)
+		{
+			size_t mid = lo + (hi - lo) / 2;
+			if (g_pauseSegments[mid].endTick <= idx)
+			{
+				lo = mid + 1;
+			}
+			else
+			{
+				hi = mid;
+			}
+		}
+		return lo < g_pauseSegments.size() && idx >= g_pauseSegments[lo].startTick;
 	}
 
 	u32 SnapSeekTargetOutOfPause(u32 tick)
@@ -769,8 +872,9 @@ namespace KZ::replaysystem::playback
 		replay->playbackSpeed = 1.0f;
 		replay->tickFraction = 0.0f;
 		g_lastFailedGiveItemDef = -1;
-		// Разбор диапазонов записанных пауз (для их пропуска при воспроизведении).
-		BuildPauseSegments();
+		// Разбор пропускаемых сегментов: записанные паузы и, в AWR-режиме, мёртвые
+		// интервалы разреза. Строго после выставления awrMode/awrDead (commands.cpp).
+		BuildSkipSegments();
 	}
 
 	void ApplyTickState(KZPlayer *player, const TickData *tickData)

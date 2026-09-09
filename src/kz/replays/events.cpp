@@ -7,6 +7,7 @@
 #include "events.h"
 #include "data.h"
 #include "bot.h"
+#include "playback.h"
 
 namespace KZ::replaysystem::events
 {
@@ -25,6 +26,20 @@ namespace KZ::replaysystem::events
 		while (replay->currentEvent < replay->numEvents && replay->events[replay->currentEvent].serverTick <= serverTick)
 		{
 			RpEvent *event = &replay->events[replay->currentEvent];
+
+			// AWR: события из вырезанных телепорт-петель зрителю не проигрываем — иначе
+			// после прыжка через петлю пачкой печатались бы её сплиты и звучали телепорты
+			// куска, которого зритель не видел. Пара TIMER_PAUSE/TIMER_RESUME —
+			// исключение: на ней держится модель времени (accumulatedPauseTime).
+			const bool pauseEvent = event->type == RPEVENT_TIMER_EVENT
+									&& (event->data.timer.type == RpEvent::RpEventData::TimerEvent::TIMER_PAUSE
+										|| event->data.timer.type == RpEvent::RpEventData::TimerEvent::TIMER_RESUME);
+			if (replay->awrMode && !pauseEvent
+				&& playback::IsTickIndexSkipped(playback::TickIndexForServerTick(replay->tickData, replay->tickCount, event->serverTick)))
+			{
+				replay->currentEvent++;
+				continue;
+			}
 
 			switch (event->type)
 			{
@@ -63,6 +78,13 @@ namespace KZ::replaysystem::events
 		while (replay->currentJump < replay->numJumps && replay->jumps[replay->currentJump].overall.serverTick <= serverTick)
 		{
 			RpJumpStats *jump = &replay->jumps[replay->currentJump];
+			// AWR: прыжки из вырезанных петель не печатаем (см. CheckEvents) — по тику отрыва.
+			if (replay->awrMode
+				&& playback::IsTickIndexSkipped(playback::TickIndexForServerTick(replay->tickData, replay->tickCount, jump->overall.serverTick)))
+			{
+				replay->currentJump++;
+				continue;
+			}
 			KZ_LOG_DEBUG(LogChannel::Replays, "Jump event: tick %d\n", jump->overall.serverTick);
 			jump->PrintJump(&player);
 			replay->currentJump++;

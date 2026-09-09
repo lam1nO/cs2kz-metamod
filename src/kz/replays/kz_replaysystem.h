@@ -40,6 +40,8 @@ namespace KZ::replaysystem
 	i32 GetCurrentCpIndex();
 	i32 GetCheckpointCount();
 	i32 GetTeleportCount();
+	// Реплей идёт в AWR-режиме (телепорт-петли вырезаны) — худ вместо счётчика ТП пишет «AWR».
+	bool IsAwrMode();
 	f32 GetTime();
 	f32 GetEndTime();
 	bool GetPaused();

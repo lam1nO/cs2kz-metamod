@@ -343,6 +343,12 @@ namespace KZ::replaysystem::commands
 			replayPath,
 			// Success callback (runs on main thread via ProcessAsyncLoadCompletion)
 			data::LoadSuccessCallback([playerUserID]() {
+				// AWR (`!replay awr`): вид записи доносит сюда одноразовое ожидание резолва —
+				// путь загрузки общий для всех видов и донести его иначе нечем. Забираем
+				// ПЕРВОЙ строкой, до любого раннего выхода (нет игрока, чужая карта), иначе
+				// протухшее ожидание включило бы AWR-режим следующему реплею.
+				u64 pendingAwrMs = 0;
+				const bool pendingAwr = CybReplayDownload::TakePendingAwr(pendingAwrMs);
 				KZPlayer* player = g_pKZPlayerManager->ToPlayer(playerUserID);
 				if (!player)
 				{
@@ -384,6 +390,45 @@ namespace KZ::replaysystem::commands
 				// Initialize bot and start playback (safe to call on main thread)
 				// The replay data is already stored in the global g_currentReplay
 				auto replay = data::GetCurrentReplay();
+
+				// Разрез считаем ЗДЕСЬ, до playback::StartReplay: он строит пропускаемые
+				// сегменты уже с учётом awrMode/awrDead.
+				replay->awrMode = pendingAwr;
+				replay->awrMs = pendingAwrMs;
+				if (replay->awrMode)
+				{
+					// Время рана — из шапки; у не-ранового реплея его нет, резать нечего.
+					const bool isRun = replay->header.has_run() && replay->header.run().time() > 0.0f;
+					awr::CutResult cut;
+					if (isRun)
+					{
+						cut = playback::ComputeCutFor(replay->tickData, replay->tickCount, replay->events, replay->numEvents,
+													  (u64)(replay->header.run().time() * 1000.0 + 0.5));
+					}
+					else
+					{
+						cut.reason = "not_a_run";
+					}
+					if (!cut.ok)
+					{
+						// Ложная сшивка хуже отказа (спека §4): играем как обычный реплей.
+						KZ_LOG_WARN(LogChannel::Replays, "[cyb_replay] awr_cut_failed reason=%s uuid=%s\n", cut.reason,
+									replay->uuid.ToString().c_str());
+						replay->awrMode = false;
+						replay->awrMs = 0;
+						player->languageService->PrintChat(true, false, "Replay - AWR Cut Failed");
+					}
+					else
+					{
+						// Истина — файл; значение из api было только подписью до загрузки.
+						// delete перед присваиванием — страховка: прошлый разрез уже снят
+						// вместе с прошлыми кадрами (FreeReplayData в ProcessAsyncLoadCompletion).
+						delete replay->awrDead;
+						replay->awrDead = new std::vector<awr::Interval>(std::move(cut.dead));
+						replay->awrMs = cut.awrMs;
+					}
+				}
+
 				bot::InitializeBotForReplay(replay->header);
 				playback::StartReplay();
 				playback::InitializeWeapons();
@@ -602,6 +647,12 @@ namespace KZ::replaysystem::commands
 		time_t time = replay->header.timestamp();
 		strftime(timestamp, 64, "%Y-%m-%d %H:%M:%S", localtime(&time));
 		player->languageService->PrintChat(true, false, "Replay - Current Info", effectiveTick, effectiveLast, timeStr, maxTime);
+		if (replay->awrMode)
+		{
+			// Подпись AWR: время рана БЕЗ вырезанных петель (посчитано по самому файлу).
+			CUtlString awrTime = utils::FormatTime((f64)replay->awrMs / 1000.0);
+			player->languageService->PrintChat(true, false, "Replay - AWR Label", awrTime.Get());
+		}
 		player->languageService->PrintConsole(false, false, "Replay - General Info Console", replay->uuid.ToString().c_str(),
 											  replay->header.player().name().c_str(), replay->header.player().steamid64(), timestamp,
 											  replay->header.server_version(), replay->header.plugin_version());
@@ -1325,6 +1376,13 @@ SCMD(kz_replay, SCFL_REPLAY | SCFL_HELP)
 			}
 		}
 		CybReplayDownload::RequestAndPlay(player, isPbProKind ? CybReplayDownload::Kind::PBPro : CybReplayDownload::Kind::PB, targetSteamId64);
+		return MRES_SUPERCEDE;
+	}
+	// AWR — рекорд сети ПОСЛЕ вырезки телепорт-петель. Аргументов курса/режима в v1 нет:
+	// ключ, как у `wr`, — текущий курс и режим игрока.
+	if (KZ_STREQI(arg1, "awr"))
+	{
+		CybReplayDownload::RequestAndPlay(player, CybReplayDownload::Kind::AWR, 0);
 		return MRES_SUPERCEDE;
 	}
 	if (KZ_STREQI(arg1, "wr"))

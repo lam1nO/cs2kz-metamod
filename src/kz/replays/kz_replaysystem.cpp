@@ -104,6 +104,11 @@ namespace KZ::replaysystem
 		return data::GetTeleportCount();
 	}
 
+	bool IsAwrMode()
+	{
+		return data::IsAwrMode();
+	}
+
 	f32 GetTime()
 	{
 		return data::GetReplayTime();

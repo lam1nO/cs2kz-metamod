@@ -183,7 +183,14 @@ static_function f64 ReplayMenuTotalTime()
 	}
 	if (ReplayMenuIsRunReplay())
 	{
-		return (f64)data::GetCurrentReplay()->header.run().time();
+		const auto *replay = data::GetCurrentReplay();
+		// AWR: знаменатель — время БЕЗ вырезанных петель, иначе числитель (позиция в
+		// эффективной шкале, где петли пропущены) никогда не дошёл бы до знаменателя.
+		if (replay->awrMode)
+		{
+			return (f64)replay->awrMs / 1000.0;
+		}
+		return (f64)replay->header.run().time();
 	}
 	const u32 effectiveCount = playback::EffectiveTickCount();
 	return effectiveCount > 0 ? (f64)(effectiveCount - 1) * ENGINE_FIXED_TICK_INTERVAL : 0.0;
@@ -216,7 +223,16 @@ std::string KZ::replaysystem::menu::GetReplayMenuStatusText(KZPlayer *player)
 	utils::FormatTime(ReplayMenuPositionTime(), time, sizeof(time), false);
 	utils::FormatTime(ReplayMenuTotalTime(), end, sizeof(end), false);
 	const bool paused = data::IsReplayPlaying() && (GetPaused() || data::GetCurrentReplay()->replayPaused);
-	return KZLanguageService::PrepareMessageWithLang(lang, paused ? "Replay Panel - Status Paused" : "Replay Panel - Status", speedText, time, end);
+	std::string status =
+		KZLanguageService::PrepareMessageWithLang(lang, paused ? "Replay Panel - Status Paused" : "Replay Panel - Status", speedText, time, end);
+	// Метка AWR — КОРОТКАЯ и в начале: карточка постоянной ширины считается по самым длинным
+	// текстам (ReplayMenuWidth), и полная чатовая фраза «AWR … (телепорты вырезаны)» раздула бы
+	// весь блок. Само время уже показано знаменателем (ReplayMenuTotalTime).
+	if (data::IsReplayPlaying() && data::GetCurrentReplay()->awrMode)
+	{
+		status = KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - AWR Mark") + status;
+	}
+	return status;
 }
 
 std::string KZ::replaysystem::menu::GetReplayMenuStatusMaxText(KZPlayer *player)
@@ -230,7 +246,14 @@ std::string KZ::replaysystem::menu::GetReplayMenuStatusMaxText(KZPlayer *player)
 	char current[16];
 	commands::FormatReplaySpeed(commands::GetReplaySpeed(), current, sizeof(current));
 	const char *speed = V_strlen(current) > 4 ? current : "0.25";
-	return KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Status Paused", speed, end, end);
+	std::string status = KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Status Paused", speed, end, end);
+	// Метка AWR входит в бюджет ширины ровно тогда, когда она реально показывается
+	// (GetReplayMenuStatusText): ширина считается по текущему реплею, не по худшему случаю.
+	if (data::IsReplayPlaying() && data::GetCurrentReplay()->awrMode)
+	{
+		status = KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - AWR Mark") + status;
+	}
+	return status;
 }
 
 std::string KZ::replaysystem::menu::GetReplayMenuHintText(KZPlayer *player, ReplayMenuLine line)

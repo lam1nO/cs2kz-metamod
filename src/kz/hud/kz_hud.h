@@ -232,6 +232,8 @@ private:
 	{
 		bool showCpTp {};
 		i32 cp {}, cpCount {}, tp {};
+		// AWR-реплей: вместо числа ТП в строке стоит метка «AWR» (телепорты вырезаны).
+		bool awr {};
 		// Худ спектатора под открытым Html-меню (DrawPanels → UpdateBottomPanel с menuOpen):
 		// время/скорость/клавиши наблюдаемого вместо CP/TP. Значения — в гранулярности
 		// отображения (целые юниты, сотые секунды), иначе слепок менялся бы чаще текста.
@@ -279,8 +281,8 @@ private:
 
 		bool operator==(const BottomPanelState &o) const
 		{
-			return showCpTp == o.showCpTp && cp == o.cp && cpCount == o.cpCount && tp == o.tp && menuOpen == o.menuOpen && menuStatus == o.menuStatus
-				   && showSpeed == o.showSpeed && showKeys == o.showKeys && speed == o.speed && prespeed == o.prespeed
+			return showCpTp == o.showCpTp && cp == o.cp && cpCount == o.cpCount && tp == o.tp && awr == o.awr && menuOpen == o.menuOpen
+				   && menuStatus == o.menuStatus && showSpeed == o.showSpeed && showKeys == o.showKeys && speed == o.speed && prespeed == o.prespeed
 				   && showPrespeed == o.showPrespeed && keyMask == o.keyMask && keysTwoRows == o.keysTwoRows && padLines == o.padLines
 				   && hasTimer == o.hasTimer && timerRunning == o.timerRunning && timerPaused == o.timerPaused && timeCs == o.timeCs
 				   && V_strcmp(lang, o.lang) == 0;
