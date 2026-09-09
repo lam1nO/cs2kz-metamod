@@ -242,10 +242,10 @@
 	}
 	"HUD Share - Export Stamp Note"
 	{
-		"en"		"The stamp line applies the block once instead of on every connect. Keep it when moving your own settings; drop it when handing them to someone else."
-		"ru"		"Строка со штампом нужна, чтобы блок применился один раз, а не при каждом заходе. Переносишь свои настройки — оставь её; отдаёшь другому — убери."
-		"chi"		"带时间戳的那一行让这段设置只应用一次, 而不是每次连接都应用. 搬自己的设置就留着, 给别人就删掉."
-		"ua"		"Рядок зі штампом потрібен, щоб блок застосувався один раз, а не при кожному заході. Переносиш свої налаштування — залиш його; віддаєш іншому — прибери."
+		"en"		"Copy the whole block, the first (stamp) line included: pasted from the main menu it is what makes the settings apply at all, and it also makes them apply once instead of on every connect. It works the same if you hand the block to someone else."
+		"ru"		"Копируй блок целиком, вместе с первой строкой (штамп): при вставке из главного меню именно она заставляет настройки примениться, и с ней же блок применяется один раз, а не при каждом заходе. Если отдаёшь блок другому — точно так же, штамп оставь."
+		"chi"		"整段复制, 包括第一行 (时间戳): 从主菜单粘贴时正是它让设置生效, 并且让设置只应用一次而不是每次连接都应用. 把这段给别人也一样, 别删时间戳."
+		"ua"		"Копіюй блок цілком, разом з першим рядком (штамп): при вставці з головного меню саме він змушує налаштування застосуватися, і з ним же блок застосовується один раз, а не при кожному заході. Віддаєш блок іншому — так само, штамп залиш."
 	}
 	"HUD Share - Export Footer"
 	{

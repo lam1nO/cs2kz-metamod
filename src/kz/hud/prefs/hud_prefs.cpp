@@ -98,12 +98,26 @@ static_function void OutlineOnActivate(KZPlayer *player, i64 tag)
 // Choice-пункта нет префа, и ResetNode такие пункты пропускает.
 static_global KZOptNode *s_resettableNodes[(i32)LayoutElement::Count + 1] {};
 
+// Сброс — тоже откатываемое действие (спека обмена §4), поэтому перед ResetNode снимаем слот
+// отката тем же и единственным способом, что и применение чужого худа
+// (KZ::hudshare::SaveUndo). Без этого «Сбросить всё» → «Откатить последнее применение» вернуло
+// бы игроку не отмену сброса, а прошлый чужой снимок — и отчиталось бы словом «Откатил».
+// Подсказку печатаем только когда слот реально записан (иначе обещали бы несуществующий откат).
+static_function void SaveUndoBeforeReset(KZPlayer *player)
+{
+	if (KZ::hudshare::SaveUndo(player))
+	{
+		player->languageService->PrintChat(true, false, "HUD Share - Undo Hint");
+	}
+}
+
 static_function void ResetPageOnActivate(KZPlayer *player, i64 tag)
 {
 	if (tag < 0 || tag >= (i64)KZ_ARRAYSIZE(s_resettableNodes))
 	{
 		return;
 	}
+	SaveUndoBeforeReset(player);
 	KZ::menu::ResetNode(player, s_resettableNodes[tag]);
 }
 
@@ -126,6 +140,7 @@ static_global KZOptNode *s_hudGeneralNode {};
 
 static_function void ResetAllOnActivate(KZPlayer *player, i64 tag)
 {
+	SaveUndoBeforeReset(player);
 	for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(s_resettableNodes); i++)
 	{
 		KZ::menu::ResetNode(player, s_resettableNodes[i]);

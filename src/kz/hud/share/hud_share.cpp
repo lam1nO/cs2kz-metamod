@@ -684,8 +684,9 @@ KZ::hudshare::ApplyStats KZ::hudshare::Apply(KZPlayer *to, const char *snapshot,
 	// Слот отката снимается ДО записи и живёт В ПАМЯТИ сессии (обоснование — hud_share.h):
 	// в Players.Preferences ему нельзя, поле общее на все настройки и уже близко к лимиту.
 	// Откат сам себе слота не пишет: иначе !hudundo стал бы переключателем двух состояний.
-	std::string previous;
-	const bool savePrevious = (source != KZ::hudshare::Source::Undo) && KZ::hudshare::Capture(to, previous);
+	// Пишем ЧЕРЕЗ SaveUndo — единственный способ записать слот (им же пользуются кнопки сброса
+	// настроек худа, hud/prefs/hud_prefs.cpp): второй путь записи разошёлся бы с этим.
+	const bool savePrevious = (source != KZ::hudshare::Source::Undo) && KZ::hudshare::SaveUndo(to);
 
 	i32 colorAlphaFixed = 0;
 	bool floored = false;
@@ -727,17 +728,7 @@ KZ::hudshare::ApplyStats KZ::hudshare::Apply(KZPlayer *to, const char *snapshot,
 		floored = ApplyVisibilityFloor(to);
 	}
 
-	// Слот отката — после пакета: он вне префов, в БД не уезжает, и записывать его надо только
-	// когда применение реально состоялось.
-	if (savePrevious)
-	{
-		if (UndoSlot *undo = GetUndoSlot(to))
-		{
-			undo->steamID = steamID;
-			undo->snapshot = previous;
-		}
-	}
-	else if (source == KZ::hudshare::Source::Undo)
+	if (source == KZ::hudshare::Source::Undo)
 	{
 		// Слот израсходован: второй !hudundo обязан сказать «нечего откатывать», а не вернуть
 		// худ, который только что откатили. Гасим ТОЛЬКО снимок — кулдаун выдачи кода к откату
@@ -853,6 +844,26 @@ KZ::hudshare::ApplyStats KZ::hudshare::TakeFromSpectated(KZPlayer *player)
 		player->languageService->PrintChat(true, false, "HUD Share - Taken", target->GetName());
 	}
 	return stats;
+}
+
+bool KZ::hudshare::SaveUndo(KZPlayer *player)
+{
+	UndoSlot *undo = GetUndoSlot(player);
+	if (!undo)
+	{
+		return false;
+	}
+	// Снимок ТЕКУЩЕГО состояния игрока тем же Capture, что и обмен: fail-closed по загрузке
+	// префов внутри (иначе «как было» оказался бы набором дефолтов), формат один на оба пути,
+	// поэтому откат сброса и откат чужого худа применяются одним и тем же кодом.
+	std::string snapshot;
+	if (!KZ::hudshare::Capture(player, snapshot))
+	{
+		return false;
+	}
+	undo->steamID = player->GetSteamId64(false);
+	undo->snapshot = snapshot;
+	return true;
 }
 
 bool KZ::hudshare::HasUndo(KZPlayer *player)
