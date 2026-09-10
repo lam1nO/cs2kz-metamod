@@ -45,6 +45,10 @@
 	// Whether we override chat processing or not.
 	"overridePlayerChat"				"true"
 
+	// Incident fallback (2026-09-10): send player chat via TextMsg/HUD_PRINTTALK instead of
+	// SayText2 (no player attribution). Flip to true only if SayText2 chat is invisible again.
+	"chatViaTextMsg"					"false"
+
 	// Whether to mirror CS2KZ log output to a file in addons/cs2kz/logs.
 	"logToFile"							"true"
 

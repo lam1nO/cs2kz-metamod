@@ -4,6 +4,7 @@
 #include "sdk/entity/cbaseplayercontroller.h"
 #include "sdk/recipientfilters.h"
 #include "utils.h"
+#include "kz/option/kz_option.h"
 
 #include "tier0/memdbgon.h"
 
@@ -311,28 +312,61 @@ void utils::SayChat(CBaseEntity *entity, const char *format, ...)
 {
 	FORMAT_STRING(buffer);
 
-	// Инцидент 10.09.2026: после апдейта CS2 09.09 клиент перестал рисовать наш SayText2
-	// (гипотеза — новое поле textallchat=8 в CUserMessageSayText2, движок его выставляет, наш
-	// .proto в SDK его не знает; проверяется диагностикой saytext2_seen в kz_quiet.cpp; поиск по
-	// подстроке «SayText2» к тому же порядок-зависим после переименования CS_UM_SayText2 →
-	// *_CSGOLegacy). Чат игроков шлём тем же путём, что и все ответы плагина — TextMsg в
-	// область чата (HUD_PRINTTALK): он на флоте доказанно рисуется, цвета/префиксы через
-	// CFormat те же. Цена: сообщение не привязано к entityindex игрока — клиентский
-	// блок-лист/мут через таб его не фильтруют, аватар/клик по нику в строке чата пропадают;
-	// фильтрацией занимается платформенный мут (cyber-presence). Вернуть SayText2 — после
-	// регенерации .proto SDK с textallchat.
-	(void)entity;
 	char coloredBuffer[512];
-	CBroadcastRecipientFilter *filter = new CBroadcastRecipientFilter;
-	if (CFormat(coloredBuffer, sizeof(coloredBuffer), buffer))
-	{
-		ClientPrintFilter(filter, HUD_PRINTTALK, coloredBuffer, "", "", "", "");
-	}
-	else
+	if (!CFormat(coloredBuffer, sizeof(coloredBuffer), buffer))
 	{
 		// CFormat при нехватке места НЕ завершает строку нулём — слать такой буфер нельзя.
 		Warning("utils::SayChat did not have enough space to print: %s\n", buffer);
+		return;
 	}
+
+	// Инцидент 10.09.2026 (чат игроков невидим после апдейта CS2 09.09). Диагностика
+	// saytext2_seen на канарейке показала: движок шлёт SayText2 id=118 с chat=1
+	// (name="Cstrike_Chat_All", p1=ник, p2=текст, без новых полей), а мы слали chat=0 с
+	// кастомным messagename — и клиент такое больше не рисует. Мимикрируем под движок:
+	// тот же id и chat=true; entityindex оставляем (клиентский блок-лист/мут через таб,
+	// аватар в строке чата). Имя в реестре — «CUserMessageSayText2 [118]», поэтому поиск по id,
+	// а не по имени класса; фолбэк — подстрока (так работало до апдейта).
+	// Страховка без пересборки: серверная опция chatViaTextMsg=true переводит чат на путь
+	// TextMsg/HUD_PRINTTALK (тот же, что у ответов !pb) — без привязки к игроку.
+	if (KZOptionService::GetOptionInt("chatViaTextMsg", false))
+	{
+		CBroadcastRecipientFilter *filter = new CBroadcastRecipientFilter;
+		ClientPrintFilter(filter, HUD_PRINTTALK, coloredBuffer, "", "", "", "");
+		delete filter;
+		return;
+	}
+
+	INetworkMessageInternal *netmsg = g_pNetworkMessages->FindNetworkMessageById(UM_SayText2);
+	if (!netmsg)
+	{
+		netmsg = g_pNetworkMessages->FindNetworkMessagePartial("SayText2");
+	}
+	if (!netmsg)
+	{
+		static bool warned = false;
+		if (!warned)
+		{
+			warned = true;
+			Warning("[cyb] print_failed reason=netmsg_not_found name=SayText2 id=%d\n", (int)UM_SayText2);
+		}
+		return;
+	}
+	static bool resolvedLogged = false;
+	if (!resolvedLogged)
+	{
+		resolvedLogged = true;
+		NetMessageInfo_t *info = netmsg->GetNetMessageInfo();
+		Msg("[cyb] chat_netmsg_resolved name=%s id=%d\n", netmsg->GetUnscopedName(), info ? (int)info->m_MessageId : -1);
+	}
+	auto msg = netmsg->AllocateMessage()->ToPB<CUserMessageSayText2>();
+	msg->set_entityindex(entity->entindex());
+	msg->set_messagename(coloredBuffer);
+	msg->set_chat(true);
+
+	CBroadcastRecipientFilter *filter = new CBroadcastRecipientFilter;
+	interfaces::pGameEventSystem->PostEventAbstract(0, false, filter, netmsg, msg, 0);
+	delete msg;
 	delete filter;
 }
 
