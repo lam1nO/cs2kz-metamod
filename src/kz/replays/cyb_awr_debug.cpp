@@ -8,7 +8,9 @@
  * на каком расстоянии был чекпоинт, сколько игрок стоял, какой вырез объявлен.
  *
  * Куда что печатается: построчная трасса и объявленные вырезы уходят в ЛОГ
- * (KZ_LOG_INFO, LogChannel::Replays — читается bin/logs.sh, как строки `[cyb_awr] backfill`),
+ * (KZ_LOG_INFO, LogChannel::Replays — читается bin/logs.sh, как строки `[cyb_awr] backfill`;
+ * брать её из логов строкой `grep -F '[cyb_awr] debug uuid=<uuid>'` — БЕЗ -F квадратные
+ * скобки читаются как класс символов и шаблон не совпадёт),
  * а в ответ команды идёт только сводка. Причина: в RCON-контексте Msg уходит в ОТВЕТ пакетом,
  * и на 81 прибытии клиент получает `bad packet size 10330`, а в логах при этом не остаётся
  * ничего — то есть на длинном ране трасса терялась целиком.
@@ -179,8 +181,10 @@ CON_COMMAND_F(kz_awr_debug, "Explain the AWR cut of one replay file. Usage: kz_a
 	KZ::replaysystem::awr::CutResult cut = KZ::replaysystem::playback::ComputeCutForTraced(
 		src.ticks.data(), (u32)src.ticks.size(), src.events.data(), (u32)src.events.size(), timeMs, &trace);
 
-	KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] debug uuid=%s arrivals=%zu teleports=%u ok=%d reason=%s awr_ms=%llu detail=%s\n", uuid.c_str(),
-				trace.size(), cut.teleports, cut.ok ? 1 : 0, cut.ok ? "ok" : cut.reason, (unsigned long long)cut.awrMs, cut.detail);
+	KZ_LOG_INFO(LogChannel::Replays,
+				"[cyb_awr] debug uuid=%s arrivals=%zu teleports=%u max_gap=%llu@%u ok=%d reason=%s awr_ms=%llu detail=%s\n", uuid.c_str(),
+				trace.size(), cut.teleports, (unsigned long long)cut.maxUncoveredGapTicks, cut.maxUncoveredGapFrame, cut.ok ? 1 : 0,
+				cut.ok ? "ok" : cut.reason, (unsigned long long)cut.awrMs, cut.detail);
 
 	for (size_t i = 0; i < trace.size(); i++)
 	{
@@ -234,11 +238,17 @@ CON_COMMAND_F(kz_awr_debug, "Explain the AWR cut of one replay file. Usage: kz_a
 	}
 	Msg("[cyb_awr]   arrivals=%zu teleports=%u ok=%d reason=%s awr_ms=%llu time_ms=%llu cuts=%zu\n", trace.size(), cut.teleports, cut.ok ? 1 : 0,
 		cut.ok ? "ok" : cut.reason, (unsigned long long)cut.awrMs, (unsigned long long)timeMs, cut.dead.size());
+	// Разрыв записи внутри вырезов — печатаем всегда: на успешном файле это метрика доверия
+	// к awr_ms (сколько времени в вырезах не подтверждено кадрами), на отказе — сам диагноз.
+	Msg("[cyb_awr]   max_uncovered_gap=%llu ticks (%.1f s) at frame %u; refuse threshold %llu\n",
+		(unsigned long long)cut.maxUncoveredGapTicks, (double)cut.maxUncoveredGapTicks * ENGINE_FIXED_TICK_INTERVAL, cut.maxUncoveredGapFrame,
+		(unsigned long long)KZ::replaysystem::awr::AWR_MAX_RECORD_GAP_TICKS);
 	if (!cut.ok && cut.detail[0] != '\0')
 	{
 		Msg("[cyb_awr]   detail=%s\n", cut.detail);
 	}
-	Msg("[cyb_awr]   per-arrival trace is in the server log: grep '[cyb_awr] debug uuid=%s'\n", uuid.c_str());
+	// grep -F: без него квадратные скобки читаются как класс символов и шаблон не совпадёт.
+	Msg("[cyb_awr]   per-arrival trace is in the server log: grep -F '[cyb_awr] debug uuid=%s'\n", uuid.c_str());
 
 	// stdout контейнера буферизуется — без flush вывод команды приходит рывками (урок
 	// kzt-саги, тот же fflush стоит у диагностики скинов бота).

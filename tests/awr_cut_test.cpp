@@ -165,6 +165,55 @@ static void test_prac_gap_pause_subtracted_by_ticks()
 	assert(r.dead[0].from == 11 && r.dead[0].to == 25);
 	// Мёртвое: тики 10..(25+GAP) = 15 + GAP, минус пауза GAP+1 → 14 тиков.
 	assert(r.awrMs == timeMs - (uint64_t)(14 * TI * 1000.0 + 0.5));
+	// Разрыв целиком покрыт записанной паузой — «непокрытого» разрыва нет.
+	assert(r.maxUncoveredGapTicks == 1);
+}
+
+// Тот же разрыв, но БЕЗ записанной паузы (неизвестный источник: реконнект с восстановлением
+// рана и пр.) — отнести это время ни к мёртвому, ни к живому нечем, поэтому измеримый отказ.
+static void test_record_gap_without_pause_refused()
+{
+	const uint32_t GAP = 20000;
+	std::vector<Frame> v;
+	for (uint32_t i = 0; i <= 20; i++) v.push_back(FC(i, 0, i >= 10 ? 1 : 0, 0, (float)i));
+	for (uint32_t i = 21; i <= 24; i++) v.push_back(FC(i + GAP, 0, 1, 0, (float)i));
+	v.push_back(FC(25 + GAP, 0, 1, 1, 10.0f));
+	for (uint32_t i = 26; i <= 30; i++) v.push_back(FC(i + GAP, 0, 1, 1, 10.0f + (i - 25)));
+	FillPre(v);
+	CutResult r = ComputeAwrCut(v.data(), v.size(), nullptr, 0, 10000, TI, 0, v.size() - 1);
+	assert(!r.ok && std::strcmp(r.reason, "awr_record_gap") == 0);
+	// Разрыв = тик кадра 21 (21+GAP) минус тик кадра 20 (20).
+	assert(r.maxUncoveredGapTicks == GAP + 1 && r.maxUncoveredGapFrame == 21);
+	assert(std::strstr(r.detail, "max_gap=20001@21") && std::strstr(r.detail, "gap_s="));
+}
+
+// Разрыв короче порога (хитч сервера) отказом НЕ является, но в метрике виден.
+static void test_small_record_gap_allowed()
+{
+	std::vector<Frame> v;
+	for (uint32_t i = 0; i <= 20; i++) v.push_back(FC(i, 0, i >= 10 ? 1 : 0, 0, (float)i));
+	// Кадры 21..25 записаны с пропуском 10 тиков сразу после кадра 20.
+	for (uint32_t i = 21; i <= 24; i++) v.push_back(FC(i + 10, 0, 1, 0, (float)i));
+	v.push_back(FC(35, 0, 1, 1, 10.0f));
+	for (uint32_t i = 26; i <= 30; i++) v.push_back(FC(i + 10, 0, 1, 1, 10.0f + (i - 25)));
+	FillPre(v);
+	CutResult r = ComputeAwrCut(v.data(), v.size(), nullptr, 0, 10000, TI, 0, v.size() - 1);
+	assert(r.ok && r.maxUncoveredGapTicks == 11 && r.maxUncoveredGapFrame == 21);
+}
+
+// Пересекающиеся/неупорядоченные паузы нормализуются: пересечение не вычитается дважды.
+static void test_overlapping_pauses_not_double_subtracted()
+{
+	std::vector<Frame> v;
+	for (uint32_t i = 0; i <= 30; i++) v.push_back(FC(i, 0, i >= 10 ? 1 : 0, 0, (float)i));
+	v.push_back(FC(31, 0, 1, 1, 10.0f));
+	for (uint32_t i = 32; i < 40; i++) v.push_back(FC(i, 0, 1, 1, 10.0f + (i - 31)));
+	FillPre(v);
+	// Две пересекающиеся паузы (14,20] и (18,24] в обратном порядке = одна (14,24] = 10 тиков.
+	const Interval pauses[2] = {{18, 24}, {14, 20}};
+	CutResult r = ComputeAwrCut(v.data(), v.size(), pauses, 2, 10000, TI, 0, v.size() - 1);
+	assert(r.ok && r.awrMs == 10000 - (uint64_t)((21 - 10) * TI * 1000.0 + 0.5));
+	// Без нормализации вычлось бы 6+6=12 тиков вместо 10 → мёртвое 9, awrMs больше.
 }
 
 // Фикстура формы живого дефекта: N прибытий подряд, каждое сшивается к предыдущему, стояний
@@ -211,12 +260,14 @@ static void test_awr_implausible_guard()
 	CutResult zero = ComputeAwrCut(v.data(), v.size(), nullptr, 0, deadMs - 375, TI, 0, (uint32_t)v.size() - 1);
 	assert(!zero.ok && std::strcmp(zero.reason, "awr_implausible") == 0);
 	assert(std::strstr(zero.detail, "dead_ms=") && std::strstr(zero.detail, "time_ms=") && std::strstr(zero.detail, "dead_n=1"));
-	// (2) живого меньше 5 % времени рана → тот же отказ.
-	CutResult tiny = ComputeAwrCut(v.data(), v.size(), nullptr, 0, deadMs + 225, TI, 0, (uint32_t)v.size() - 1);
+	// (2) живого меньше 1 % времени рана (порог — сеть, не основной триггер) → тот же отказ.
+	CutResult tiny = ComputeAwrCut(v.data(), v.size(), nullptr, 0, deadMs + 90, TI, 0, (uint32_t)v.size() - 1);
 	assert(!tiny.ok && std::strcmp(tiny.reason, "awr_implausible") == 0);
-	// (3) ровно над порогом — проходит.
-	CutResult okRes = ComputeAwrCut(v.data(), v.size(), nullptr, 0, deadMs + 500, TI, 0, (uint32_t)v.size() - 1);
-	assert(okRes.ok && okRes.awrMs == 500);
+	// (3) над порогом — проходит. 5 % прежнего порога легитимный гринд бы не прошёл.
+	CutResult okRes = ComputeAwrCut(v.data(), v.size(), nullptr, 0, deadMs + 100, TI, 0, (uint32_t)v.size() - 1);
+	assert(okRes.ok && okRes.awrMs == 100);
+	CutResult grind = ComputeAwrCut(v.data(), v.size(), nullptr, 0, deadMs + 500, TI, 0, (uint32_t)v.size() - 1);
+	assert(grind.ok && grind.awrMs == 500);
 }
 
 // Позиция прибытия не совпадает ни с одним прежним кадром → отказ, не ложная сшивка.
@@ -598,6 +649,7 @@ int main()
 	test_no_teleports(); test_single_tp(); test_repeat_tp_same_cp(); test_prevcp_nextcp_keeps_middle();
 	test_undo(); test_pause_overlap_not_double_counted(); test_dest_not_found();
 	test_prac_gap_pause_subtracted_by_ticks(); test_many_arrivals_chain_no_double_count(); test_awr_implausible_guard();
+	test_record_gap_without_pause_refused(); test_small_record_gap_allowed(); test_overlapping_pauses_not_double_subtracted();
 	test_tail_teleport_after_run_end(); test_prerecord_teleport_before_run_start(); test_counter_mismatch();
 	test_no_run_window();
 	test_cp_set_while_running(); test_cp_matches_pre_side(); test_undo_mid_tick();

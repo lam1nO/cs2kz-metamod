@@ -69,6 +69,12 @@ namespace
 	// -dry-run` пережёвывал бы ОДИН И ТОТ ЖЕ файл все 50 раз (наблюдено на канарейке
 	// kz 0.191.0). Живёт до следующего Run.
 	std::unordered_set<std::string> g_dryRunSeen;
+	// «Мягко» отказавшие uuid этого ПРОЦЕССА (см. IsSoftFailure): в api они не отправлены,
+	// значит api их не помечает и бэклог отдаёт их снова — без этого множества обычный
+	// прогон жевал бы один и тот же файл до исчерпания счётчика. Живёт до перезапуска
+	// плагина намеренно: «мягкий» отказ снимает правка НАШЕГО кода, то есть новый бинарь.
+	std::unordered_set<std::string> g_softFailed;
+
 	// Сколько записей просить у бэклога в dry-run: обычному прогону хватает свежайшей, а
 	// dry-run нужен выбор, чтобы было из чего взять невиденную.
 	constexpr const char *AWR_BACKFILL_DRY_LIMIT = "50";
@@ -84,6 +90,11 @@ namespace
 		u32 teleports = 0;
 		// Число ТП из шапки реплея (RunReplayData::num_teleports); -1 = поля нет.
 		i32 headerTeleports = -1;
+		// Самый большой разрыв записи внутри вырезов, не покрытый паузой, и его кадр
+		// (awr::CutResult::maxUncoveredGapTicks). Печатается ВСЕГДА, в том числе на успехе:
+		// распределение разрывов надо видеть до того, как оно испортит awr_ms.
+		u64 maxGapTicks = 0;
+		u32 maxGapFrame = 0;
 		// Разбор отказа из awr::CutResult::detail (пусто при ok). Копия, а не указатель:
 		// CutResult живёт на стеке рабочего потока, а строку печатает главный.
 		std::string detail;
@@ -315,7 +326,10 @@ namespace
 		// В обычном режиме хватает одной свежайшей строки: обработанная помечается в api и
 		// в бэклог не возвращается. В dry-run пометки нет, поэтому берём страницу и ищем в
 		// ней невиденную (см. g_dryRunSeen).
-		req.SetQuery("limit", dryRun ? AWR_BACKFILL_DRY_LIMIT : "1");
+		// Обычному прогону хватает одной свежайшей строки — но только пока нет «мягко»
+		// отказавших: они в api не помечены и приезжают первыми, поэтому нужен выбор.
+		const bool needPage = dryRun || !g_softFailed.empty();
+		req.SetQuery("limit", needPage ? AWR_BACKFILL_DRY_LIMIT : "1");
 		SetAuthHeader(req);
 		// clang-format off
 		req.Send(
@@ -367,7 +381,21 @@ namespace
 
 				if (!dryRun)
 				{
-					StartDownload(items[0].replayUuid, items[0].url, dryRun);
+					for (const BacklogItem &item : items)
+					{
+						if (g_softFailed.count(item.replayUuid) != 0)
+						{
+							continue;
+						}
+						StartDownload(item.replayUuid, item.url, dryRun);
+						return;
+					}
+					// Вся страница — «мягко» отказавшие в этом процессе: идти некуда,
+					// следующий запрос вернёт её же. Останавливаемся сами.
+					g_remaining = 0;
+					g_busy = false;
+					KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill done reason=soft_failed_exhausted soft=%u\n",
+								(unsigned)g_softFailed.size());
 					return;
 				}
 
@@ -527,9 +555,20 @@ namespace
 				res.detail = cut.detail;
 				res.awrMs = cut.awrMs;
 				res.teleports = cut.teleports;
+				res.maxGapTicks = cut.maxUncoveredGapTicks;
+				res.maxGapFrame = cut.maxUncoveredGapFrame;
 				PublishResult(res);
 			});
 		worker.detach();
+	}
+
+	// Отказ, который может исчезнуть после правки НАШЕГО кода, а не свойство файла. Такой
+	// результат нельзя ни писать в api, ни помечать посчитанным — см. SendResult.
+	// Детерминированные отказы (dest_not_found, counter_mismatch, header_tp_mismatch,
+	// no_run_window, parse_failed, not_a_run, http_4xx, empty_file) сюда НЕ входят.
+	bool IsSoftFailure(const char *reason)
+	{
+		return KZ_STREQ(reason, "awr_implausible") || KZ_STREQ(reason, "awr_record_gap");
 	}
 
 	// Рабочий поток: отдать результат главному. Один файл в работе, поэтому очередь
@@ -567,9 +606,9 @@ namespace
 		{
 			V_snprintf(detailSuffix, sizeof(detailSuffix), " detail=%s", res.detail.c_str());
 		}
-		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill uuid=%s time_ms=%llu awr_ms=%llu tps=%u ok=%d reason=%s dry=%d%s\n",
+		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill uuid=%s time_ms=%llu awr_ms=%llu tps=%u max_gap=%llu@%u ok=%d reason=%s dry=%d%s\n",
 					res.uuid.c_str(), (unsigned long long)res.timeMs, (unsigned long long)res.awrMs, (unsigned)res.teleports,
-					res.ok ? 1 : 0, res.reason, res.dryRun ? 1 : 0, detailSuffix);
+					(unsigned long long)res.maxGapTicks, res.maxGapFrame, res.ok ? 1 : 0, res.reason, res.dryRun ? 1 : 0, detailSuffix);
 
 		if (res.ok)
 		{
@@ -589,6 +628,20 @@ namespace
 
 		if (res.dryRun)
 		{
+			FinishFileAndChain();
+			return;
+		}
+
+		// «Мягкий» отказ — НЕ отправляем в api вовсе. Любой POST (даже с awrMs:null) ставит
+		// строке awr_checked_at, и она навсегда выпадает из бэклога; для отказа, который
+		// говорит «этому результату нельзя верить» (а не «файл такой»), это неверно: после
+		// правки нашего кода тот же файл может посчитаться нормально. Файл остаётся в
+		// бэклоге, а чтобы прогон не жевал его по кругу — помним uuid в процессе.
+		if (!res.ok && IsSoftFailure(res.reason))
+		{
+			g_softFailed.insert(res.uuid);
+			KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill soft_failed uuid=%s reason=%s not_posted=1 soft=%u\n", res.uuid.c_str(),
+						res.reason, (unsigned)g_softFailed.size());
 			FinishFileAndChain();
 			return;
 		}
