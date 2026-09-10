@@ -525,7 +525,7 @@ namespace KZ::replaysystem::awr
 				// test_adjacent_cuts_with_different_dest_not_merged (числа держим там, чтобы
 				// комментарий не разъезжался с ассертами). На awrMs это не влияет (кадры те
 				// же), но влияет на ЧИСЛО вырезов и на разброс точек внутри выреза
-				// (maxDestSpread) — то есть на инвариант правила.
+				// (maxChainDestOffset) — то есть на инвариант правила.
 				//
 				// Ветка ПЕРЕСЕЧЕНИЯ сегодня недостижима и стоит страховкой, это осознанно:
 				// обход даёт интервалы непересекающимися (курсор строго убывает), поэтому
@@ -536,6 +536,16 @@ namespace KZ::replaysystem::awr
 				const bool adjacent = merged > 0 && cuts[i].iv.from == cuts[merged - 1].iv.to + 1;
 				if (overlap || (adjacent && SameDest(&cuts[i].dest.x, &cuts[merged - 1].dest.x)))
 				{
+					// ИНВАРИАНТ: член цепочки обязан лежать в допуске от её ЯКОРЯ (см.
+					// CutResult::maxChainDestOffset). Пишем максимум здесь, потому что
+					// сравнение якоря с членом происходит ровно в этой строке — O(вырезов),
+					// без прохода по кадрам.
+					const float offset = Dist(&cuts[i].dest.x, &cuts[merged - 1].dest.x);
+					if (offset > r.maxChainDestOffset)
+					{
+						r.maxChainDestOffset = offset;
+						r.maxChainDestOffsetCut = (uint32_t)(merged - 1);
+					}
 					if (cuts[i].iv.to > cuts[merged - 1].iv.to)
 					{
 						cuts[merged - 1].iv.to = cuts[i].iv.to;
@@ -545,6 +555,8 @@ namespace KZ::replaysystem::awr
 				cuts[merged++] = cuts[i];
 			}
 			cuts.resize(merged);
+			// С этого места ноль в метрике правдив (см. CutResult::maxChainDestOffsetMeasured).
+			r.maxChainDestOffsetMeasured = true;
 			r.dead.clear();
 			r.dead.reserve(cuts.size());
 			for (const DeadCut &cut : cuts)
@@ -566,40 +578,10 @@ namespace KZ::replaysystem::awr
 		// у одного time_ms=706539 против dead_ms=720094 (awr_ms клампился в ноль). В кадрах
 		// такой промежуток не даёт вклада ни в одну из величин, и класс отказов исчезает.
 		uint64_t deadFrames = 0;
-		// Буфер точек прибытий одного выреза — для инварианта «разброс точек внутри выреза»
-		// (см. CutResult::maxDestSpread). Один вектор на все вырезы, чтобы не аллоцировать в
-		// цикле.
-		std::vector<const Frame *> cutArrivals;
-		uint32_t cutIndex = 0;
 		for (const Interval &d : r.dead)
 		{
 			deadFrames += ActiveFrames(d.from, d.to, pauseList);
 
-			// Разброс точек прибытий внутри ОДНОГО выреза. Попарно, а не по габаритам: это
-			// инвариант, и завышенная оценка дала бы ложную тревогу. Цена — O(k²) на вырез,
-			// где k — прибытий в нём; кластеры обычно в единицы-десятки, а путь разовый (на
-			// файл), в игровом такте разреза нет.
-			cutArrivals.clear();
-			for (uint32_t i = d.from; i <= d.to; i++)
-			{
-				if (arrival[i])
-				{
-					cutArrivals.push_back(&frames[i]);
-				}
-			}
-			for (size_t a = 0; a + 1 < cutArrivals.size(); a++)
-			{
-				for (size_t b = a + 1; b < cutArrivals.size(); b++)
-				{
-					const float spread = Dist(cutArrivals[a]->origin, cutArrivals[b]->origin);
-					if (spread > r.maxDestSpread)
-					{
-						r.maxDestSpread = spread;
-						r.maxDestSpreadCut = cutIndex;
-					}
-				}
-			}
-			cutIndex++;
 			// Разрывы записи внутри выреза — считаем ВСЕГДА, но теперь только как диагностику
 			// (на мёртвое время они больше не влияют): по ним видно, сколько времени внутри
 			// вырезов не подтверждено кадрами. Цена — проход по кадрам выреза; зовут разрез с

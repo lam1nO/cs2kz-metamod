@@ -202,17 +202,23 @@ namespace KZ::replaysystem::playback
 		return outStart < outEnd;
 	}
 
-	void LogDestSpreadViolation(const char *uuid, const awr::CutResult &cut)
+	bool LogDestOffsetViolation(const char *uuid, bool measured, float offset, u32 offsetCut, size_t deadCount)
 	{
-		if (cut.maxDestSpread <= awr::AWR_SAME_DEST_TOLERANCE)
+		if (!measured || offset <= awr::AWR_SAME_DEST_TOLERANCE)
 		{
-			return;
+			return false;
 		}
-		// `error`, а не `warn`: это не свойство файла, а нарушенное правило разреза — вырез
-		// склеил прибытия на РАЗНЫЕ точки. Ровно этот дефект правился 10.09 (живой файл
+		// `error`, а не `warn`: это не свойство файла, а нарушенное правило разреза — сшивка
+		// прошла через смену точки назначения. Ровно этот дефект правился 10.09 (живой файл
 		// 01a06ca3), и оставить его без сигнала значит снова узнать о нём из глаз игрока.
-		KZ_LOG_ERROR(LogChannel::Replays, "[cyb_awr] invariant uuid=%s reason=dest_spread_violation spread=%.3f tol=%.1f cut=%u dead_n=%zu\n",
-					 uuid ? uuid : "?", cut.maxDestSpread, awr::AWR_SAME_DEST_TOLERANCE, cut.maxDestSpreadCut, cut.dead.size());
+		KZ_LOG_ERROR(LogChannel::Replays, "[cyb_awr] invariant uuid=%s reason=dest_offset_violation offset=%.3f tol=%.1f cut=%u dead_n=%zu\n",
+					 uuid ? uuid : "?", offset, awr::AWR_SAME_DEST_TOLERANCE, offsetCut, deadCount);
+		return true;
+	}
+
+	bool LogDestOffsetViolation(const char *uuid, const awr::CutResult &cut)
+	{
+		return LogDestOffsetViolation(uuid, cut.maxChainDestOffsetMeasured, cut.maxChainDestOffset, cut.maxChainDestOffsetCut, cut.dead.size());
 	}
 
 	awr::CutResult ComputeCutFor(const TickData *ticks, u32 tickCount, const RpEvent *events, u32 numEvents, u64 timeMs)

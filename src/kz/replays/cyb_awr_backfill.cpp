@@ -258,11 +258,13 @@ namespace
 		// увеличивает (и даёт десятки миллисекунд). До этой правки число вырезов печаталось
 		// только в detail= НА ОТКАЗЕ, то есть сравнить успешные прогоны было нечем.
 		u32 deadCuts = 0;
-		// Инвариант правила: разброс точек прибытий внутри одного выреза (см.
-		// awr::CutResult::maxDestSpread). Печатается на каждом файле и проверяется на главном
-		// потоке; это ТОТ различитель правила, которым «дельта числа вырезов» не стала.
-		f32 destSpread = 0.0f;
-		u32 destSpreadCut = 0;
+		// Инвариант правила: смещение члена сшитой цепочки от её якоря (см.
+		// awr::CutResult::maxChainDestOffset). Печатается на каждом файле и проверяется на
+		// главном потоке; это ТОТ различитель правила, которым «дельта числа вырезов» не
+		// стала. measured — дошёл ли разрез до слияния (иначе печатаем n/a, а не ноль).
+		bool destOffsetMeasured = false;
+		f32 destOffset = 0.0f;
+		u32 destOffsetCut = 0;
 		// Самый большой разрыв записи внутри вырезов и его кадр — диагностика доверия
 		// (awr::CutResult::maxRecordGapTicks). Печатается на КАЖДОМ файле, где метрика
 		// вообще посчитана (в том числе на успехе): распределение разрывов надо видеть до
@@ -957,8 +959,9 @@ namespace
 				res.awrMs = cut.awrMs;
 				res.teleports = cut.teleports;
 				res.deadCuts = (u32)cut.dead.size();
-				res.destSpread = cut.maxDestSpread;
-				res.destSpreadCut = cut.maxDestSpreadCut;
+				res.destOffsetMeasured = cut.maxChainDestOffsetMeasured;
+				res.destOffset = cut.maxChainDestOffset;
+				res.destOffsetCut = cut.maxChainDestOffsetCut;
 				res.timerFramesChecked = cut.timerFramesChecked;
 				res.timerFramesRecorded = cut.timerFramesRecorded;
 				res.timerFramesExpected = cut.timerFramesExpected;
@@ -978,7 +981,9 @@ namespace
 	// no_run_window, parse_failed, not_a_run, http_4xx, empty_file) сюда НЕ входят.
 	bool IsSoftFailure(const char *reason)
 	{
-		return KZ_STREQ(reason, "awr_implausible") || KZ_STREQ(reason, "awr_record_gap");
+		// dest_offset_violation — тоже мягкий: нарушен инвариант НАШЕГО правила, значит после
+		// правки кода тот же файл посчитается верно, и помечать его в api нельзя.
+		return KZ_STREQ(reason, "awr_implausible") || KZ_STREQ(reason, "awr_record_gap") || KZ_STREQ(reason, "dest_offset_violation");
 	}
 
 	// Рабочий поток: отдать результат главному. Файлов в полёте до N, поэтому это ОЧЕРЕДЬ:
@@ -1035,22 +1040,42 @@ namespace
 		{
 			V_snprintf(framesText, sizeof(framesText), "n/a");
 		}
+		// ИНВАРИАНТ ПРАВИЛА на пути ДОГОНА — МЯГКИЙ ОТКАЗ, а не «залогировали и отправили».
+		// Нарушение означает, что сшивка прошла через смену точки назначения: вырез съел
+		// лишнее, awr_ms ЗАНИЖЕН, и такое время попало бы в таблицу как рекорд. Спека §4:
+		// ложная сшивка хуже отказа. Мягкий, потому что причина в НАШЕМ коде — строку в api
+		// не помечаем, файл остаётся в бэклоге и посчитается после правки (IsSoftFailure).
+		// На пути ПРОИГРЫВАНИЯ (`!replay awr`, commands.cpp) наоборот, только лог: зрителю
+		// нужен реплей, а в api оттуда ничего не уезжает.
+		if (res.ok
+			&& KZ::replaysystem::playback::LogDestOffsetViolation(res.uuid.c_str(), res.destOffsetMeasured, res.destOffset, res.destOffsetCut,
+																  res.deadCuts))
+		{
+			res.ok = false;
+			res.reason = "dest_offset_violation";
+			res.awrMs = 0;
+		}
+
+		// max_chain_offset=n/a там, где до слияния разрез не дошёл (ранние отказы разреза,
+		// отказы докачки): ноль читался бы как «нарушений нет».
+		char offsetText[32];
+		if (res.destOffsetMeasured)
+		{
+			V_snprintf(offsetText, sizeof(offsetText), "%.3f", res.destOffset);
+		}
+		else
+		{
+			V_snprintf(offsetText, sizeof(offsetText), "n/a");
+		}
 		// tp_collapsed — прибытия, не получившие своего выреза: они попали внутрь чужого
 		// (повторные попытки одного чекпоинта). deadCuts <= teleports по построению (каждый
 		// вырез кончается на прибытии), поэтому вычитание безопасно.
 		const unsigned collapsed = res.teleports > res.deadCuts ? (unsigned)(res.teleports - res.deadCuts) : 0u;
 		KZ_LOG_INFO(LogChannel::Replays,
-					"[cyb_awr] backfill uuid=%s time_ms=%llu awr_ms=%llu tps=%u dead_n=%u tp_collapsed=%u max_dest_spread=%.3f max_gap=%s "
+					"[cyb_awr] backfill uuid=%s time_ms=%llu awr_ms=%llu tps=%u dead_n=%u tp_collapsed=%u max_chain_offset=%s max_gap=%s "
 					"frames=%s ok=%d reason=%s dry=%d%s\n",
 					res.uuid.c_str(), (unsigned long long)res.timeMs, (unsigned long long)res.awrMs, (unsigned)res.teleports, (unsigned)res.deadCuts,
-					collapsed, res.destSpread, maxGapText, framesText, res.ok ? 1 : 0, res.reason, res.dryRun ? 1 : 0, detailSuffix);
-		// Нарушение инварианта правила — отдельной строкой уровня error, файл при этом
-		// отправляется как обычно (ошибка наша, а не файла).
-		if (res.destSpread > KZ::replaysystem::awr::AWR_SAME_DEST_TOLERANCE)
-		{
-			KZ_LOG_ERROR(LogChannel::Replays, "[cyb_awr] invariant uuid=%s reason=dest_spread_violation spread=%.3f tol=%.1f cut=%u dead_n=%u\n",
-						 res.uuid.c_str(), res.destSpread, KZ::replaysystem::awr::AWR_SAME_DEST_TOLERANCE, res.destSpreadCut, (unsigned)res.deadCuts);
-		}
+					collapsed, offsetText, maxGapText, framesText, res.ok ? 1 : 0, res.reason, res.dryRun ? 1 : 0, detailSuffix);
 
 		// Сверка кадров с таймером — независимо от ok: она про сам файл, а не про разрез, и
 		// на отказе тоже говорит, можно ли верить его числам. Порога-отказа тут нет

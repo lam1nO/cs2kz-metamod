@@ -203,15 +203,26 @@ CON_COMMAND_F(kz_awr_debug, "Explain the AWR cut of one replay file. Usage: kz_a
 	{
 		V_snprintf(framesText, sizeof(framesText), "n/a");
 	}
+	// max_chain_offset=n/a, если до слияния разрез не дошёл: ноль читался бы как «нарушений
+	// нет» (та же ловушка, что у max_gap и frames).
+	char offsetText[32];
+	if (cut.maxChainDestOffsetMeasured)
+	{
+		V_snprintf(offsetText, sizeof(offsetText), "%.3f", cut.maxChainDestOffset);
+	}
+	else
+	{
+		V_snprintf(offsetText, sizeof(offsetText), "n/a");
+	}
 	// dead_n / tp_collapsed — те же метрики, что в строке бэкфилла: по ним принимают
 	// пересчёт (число вырезов падает при склейке петель разных чекпоинтов).
 	const unsigned collapsed = cut.teleports > (u32)cut.dead.size() ? (unsigned)(cut.teleports - (u32)cut.dead.size()) : 0u;
 	KZ_LOG_INFO(LogChannel::Replays,
-				"[cyb_awr] debug uuid=%s arrivals=%zu teleports=%u dead_n=%zu tp_collapsed=%u max_dest_spread=%.3f max_gap=%s frames=%s ok=%d "
+				"[cyb_awr] debug uuid=%s arrivals=%zu teleports=%u dead_n=%zu tp_collapsed=%u max_chain_offset=%s max_gap=%s frames=%s ok=%d "
 				"reason=%s awr_ms=%llu detail=%s\n",
-				uuid.c_str(), trace.size(), cut.teleports, cut.dead.size(), collapsed, cut.maxDestSpread, maxGapText, framesText, cut.ok ? 1 : 0,
+				uuid.c_str(), trace.size(), cut.teleports, cut.dead.size(), collapsed, offsetText, maxGapText, framesText, cut.ok ? 1 : 0,
 				cut.ok ? "ok" : cut.reason, (unsigned long long)cut.awrMs, cut.detail);
-	KZ::replaysystem::playback::LogDestSpreadViolation(uuid.c_str(), cut);
+	KZ::replaysystem::playback::LogDestOffsetViolation(uuid.c_str(), cut);
 
 	for (size_t i = 0; i < trace.size(); i++)
 	{
@@ -265,10 +276,10 @@ CON_COMMAND_F(kz_awr_debug, "Explain the AWR cut of one replay file. Usage: kz_a
 	}
 	Msg("[cyb_awr]   arrivals=%zu teleports=%u ok=%d reason=%s awr_ms=%llu time_ms=%llu cuts=%zu tp_collapsed=%u\n", trace.size(), cut.teleports,
 		cut.ok ? 1 : 0, cut.ok ? "ok" : cut.reason, (unsigned long long)cut.awrMs, (unsigned long long)timeMs, cut.dead.size(), collapsed);
-	// Инвариант правила: разброс точек прибытий внутри одного выреза обязан быть в допуске
-	// «та же точка». 0.000 — вырезы строго по правилу; больше допуска — дефект разреза.
-	Msg("[cyb_awr]   max_dest_spread=%.3f u (tol %.1f) at cut %u\n", cut.maxDestSpread, KZ::replaysystem::awr::AWR_SAME_DEST_TOLERANCE,
-		cut.maxDestSpreadCut);
+	// Инвариант правила: член сшитой цепочки обязан лежать в допуске от её якоря. 0.000 —
+	// сшивок через смену точки нет; больше допуска — дефект разреза.
+	Msg("[cyb_awr]   max_chain_offset=%s u (tol %.1f) at cut %u\n", offsetText, KZ::replaysystem::awr::AWR_SAME_DEST_TOLERANCE,
+		cut.maxChainDestOffsetCut);
 	// Разрыв записи внутри вырезов: метрика доверия к awr_ms (сколько времени в вырезах не
 	// подтверждено кадрами — prac, пауза, смерть); на сам результат он не влияет, мёртвое
 	// время считается в кадрах. Если

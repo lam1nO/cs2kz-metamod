@@ -938,16 +938,15 @@ static void test_adjacent_cuts_with_different_dest_not_merged()
 	assert(r.dead[0].to + 1 == r.dead[1].from);
 }
 
-// ИНВАРИАНТ ПРАВИЛА: внутри одного выреза все прибытия лежат в одной точке, то есть
-// max_dest_spread <= AWR_SAME_DEST_TOLERANCE при любом входе. Фикстура — из разбора
+// ИНВАРИАНТ ПРАВИЛА: член сшитой цепочки обязан лежать в допуске от её ЯКОРЯ, то есть
+// max_chain_offset <= AWR_SAME_DEST_TOLERANCE при любом входе. Фикстура — из разбора
 // kz_devon main ckz (тот единственный файл из 17 680, где пересчёт дал −437 мс): там старый
 // разрез склеивал в вырез №3 прибытия на точки в 15.843 u друг от друга, новый развёл их по
-// двум вырезам и разброс стал 0.000. Здесь то же расстояние: 15.843 u — внутри
-// AWR_DEST_TOLERANCE (16), то есть старое правило склеило бы, а новое обязано разделить.
-static void test_dest_spread_invariant_holds()
+// двум вырезам. Здесь то же расстояние: 15.843 u — внутри AWR_DEST_TOLERANCE (16), то есть
+// старое правило склеило бы, а новое обязано разделить.
+static void test_dest_offset_invariant_holds()
 {
 	std::vector<Frame> v;
-	// Точка A и точка B в 15.843 u (по x: 15.843 — ровно как в разборе devon).
 	const float ax = 1000.0f, bx = 1015.843f;
 	for (uint32_t i = 0; i <= 9; i++) v.push_back(F3(i, -1, 0, 0, 940.0f + 6.0f * i, 500.0f, 64.0f));
 	v.push_back(F3(10, -1, 1, 0, ax, 500.0f, 64.0f)); // постановка A
@@ -961,24 +960,22 @@ static void test_dest_spread_invariant_holds()
 	FillPre(v);
 	CutResult r = ComputeAwrCut(v.data(), v.size(), nullptr, 0, 10000, TI, 0, v.size() - 1);
 	assert(r.ok && r.teleports == 2);
-	// Главное: инвариант держится — ни один вырез не склеил прибытия дальше допуска.
-	assert(r.maxDestSpread <= AWR_SAME_DEST_TOLERANCE);
-	// И это ДВА выреза, а не один: точки разные, сшивка прервана.
-	assert(r.dead.size() == 2);
+	assert(r.maxChainDestOffsetMeasured && r.maxChainDestOffset <= AWR_SAME_DEST_TOLERANCE);
+	// Два выреза, ни одной сшивки — значит и смещения нет вовсе.
+	assert(r.dead.size() == 2 && r.maxChainDestOffset == 0.0f);
 	assert(r.dead[0].from == 11 && r.dead[0].to == 26);
 	assert(r.dead[1].from == 32 && r.dead[1].to == 46);
-	// Разброс внутри каждого выреза нулевой: в каждом ровно одно прибытие.
-	assert(r.maxDestSpread == 0.0f);
 }
 
-// Инвариант держится и там, где прибытий в вырезе МНОГО: разброс внутри кластера
-// (0.0…1.8 u в фикстуре по реальным числам) обязан остаться в допуске.
-static void test_dest_spread_invariant_within_cluster()
+// ГРАНИЦА меры (фикстура ревью): прибытия дрожат на ±1.9 u вокруг ОДНОГО чекпоинта. Попарный
+// разброс тут 3.8 u — вдвое больше допуска, и попарная мера объявила бы это нарушением при
+// ИСПРАВНОМ разрезе. Мера «расстояние до якоря цепочки» даёт 1.9 u, то есть в допуске.
+static void test_chain_offset_jitter_is_not_violation()
 {
 	std::vector<Frame> v;
 	for (uint32_t i = 0; i <= 9; i++) v.push_back(F3(i, -1, 0, 0, 940.0f + 6.0f * i, 500.0f, 64.0f));
 	v.push_back(F3(10, -1, 1, 0, 1000.0f, 500.0f, 64.0f));
-	const float jitter[4] = {0.0f, 0.6f, 1.2f, 1.8f};
+	const float jitter[4] = {0.0f, 1.9f, -1.9f, 0.0f};
 	uint32_t frame = 11;
 	for (uint32_t a = 0; a < 4; a++)
 	{
@@ -990,9 +987,46 @@ static void test_dest_spread_invariant_within_cluster()
 	FillPre(v);
 	CutResult r = ComputeAwrCut(v.data(), v.size(), nullptr, 0, 10000, TI, 0, (uint32_t)v.size() - 1);
 	assert(r.ok && r.teleports == 4 && r.dead.size() == 1);
-	// Четыре прибытия в одном вырезе, максимум попарного расстояния — 1.8 u, это в допуске.
-	assert(r.maxDestSpread > 1.7f && r.maxDestSpread < 1.9f);
-	assert(r.maxDestSpread <= AWR_SAME_DEST_TOLERANCE);
+	// Все четыре прибытия — одна цепочка, максимум смещения от якоря 1.9 u: НЕ нарушение.
+	assert(r.maxChainDestOffsetMeasured);
+	assert(r.maxChainDestOffset > 1.8f && r.maxChainDestOffset < 2.0f);
+	assert(r.maxChainDestOffset <= AWR_SAME_DEST_TOLERANCE);
+}
+
+// Метрика не даёт ЛОЖНОЙ тревоги на законном вырезе `tp cp1` → `nextcp` (спека §4): внутри
+// одного выреза лежат прибытия на точки в 640 u друг от друга, и это ОДНА петля — крюк через
+// чужой чекпоинт такой же фейл. Попарная мера здесь давала 640.000 (прогон), мера «до якоря
+// цепочки» — ноль, потому что сшивки не было вовсе.
+static void test_chain_offset_no_false_alarm_on_nextcp()
+{
+	std::vector<Frame> v;
+	for (uint32_t i = 0; i <= 24; i++) v.push_back(FC(i, i >= 20 ? 1 : 0, i >= 20 ? 2 : (i >= 10 ? 1 : 0), 0, (float)i));
+	v.push_back(FC(25, 0, 2, 1, 10.0f));
+	for (uint32_t i = 26; i <= 29; i++) v.push_back(FC(i, 0, 2, 1, 10.0f));
+	v.push_back(FC(30, 1, 2, 2, 20.0f));
+	for (uint32_t i = 31; i < 40; i++) v.push_back(FC(i, 1, 2, 2, 20.0f + (i - 30)));
+	FillPre(v);
+	CutResult r = ComputeAwrCut(v.data(), v.size(), nullptr, 0, 10000, TI, 0, v.size() - 1);
+	assert(r.ok && r.dead.size() == 1 && r.dead[0].from == 21 && r.dead[0].to == 30);
+	assert(r.maxChainDestOffsetMeasured && r.maxChainDestOffset == 0.0f);
+}
+
+// На РАННЕМ отказе разреза метрика не считалась — ноль в ней печатать нельзя.
+static void test_chain_offset_not_measured_on_early_refusal()
+{
+	std::vector<Frame> plain;
+	for (uint32_t i = 0; i < 20; i++) plain.push_back(FC(i, 0, 0, 0, (float)i));
+	FillPre(plain);
+	CutResult noWindow = ComputeAwrCut(plain.data(), plain.size(), nullptr, 0, 10000, TI, 0, 0);
+	assert(!noWindow.ok && !noWindow.maxChainDestOffsetMeasured);
+
+	std::vector<Frame> bad;
+	for (uint32_t i = 0; i <= 20; i++) bad.push_back(FC(i, 0, i >= 10 ? 1 : 0, 0, (float)i));
+	bad.push_back(FC(21, 0, 1, 2, 10.0f)); // tpCount 0 -> 2 одним кадром
+	for (uint32_t i = 22; i < 30; i++) bad.push_back(FC(i, 0, 1, 2, 10.0f + (i - 21)));
+	FillPre(bad);
+	CutResult mismatch = ComputeAwrCut(bad.data(), bad.size(), nullptr, 0, 10000, TI, 0, bad.size() - 1);
+	assert(!mismatch.ok && !mismatch.maxChainDestOffsetMeasured);
 }
 
 // `!undo` по-прежнему снимает и телепорт, и его вырез: игрок возвращается туда, откуда
@@ -1032,7 +1066,8 @@ int main()
 	test_trace_reports_every_arrival();
 	test_real_file_dest_change_breaks_chain(); test_dest_change_breaks_chain_without_placement();
 	test_adjacent_cuts_with_different_dest_not_merged(); test_undo_cancels_teleport_and_its_cut();
-	test_dest_spread_invariant_holds(); test_dest_spread_invariant_within_cluster();
+	test_dest_offset_invariant_holds(); test_chain_offset_jitter_is_not_violation();
+	test_chain_offset_no_false_alarm_on_nextcp(); test_chain_offset_not_measured_on_early_refusal();
 	test_dead_frames_up_to(); test_seek_live_frames_identity(); test_seek_scale_matches_cut_scale();
 	test_timer_frames_check();
 	std::puts("awr_cut: all tests passed");
