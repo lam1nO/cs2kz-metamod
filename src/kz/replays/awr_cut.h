@@ -42,12 +42,13 @@ namespace KZ::replaysystem::awr
 	struct CutResult
 	{
 		bool ok = false;
-		// dest_not_found | counter_mismatch | no_run_window | empty. Вызывающий может выставить
-		// сюда и свою причину отказа до вызова (not_a_run, course_mismatch — commands.cpp).
+		// dest_not_found | counter_mismatch | no_run_window | awr_interval_overflow |
+		// awr_implausible | empty. Вызывающий может выставить сюда и свою причину отказа до
+		// вызова (not_a_run, course_mismatch — commands.cpp).
 		const char *reason = "";
 		std::vector<Interval> dead;      // мёртвые интервалы, по возрастанию, без пересечений
 		uint32_t teleports = 0;          // число прибытий ТП по кадрам
-		uint64_t awrMs = 0;              // timeMs - мёртвое время (за вычетом пересечения с паузами)
+		uint64_t awrMs = 0;              // timeMs - мёртвое время (за вычетом пересечения с паузами); при !ok не используется
 		// Разбор отказа для лога (пусто при ok): что именно не сошлось и насколько. Без него
 		// живой прогон бэкфилла отвечает только «dest_not_found», и следующий шаг требует
 		// ещё одного цикла сборка→канарейка. Фиксированный буфер: структура уходит между
@@ -78,7 +79,26 @@ namespace KZ::replaysystem::awr
 		uint32_t deadTo = 0;
 	};
 
-	// pauses — записанные паузы в индексах кадров (включительно), могут быть пустыми.
+	// Ниже какой доли времени рана результат считается неправдоподобным и разрез отказывает
+	// (reason = "awr_implausible"). Живой отрезок от ПОСЛЕДНЕГО телепорта до финиша существует
+	// всегда (вырез каждого прибытия кончается НА кадре прибытия), плюс жив участок от старта
+	// до первого чекпоинта — на реальных картах это вместе не короче 5 % полного времени:
+	// при 18:39 порог = 56 с. Всё, что меньше, означает ошибку арифметики или разрыв записи,
+	// а не «ран целиком из фейлов»: такая строка выиграла бы минимум по (карта, курс, режим)
+	// и игрок увидел бы пустой прыжок в финиш.
+	inline constexpr uint64_t AWR_MIN_LIVE_FRACTION_DIVISOR = 20;
+
+	// pauseTicks — записанные паузы в СЕРВЕРНЫХ ТИКАХ: {from = тик TIMER_PAUSE, to = тик
+	// TIMER_RESUME}, длительность паузы = to - from. Могут быть пустыми.
+	//
+	// Почему в тиках, а не в индексах кадров (было до 10.09): в `!prac` рекордер НЕ пишет тики
+	// вовсе (kz_recording.cpp, RecordTickData_PhysicsSimulatePost), а таймер на это время
+	// ставится на паузу (kz_prac.cpp → ForcePause → TIMER_PAUSE/TIMER_RESUME). В файле от
+	// многоминутной prac-сессии остаётся РАЗРЫВ serverTick между двумя соседними кадрами, а
+	// пауза в индексах кадров съёживается в один кадр — её длительность из мёртвого времени
+	// не вычиталась, хотя мёртвое время мерится по serverTick и разрыв учитывает целиком.
+	// На длинных гриндах (30-100 минут, 700-4000 телепортов) это давало deadMs > timeMs и
+	// awrMs = 0. Пересечение с паузой считается ПО ТИКАМ и разрыв покрывает.
 	// tickInterval — секунд на серверный тик (ENGINE_FIXED_TICK_INTERVAL = 1/64).
 	// runStart/runEnd — окно САМОГО рана в индексах кадров, включительно (кадры TIMER_START и
 	// TIMER_END). Окно обязательно: в run-реплее есть ~5 с предзаписи до старта и ~4 с хвоста
@@ -87,8 +107,8 @@ namespace KZ::replaysystem::awr
 	// Прибытия вне окна игнорируются, назначение телепорта ищется только в [runStart, T)
 	// и с допуском AWR_DEST_TOLERANCE (см. выше).
 	// trace (необязателен) — по одной записи на каждое прибытие ТП в окне, для kz_awr_debug.
-	CutResult ComputeAwrCut(const Frame *frames, uint32_t count, const Interval *pauses, uint32_t pauseCount, uint64_t timeMs, double tickInterval,
-							uint32_t runStart, uint32_t runEnd, std::vector<ArrivalTrace> *trace = nullptr);
+	CutResult ComputeAwrCut(const Frame *frames, uint32_t count, const Interval *pauseTicks, uint32_t pauseTickCount, uint64_t timeMs,
+							double tickInterval, uint32_t runStart, uint32_t runEnd, std::vector<ArrivalTrace> *trace = nullptr);
 
 	// Живые интервалы (дополнение dead на [0, count-1]) — нужны !lead.
 	std::vector<Interval> LiveIntervals(const std::vector<Interval> &dead, uint32_t count);

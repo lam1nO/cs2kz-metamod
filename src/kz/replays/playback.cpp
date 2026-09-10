@@ -65,7 +65,7 @@ namespace KZ::replaysystem::playback
 		g_nextPauseSegment = 0;
 	}
 
-	std::vector<awr::Interval> PauseIntervalsFromEvents(const TickData *ticks, u32 tickCount, const RpEvent *events, u32 numEvents)
+	std::vector<awr::Interval> PauseIntervalsFromEvents(const TickData *ticks, u32 tickCount, const RpEvent *events, u32 numEvents, PauseUnits units)
 	{
 		std::vector<awr::Interval> out;
 		if (!events || numEvents == 0 || !ticks || tickCount == 0)
@@ -96,6 +96,17 @@ namespace KZ::replaysystem::playback
 					if (inPause)
 					{
 						inPause = false;
+						if (units == PauseUnits::ServerTicks)
+						{
+							// Длительность паузы = тик возобновления минус тик постановки.
+							// Кадров здесь может не быть вообще (`!prac`), поэтому в индексы
+							// не переводим — именно этот случай в кадрах и не измеряется.
+							if (e->serverTick > pauseStartServerTick)
+							{
+								out.push_back({pauseStartServerTick, e->serverTick});
+							}
+							break;
+						}
 						u32 startIdx = TickIndexForServerTick(ticks, tickCount, pauseStartServerTick);
 						u32 endIdx = TickIndexForServerTick(ticks, tickCount, e->serverTick);
 						// Кадр возобновления обязан существовать; интервал — хотя бы 1 кадр.
@@ -247,7 +258,9 @@ namespace KZ::replaysystem::playback
 			frames[i].preOrigin[1] = t.pre.origin.y;
 			frames[i].preOrigin[2] = t.pre.origin.z;
 		}
-		std::vector<awr::Interval> pauses = PauseIntervalsFromEvents(ticks, tickCount, events, numEvents);
+		// Паузы для разреза — в ТИКАХ: мёртвое время мерится по serverTick, и prac-разрыв
+		// (тиков не писали, кадров нет) вычитается только так (awr_cut.h, pauseTicks).
+		std::vector<awr::Interval> pauses = PauseIntervalsFromEvents(ticks, tickCount, events, numEvents, PauseUnits::ServerTicks);
 		return awr::ComputeAwrCut(frames.data(), tickCount, pauses.data(), (u32)pauses.size(), timeMs, ENGINE_FIXED_TICK_INTERVAL, runStart, runEnd,
 								  trace);
 	}

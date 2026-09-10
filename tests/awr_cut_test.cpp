@@ -126,7 +126,8 @@ static void test_undo()
 	assert(r.ok && r.dead.size() == 1 && r.dead[0].from == 21 && r.dead[0].to == 23);
 }
 
-// Пауза 15..18 внутри мёртвого интервала 11..31 — её длительность из мёртвого времени вычитается.
+// Пауза (TIMER_PAUSE на тике 15, TIMER_RESUME на тике 18) внутри мёртвого интервала 11..31 —
+// её длительность из мёртвого времени вычитается. Паузы задаются в СЕРВЕРНЫХ ТИКАХ.
 static void test_pause_overlap_not_double_counted()
 {
 	std::vector<Frame> v;
@@ -136,8 +137,86 @@ static void test_pause_overlap_not_double_counted()
 	Interval pause {15, 18};
 	FillPre(v);
 	CutResult r = ComputeAwrCut(v.data(), v.size(), &pause, 1, 10000, TI, 0, v.size() - 1);
-	// мёртвое 21 тик минус пауза (18-14 = 4 тика) = 17 тиков
-	assert(r.ok && r.awrMs == 10000 - (uint64_t)(17 * TI * 1000.0 + 0.5));
+	// мёртвое 21 тик (31-10) минус пауза (18-15 = 3 тика) = 18 тиков
+	assert(r.ok && r.awrMs == 10000 - (uint64_t)(18 * TI * 1000.0 + 0.5));
+}
+
+// КОРЕНЬ awr_ms = 0 на длинных гриндах: `!prac` не пишет тиков вовсе, а таймер на это время
+// стоит на паузе — в файле остаётся РАЗРЫВ serverTick между двумя соседними кадрами. Пауза,
+// измеренная в индексах кадров, съёживается в один кадр, и её тики оставались в мёртвом
+// времени: deadMs > timeMs → awrMs = 0. Пересечение считается по тикам и разрыв покрывает.
+static void test_prac_gap_pause_subtracted_by_ticks()
+{
+	const uint32_t GAP = 20000; // ~5 минут prac между кадрами 20 и 21
+	std::vector<Frame> v;
+	for (uint32_t i = 0; i <= 20; i++) v.push_back(FC(i, 0, i >= 10 ? 1 : 0, 0, (float)i));
+	// После prac игрок продолжает с того же места; тики прыгнули на GAP.
+	for (uint32_t i = 21; i <= 24; i++) v.push_back(FC(i + GAP, 0, 1, 0, (float)i));
+	v.push_back(FC(25 + GAP, 0, 1, 1, 10.0f)); // ТП на чекпоинт кадра 10
+	for (uint32_t i = 26; i <= 30; i++) v.push_back(FC(i + GAP, 0, 1, 1, 10.0f + (i - 25)));
+	FillPre(v);
+	// TIMER_PAUSE на тике 20, TIMER_RESUME на тике 21+GAP — ровно как их пишет рекордер.
+	Interval pause {20, 21 + GAP};
+	// Время рана: окно 0..(30+GAP) тиков минус пауза = 30 - 1 + 1 ... считаем по-честному.
+	const uint64_t windowTicks = 30 + GAP;
+	const uint64_t timeMs = (uint64_t)((double)(windowTicks - GAP) * TI * 1000.0 + 0.5);
+	CutResult r = ComputeAwrCut(v.data(), v.size(), &pause, 1, timeMs, TI, 0, v.size() - 1);
+	assert(r.ok && r.teleports == 1 && r.dead.size() == 1);
+	assert(r.dead[0].from == 11 && r.dead[0].to == 25);
+	// Мёртвое: тики 10..(25+GAP) = 15 + GAP, минус пауза GAP+1 → 14 тиков.
+	assert(r.awrMs == timeMs - (uint64_t)(14 * TI * 1000.0 + 0.5));
+}
+
+// Фикстура формы живого дефекта: N прибытий подряд, каждое сшивается к предыдущему, стояний
+// нет. Проверяет, что цепочка вырезов схлопывается в ОДИН интервал и что мёртвое время
+// считается один раз (а не по 3 тика на каждое прибытие).
+static std::vector<Frame> BuildChainFixture(uint32_t arrivals)
+{
+	std::vector<Frame> v;
+	v.push_back(F(0, -1, 0, 0, 0.0f));
+	v.push_back(F(1, -1, 1, 0, 0.0f)); // cp поставлен стоя; cpIndex = -1 → путь (б)
+	for (uint32_t k = 0; k < arrivals; k++)
+	{
+		v.push_back(F(2 + 3 * k, -1, 1, (int32_t)k, 40.0f));
+		v.push_back(F(3 + 3 * k, -1, 1, (int32_t)k, 80.0f));
+		v.push_back(F(4 + 3 * k, -1, 1, (int32_t)k + 1, 0.0f)); // прибытие
+	}
+	const uint32_t last = 4 + 3 * (arrivals - 1);
+	v.push_back(F(last + 1, -1, 1, (int32_t)arrivals, 40.0f));
+	v.push_back(F(last + 2, -1, 1, (int32_t)arrivals, 80.0f));
+	FillPre(v);
+	return v;
+}
+
+static void test_many_arrivals_chain_no_double_count()
+{
+	std::vector<Frame> v = BuildChainFixture(200);
+	// Якорь первого прибытия — кадр 0: игрок стоял в точке чекпоинта ещё до его постановки,
+	// и по каноническому правилу это стояние тоже мёртвое (самый ранний кадр пребывания).
+	const uint64_t deadTicks = 601 - 0;
+	const uint64_t deadMs = (uint64_t)((double)deadTicks * TI * 1000.0 + 0.5);
+	CutResult r = ComputeAwrCut(v.data(), v.size(), nullptr, 0, 20000, TI, 0, (uint32_t)v.size() - 1);
+	assert(r.ok && r.teleports == 200);
+	assert(r.dead.size() == 1 && r.dead[0].from == 1 && r.dead[0].to == 601);
+	assert(r.awrMs == 20000 - deadMs);
+}
+
+// Неправдоподобно малый awrMs — отказ, а не строка с нулём: она выиграла бы минимум по
+// (карта, курс, режим), и игрок увидел бы пустой прыжок в финиш.
+static void test_awr_implausible_guard()
+{
+	std::vector<Frame> v = BuildChainFixture(200);
+	const uint64_t deadMs = (uint64_t)((double)(601 - 0) * TI * 1000.0 + 0.5); // 9391
+	// (1) мёртвого времени насчитали больше, чем длился ран → кламп в ноль запрещён.
+	CutResult zero = ComputeAwrCut(v.data(), v.size(), nullptr, 0, deadMs - 375, TI, 0, (uint32_t)v.size() - 1);
+	assert(!zero.ok && std::strcmp(zero.reason, "awr_implausible") == 0);
+	assert(std::strstr(zero.detail, "dead_ms=") && std::strstr(zero.detail, "time_ms=") && std::strstr(zero.detail, "dead_n=1"));
+	// (2) живого меньше 5 % времени рана → тот же отказ.
+	CutResult tiny = ComputeAwrCut(v.data(), v.size(), nullptr, 0, deadMs + 225, TI, 0, (uint32_t)v.size() - 1);
+	assert(!tiny.ok && std::strcmp(tiny.reason, "awr_implausible") == 0);
+	// (3) ровно над порогом — проходит.
+	CutResult okRes = ComputeAwrCut(v.data(), v.size(), nullptr, 0, deadMs + 500, TI, 0, (uint32_t)v.size() - 1);
+	assert(okRes.ok && okRes.awrMs == 500);
 }
 
 // Позиция прибытия не совпадает ни с одним прежним кадром → отказ, не ложная сшивка.
@@ -460,6 +539,7 @@ int main()
 {
 	test_no_teleports(); test_single_tp(); test_repeat_tp_same_cp(); test_prevcp_nextcp_keeps_middle();
 	test_undo(); test_pause_overlap_not_double_counted(); test_dest_not_found();
+	test_prac_gap_pause_subtracted_by_ticks(); test_many_arrivals_chain_no_double_count(); test_awr_implausible_guard();
 	test_tail_teleport_after_run_end(); test_prerecord_teleport_before_run_start(); test_counter_mismatch();
 	test_no_run_window();
 	test_cp_set_while_running(); test_cp_matches_pre_side(); test_undo_mid_tick();

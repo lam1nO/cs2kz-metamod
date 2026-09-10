@@ -193,8 +193,8 @@ namespace KZ::replaysystem::awr
 		return n;
 	}
 
-	CutResult ComputeAwrCut(const Frame *frames, uint32_t count, const Interval *pauses, uint32_t pauseCount, uint64_t timeMs, double tickInterval,
-							uint32_t runStart, uint32_t runEnd, std::vector<ArrivalTrace> *trace)
+	CutResult ComputeAwrCut(const Frame *frames, uint32_t count, const Interval *pauseTicks, uint32_t pauseTickCount, uint64_t timeMs,
+							double tickInterval, uint32_t runStart, uint32_t runEnd, std::vector<ArrivalTrace> *trace)
 	{
 		CutResult r;
 		if (!frames || count == 0)
@@ -298,7 +298,7 @@ namespace KZ::replaysystem::awr
 			r.dead.push_back({(uint32_t)d + 1, (uint32_t)cursor});
 			cursor = d;
 		}
-		std::reverse(r.dead.begin(), r.dead.end());
+		// Порядок здесь — от финиша к старту; в возрастающий его приводит нормализация ниже.
 
 		if (trace)
 		{
@@ -339,12 +339,21 @@ namespace KZ::replaysystem::awr
 			std::sort(trace->begin(), trace->end(), [](const ArrivalTrace &x, const ArrivalTrace &y) { return x.frame < y.frame; });
 		}
 
-		// Слить СМЕЖНЫЕ интервалы. Повторные попытки на одном чекпоинте дают цепочку
-		// вырезов, стыкующихся кадр в кадр ([D+1,T1], [T1+1,T2], …) — сшивка ведёт каждый
-		// следующий обход ровно к прибытию предыдущего. Плейбек их и так склеит
-		// (BuildSkipSegments), но с одним интервалом читаемее и трасса, и !lead, и тесты.
-		// Мёртвое время не меняется: длительности считаются по serverTick и телескопируются.
+		// НОРМАЛИЗАЦИЯ списка вырезов: отсортировать и слить смежные, пересекающиеся и
+		// вложенные. Обход даёт интервалы по построению непересекающимися и по убыванию
+		// (курсор строго убывает: DestFrame всегда возвращает d < t), но подсчёт мёртвого
+		// времени суммирует интервалы, и любая будущая ошибка в сшивке, породившая
+		// перекрытие, вычла бы перекрытый участок дважды. Нормализация делает подсчёт
+		// корректным по построению и не зависящим от инвариантов обхода.
+		//
+		// Слияние СМЕЖНЫХ (from <= to + 1) нужно и по существу: повторные попытки на одном
+		// чекпоинте дают цепочку вырезов, стыкующихся кадр в кадр ([D+1,T1], [T1+1,T2], …) —
+		// сшивка ведёт каждый следующий обход ровно к прибытию предыдущего. Плейбек их и так
+		// склеит (BuildSkipSegments), но с одним интервалом читаемее и трасса, и !lead, и
+		// тесты. Мёртвое время от слияния не меняется: длительности считаются по serverTick и
+		// телескопируются.
 		{
+			std::sort(r.dead.begin(), r.dead.end(), [](const Interval &x, const Interval &y) { return x.from < y.from; });
 			size_t merged = 0;
 			for (size_t i = 0; i < r.dead.size(); i++)
 			{
@@ -361,28 +370,80 @@ namespace KZ::replaysystem::awr
 			r.dead.resize(merged);
 		}
 
-		// Мёртвое время по serverTick (кадры могут быть с пропусками), минус пересечение с паузами:
-		// пауза в time_ms уже не входит, вычесть её дважды нельзя.
-		auto ticksBetween = [&](uint32_t from, uint32_t to) -> uint64_t
-		{
-			uint32_t a = frames[from > 0 ? from - 1 : 0].serverTick, b = frames[to].serverTick;
-			return b > a ? b - a : 0;
-		};
+		// Мёртвое время по serverTick (кадры бывают с пропусками), минус пересечение с
+		// паузами ПО ТИКАМ: пауза в time_ms уже не входит, вычесть её дважды нельзя. Именно
+		// по тикам, а не по индексам кадров: в `!prac` рекордер тиков не пишет вовсе, и от
+		// многоминутной паузы в файле остаётся только РАЗРЫВ serverTick между двумя соседними
+		// кадрами — в индексах кадров такую паузу не измерить (см. комментарий к pauseTicks в
+		// awr_cut.h: это и был корень awr_ms = 0 на длинных гриндах).
+		auto spanStartTick = [&](uint32_t from) -> uint32_t { return frames[from > 0 ? from - 1 : 0].serverTick; };
 		uint64_t deadTicks = 0;
 		for (const Interval &d : r.dead)
 		{
-			deadTicks += ticksBetween(d.from, d.to);
-			for (uint32_t p = 0; p < pauseCount; p++)
+			const uint32_t a = spanStartTick(d.from), b = frames[d.to].serverTick;
+			if (b <= a)
 			{
-				uint32_t f = std::max(d.from, pauses[p].from), t = std::min(d.to, pauses[p].to);
-				if (f <= t)
+				continue;
+			}
+			uint64_t span = b - a;
+			for (uint32_t p = 0; p < pauseTickCount; p++)
+			{
+				// Пауза (from, to] против мёртвого отрезка (a, b] — пересечение в тиках.
+				const uint32_t f = std::max(a, pauseTicks[p].from), t = std::min(b, pauseTicks[p].to);
+				if (t > f)
 				{
-					deadTicks -= std::min(deadTicks, ticksBetween(f, t));
+					span -= std::min(span, (uint64_t)(t - f));
 				}
 			}
+			deadTicks += span;
 		}
-		uint64_t deadMs = (uint64_t)((double)deadTicks * tickInterval * 1000.0 + 0.5);
+
+		// Инвариант арифметики: мёртвое время не может превышать окно рана. Держится это на
+		// нормализации выше (интервалы не пересекаются и лежат внутри окна), а проверка ловит
+		// любую будущую ошибку подсчёта до того, как она уедет в api заниженным awr_ms.
+		const uint32_t windowStartTick = frames[runStart].serverTick, windowEndTick = frames[runEnd].serverTick;
+		const uint64_t windowTicks = windowEndTick > windowStartTick ? (uint64_t)(windowEndTick - windowStartTick) : 0;
+		if (deadTicks > windowTicks)
+		{
+			r.reason = "awr_interval_overflow";
+			std::snprintf(r.detail, sizeof(r.detail), "dead_ticks=%llu window_ticks=%llu dead_n=%zu window=%u..%u", (unsigned long long)deadTicks,
+						  (unsigned long long)windowTicks, r.dead.size(), runStart, runEnd);
+			return r;
+		}
+
+		const uint64_t deadMs = (uint64_t)((double)deadTicks * tickInterval * 1000.0 + 0.5);
 		r.awrMs = timeMs > deadMs ? timeMs - deadMs : 0;
+
+		// Гард правдоподобия (см. AWR_MIN_LIVE_FRACTION_DIVISOR в awr_cut.h). Инвариант:
+		// awrMs == 0 при timeMs > 0 — ВСЕГДА отказ, ноль наружу как валидное значение не
+		// отдаём; кламп в ноль сам по себе означает deadMs >= timeMs, то есть мёртвого
+		// времени насчитали больше, чем длился ран.
+		if (timeMs > 0 && (deadMs >= timeMs || r.awrMs * AWR_MIN_LIVE_FRACTION_DIVISOR < timeMs))
+		{
+			r.reason = "awr_implausible";
+			// Самый большой разрыв записи внутри вырезов: главный подозреваемый — пауза, чьи
+			// тики в мёртвое время попали, а вычесть их было нечем (prac, где тиков не пишут
+			// вовсе). Считается только здесь: на успешном пути за диагностику не платим.
+			uint64_t maxGap = 0;
+			uint32_t maxGapFrame = 0;
+			for (const Interval &d : r.dead)
+			{
+				for (uint32_t i = d.from > 0 ? d.from : 1; i <= d.to; i++)
+				{
+					const uint32_t prev = frames[i - 1].serverTick, cur = frames[i].serverTick;
+					if (cur > prev && (uint64_t)(cur - prev) > maxGap)
+					{
+						maxGap = cur - prev;
+						maxGapFrame = i;
+					}
+				}
+			}
+			std::snprintf(r.detail, sizeof(r.detail), "dead_ms=%llu time_ms=%llu dead_n=%zu first=%u..%u last=%u..%u max_gap=%llu@%u",
+						  (unsigned long long)deadMs, (unsigned long long)timeMs, r.dead.size(), r.dead.empty() ? 0 : r.dead.front().from,
+						  r.dead.empty() ? 0 : r.dead.front().to, r.dead.empty() ? 0 : r.dead.back().from, r.dead.empty() ? 0 : r.dead.back().to,
+						  (unsigned long long)maxGap, maxGapFrame);
+			return r;
+		}
 		r.ok = true;
 		r.reason = "";
 		return r;

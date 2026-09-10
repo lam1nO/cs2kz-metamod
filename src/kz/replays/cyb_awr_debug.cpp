@@ -7,6 +7,12 @@
  * цикла сборка → канарейка. Команда печатает по строке на каждое прибытие: чем сшили, куда,
  * на каком расстоянии был чекпоинт, сколько игрок стоял, какой вырез объявлен.
  *
+ * Куда что печатается: построчная трасса и объявленные вырезы уходят в ЛОГ
+ * (KZ_LOG_INFO, LogChannel::Replays — читается bin/logs.sh, как строки `[cyb_awr] backfill`),
+ * а в ответ команды идёт только сводка. Причина: в RCON-контексте Msg уходит в ОТВЕТ пакетом,
+ * и на 81 прибытии клиент получает `bad packet size 10330`, а в логах при этом не остаётся
+ * ничего — то есть на длинном ране трасса терялась целиком.
+ *
  * Только серверная консоль/RCON (как kz_awr_backfill): это операторская диагностика.
  * Разбор СИНХРОННЫЙ, на главном потоке — секция тиков большого реплея распаковывается
  * десятки миллисекунд, то есть команда крадёт кадр. Для ручного вызова это приемлемо, в
@@ -31,8 +37,8 @@
 
 namespace
 {
-	// Потолок печати: на ране с сотнями телепортов полная трасса вытеснит из консоли всё
-	// остальное, а для разбора хватает начала (обход идёт от старта к финишу).
+	// Потолок печати: на ране с тысячами телепортов полная трасса заливает лог, а для
+	// разбора хватает начала (трасса упорядочена от старта к финишу).
 	constexpr size_t AWR_DEBUG_MAX_ARRIVALS = 200;
 
 	// Три РАЗНЫХ исхода чтения: «файла нет» и «файл есть, но прочитать нечего» — разные
@@ -150,35 +156,38 @@ CON_COMMAND_F(kz_awr_debug, "Explain the AWR cut of one replay file. Usage: kz_a
 	const bool isRun = src.header.has_run() && src.header.run().time() > 0.0f;
 	const u64 timeMs = isRun ? (u64)((f64)src.header.run().time() * 1000.0 + 0.5) : 0;
 
-	Msg("[cyb_awr] kz_awr_debug uuid=%s path=%s ticks=%zu events=%zu is_run=%d time_ms=%llu header_tps=%d\n", uuid.c_str(), path.c_str(),
-		src.ticks.size(), src.events.size(), isRun ? 1 : 0,
-		(unsigned long long)timeMs, isRun && src.header.run().has_num_teleports() ? src.header.run().num_teleports() : -1);
+	// Шапка — и в лог (чтобы блок трассы был самодостаточен), и в ответ команды.
+	KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] debug uuid=%s path=%s ticks=%zu events=%zu is_run=%d time_ms=%llu header_tps=%d\n", uuid.c_str(),
+				path.c_str(), src.ticks.size(), src.events.size(), isRun ? 1 : 0, (unsigned long long)timeMs,
+				isRun && src.header.run().has_num_teleports() ? src.header.run().num_teleports() : -1);
 
 	u32 runStart = 0, runEnd = 0;
 	i32 runCourseId = -1;
-	if (KZ::replaysystem::playback::RunWindowFromEvents(src.ticks.data(), (u32)src.ticks.size(), src.events.data(), (u32)src.events.size(), runStart,
-														runEnd, runCourseId))
+	const bool hasWindow = KZ::replaysystem::playback::RunWindowFromEvents(src.ticks.data(), (u32)src.ticks.size(), src.events.data(),
+																		   (u32)src.events.size(), runStart, runEnd, runCourseId);
+	if (hasWindow)
 	{
-		Msg("[cyb_awr]   window=%u..%u course_id=%d start_tick=%u end_tick=%u\n", runStart, runEnd, runCourseId,
-			src.ticks[runStart].serverTick, src.ticks[runEnd].serverTick);
+		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] debug uuid=%s window=%u..%u course_id=%d start_tick=%u end_tick=%u\n", uuid.c_str(), runStart,
+					runEnd, runCourseId, src.ticks[runStart].serverTick, src.ticks[runEnd].serverTick);
 	}
 	else
 	{
-		Msg("[cyb_awr]   window=<none> (no TIMER_START/TIMER_END pair, or the pair has different course ids)\n");
+		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] debug uuid=%s window=none reason=no_timer_start_end_pair_or_course_mismatch\n", uuid.c_str());
 	}
 
 	std::vector<KZ::replaysystem::awr::ArrivalTrace> trace;
 	KZ::replaysystem::awr::CutResult cut = KZ::replaysystem::playback::ComputeCutForTraced(
 		src.ticks.data(), (u32)src.ticks.size(), src.events.data(), (u32)src.events.size(), timeMs, &trace);
 
-	Msg("[cyb_awr]   arrivals=%zu teleports=%u ok=%d reason=%s awr_ms=%llu detail=%s\n", trace.size(), cut.teleports, cut.ok ? 1 : 0,
-		cut.ok ? "ok" : cut.reason, (unsigned long long)cut.awrMs, cut.detail);
+	KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] debug uuid=%s arrivals=%zu teleports=%u ok=%d reason=%s awr_ms=%llu detail=%s\n", uuid.c_str(),
+				trace.size(), cut.teleports, cut.ok ? 1 : 0, cut.ok ? "ok" : cut.reason, (unsigned long long)cut.awrMs, cut.detail);
 
 	for (size_t i = 0; i < trace.size(); i++)
 	{
 		if (i >= AWR_DEBUG_MAX_ARRIVALS)
 		{
-			Msg("[cyb_awr]   ... %zu more arrivals not shown\n", trace.size() - AWR_DEBUG_MAX_ARRIVALS);
+			KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] debug uuid=%s ... %zu more arrivals not shown\n", uuid.c_str(),
+						trace.size() - AWR_DEBUG_MAX_ARRIVALS);
 			break;
 		}
 		const KZ::replaysystem::awr::ArrivalTrace &tr = trace[i];
@@ -200,14 +209,36 @@ CON_COMMAND_F(kz_awr_debug, "Explain the AWR cut of one replay file. Usage: kz_a
 		{
 			V_snprintf(deadText, sizeof(deadText), "dead=none");
 		}
-		Msg("[cyb_awr]   T=%u tick=%u cp=%d/%d tp=%d pos=%.1f/%.1f/%.1f D=%lld via=%c %s stand=%u %s\n", tr.frame, tr.serverTick, tr.cpIndex,
-			tr.cpCount, tr.tpCount, tr.origin[0], tr.origin[1], tr.origin[2], (long long)tr.dest, tr.method, cpText, tr.standTicks, deadText);
+		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] debug uuid=%s T=%u tick=%u cp=%d/%d tp=%d pos=%.1f/%.1f/%.1f D=%lld via=%c %s stand=%u %s\n",
+					uuid.c_str(), tr.frame, tr.serverTick, tr.cpIndex, tr.cpCount, tr.tpCount, tr.origin[0], tr.origin[1], tr.origin[2],
+					(long long)tr.dest, tr.method, cpText, tr.standTicks, deadText);
 	}
 
 	for (const KZ::replaysystem::awr::Interval &d : cut.dead)
 	{
-		Msg("[cyb_awr]   cut %u..%u\n", d.from, d.to);
+		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] debug uuid=%s cut %u..%u\n", uuid.c_str(), d.from, d.to);
 	}
+
+	// СВОДКА в ответ команды. Больше в ответ не печатаем: в RCON-контексте вывод уходит
+	// клиенту одним пакетом, и трасса на десятки прибытий его рвёт (bad packet size).
+	Msg("[cyb_awr] kz_awr_debug uuid=%s path=%s ticks=%zu is_run=%d time_ms=%llu\n", uuid.c_str(), path.c_str(), src.ticks.size(), isRun ? 1 : 0,
+		(unsigned long long)timeMs);
+	if (hasWindow)
+	{
+		Msg("[cyb_awr]   window=%u..%u (ticks %u..%u) course_id=%d\n", runStart, runEnd, src.ticks[runStart].serverTick,
+			src.ticks[runEnd].serverTick, runCourseId);
+	}
+	else
+	{
+		Msg("[cyb_awr]   window=<none> (no TIMER_START/TIMER_END pair, or the pair has different course ids)\n");
+	}
+	Msg("[cyb_awr]   arrivals=%zu teleports=%u ok=%d reason=%s awr_ms=%llu time_ms=%llu cuts=%zu\n", trace.size(), cut.teleports, cut.ok ? 1 : 0,
+		cut.ok ? "ok" : cut.reason, (unsigned long long)cut.awrMs, (unsigned long long)timeMs, cut.dead.size());
+	if (!cut.ok && cut.detail[0] != '\0')
+	{
+		Msg("[cyb_awr]   detail=%s\n", cut.detail);
+	}
+	Msg("[cyb_awr]   per-arrival trace is in the server log: grep '[cyb_awr] debug uuid=%s'\n", uuid.c_str());
 
 	// stdout контейнера буферизуется — без flush вывод команды приходит рывками (урок
 	// kzt-саги, тот же fflush стоит у диагностики скинов бота).
