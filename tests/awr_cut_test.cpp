@@ -261,8 +261,11 @@ static void test_undo_mid_tick()
 	FillPre(v);
 	CutResult r = ComputeAwrCut(v.data(), v.size(), nullptr, 0, 10000, TI, 0, v.size() - 1);
 	assert(r.ok && r.teleports == 2 && r.dead.size() == 1);
-	// pre кадра 21 = 120, в 1 юните от 121 → последний живой кадр 20, мёртвое 21..31.
-	assert(r.dead[0].from == 21 && r.dead[0].to == 31);
+	// Вход в участок — pre кадра 21 (120, в 1 юните от 121), но якорь откатывается к НАЧАЛУ
+	// пребывания в допуске: кадры 20 (120), 19 (114), 18 (108) — все в 16 u от 121, кадр 17
+	// (102) уже нет. Значит последний живой — 18. Это заявленная цена позиционного якоря:
+	// последние кадры подхода уходят в вырез (см. комментарий в DestFrame).
+	assert(r.dead[0].from == 19 && r.dead[0].to == 31);
 }
 
 // Прибытие дальше допуска от всего маршрута — отказ, и в detail есть чем разбираться.
@@ -359,17 +362,20 @@ static void test_repeat_tp_collapses_to_one_dead()
 	FillPre(v);
 	CutResult r = ComputeAwrCut(v.data(), v.size(), nullptr, 0, 10000, TI, 0, v.size() - 1);
 	assert(r.ok && r.teleports == 3);
-	// Все три попытки — ОДИН вырез от кадра после постановки до последнего прибытия.
-	// from == 11, а не 13: точка сшивки — ближайший к чекпоинту кадр (сам кадр постановки),
-	// а не «последний в радиусе», иначе первые тики разгона с чекпоинта ушли бы в вырез.
-	assert(r.dead.size() == 1 && r.dead[0].from == 11 && r.dead[0].to == 71);
+	// Все три попытки — ОДИН вырез до последнего прибытия (якорь очередного прибытия
+	// упирается в предыдущее, смежные интервалы сливаются). from == 9, а не 11: путь (б)
+	// откатывает якорь к началу пребывания в допуске, и два последних кадра плавного подхода
+	// (9 — 54 u, 8 — 48 u) в него попадают; при валидном cpIndex (путь «а») было бы ровно 11 —
+	// см. test_cp_index_and_scan_agree.
+	assert(r.dead.size() == 1 && r.dead[0].from == 9 && r.dead[0].to == 71);
 }
 
-// Стояние ПЕРЕД первой попыткой (поставил cp, постоял, побежал) обязано остаться ЖИВЫМ:
-// это таймер игрока, а не петля. Тест обязан падать, если откат идёт «пока позиция в
-// радиусе допуска» вместо сшивки к кадру прибытия: тогда живыми не остались бы ни стояние,
-// ни последние кадры подхода.
-static void test_standing_before_first_tp_stays_live()
+// Стояние на чекпоинте ПЕРЕД первой попыткой тоже вырезается: каноническое правило —
+// «вырезаем всё от постановки чекпоинта до последнего телепорта на него», и стояние на месте
+// постановки в этот промежуток входит (решение пользователя 10.09). Здесь работает путь (б)
+// (cpIndex = -1), и видна его цена: якорь уходит к началу пребывания в радиусе, поэтому в
+// вырез попадают ещё два кадра подхода (9 — 54 u, 8 — 48 u; кадр 7 в 42 u уже за допуском).
+static void test_standing_before_first_tp_is_cut()
 {
 	std::vector<Frame> v;
 	for (uint32_t i = 0; i <= 9; i++) v.push_back(F(i, -1, 0, 0, 6.0f * i));               // подход, ..54
@@ -381,10 +387,42 @@ static void test_standing_before_first_tp_stays_live()
 	FillPre(v);
 	CutResult r = ComputeAwrCut(v.data(), v.size(), nullptr, 0, 10000, TI, 0, v.size() - 1);
 	assert(r.ok && r.teleports == 1 && r.dead.size() == 1);
-	// Мёртвое начинается только там, где игрок ушёл с чекпоинта (кадр 21).
-	assert(r.dead[0].from == 21 && r.dead[0].to == 41);
+	assert(r.dead[0].from == 9 && r.dead[0].to == 41);
 	auto live = LiveIntervals(r.dead, v.size());
-	assert(live.size() == 2 && live[0].from == 0 && live[0].to == 20);
+	assert(live.size() == 2 && live[0].from == 0 && live[0].to == 8);
+}
+
+// Пути (а) и (б) обязаны давать ОДИН И ТОТ ЖЕ вырез и одно awrMs: иначе один и тот же ран
+// считался бы по-разному в зависимости от того, нашёлся ли индекс чекпоинта. Подход здесь
+// намеренно резкий (кадр 9 в 40 u от точки — уже за допуском), чтобы изолировать РАВЕНСТВО
+// правил; погрешность позиционного якоря на плавном подходе проверяет тест выше.
+static void BuildSymmetricFixture(std::vector<Frame> &v, int32_t cpIndexOnArrival)
+{
+	v.clear();
+	for (uint32_t i = 0; i <= 9; i++) v.push_back(F(i, cpIndexOnArrival, 0, 0, 40.0f - 20.0f * (9 - i))); // резкий подход, кадр 9 = 40
+	v.push_back(F(10, cpIndexOnArrival, 1, 0, 60.0f));                                                     // !cp
+	for (uint32_t i = 11; i <= 20; i++) v.push_back(F(i, cpIndexOnArrival, 1, 0, 60.0f));                  // стоит
+	for (uint32_t i = 21; i <= 40; i++) v.push_back(F(i, cpIndexOnArrival, 1, 0, 60.0f + 6.0f * (i - 20)));
+	v.push_back(F(41, cpIndexOnArrival, 1, 1, 60.0f));                                                     // ТП №1
+	for (uint32_t i = 42; i <= 60; i++) v.push_back(F(i, cpIndexOnArrival, 1, 1, 60.0f + 6.0f * (i - 41)));
+	v.push_back(F(61, cpIndexOnArrival, 1, 2, 60.0f));                                                     // ТП №2
+	for (uint32_t i = 62; i < 76; i++) v.push_back(F(i, cpIndexOnArrival, 1, 2, 60.0f + 6.0f * (i - 61)));
+	FillPre(v);
+}
+
+static void test_cp_index_and_scan_agree()
+{
+	std::vector<Frame> byIndex, byScan;
+	BuildSymmetricFixture(byIndex, 0);  // валидный cpIndex → путь (а)
+	BuildSymmetricFixture(byScan, -1);  // cpIndex невалиден → путь (б)
+	CutResult a = ComputeAwrCut(byIndex.data(), byIndex.size(), nullptr, 0, 10000, TI, 0, byIndex.size() - 1);
+	CutResult b = ComputeAwrCut(byScan.data(), byScan.size(), nullptr, 0, 10000, TI, 0, byScan.size() - 1);
+	assert(a.ok && b.ok && a.teleports == 2 && b.teleports == 2);
+	assert(a.dead.size() == 1 && b.dead.size() == 1);
+	// Вырез — от кадра ПОСЛЕ постановки до последнего ТП; стояние 11..20 внутри.
+	assert(a.dead[0].from == 11 && a.dead[0].to == 61);
+	assert(b.dead[0].from == a.dead[0].from && b.dead[0].to == a.dead[0].to);
+	assert(a.awrMs == b.awrMs && a.awrMs > 0);
 }
 
 // Трасса прибытий (её печатает kz_awr_debug): по записи на каждое прибытие окна, в порядке
@@ -410,8 +448,8 @@ static void test_trace_reports_every_arrival()
 	assert(trace[0].frame == 31 && trace[1].frame == 51 && trace[2].frame == 71);
 	// cpIndex невалиден — сшивка только сканом; каждое следующее прибытие сшито к предыдущему.
 	assert(trace[0].method == 'b' && trace[1].method == 'b' && trace[2].method == 'b');
-	assert(trace[0].dest == 10 && trace[1].dest == 31 && trace[2].dest == 51);
-	assert(trace[0].deadFrom == 11 && trace[0].deadTo == 31);
+	assert(trace[0].dest == 8 && trace[1].dest == 31 && trace[2].dest == 51);
+	assert(trace[0].deadFrom == 9 && trace[0].deadTo == 31);
 	// standTicks мерится тем же допуском, поэтому включает и пару тиков разгона — важно
 	// лишь, что стояние после прибытия видно.
 	assert(trace[0].standTicks >= 4 && trace[2].cpFrame == -1);
@@ -426,7 +464,7 @@ int main()
 	test_cp_set_while_running(); test_cp_matches_pre_side(); test_undo_mid_tick();
 	test_dest_not_found_detail(); test_counter_mismatch_detail();
 	test_pre_branch_beats_later_pass(); test_pre_match_at_run_start_clamped();
-	test_repeat_tp_collapses_to_one_dead(); test_standing_before_first_tp_stays_live();
+	test_repeat_tp_collapses_to_one_dead(); test_standing_before_first_tp_is_cut(); test_cp_index_and_scan_agree();
 	test_trace_reports_every_arrival();
 	std::puts("awr_cut: all tests passed");
 	return 0;

@@ -16,6 +16,7 @@
 #include "cs2kz.h"
 #include "filesystem.h"
 #include "kz/kz.h"
+#include "kz/timer/kz_timer.h"
 #include "kz/replays/awr_cut.h"
 #include "kz/replays/data.h"
 #include "kz/replays/kz_replay.h"
@@ -34,9 +35,19 @@ namespace
 	// остальное, а для разбора хватает начала (обход идёт от старта к финишу).
 	constexpr size_t AWR_DEBUG_MAX_ARRIVALS = 200;
 
+	// Три РАЗНЫХ исхода чтения: «файла нет» и «файл есть, но прочитать нечего» — разные
+	// диагнозы, и путать их нельзя (пустой или обрезанный файл диагностировался бы как
+	// «сначала проиграйте реплей», хотя играть нечего).
+	enum class ReadResult
+	{
+		Ok,
+		NotFound,
+		ReadFailed,
+	};
+
 	// Прочитать файл реплея целиком. Путь строится ТОЛЬКО из провалидированного UUID
 	// (как в cyb_replay_download): аргумент команды в путь на диске не попадает.
-	bool ReadReplayFile(const char *uuid, std::vector<char> &out, std::string &usedPath)
+	ReadResult ReadReplayFile(const char *uuid, std::vector<char> &out, std::string &usedPath)
 	{
 		char path[512];
 		V_snprintf(path, sizeof(path), KZ_REPLAY_PATH "/%s.replay", uuid);
@@ -45,25 +56,40 @@ namespace
 			V_snprintf(path, sizeof(path), KZ_REPLAY_DOWNLOADS_PATH "/%s.replay", uuid);
 			if (!g_pFullFileSystem->FileExists(path))
 			{
-				return false;
+				return ReadResult::NotFound;
 			}
 		}
+		usedPath = path;
 
 		FileHandle_t file = g_pFullFileSystem->Open(path, "rb");
 		if (!file)
 		{
-			return false;
+			return ReadResult::ReadFailed;
 		}
 		const size_t size = g_pFullFileSystem->Size(file);
 		out.resize(size);
 		const bool read = size > 0 && g_pFullFileSystem->Read(out.data(), (int)size, file) == (int)size;
 		g_pFullFileSystem->Close(file);
-		if (!read)
+		return read ? ReadResult::Ok : ReadResult::ReadFailed;
+	}
+
+	// Есть ли на сервере живой ран. Разбор синхронный и крадёт кадр — оператор должен
+	// понимать, что именно он сейчас испортит чужой ран, но ОТКАЗЫВАТЬ не за что: это его
+	// сервер и его решение.
+	bool AnyTimerRunning()
+	{
+		// Граница цикла — как в KZ::zones::ResetEditors: перегрузка ToPlayer(CPlayerSlot)
+		// внутри делает index = slot.Get() + 1 по массиву players[MAXPLAYERS + 1], поэтому
+		// строго `i < MAXPLAYERS`.
+		for (i32 i = 0; i < MAXPLAYERS; i++)
 		{
-			return false;
+			KZPlayer *player = g_pKZPlayerManager->ToPlayer(CPlayerSlot(i));
+			if (player && player->timerService && player->timerService->GetTimerRunning())
+			{
+				return true;
+			}
 		}
-		usedPath = path;
-		return true;
+		return false;
 	}
 } // namespace
 
@@ -89,15 +115,28 @@ CON_COMMAND_F(kz_awr_debug, "Explain the AWR cut of one replay file. Usage: kz_a
 
 	std::vector<char> raw;
 	std::string path;
-	if (!ReadReplayFile(uuid.c_str(), raw, path))
+	const ReadResult read = ReadReplayFile(uuid.c_str(), raw, path);
+	// Печать команды — ASCII: кодировка серверной консоли и RCON-клиента ненадёжна,
+	// кириллица в них приезжает мусором (комментарии по-русски, вывод — нет).
+	if (read == ReadResult::NotFound)
 	{
-		// Печать команды — ASCII: кодировка серверной консоли и RCON-клиента ненадёжна,
-		// кириллица в них приезжает мусором (комментарии по-русски, вывод — нет).
 		Msg("[cyb_awr] kz_awr_debug uuid=%s: file not found locally (neither " KZ_REPLAY_PATH " nor " KZ_REPLAY_DOWNLOADS_PATH
 			"). Play it once first: !replay %s\n",
 			uuid.c_str(), uuid.c_str());
 		fflush(stdout);
 		return;
+	}
+	if (read == ReadResult::ReadFailed)
+	{
+		Msg("[cyb_awr] kz_awr_debug uuid=%s: read failed path=%s size=%zu (empty or truncated file)\n", uuid.c_str(), path.c_str(), raw.size());
+		fflush(stdout);
+		return;
+	}
+
+	if (AnyTimerRunning())
+	{
+		Msg("[cyb_awr] kz_awr_debug: WARNING a player has a run in progress; this command parses the replay synchronously and will steal a "
+			"frame\n");
 	}
 
 	KZ::replaysystem::data::CutSource src = KZ::replaysystem::data::LoadCutSourceFromMemory(raw.data(), raw.size());
