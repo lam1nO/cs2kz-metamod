@@ -179,7 +179,8 @@ bool KZPlugin::Unload(char *error, size_t maxlen)
 	KZ::zones::DestroyEditorMenus();
 	KZ::misc::UnrestrictTimeLimit();
 	KZRecordingService::Shutdown();
-	// Воркер бэклога AWR: до 8 detached-потоков разбора держат указатели в наш .so.
+	// Воркер бэклога AWR: до 8 потоков разбора держат указатели в наш .so — Shutdown
+	// джойнит каждый, иначе выгрузка ушла бы из-под живого потока.
 	CybAwrBackfill::Shutdown();
 	AsyncFileIO::Cleanup();
 	KZ::misc::customchangemap::Cleanup();

@@ -77,18 +77,32 @@ namespace
 	// эпоху и на чужой молча уходят, не трогая ни слоты, ни g_remaining, ни сцепку.
 	u32 g_epoch = 0;
 	// Рабочих потоков в полёте. Атомик, потому что декремент делает сам поток. Только
-	// диагностика (печатается в логах): занятость слотов считается НЕ им, см. g_orphanWorkers.
+	// диагностика (печатается в логах): занятость слотов считается НЕ им, см. g_orphanResults.
 	std::atomic<int> g_workersInFlight {0};
+	// Разборы, чей результат ещё НЕ ПОТРЕБЛЁН главным потоком: инкремент в SpawnWorker,
+	// декремент на каждый снятый очередью результат в Tick. Оба конца — на главном потоке и
+	// попарны ПО ПОСТРОЕНИЮ: каждый запущенный воркер публикует ровно один результат, и
+	// каждый результат снимается очередью ровно один раз. Единица одна и та же — «результат,
+	// который ещё не забрали», поэтому счётчик не зависит ни от живости потока, ни от такта
+	// насоса, ни от паузы changelevel (когда таймеры не тикают, а воркеры считают).
+	u32 g_unconsumedResults = 0;
 	// Разборы, ОСИРОТЕВШИЕ на смене карты: их слоты погашены (OnMapChanged), колбэки
-	// отброшены по эпохе, но сами потоки живы и держат сырой буфер плюс распакованные тики.
-	// Это ВТОРОЕ слагаемое занятости, и в нормальном прогоне оно равно нулю — поэтому файл
+	// отброшены по эпохе, но память (сырой буфер + дельта-буфер + тики) они держат. Это
+	// ВТОРОЕ слагаемое занятости, и в нормальном прогоне оно равно нулю — поэтому файл
 	// считается ровно один раз (складывать g_inFlight с g_workersInFlight нельзя: второй
 	// счётчик строгий подынтервал первого, и файл на этапе разбора считался бы дважды,
 	// вдвое занижая фактическую параллельность).
 	//
-	// Счётчик точен: каждый рабочий поток на КАЖДОМ пути выхода публикует результат, а Tick
-	// отбрасывает результат чужой эпохи — на этом и декрементируем.
-	u32 g_orphanWorkers = 0;
+	// Снимок берётся из g_unconsumedResults, а НЕ из числа живых потоков: инкремент по
+	// живости и декремент по потреблению — разные единицы, между ними такт насоса и пауза
+	// changelevel, и снимок расходился в обе стороны (воркер, вышедший до смены карты,
+	// в снимок не попадал, но его результат списывал чужую долю — занижение занятости и
+	// ложный underflow; обратный порядок давал завышение и ПОТЕРЯННЫЙ слот, при N=1 —
+	// полный стоп прогона). В нынешней единице расходиться нечему: все непотреблённые на
+	// момент смены карты результаты принадлежат прошлой эпохе, каждый будет снят ровно один
+	// раз и ровно один раз уменьшит снимок.
+	u32 g_orphanResults = 0;
+
 	// Хэндлы рабочих потоков: нужны, чтобы на выгрузке плагина сделать join, а не ждать
 	// счётчик. Ожидание счётчика окно не закрывает: декремент стоит в деструкторе локальной
 	// переменной внутри лямбды, а сама лямбда (с копией сырого буфера) уничтожается ПОЗЖЕ,
@@ -101,6 +115,7 @@ namespace
 		// флаг переживает и хэндл (главный поток), и лямбду (рабочий).
 		std::shared_ptr<std::atomic<bool>> done;
 	};
+
 	std::vector<WorkerHandle> g_workerThreads;
 	// dry-run: uuid, уже взятые в ЭТОМ прогоне. В dry-run строка в api не помечается, а
 	// `awr-backlog` отдаёт свежайшие записи, поэтому без этого множества `kz_awr_backfill 50
@@ -383,9 +398,9 @@ namespace
 		// жизнь файла (скачивание → разбор → POST), поэтому в нормальном прогоне файл
 		// считается РОВНО ОДИН РАЗ и N слотов дают N одновременных скачиваний. Второе
 		// слагаемое в норме ноль и нужно только после смены карты: там слоты гасятся, а
-		// потоки прошлой эпохи ещё держат сырой буфер и распакованные тики, и без него сразу
+		// разборы прошлой эпохи ещё держат сырой буфер и распакованные тики, и без него сразу
 		// после changelevel брались бы до N новых файлов ПРИ до N ещё считающихся.
-		const u32 busy = g_inFlight + g_orphanWorkers;
+		const u32 busy = g_inFlight + g_orphanResults;
 		if (g_remaining == 0 || g_backlogBusy || busy >= Concurrency())
 		{
 			return;
@@ -435,6 +450,21 @@ namespace
 		// Отправка — вне лока: колбэки HTTP и логи не должны держать мьютекс.
 		for (WorkerResult &res : ready)
 		{
+			// Результат снят с очереди — он больше не «непотреблённый», независимо от того,
+			// свой он или чужой по эпохе. Это второй конец пары к инкременту в SpawnWorker.
+			if (g_unconsumedResults > 0)
+			{
+				g_unconsumedResults--;
+			}
+			else
+			{
+				// Результатов снято больше, чем запущено разборов: либо воркер опубликовал
+				// дважды, либо очередь прочитали мимо этого места. Молчать нельзя — на этом
+				// счётчике стоит снимок занятости после смены карты.
+				KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] invariant reason=unconsumed_counter_underflow uuid=%s in_flight=%u epoch=%u\n",
+							res.uuid.c_str(), (unsigned)g_inFlight, (unsigned)g_epoch);
+			}
+
 			// Результат потока, запущенного до смены карты. Разрез сам по себе верен (файл
 			// от карты не зависит), но отправлять его отсюда нельзя: SendResult на всех
 			// своих путях трогает общее состояние — слоты и сцепку, а на not_configured ещё
@@ -447,22 +477,22 @@ namespace
 			if (res.epoch != g_epoch)
 			{
 				KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] callback dropped reason=stale_epoch what=worker uuid=%s epoch=%u now=%u orphans=%u\n",
-							res.uuid.c_str(), (unsigned)res.epoch, (unsigned)g_epoch, (unsigned)g_orphanWorkers);
-				// Осиротевший разбор закончился — освобождаем ЕГО долю занятости. Каждый
-				// рабочий поток публикует результат ровно один раз на каждом пути выхода,
-				// поэтому счётчик сходится к нулю точно.
-				if (g_orphanWorkers > 0)
+							res.uuid.c_str(), (unsigned)res.epoch, (unsigned)g_epoch, (unsigned)g_orphanResults);
+				// Осиротевший разбор отдал результат — освобождаем ЕГО долю занятости.
+				// Снимок брался в тех же единицах (непотреблённые результаты), поэтому
+				// декрементов будет ровно столько, сколько было в снимке.
+				if (g_orphanResults > 0)
 				{
-					g_orphanWorkers--;
+					g_orphanResults--;
 				}
 				else
 				{
-					// Рассинхрон: стало больше осиротевших результатов, чем мы насчитали на
-					// смене карты. Молча превращать в ноль нельзя — это означало бы, что
-					// снимок в OnMapChanged врёт, и занятость слотов считается неверно.
+					// Рассинхрон: чужих по эпохе результатов пришло больше, чем было в
+					// снимке. Молча превращать в ноль нельзя — это означало бы, что снимок
+					// в OnMapChanged врёт, и занятость слотов считается неверно.
 					KZ_LOG_WARN(LogChannel::Replays,
-								"[cyb_awr] invariant reason=orphan_counter_underflow uuid=%s in_flight=%u workers=%d epoch=%u\n",
-								res.uuid.c_str(), (unsigned)g_inFlight, g_workersInFlight.load(), (unsigned)g_epoch);
+								"[cyb_awr] invariant reason=orphan_counter_underflow uuid=%s in_flight=%u unconsumed=%u epoch=%u\n",
+								res.uuid.c_str(), (unsigned)g_inFlight, (unsigned)g_unconsumedResults, (unsigned)g_epoch);
 				}
 				continue;
 			}
@@ -839,6 +869,9 @@ namespace
 		// playback::ComputeCutFor глобального состояния не трогают (см. их комментарии),
 		// а распаковка нескольких мегабайт в игровом потоке дала бы просадку кадра.
 		g_workersInFlight++;
+		// Второй счётчик — в единицах «результат, который ещё не забрали» (см.
+		// g_unconsumedResults): именно из него берётся снимок занятости на смене карты.
+		g_unconsumedResults++;
 		// Эпоха фиксируется ЗДЕСЬ, на главном потоке: сам поток g_epoch читать не должен.
 		const u32 epoch = g_epoch;
 		// Флаг «поток отработал» — для приборки хэндлов без блокировки такта (см. Tick).
@@ -1165,26 +1198,32 @@ void CybAwrBackfill::Shutdown()
 	g_epoch++;
 	g_remaining = 0;
 	g_inFlight = 0;
-	g_orphanWorkers = 0;
+	g_orphanResults = 0;
+	g_unconsumedResults = 0;
 	g_takenInFlight.clear();
 	g_backlogBusy = false;
 
 	const int live = g_workersInFlight.load();
+	const size_t handles = g_workerThreads.size();
 	if (live > 0)
 	{
-		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] shutdown waiting workers=%d handles=%u\n", live, (unsigned)g_workerThreads.size());
+		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] shutdown waiting workers=%d handles=%zu\n", live, handles);
 	}
+	size_t joined = 0;
 	for (WorkerHandle &handle : g_workerThreads)
 	{
 		if (handle.thread.joinable())
 		{
 			handle.thread.join();
+			joined++;
 		}
 	}
 	g_workerThreads.clear();
 	if (live > 0)
 	{
-		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] shutdown joined workers=%d\n", g_workersInFlight.load());
+		// Печатаем ЧИСЛО ДОЖДАННЫХ потоков: g_workersInFlight здесь уже ноль по построению
+		// (все джойны прошли), и печатать его значило бы печатать константу.
+		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] shutdown joined=%zu of_handles=%zu\n", joined, handles);
 	}
 }
 
@@ -1210,22 +1249,16 @@ void CybAwrBackfill::OnMapChanged()
 	// безопасно и с живым потоком: ячейка результата больше не одна, затирать нечего.
 	if (g_inFlight > 0 || g_backlogBusy)
 	{
-		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] map_changed reason=flights_cleared in_flight=%u workers=%d remaining=%u epoch=%u\n",
-					(unsigned)g_inFlight, g_workersInFlight.load(), (unsigned)g_remaining, (unsigned)g_epoch);
+		KZ_LOG_INFO(LogChannel::Replays,
+					"[cyb_awr] map_changed reason=flights_cleared in_flight=%u orphans=%u workers=%d remaining=%u epoch=%u\n",
+					(unsigned)g_inFlight, (unsigned)g_unconsumedResults, g_workersInFlight.load(), (unsigned)g_remaining, (unsigned)g_epoch);
 	}
-	// Снимок ОСИРОТЕВШИХ разборов: слоты гасим, но эти потоки живы и память держат, значит
-	// занятость они держат тоже (см. g_orphanWorkers). Присваивание, а не +=: после этой
-	// строки ВСЕ живые потоки — прошлой эпохи, то есть осиротевшие все до одного.
-	const int liveWorkers = g_workersInFlight.load();
-	if (liveWorkers < 0)
-	{
-		// Отрицательное значение означает рассинхрон инкремента и декремента счётчика — это
-		// дефект, а не состояние. Не заминаем его нулём молча: занятость слотов считается по
-		// снимку, и врущий снимок либо душит прогон, либо удваивает пик памяти.
-		KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] invariant reason=worker_counter_negative workers=%d in_flight=%u epoch=%u\n", liveWorkers,
-					(unsigned)g_inFlight, (unsigned)g_epoch);
-	}
-	g_orphanWorkers = liveWorkers > 0 ? (u32)liveWorkers : 0;
+	// Снимок ОСИРОТЕВШИХ разборов: слоты гасим, но эти разборы память держат, значит держат
+	// и занятость (см. g_orphanResults). Берём его из g_unconsumedResults — то есть в тех же
+	// единицах, в которых он потом уменьшается (снятый с очереди чужой результат).
+	// Присваивание, а не +=: после этой строки ВСЕ непотреблённые результаты принадлежат
+	// прошлой эпохе, то есть осиротели все до одного.
+	g_orphanResults = g_unconsumedResults;
 	g_inFlight = 0;
 	g_takenInFlight.clear();
 	g_backlogBusy = false;
