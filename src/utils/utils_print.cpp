@@ -261,7 +261,24 @@ bool utils::CFormat(char *buffer, u64 buffer_size, const char *text)
 void utils::ClientPrintFilter(IRecipientFilter *filter, int msg_dest, const char *msg_name, const char *param1, const char *param2,
 							  const char *param3, const char *param4)
 {
-	INetworkMessageInternal *netmsg = g_pNetworkMessages->FindNetworkMessagePartial("TextMsg");
+	// Полное имя базового сообщения, а не подстрока «TextMsg»: обновление CS2 09.09.2026
+	// переименовало CS-специфичные CS_UM_SayText/SayText2/TextMsg в *_CSGOLegacy, и поиск
+	// по подстроке стал попадать в легаси-вариант, который клиент больше не рисует —
+	// весь чат и печать плагина на флоте молча пропали (инцидент 10.09).
+	// Точный поиск, не Partial: подстрока порядок-зависима и однажды уже уехала в легаси.
+	INetworkMessageInternal *netmsg = g_pNetworkMessages->FindNetworkMessage("CUserMessageTextMsg");
+	if (!netmsg)
+	{
+		// Единственная страховка при смене реестра сообщений движком: без неё разыменование
+		// nullptr на каждой строке печати уронило бы весь флот вместо невидимого чата.
+		static bool warned = false;
+		if (!warned)
+		{
+			warned = true;
+			Warning("[cyb] print_failed reason=netmsg_not_found name=CUserMessageTextMsg\n");
+		}
+		return;
+	}
 	auto msg = netmsg->AllocateMessage()->ToPB<CUserMessageTextMsg>();
 	msg->set_dest(msg_dest);
 	msg->add_param(msg_name);
@@ -291,7 +308,18 @@ void utils::SayChat(CBaseEntity *entity, const char *format, ...)
 		Warning("utils::SayChat did not have enough space to print: %s\n", buffer);
 	}
 
-	INetworkMessageInternal *netmsg = g_pNetworkMessages->FindNetworkMessagePartial("SayText2");
+	// См. комментарий у CUserMessageTextMsg выше: полное имя, не подстрока.
+	INetworkMessageInternal *netmsg = g_pNetworkMessages->FindNetworkMessage("CUserMessageSayText2");
+	if (!netmsg)
+	{
+		static bool warned = false;
+		if (!warned)
+		{
+			warned = true;
+			Warning("[cyb] print_failed reason=netmsg_not_found name=CUserMessageSayText2\n");
+		}
+		return;
+	}
 	auto msg = netmsg->AllocateMessage()->ToPB<CUserMessageSayText2>();
 	msg->set_entityindex(entity->entindex());
 	msg->set_messagename(coloredBuffer);
