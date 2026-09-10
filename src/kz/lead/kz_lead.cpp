@@ -169,7 +169,7 @@ namespace
 	//
 	// Защита от битого файла — НЕ языковыми исключениями: форк собирается с
 	// `-fno-exceptions` (AMBuildScript), поймать их нечем в принципе. Абсурдные размеры из
-	// шапок секций (по ним аллоцирует compression.cpp:417/458) отсекает пре-валидация внутри
+	// шапок секций (по ним аллоцируют ReadTickSection и ReadEventsCompressed) отсекает пре-валидация внутри
 	// data::LoadCutSourceFromMemory — она отдаёт valid=false, что здесь становится
 	// parse_failed. Это единственное место такой защиты на весь тракт.
 	void BuildPathWorker(std::string filePath, std::shared_ptr<KZLeadService::PendingLoad> pending)

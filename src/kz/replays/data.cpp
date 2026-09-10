@@ -252,7 +252,9 @@ namespace KZ::replaysystem::data
 	// сырых тиков (дельта-буфер плюс 8 Б флагов на кадр — ~120 МиБ), а лимит файла на
 	// аплоаде — 32 МБ сжатых. 256 МиБ — двукратный запас к этому и одновременно тормоз на
 	// суммарный запрос памяти: у тиков в пике живут ОБА буфера сразу
-	// (`new char[uncompressedSize]` в compression.cpp:417 плюс `resize(elementCount)` на :489).
+	// (`new char[uncompressedSize]` в compression::ReadTickSection плюс `resize(elementCount)`
+	// в DecodeTickDataBuffer). Ссылки здесь и ниже — по ИМЕНАМ функций, а не по номерам
+	// строк: номера в compression.cpp сдвигаются при каждой правке файла.
 	static constexpr u64 KZ_CUT_MAX_SECTION_BYTES = 256ull * 1024ull * 1024ull;
 
 	// Максимум на ЧИСЛО КАДРОВ (elementCount секции тиков) — 1 000 000, это ~4.3 часа при
@@ -324,9 +326,9 @@ namespace KZ::replaysystem::data
 		SectionHeader tickHeader {}, eventHeader {};
 		const char *probe = cursor;
 
-		// Секция тиков. compression.cpp:417 делает `new char[uncompressedSize]` (границу
-		// держит PeekSectionHeader), compression.cpp:489 — `resize(elementCount)` уже
-		// массивом TickData, поэтому ограничиваем И число кадров (KZ_CUT_MAX_TICKS).
+		// Секция тиков. compression::ReadTickSection делает `new char[uncompressedSize]`
+		// (границу держит PeekSectionHeader), а DecodeTickDataBuffer — `resize(elementCount)`
+		// уже массивом TickData, поэтому ограничиваем И число кадров (KZ_CUT_MAX_TICKS).
 		if (!PeekSectionHeader(probe, end, KZ_CUT_MAX_SECTION_BYTES, tickHeader) || (u64)tickHeader.elementCount > KZ_CUT_MAX_TICKS)
 		{
 			return out;
@@ -355,8 +357,9 @@ namespace KZ::replaysystem::data
 			return out;
 		}
 
-		// Секция событий: compression.cpp:716 делает `resize(elementCount)` массивом RpEvent,
-		// а Decompress следом пишет туда до `uncompressedSize` байт. Как и у сабтиков —
+		// Секция событий: compression::ReadEventsCompressed делает `resize(elementCount)`
+		// массивом RpEvent, а Decompress следом пишет туда до `uncompressedSize` байт. Как
+		// было и у сабтиков —
 		// ВЕРХНЯЯ ГРАНИЦА, не равенство: меньший `uncompressedSize` законен, больший означает
 		// запись за концом вектора.
 		//

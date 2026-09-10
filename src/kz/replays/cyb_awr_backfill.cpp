@@ -12,8 +12,8 @@
 #include "utils/utils.h"
 
 #include <atomic>
-#include <chrono>
 #include <cstdlib>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -76,10 +76,32 @@ namespace
 	// отправок (GET бэклога, GET файла, POST результата) и каждый её колбэк ошибки запоминают
 	// эпоху и на чужой молча уходят, не трогая ни слоты, ни g_remaining, ни сцепку.
 	u32 g_epoch = 0;
-	// Рабочих потоков в полёте. Атомик, потому что декремент делает сам поток. Осталось
-	// диагностикой (печатается на смене карты): результаты теперь копятся в ОЧЕРЕДИ, а не в
-	// одной ячейке, поэтому живой поток больше ничему не мешает.
+	// Рабочих потоков в полёте. Атомик, потому что декремент делает сам поток. Только
+	// диагностика (печатается в логах): занятость слотов считается НЕ им, см. g_orphanWorkers.
 	std::atomic<int> g_workersInFlight {0};
+	// Разборы, ОСИРОТЕВШИЕ на смене карты: их слоты погашены (OnMapChanged), колбэки
+	// отброшены по эпохе, но сами потоки живы и держат сырой буфер плюс распакованные тики.
+	// Это ВТОРОЕ слагаемое занятости, и в нормальном прогоне оно равно нулю — поэтому файл
+	// считается ровно один раз (складывать g_inFlight с g_workersInFlight нельзя: второй
+	// счётчик строгий подынтервал первого, и файл на этапе разбора считался бы дважды,
+	// вдвое занижая фактическую параллельность).
+	//
+	// Счётчик точен: каждый рабочий поток на КАЖДОМ пути выхода публикует результат, а Tick
+	// отбрасывает результат чужой эпохи — на этом и декрементируем.
+	u32 g_orphanWorkers = 0;
+	// Хэндлы рабочих потоков: нужны, чтобы на выгрузке плагина сделать join, а не ждать
+	// счётчик. Ожидание счётчика окно не закрывает: декремент стоит в деструкторе локальной
+	// переменной внутри лямбды, а сама лямбда (с копией сырого буфера) уничтожается ПОЗЖЕ,
+	// уже после возврата из неё, и её деструкторы лежат в нашей .so. join() возвращается
+	// только когда поток отработал целиком, включая уничтожение замыкания.
+	struct WorkerHandle
+	{
+		std::thread thread;
+		// Поток дописал результат — можно джойнить без блокировки. shared_ptr, потому что
+		// флаг переживает и хэндл (главный поток), и лямбду (рабочий).
+		std::shared_ptr<std::atomic<bool>> done;
+	};
+	std::vector<WorkerHandle> g_workerThreads;
 	// dry-run: uuid, уже взятые в ЭТОМ прогоне. В dry-run строка в api не помечается, а
 	// `awr-backlog` отдаёт свежайшие записи, поэтому без этого множества `kz_awr_backfill 50
 	// -dry-run` пережёвывал бы ОДИН И ТОТ ЖЕ файл все 50 раз (наблюдено на канарейке
@@ -116,9 +138,18 @@ namespace
 
 	static_assert(ParseDecimal(AWR_BACKFILL_PAGE_LIMIT_STR) == AWR_BACKFILL_PAGE_LIMIT, "limit query string must match AWR_BACKFILL_PAGE_LIMIT");
 
-	// Потолок одновременных файлов. Больше 8 не даём: разбор держит в памяти и сырой файл,
-	// и распакованные тики (264 Б на кадр против 72 Б в файле, то есть ~4 размера файла),
-	// а это ЖИВОЙ игровой сервер — арифметика в CYBER.md и в fix-отчёте.
+	// Потолок одновременных файлов. Разбор держит на слот ТРИ буфера сразу: сырой файл,
+	// дельта-буфер распаковки и вектор тиков. Три РАЗНЫЕ величины (двухчасовой ран,
+	// ~460 000 кадров, файл 32 МБ):
+	//   - типичный пик ~209 МБ (32 + 121 тики + ~56 дельта-буфер по оценке самого форка,
+	//     `reserve(size * 120)` в compression.cpp);
+	//   - худший ЛЕГИТИМНЫЙ ~275 МБ (дельта-буфер вырастает до 264 Б на кадр, если меняются
+	//     все поля каждый кадр);
+	//   - разрешённый ПРЕ-ВАЛИДАЦИЕЙ ~550 МБ (256 МиБ на секцию + миллион кадров по 264 Б +
+	//     32 МБ сырых): 32-мегабайтный zstd законно разжимается в 256 МиБ.
+	// При N=8 это 1.7 / 2.2 / 4.4 ГБ соответственно. Восьмёрка держится НЕ на объёме, а на
+	// том, что файлы — вывод нашего же рекордера (лимит аплоада 32 МБ, кадры пишет он сам),
+	// а не то, что прислал игрок; на ноде с игроками рекомендуется 4 (см. CYBER.md).
 	constexpr i32 AWR_BACKFILL_MAX_CONCURRENCY = 8;
 	// Про кламп предупреждаем один раз на процесс: конвар читается на каждое решение.
 	bool g_concurrencyWarned = false;
@@ -348,13 +379,13 @@ namespace
 	// (чтобы N слотов заполнились без ожидания тика), а тик работает страховкой.
 	void MaybeFetchNext()
 	{
-		// Гейт по СУММЕ слотов и живых рабочих потоков. Слоты гасятся на смене карты
-		// (OnMapChanged), а потоки прошлой эпохи в этот момент живы и держат свои сырые
-		// буферы и распакованные тики: без этого слагаемого сразу после changelevel брались
-		// бы до N новых файлов ПРИ до N ещё считающихся — пик памяти удваивался ровно там,
-		// где сервер и так занят загрузкой карты.
-		const i32 workers = g_workersInFlight.load();
-		const u32 busy = g_inFlight + (u32)(workers > 0 ? workers : 0);
+		// ЗАНЯТОСТЬ = слоты живых файлов + осиротевшие разборы прошлой эпохи. Слот живёт всю
+		// жизнь файла (скачивание → разбор → POST), поэтому в нормальном прогоне файл
+		// считается РОВНО ОДИН РАЗ и N слотов дают N одновременных скачиваний. Второе
+		// слагаемое в норме ноль и нужно только после смены карты: там слоты гасятся, а
+		// потоки прошлой эпохи ещё держат сырой буфер и распакованные тики, и без него сразу
+		// после changelevel брались бы до N новых файлов ПРИ до N ещё считающихся.
+		const u32 busy = g_inFlight + g_orphanWorkers;
 		if (g_remaining == 0 || g_backlogBusy || busy >= Concurrency())
 		{
 			return;
@@ -415,11 +446,43 @@ namespace
 			// целиком, и декремент здесь уехал бы в чужой, уже новый файл.
 			if (res.epoch != g_epoch)
 			{
-				KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] callback dropped reason=stale_epoch what=worker uuid=%s epoch=%u now=%u\n",
-							res.uuid.c_str(), (unsigned)res.epoch, (unsigned)g_epoch);
+				KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] callback dropped reason=stale_epoch what=worker uuid=%s epoch=%u now=%u orphans=%u\n",
+							res.uuid.c_str(), (unsigned)res.epoch, (unsigned)g_epoch, (unsigned)g_orphanWorkers);
+				// Осиротевший разбор закончился — освобождаем ЕГО долю занятости. Каждый
+				// рабочий поток публикует результат ровно один раз на каждом пути выхода,
+				// поэтому счётчик сходится к нулю точно.
+				if (g_orphanWorkers > 0)
+				{
+					g_orphanWorkers--;
+				}
+				else
+				{
+					// Рассинхрон: стало больше осиротевших результатов, чем мы насчитали на
+					// смене карты. Молча превращать в ноль нельзя — это означало бы, что
+					// снимок в OnMapChanged врёт, и занятость слотов считается неверно.
+					KZ_LOG_WARN(LogChannel::Replays,
+								"[cyb_awr] invariant reason=orphan_counter_underflow uuid=%s in_flight=%u workers=%d epoch=%u\n",
+								res.uuid.c_str(), (unsigned)g_inFlight, g_workersInFlight.load(), (unsigned)g_epoch);
+				}
 				continue;
 			}
 			SendResult(res);
+		}
+
+		// Приборка отработавших потоков: join только по выставленному флагу, поэтому такт не
+		// блокируется. Без неё хэндлы копились бы до выгрузки плагина.
+		for (size_t i = 0; i < g_workerThreads.size();)
+		{
+			if (g_workerThreads[i].done && g_workerThreads[i].done->load())
+			{
+				if (g_workerThreads[i].thread.joinable())
+				{
+					g_workerThreads[i].thread.join();
+				}
+				g_workerThreads.erase(g_workerThreads.begin() + (ptrdiff_t)i);
+				continue;
+			}
+			i++;
 		}
 
 		// Заполняем свободные слоты. Запрос бэклога сериализован, поэтому за такт уходит
@@ -778,18 +841,26 @@ namespace
 		g_workersInFlight++;
 		// Эпоха фиксируется ЗДЕСЬ, на главном потоке: сам поток g_epoch читать не должен.
 		const u32 epoch = g_epoch;
+		// Флаг «поток отработал» — для приборки хэндлов без блокировки такта (см. Tick).
+		auto done = std::make_shared<std::atomic<bool>>(false);
 		std::thread worker(
-			[uuid, dryRun, epoch, data = std::move(data)]()
+			[uuid, dryRun, epoch, done, data = std::move(data)]()
 			{
 				// Декремент строго после публикации результата: главный поток по нулю
 				// решает, что в полёте никого нет (OnMapChanged).
 				struct InFlightGuard
 				{
+					std::shared_ptr<std::atomic<bool>> done;
+
 					~InFlightGuard()
 					{
 						g_workersInFlight--;
+						// Флаг для приборки. Он НЕ гарантия «замыкание уничтожено» — оно
+						// уничтожается позже, уже вне лямбды; гарантию даёт только join(),
+						// которым и закрывается выгрузка плагина (Shutdown).
+						done->store(true);
 					}
-				} guard;
+				} guard {done};
 
 				WorkerResult res;
 				res.uuid = uuid;
@@ -798,7 +869,7 @@ namespace
 
 				// Защита от битого файла — НЕ try/catch: форк собирается с
 				// `-fno-exceptions` (AMBuildScript), исключение поймать нечем. Абсурдные
-				// размеры из шапки секций (по ним аллоцирует compression.cpp:417/458)
+				// размеры из шапки секций (по ним аллоцируют ReadTickSection и ReadEventsCompressed)
 				// отсекает пре-валидация внутри data::LoadCutSourceFromMemory — она отдаёт
 				// valid=false, и это ровно та же причина отказа parse_failed ниже.
 				KZ::replaysystem::data::CutSource src = KZ::replaysystem::data::LoadCutSourceFromMemory(data.data(), data.size());
@@ -837,7 +908,8 @@ namespace
 				res.maxGapFrame = cut.maxRecordGapFrame;
 				PublishResult(res);
 			});
-		worker.detach();
+		// НЕ detach: хэндл нужен, чтобы на выгрузке плагина дождаться потока join'ом.
+		g_workerThreads.push_back({std::move(worker), done});
 	}
 
 	// Отказ, который может исчезнуть после правки НАШЕГО кода, а не свойство файла. Такой
@@ -1078,35 +1150,41 @@ void CybAwrBackfill::Run(u32 count, bool dryRun)
 
 void CybAwrBackfill::Shutdown()
 {
-	// Выгрузка плагина. Рабочие потоки запущены detached и держат указатели в НАШ .so
-	// (data::LoadCutSourceFromMemory, playback::ComputeCutFor, аллокаторы): если .so
-	// выгрузят под живым потоком, это вызов в выгруженный код, то есть падение сервера. При
-	// одном файле в полёте окно было узким, при восьми оно шире ровно в восемь раз — поэтому
-	// закрываем его теперь явно.
+	// Выгрузка плагина. Рабочие потоки держат указатели в НАШ .so
+	// (data::LoadCutSourceFromMemory, playback::ComputeCutFor, аллокаторы, деструкторы
+	// шаблонов замыкания): если .so выгрузят под живым потоком, это вызов в выгруженный код,
+	// то есть падение сервера.
 	//
-	// Эпоха вперёд: доехавшие результаты будут отброшены, новые файлы не возьмутся
-	// (g_remaining обнулён). Дальше ЖДЁМ, пока живые потоки допишут свои результаты — ждём
-	// ограниченно: повиснуть на выгрузке навсегда хуже, чем рискнуть, но тогда об этом
-	// останется строка в логе.
+	// Ждём join'ом и БЕЗ таймаута. Ожидание счётчика g_workersInFlight окно не закрывало:
+	// декремент стоит в деструкторе локальной переменной внутри лямбды, а само замыкание
+	// (с копией сырого буфера) уничтожается ПОЗЖЕ, уже после возврата из лямбды. Таймаута
+	// нет намеренно: выгрузиться по истечении срока значит выгрузиться под живым потоком —
+	// ровно то падение, от которого мы защищаемся. Разбор ограничен размером файла (32 МБ,
+	// секунды), поэтому пауза конечна; чтобы она не выглядела зависанием, пишем строку ДО
+	// ожидания и после.
 	g_epoch++;
 	g_remaining = 0;
 	g_inFlight = 0;
+	g_orphanWorkers = 0;
 	g_takenInFlight.clear();
 	g_backlogBusy = false;
-	constexpr int AWR_SHUTDOWN_WAIT_MS = 3000;
-	int waited = 0;
-	while (g_workersInFlight.load() > 0 && waited < AWR_SHUTDOWN_WAIT_MS)
+
+	const int live = g_workersInFlight.load();
+	if (live > 0)
 	{
-		std::this_thread::sleep_for(std::chrono::milliseconds(5));
-		waited += 5;
+		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] shutdown waiting workers=%d handles=%u\n", live, (unsigned)g_workerThreads.size());
 	}
-	if (g_workersInFlight.load() > 0)
+	for (WorkerHandle &handle : g_workerThreads)
 	{
-		KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] shutdown timeout workers=%d waited_ms=%d\n", g_workersInFlight.load(), waited);
+		if (handle.thread.joinable())
+		{
+			handle.thread.join();
+		}
 	}
-	else if (waited > 0)
+	g_workerThreads.clear();
+	if (live > 0)
 	{
-		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] shutdown waited_ms=%d\n", waited);
+		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] shutdown joined workers=%d\n", g_workersInFlight.load());
 	}
 }
 
@@ -1135,6 +1213,19 @@ void CybAwrBackfill::OnMapChanged()
 		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] map_changed reason=flights_cleared in_flight=%u workers=%d remaining=%u epoch=%u\n",
 					(unsigned)g_inFlight, g_workersInFlight.load(), (unsigned)g_remaining, (unsigned)g_epoch);
 	}
+	// Снимок ОСИРОТЕВШИХ разборов: слоты гасим, но эти потоки живы и память держат, значит
+	// занятость они держат тоже (см. g_orphanWorkers). Присваивание, а не +=: после этой
+	// строки ВСЕ живые потоки — прошлой эпохи, то есть осиротевшие все до одного.
+	const int liveWorkers = g_workersInFlight.load();
+	if (liveWorkers < 0)
+	{
+		// Отрицательное значение означает рассинхрон инкремента и декремента счётчика — это
+		// дефект, а не состояние. Не заминаем его нулём молча: занятость слотов считается по
+		// снимку, и врущий снимок либо душит прогон, либо удваивает пик памяти.
+		KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] invariant reason=worker_counter_negative workers=%d in_flight=%u epoch=%u\n", liveWorkers,
+					(unsigned)g_inFlight, (unsigned)g_epoch);
+	}
+	g_orphanWorkers = liveWorkers > 0 ? (u32)liveWorkers : 0;
 	g_inFlight = 0;
 	g_takenInFlight.clear();
 	g_backlogBusy = false;
