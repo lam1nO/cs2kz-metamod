@@ -53,6 +53,9 @@ namespace
 		u32 teleports = 0;
 		// Число ТП из шапки реплея (RunReplayData::num_teleports); -1 = поля нет.
 		i32 headerTeleports = -1;
+		// Разбор отказа из awr::CutResult::detail (пусто при ok). Копия, а не указатель:
+		// CutResult живёт на стеке рабочего потока, а строку печатает главный.
+		std::string detail;
 		// Снапшот режима на момент ВЗЯТИЯ файла. Пока файл в полёте, kz_awr_backfill может
 		// переставить g_dryRun — и реальный файл ушёл бы как dry (или наоборот).
 		bool dryRun = false;
@@ -390,6 +393,7 @@ namespace
 															 (u32)src.events.size(), res.timeMs);
 				res.ok = cut.ok;
 				res.reason = cut.ok ? "ok" : cut.reason;
+				res.detail = cut.detail;
 				res.awrMs = cut.awrMs;
 				res.teleports = cut.teleports;
 				PublishResult(res);
@@ -424,9 +428,17 @@ namespace
 			res.awrMs = 0;
 		}
 
-		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill uuid=%s time_ms=%llu awr_ms=%llu tps=%u ok=%d reason=%s dry=%d\n",
+		// detail — только на отказе: без него первый живой dry-run ответил только
+		// «dest_not_found» на всех 50 файлах, и разбор стоил ещё одного цикла
+		// сборка → канарейка. Пишем в ту же строку, чтобы её можно было грепать целиком.
+		char detailSuffix[256] = {};
+		if (!res.ok && !res.detail.empty())
+		{
+			V_snprintf(detailSuffix, sizeof(detailSuffix), " detail=%s", res.detail.c_str());
+		}
+		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill uuid=%s time_ms=%llu awr_ms=%llu tps=%u ok=%d reason=%s dry=%d%s\n",
 					res.uuid.c_str(), (unsigned long long)res.timeMs, (unsigned long long)res.awrMs, (unsigned)res.teleports,
-					res.ok ? 1 : 0, res.reason, res.dryRun ? 1 : 0);
+					res.ok ? 1 : 0, res.reason, res.dryRun ? 1 : 0, detailSuffix);
 
 		if (res.ok)
 		{

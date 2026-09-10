@@ -235,6 +235,11 @@ namespace KZ::replaysystem::playback
 			frames[i].origin[0] = t.post.origin.x;
 			frames[i].origin[1] = t.post.origin.y;
 			frames[i].origin[2] = t.post.origin.z;
+			// Оба конца кадра: позиция чекпоинта снята в середине тика и точного совпадения
+			// ни с одним из них не даёт — разрез сопоставляет с допуском (awr_cut.h).
+			frames[i].preOrigin[0] = t.pre.origin.x;
+			frames[i].preOrigin[1] = t.pre.origin.y;
+			frames[i].preOrigin[2] = t.pre.origin.z;
 		}
 		std::vector<awr::Interval> pauses = PauseIntervalsFromEvents(ticks, tickCount, events, numEvents);
 		return awr::ComputeAwrCut(frames.data(), tickCount, pauses.data(), (u32)pauses.size(), timeMs, ENGINE_FIXED_TICK_INTERVAL, runStart, runEnd);

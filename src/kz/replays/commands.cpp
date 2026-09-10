@@ -448,8 +448,8 @@ namespace KZ::replaysystem::commands
 					if (!cut.ok)
 					{
 						// Ложная сшивка хуже отказа (спека §4): играем как обычный реплей.
-						KZ_LOG_WARN(LogChannel::Replays, "[cyb_replay] awr_cut_failed reason=%s uuid=%s\n", cut.reason,
-									replay->uuid.ToString().c_str());
+						KZ_LOG_WARN(LogChannel::Replays, "[cyb_replay] awr_cut_failed reason=%s uuid=%s detail=%s\n", cut.reason,
+									replay->uuid.ToString().c_str(), cut.detail);
 						replay->awrMode = false;
 						replay->awrMs = 0;
 						player->languageService->PrintChat(true, false, "Replay - AWR Cut Failed");

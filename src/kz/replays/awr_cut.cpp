@@ -1,13 +1,24 @@
 #include "awr_cut.h"
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
 
 namespace KZ::replaysystem::awr
 {
-	static bool SameOrigin(const Frame &a, const Frame &b)
+	// Квадрат расстояния: сравнения идут по нему (корень в скане назад — лишние такты на
+	// каждый кадр), сам корень нужен только строке detail.
+	static float DistSq(const float *a, const float *b)
 	{
-		// Чекпоинт и undo-точка копируют origin игрока побитно — сравниваем точно.
-		return a.origin[0] == b.origin[0] && a.origin[1] == b.origin[1] && a.origin[2] == b.origin[2];
+		const float dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
+		return dx * dx + dy * dy + dz * dz;
 	}
+
+	static float Dist(const float *a, const float *b)
+	{
+		return std::sqrt(DistSq(a, b));
+	}
+
+	static constexpr float AWR_DEST_TOLERANCE_SQ = AWR_DEST_TOLERANCE * AWR_DEST_TOLERANCE;
 
 	// Кадр постановки чекпоинта №k: первый кадр, где cpCount вырос ДО k+1 (позднейшая постановка
 	// побеждает — после сброса счётчика индексы переиспользуются). Только внутри окна рана:
@@ -34,22 +45,79 @@ namespace KZ::replaysystem::awr
 		return cpSet;
 	}
 
-	// Кадр назначения телепорта, прибывшего на кадре t; -1 — не нашли. Искать только в
-	// [runStart, t): кадр предзаписи с той же позицией (игрок стоял на старте) сшил бы ран целиком.
-	static int64_t DestFrame(const Frame *frames, uint32_t t, const std::vector<int64_t> &cpSet, uint32_t runStart)
+	// Подходит ли кадр j как место, ОТКУДА игрок телепортировался в позицию a. Возвращает
+	// индекс последнего ЖИВОГО кадра (то самое D) или -1.
+	//
+	// Позиция чекпоинта/undo снята в СЕРЕДИНЕ тика (см. AWR_DEST_TOLERANCE), поэтому она
+	// сравнивается с обоими концами кадра:
+	//  - совпала с post (конец тика j) → игрок был там к концу j, последний живой кадр = j;
+	//  - совпала с pre (начало тика j) → он был там ещё до симуляции j, значит последним
+	//    живым надо считать j-1, иначе в живой путь попал бы кадр, уже уводящий его прочь.
+	// На нижней границе окна j-1 упирается в runStart: срезать сам старт рана нельзя.
+	static int64_t MatchDest(const Frame *frames, uint32_t j, const float *a, uint32_t runStart)
 	{
-		int32_t k = frames[t].cpIndex;
-		if (k >= 0 && (size_t)k < cpSet.size() && cpSet[k] >= (int64_t)runStart && (uint32_t)cpSet[k] < t
-			&& SameOrigin(frames[cpSet[k]], frames[t]))
+		if (DistSq(a, frames[j].origin) <= AWR_DEST_TOLERANCE_SQ)
 		{
-			return cpSet[k];
+			return (int64_t)j;
 		}
-		// !undo, переполнение списка чекпоинтов: последний прежний кадр с той же позицией.
+		if (DistSq(a, frames[j].preOrigin) <= AWR_DEST_TOLERANCE_SQ)
+		{
+			return j > runStart ? (int64_t)j - 1 : (int64_t)runStart;
+		}
+		return -1;
+	}
+
+	// Разбор неудачного поиска назначения — только для строки detail в логе.
+	struct DestProbe
+	{
+		int64_t cpFrame = -1;    // S: кадр постановки чекпоинта по индексу, -1 если нет
+		float cpPostDist = -1.0f;
+		float cpPreDist = -1.0f;
+		int64_t bestFrame = -1;  // ближайший кадр скана
+		float bestDistSq = -1.0f;
+	};
+
+	// Кадр назначения телепорта, прибывшего на кадре t; -1 — не нашли.
+	static int64_t DestFrame(const Frame *frames, uint32_t t, const std::vector<int64_t> &cpSet, uint32_t runStart, DestProbe *probe)
+	{
+		const float *arrival = frames[t].origin;
+
+		// (а) Прямая ссылка: телепорт на чекпоинт №k, кадр его постановки известен.
+		int32_t k = frames[t].cpIndex;
+		if (k >= 0 && (size_t)k < cpSet.size() && cpSet[k] >= (int64_t)runStart && (uint32_t)cpSet[k] < t)
+		{
+			const uint32_t sFrame = (uint32_t)cpSet[k];
+			if (probe)
+			{
+				probe->cpFrame = (int64_t)sFrame;
+				probe->cpPostDist = Dist(arrival, frames[sFrame].origin);
+				probe->cpPreDist = Dist(arrival, frames[sFrame].preOrigin);
+			}
+			int64_t d = MatchDest(frames, sFrame, arrival, runStart);
+			if (d >= 0)
+			{
+				return d;
+			}
+		}
+
+		// (б) !undo, переполнение списка чекпоинтов, сдвиг индексов: САМЫЙ ПОЗДНИЙ кадр окна
+		// в радиусе допуска. Поздний, а не ранний, потому что undo возвращает на позицию
+		// ПЕРЕД последним телепортом — это кадр его прибытия, ближайший к t из подходящих.
 		for (int64_t j = (int64_t)t - 1; j >= (int64_t)runStart; j--)
 		{
-			if (SameOrigin(frames[j], frames[t]))
+			if (probe)
 			{
-				return j;
+				const float dSq = std::min(DistSq(arrival, frames[j].origin), DistSq(arrival, frames[j].preOrigin));
+				if (probe->bestFrame < 0 || dSq < probe->bestDistSq)
+				{
+					probe->bestFrame = j;
+					probe->bestDistSq = dSq;
+				}
+			}
+			int64_t d = MatchDest(frames, (uint32_t)j, arrival, runStart);
+			if (d >= 0)
+			{
+				return d;
 			}
 		}
 		return -1;
@@ -91,6 +159,8 @@ namespace KZ::replaysystem::awr
 		if ((int64_t)r.teleports != expectedTeleports)
 		{
 			r.reason = "counter_mismatch";
+			std::snprintf(r.detail, sizeof(r.detail), "arrivals=%u expected=%lld window=%u..%u tp_start=%d tp_end=%d", r.teleports,
+						  (long long)expectedTeleports, runStart, runEnd, frames[runStart].tpCount, frames[runEnd].tpCount);
 			return r;
 		}
 
@@ -103,11 +173,19 @@ namespace KZ::replaysystem::awr
 				cursor--;
 				continue;
 			}
-			int64_t d = DestFrame(frames, (uint32_t)cursor, cpSet, runStart);
+			DestProbe probe;
+			int64_t d = DestFrame(frames, (uint32_t)cursor, cpSet, runStart, &probe);
 			if (d < 0)
 			{
 				r.reason = "dest_not_found";
 				r.dead.clear();
+				const Frame &a = frames[cursor];
+				const float bestDist = probe.bestDistSq >= 0.0f ? std::sqrt(probe.bestDistSq) : -1.0f;
+				std::snprintf(
+					r.detail, sizeof(r.detail),
+					"t=%lld tick=%u arrival=%.1f/%.1f/%.1f cp_index=%d cp_frame=%lld cp_post_d=%.1f cp_pre_d=%.1f best_frame=%lld best_d=%.1f",
+					(long long)cursor, a.serverTick, a.origin[0], a.origin[1], a.origin[2], a.cpIndex, (long long)probe.cpFrame, probe.cpPostDist,
+					probe.cpPreDist, (long long)probe.bestFrame, bestDist);
 				return r;
 			}
 			r.dead.push_back({(uint32_t)d + 1, (uint32_t)cursor});
