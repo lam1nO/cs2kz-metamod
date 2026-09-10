@@ -663,7 +663,66 @@ static void test_seek_live_frames_identity()
 	}
 	const uint64_t all = target - runStart;
 	const uint64_t formula = all - pausedUpTo - DeadFramesUpTo(dead, 2, pauses, 2, target);
-	assert(formula == liveDirect);
+	// Абсолютный якорь: без него тест сверяет формулу с самой собой при пустых фикстурах.
+	assert(liveDirect == 597 && formula == liveDirect);
+}
+
+// Шкала перемотки и шкала разреза — ОДНА: DeadFramesUpTo(…, runEnd) обязана дать ровно то
+// число кадров, которое разрез вычел из времени рана. Разъедутся — таймер бота после сика
+// разойдётся с awr_ms (тот самый дефект «отмотал назад — вернулись вырезы»).
+static void test_seek_scale_matches_cut_scale()
+{
+	std::vector<Frame> v;
+	for (uint32_t i = 0; i <= 30; i++) v.push_back(FC(i, 0, i >= 10 ? 1 : 0, 0, (float)i));
+	v.push_back(FC(31, 0, 1, 1, 10.0f));
+	for (uint32_t i = 32; i < 40; i++) v.push_back(FC(i, 0, 1, 1, 10.0f + (i - 31)));
+	FillPre(v);
+	const Interval pause {15, 18};
+	const uint32_t runEnd = (uint32_t)v.size() - 1;
+	CutResult r = ComputeAwrCut(v.data(), v.size(), &pause, 1, 10000, TI, 0, runEnd);
+	assert(r.ok && r.dead.size() == 1);
+	const uint64_t seekFrames = DeadFramesUpTo(r.dead.data(), (uint32_t)r.dead.size(), &pause, 1, runEnd);
+	assert(seekFrames == 17);
+	// И то же самое через сам awrMs: (timeMs - awrMs) — это ровно seekFrames тиков.
+	assert(10000 - r.awrMs == (uint64_t)(seekFrames * TI * 1000.0 + 0.5));
+}
+
+// Сверка «кадры окна против тиков таймера»: на согласованной фикстуре расхождения нет, а
+// завышенное time_ms (модель порванной паузной пары) метрика обязана заметить — не отказом.
+static void test_timer_frames_check()
+{
+	std::vector<Frame> v;
+	for (uint32_t i = 0; i <= 30; i++) v.push_back(FC(i, 0, i >= 10 ? 1 : 0, 0, (float)i));
+	v.push_back(FC(31, 0, 1, 1, 10.0f));
+	for (uint32_t i = 32; i < 40; i++) v.push_back(FC(i, 0, 1, 1, 10.0f + (i - 31)));
+	FillPre(v);
+	const uint32_t runEnd = (uint32_t)v.size() - 1;
+	const Interval pause {15, 18};
+
+	// Окно 0..39 = 39 кадров, из них 4 паузных → таймер должен был насчитать 35 тиков.
+	const uint64_t honestMs = (uint64_t)(35 * TI * 1000.0 + 0.5);
+	CutResult okRes = ComputeAwrCut(v.data(), v.size(), &pause, 1, honestMs, TI, 0, runEnd);
+	assert(okRes.ok && okRes.timerFramesChecked);
+	assert(okRes.timerFramesRecorded == 35 && okRes.timerFramesExpected == 35 && !okRes.timerFramesMismatch);
+
+	// Без паузы кадры окна не вычитаются: 39 записанных против 35 ожидаемых — 4 тика, это
+	// внутри допуска (16), метрика молчит.
+	CutResult inTol = ComputeAwrCut(v.data(), v.size(), nullptr, 0, honestMs, TI, 0, runEnd);
+	assert(inTol.ok && inTol.timerFramesRecorded == 39 && !inTol.timerFramesMismatch);
+
+	// time_ms завышено на 2 секунды (128 тиков) — расхождение сверх допуска.
+	CutResult bad = ComputeAwrCut(v.data(), v.size(), &pause, 1, honestMs + 2000, TI, 0, runEnd);
+	assert(bad.timerFramesChecked && bad.timerFramesMismatch);
+	assert(bad.timerFramesRecorded == 35 && bad.timerFramesExpected == 35 + 128);
+	// И это НЕ отказ: метрика только предупреждает.
+	assert(bad.ok);
+
+	// На раннем отказе сверка не выполнялась — печатать её нельзя.
+	std::vector<Frame> plain;
+	for (uint32_t i = 0; i < 20; i++) plain.push_back(FC(i, 0, 0, 0, (float)i));
+	FillPre(plain);
+	CutResult noWindow = ComputeAwrCut(plain.data(), plain.size(), nullptr, 0, 10000, TI, 0, 0);
+	assert(!noWindow.ok && !noWindow.timerFramesChecked);
 }
 
 int main()
@@ -680,7 +739,8 @@ int main()
 	test_pre_branch_beats_later_pass(); test_pre_match_at_run_start_clamped();
 	test_repeat_tp_collapses_to_one_dead(); test_standing_before_first_tp_is_cut(); test_cp_index_and_scan_agree();
 	test_trace_reports_every_arrival();
-	test_dead_frames_up_to(); test_seek_live_frames_identity();
+	test_dead_frames_up_to(); test_seek_live_frames_identity(); test_seek_scale_matches_cut_scale();
+	test_timer_frames_check();
 	std::puts("awr_cut: all tests passed");
 	return 0;
 }

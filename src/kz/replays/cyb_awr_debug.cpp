@@ -192,8 +192,11 @@ CON_COMMAND_F(kz_awr_debug, "Explain the AWR cut of one replay file. Usage: kz_a
 	{
 		V_snprintf(maxGapText, sizeof(maxGapText), "n/a");
 	}
-	KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] debug uuid=%s arrivals=%zu teleports=%u max_gap=%s ok=%d reason=%s awr_ms=%llu detail=%s\n",
-				uuid.c_str(), trace.size(), cut.teleports, maxGapText, cut.ok ? 1 : 0, cut.ok ? "ok" : cut.reason,
+	KZ_LOG_INFO(LogChannel::Replays,
+				"[cyb_awr] debug uuid=%s arrivals=%zu teleports=%u max_gap=%s frames=%llu/%llu frames_mismatch=%d ok=%d reason=%s awr_ms=%llu "
+				"detail=%s\n",
+				uuid.c_str(), trace.size(), cut.teleports, maxGapText, (unsigned long long)cut.timerFramesRecorded,
+				(unsigned long long)cut.timerFramesExpected, cut.timerFramesMismatch ? 1 : 0, cut.ok ? 1 : 0, cut.ok ? "ok" : cut.reason,
 				(unsigned long long)cut.awrMs, cut.detail);
 
 	for (size_t i = 0; i < trace.size(); i++)
@@ -252,6 +255,15 @@ CON_COMMAND_F(kz_awr_debug, "Explain the AWR cut of one replay file. Usage: kz_a
 	// подтверждено кадрами — prac, пауза, смерть); на сам результат он не влияет, мёртвое
 	// время считается в кадрах. Если
 	// разрез до подсчёта не дошёл (ранний отказ) — так и говорим, а не печатаем ноль.
+	if (cut.timerFramesChecked)
+	{
+		Msg("[cyb_awr]   timer_frames recorded=%llu expected=%llu mismatch=%d (recorded = window frames minus paused ones)\n",
+			(unsigned long long)cut.timerFramesRecorded, (unsigned long long)cut.timerFramesExpected, cut.timerFramesMismatch ? 1 : 0);
+	}
+	else
+	{
+		Msg("[cyb_awr]   timer_frames=n/a (the cut refused before checking)\n");
+	}
 	if (cut.maxRecordGapMeasured)
 	{
 		Msg("[cyb_awr]   max_record_gap=%llu ticks (%.1f s) at frame %u; refuse threshold %llu\n",

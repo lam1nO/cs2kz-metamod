@@ -77,6 +77,23 @@ namespace KZ::replaysystem::awr
 		bool maxRecordGapMeasured = false;
 		uint64_t maxRecordGapTicks = 0;
 		uint32_t maxRecordGapFrame = 0;
+		// ПРЯМАЯ сверка тождества, на котором стоит вся мера мёртвого времени: число
+		// записанных и НЕ паузных кадров окна рана обязано совпадать с числом тиков, которые
+		// насчитал таймер (timeMs / tickInterval). Гейты сходятся ровно на это:
+		// рекордер пишет кадр при `alive && !prac` (recording/events.cpp, kz_recording.cpp),
+		// таймер тикает при `alive && running && !paused` (timer/kz_timer.cpp) — разница
+		// только в паузных кадрах, а они вычитаются.
+		//
+		// Зачем метрика, если есть отказы: `deadMs >= timeMs` ловит завышение мёртвого только
+		// после 100 %, сеть 1 % — только абсурд, а завышение на 5-50 % (например паузная пара,
+		// порванная посторонним TIMER_START, playback.cpp) даёт ПРАВДОПОДОБНЫЙ заниженный
+		// awrMs, то есть чужой проигранный рекорд. Сверка — единственное, что видит этот класс.
+		// Отказа она НЕ вызывает намеренно: живой разброс неизвестен, сначала нужно его
+		// увидеть (предупреждение в лог с числами), и только потом решать про порог.
+		bool timerFramesChecked = false;
+		uint64_t timerFramesRecorded = 0;  // кадры окна минус паузные
+		uint64_t timerFramesExpected = 0;  // timeMs / tickInterval
+		bool timerFramesMismatch = false;  // расхождение сверх допуска (см. AWR_TIMER_FRAMES_TOLERANCE_*)
 	};
 
 	// Трасса одного прибытия телепорта — только для диагностической команды kz_awr_debug.
@@ -115,6 +132,20 @@ namespace KZ::replaysystem::awr
 	// означает уже не паузу, а склеенный или битый файл.
 	inline constexpr uint64_t AWR_MAX_RECORD_GAP_TICKS = 64 * 60 * 60;
 
+	// Допуск сверки «кадры окна против тиков таймера»: абсолютный (тиков) и относительный
+	// (делитель ожидаемого). Расхождение сверх max(абс, ожидание/делитель) — предупреждение.
+	//
+	// 16 тиков (0.25 с) — это заведомо больше суммы законных источников: таймер стартует и
+	// финиширует с СУБТИКОВЫМ сдвигом (kz_timer.cpp: `currentTime = GetGlobals()->curtime -
+	// GetServerGlobals()->curtime`, значение в (-тик, 0]) — до тика на каждом конце; окно
+	// рана выводится по кадрам (первый кадр с serverTick >= тика старта, последний с
+	// serverTick <= тика финиша) — ещё до кадра на каждом конце; плюс запас на одиночные
+	// потерянные тики. Относительный член (1/1000) — на накопление таких потерь в длинных
+	// ранах: на 100-минутном ране это 384 тика (6 с). Оба заведомо на порядки меньше класса,
+	// который метрика ищет (завышение мёртвого на 5-50 %).
+	inline constexpr uint64_t AWR_TIMER_FRAMES_TOLERANCE_TICKS = 16;
+	inline constexpr uint64_t AWR_TIMER_FRAMES_TOLERANCE_DIVISOR = 1000;
+
 	// Ниже какой доли времени рана результат считается абсурдным и разрез отказывает
 	// (reason = "awr_implausible"). 1/100 — это СЕТЬ от абсурда: основной жёсткий отказ —
 	// `deadMs >= timeMs` ниже (он ловит настоящую порчу счёта), а `awr_record_gap` после
@@ -145,9 +176,6 @@ namespace KZ::replaysystem::awr
 	// trace (необязателен) — по одной записи на каждое прибытие ТП в окне, для kz_awr_debug.
 	CutResult ComputeAwrCut(const Frame *frames, uint32_t count, const Interval *pauses, uint32_t pauseCount, uint64_t timeMs, double tickInterval,
 							uint32_t runStart, uint32_t runEnd, std::vector<ArrivalTrace> *trace = nullptr);
-
-	// Живые интервалы (дополнение dead на [0, count-1]) — нужны !lead.
-	std::vector<Interval> LiveIntervals(const std::vector<Interval> &dead, uint32_t count);
 
 	// Сколько ВЫРЕЗАННЫХ кадров лежит до кадра targetFrame включительно, за вычетом кадров,
 	// записанных на паузе. Нужна перемотке: отображаемое время бота в AWR-режиме = сырое

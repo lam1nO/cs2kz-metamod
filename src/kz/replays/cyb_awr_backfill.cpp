@@ -154,6 +154,13 @@ namespace
 		bool maxGapMeasured = false;
 		u64 maxGapTicks = 0;
 		u32 maxGapFrame = 0;
+		// Прямая сверка тождества меры мёртвого времени: записанные не паузные кадры окна
+		// против тиков таймера (awr::CutResult::timerFrames*). Расхождение сверх допуска —
+		// отдельный warn с числами; отказом НЕ является (нужен живой разброс, а не отсев).
+		bool timerFramesChecked = false;
+		u64 timerFramesRecorded = 0;
+		u64 timerFramesExpected = 0;
+		bool timerFramesMismatch = false;
 		// Разбор отказа из awr::CutResult::detail (пусто при ok). Копия, а не указатель:
 		// CutResult живёт на стеке рабочего потока, а строку печатает главный.
 		std::string detail;
@@ -701,6 +708,10 @@ namespace
 				res.detail = cut.detail;
 				res.awrMs = cut.awrMs;
 				res.teleports = cut.teleports;
+				res.timerFramesChecked = cut.timerFramesChecked;
+				res.timerFramesRecorded = cut.timerFramesRecorded;
+				res.timerFramesExpected = cut.timerFramesExpected;
+				res.timerFramesMismatch = cut.timerFramesMismatch;
 				res.maxGapMeasured = cut.maxRecordGapMeasured;
 				res.maxGapTicks = cut.maxRecordGapTicks;
 				res.maxGapFrame = cut.maxRecordGapFrame;
@@ -762,9 +773,34 @@ namespace
 		{
 			V_snprintf(maxGapText, sizeof(maxGapText), "n/a");
 		}
-		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill uuid=%s time_ms=%llu awr_ms=%llu tps=%u max_gap=%s ok=%d reason=%s dry=%d%s\n",
+		// frames=<записанные не паузные>/<ожидаемые таймером>: n/a, если до сверки не дошли.
+		char framesText[48];
+		if (res.timerFramesChecked)
+		{
+			V_snprintf(framesText, sizeof(framesText), "%llu/%llu", (unsigned long long)res.timerFramesRecorded,
+					   (unsigned long long)res.timerFramesExpected);
+		}
+		else
+		{
+			V_snprintf(framesText, sizeof(framesText), "n/a");
+		}
+		KZ_LOG_INFO(LogChannel::Replays,
+					"[cyb_awr] backfill uuid=%s time_ms=%llu awr_ms=%llu tps=%u max_gap=%s frames=%s ok=%d reason=%s dry=%d%s\n",
 					res.uuid.c_str(), (unsigned long long)res.timeMs, (unsigned long long)res.awrMs, (unsigned)res.teleports, maxGapText,
-					res.ok ? 1 : 0, res.reason, res.dryRun ? 1 : 0, detailSuffix);
+					framesText, res.ok ? 1 : 0, res.reason, res.dryRun ? 1 : 0, detailSuffix);
+
+		// Сверка кадров с таймером — независимо от ok: она про сам файл, а не про разрез, и
+		// на отказе тоже говорит, можно ли верить его числам. Порога-отказа тут нет
+		// намеренно (см. CutResult::timerFramesChecked), поэтому единственный способ увидеть
+		// класс «мёртвое завышено на 5-50 %» — читать эти строки.
+		if (res.timerFramesChecked && res.timerFramesMismatch)
+		{
+			const i64 delta = (i64)res.timerFramesRecorded - (i64)res.timerFramesExpected;
+			KZ_LOG_WARN(LogChannel::Replays,
+						"[cyb_awr] invariant uuid=%s reason=timer_frames_mismatch recorded=%llu expected=%llu delta=%lld max_gap=%s\n",
+						res.uuid.c_str(), (unsigned long long)res.timerFramesRecorded, (unsigned long long)res.timerFramesExpected,
+						(long long)delta, maxGapText);
+		}
 
 		if (res.ok)
 		{

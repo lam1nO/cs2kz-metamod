@@ -466,6 +466,31 @@ namespace KZ::replaysystem::awr
 		// Метрика разрывов посчитана — с этого места ноль в ней правдив (см. CutResult).
 		r.maxRecordGapMeasured = true;
 
+		// ПРЯМАЯ сверка тождества, на котором стоит мера мёртвого времени (см. CutResult):
+		// записанные и не паузные кадры окна против тиков, насчитанных таймером. Считается
+		// всегда, отказа не вызывает — нужна, чтобы увидеть живой разброс. Стоит здесь, а не
+		// у вызывающего, потому что только тут есть и окно, и нормализованные паузы.
+		{
+			const uint64_t windowFramesTotal = (uint64_t)runEnd - runStart;
+			uint64_t pausedInWindow = 0;
+			for (const Interval &p : pauseList)
+			{
+				const uint32_t f = std::max(runStart + 1, p.from), t = std::min(runEnd, p.to);
+				if (f <= t)
+				{
+					pausedInWindow += (uint64_t)t - f + 1;
+				}
+			}
+			r.timerFramesRecorded = windowFramesTotal - std::min(windowFramesTotal, pausedInWindow);
+			r.timerFramesExpected = tickInterval > 0.0 ? (uint64_t)((double)timeMs / (tickInterval * 1000.0) + 0.5) : 0;
+			const uint64_t tolerance =
+				std::max(AWR_TIMER_FRAMES_TOLERANCE_TICKS, r.timerFramesExpected / AWR_TIMER_FRAMES_TOLERANCE_DIVISOR);
+			const uint64_t delta = r.timerFramesRecorded > r.timerFramesExpected ? r.timerFramesRecorded - r.timerFramesExpected
+																				 : r.timerFramesExpected - r.timerFramesRecorded;
+			r.timerFramesMismatch = delta > tolerance;
+			r.timerFramesChecked = true;
+		}
+
 		// Инвариант арифметики: мёртвых кадров не может быть больше, чем кадров в окне рана.
 		// Держится это на нормализации выше (интервалы не пересекаются и лежат внутри окна),
 		// а проверка ловит любую будущую ошибку подсчёта до того, как она уедет в api
