@@ -432,6 +432,8 @@
 	{
 		"en"		"Route progress"
 		"ru"		"Прогресс маршрута"
+		"chi"		"路线进度"
+		"ua"		"Прогрес маршруту"
 	}
 	"HUD - Menu Cat Crosshair"
 	{

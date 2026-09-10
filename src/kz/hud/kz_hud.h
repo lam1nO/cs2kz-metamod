@@ -654,6 +654,11 @@ public:
 	// LayoutCleanup() и CloseReplayMenu().
 	void DestroyOwnedReplayLayout();
 
+	// Снести копию страницы под элемент «Прогресс» (layout/mhud.cpp) и сбросить её диф-кэш.
+	// Публичный по той же причине, что DestroyOwnedLayout: снос зовёт и импорт чужого худа
+	// (hud/share/hud_share.cpp) — у копии свой интерн-пул классов, переживший бы импорт.
+	void DestroyOwnedLeadProgressLayout();
+
 private:
 	// Единственная точка расчёта SpeedInfo (Task 6/R3, см. комментарий у struct SpeedInfo):
 	// HTML-путь (BuildVersionCHud) и panorama-layout (layout/mhud.cpp)
@@ -875,7 +880,6 @@ private:
 	// путь маршрута (source->leadService), иначе сущность гасится.
 	void UpdateLeadProgressElement(KZPlayer *source);
 	CCSCustomHudLayout *EnsureLeadProgressLayout(bool &created);
-	void DestroyOwnedLeadProgressLayout();
 
 	// === Меню настроек (Task 11) — состояние и рендер ==================================
 

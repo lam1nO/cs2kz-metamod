@@ -539,8 +539,19 @@ static_function bool ApplyVisibilityFloor(KZPlayer *player)
 	auto *opts = player->optionService;
 	for (i32 e = 0; e < (i32)LayoutElement::Count; e++)
 	{
-		const LayoutElementDef &def = LAYOUT_ELEMENTS[e];
-		if (opts->GetPreferenceBool(def.enabledKey, true) && opts->GetPreferenceInt(def.opacityKey, 100) >= HUDSHARE_MIN_VISIBLE_OPACITY)
+		// «Прогресс» доказательством «экран не пуст» быть НЕ МОЖЕТ: он скрыт всегда, пока у
+		// игрока нет загруженного маршрута `!lead` (kz/lead), то есть у почти всех и почти
+		// всегда. Учитывать его здесь — значит считать худ видимым по элементу, которого на
+		// экране нет.
+		if ((LayoutElement)e == LayoutElement::LeadProgress)
+		{
+			continue;
+		}
+		// Дефолт тумблера — ПОЭЛЕМЕНТНЫЙ (def.enabledDefault), а не константа true: у элемента
+		// с дефолтом false отсутствующий в префах ключ читался бы как «включён», и весь этот
+		// предохранитель превращался бы в мёртвый код (он возвращал бы false всегда).
+		if (opts->GetPreferenceBool(def.enabledKey, def.enabledDefault)
+			&& opts->GetPreferenceInt(def.opacityKey, 100) >= HUDSHARE_MIN_VISIBLE_OPACITY)
 		{
 			return false;
 		}
@@ -748,6 +759,10 @@ KZ::hudshare::ApplyStats KZ::hudshare::Apply(KZPlayer *to, const char *snapshot,
 	// меняет, поэтому штатный триггер пересоздания (layoutMimicSource, layout/entity.cpp) здесь
 	// не сработает, и звать снос надо явно. Он же обнуляет кэши классов элементов.
 	to->hudService->DestroyOwnedLayout();
+	// Копия страницы под элемент «Прогресс» — ОТДЕЛЬНАЯ сущность со своим интерн-пулом, а
+	// чужой набор меняет и её раскладку (mhudLeadProgress*): без сноса она осталась бы с
+	// классами прошлого худа. Пересоздастся сама на следующем тике, если элемент включён.
+	to->hudService->DestroyOwnedLeadProgressLayout();
 	// Кэш префов: без него игрок увидит новый худ только после перезахода.
 	to->hudService->RefreshLayoutPrefs();
 
