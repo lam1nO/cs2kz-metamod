@@ -287,6 +287,10 @@ namespace KZ::replaysystem::commands
 		// Check if already loading
 		if (data::IsLoading())
 		{
+			// Ожидание AWR снимаем: этот вызов реплей НЕ загрузит, а протухший uuid
+			// достался бы следующему `!replay <тот же uuid>` с диска — и обычный реплей
+			// сыграл бы как AWR.
+			CybReplayDownload::ClearPendingAwr();
 			player->languageService->PrintChat(true, false, "Replay - Loading Already");
 			return;
 		}

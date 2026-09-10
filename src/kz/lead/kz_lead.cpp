@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <string>
 #include <thread>
 #include <utility>
 
@@ -142,104 +143,160 @@ namespace
 		}
 	}
 
-	// Рабочий поток: файл → живые кадры → упрощённый путь. Ничего движкового не трогает
-	// (LoadCutSourceFromMemory и ComputeCutFor намеренно не смотрят в g_currentReplay).
-	void BuildPathWorker(std::vector<char> bytes, std::shared_ptr<KZLeadService::PendingLoad> pending)
+	// Рабочий поток: файл с диска → живые кадры рана → упрощённый путь.
+	//
+	// Файл читается ЗДЕСЬ, а не на главном потоке: реплей — до 32 МБ, и чтение в тике
+	// колбэка докачки было бы хитчем. Тем же путём идёт штатный загрузчик реплеев
+	// (data::LoadReplayAsync читает файл на своём потоке); utils::ReadBufferFromFile —
+	// обычный stdio, движковый файловый интерфейс не трогает.
+	//
+	// Всё тело в try/catch: разбор аллоцирует по размерам ИЗ ФАЙЛА (compression.cpp:417
+	// `new char[uncompressedSize]`, :458 `resize(elementCount)`), и на битом файле прилетит
+	// bad_alloc/length_error. Необработанное исключение в detached-потоке — std::terminate,
+	// то есть падение сервера из-за одного мусорного реплея (та же защита, что у воркера
+	// бэкфилла, cyb_awr_backfill.cpp).
+	void BuildPathWorker(std::string filePath, std::shared_ptr<KZLeadService::PendingLoad> pending)
 	{
 		std::vector<KZLeadService::Vertex> out;
 		const char *failReason = nullptr;
 		const char *cutWarn = nullptr;
 
-		data::CutSource src = data::LoadCutSourceFromMemory(bytes.data(), bytes.size());
-		if (!src.valid || src.ticks.empty())
+		try
 		{
-			failReason = "parse_failed";
-		}
-		else
-		{
-			const u32 count = (u32)src.ticks.size();
-			// Время рана нужно только для awrMs, а он здесь не используется — но у
-			// не-ранового реплея его нет, и передавать мусор незачем.
-			const u64 timeMs =
-				(src.header.has_run() && src.header.run().time() > 0.0f) ? (u64)(src.header.run().time() * 1000.0 + 0.5) : 0;
-			awr::CutResult cut = playback::ComputeCutFor(src.ticks.data(), count, src.events.empty() ? nullptr : src.events.data(),
-														(u32)src.events.size(), timeMs);
-			std::vector<awr::Interval> live;
-			if (cut.ok)
+			std::vector<char> bytes;
+			if (!utils::ReadBufferFromFile(filePath.c_str(), bytes) || bytes.empty())
 			{
-				live = awr::LiveIntervals(cut.dead, count);
+				failReason = "read_failed";
 			}
 			else
 			{
-				// Разрез не сошёлся — рисуем путь целиком: луч без вырезки всё равно
-				// показывает маршрут, а отказ оставил бы новичка вообще без подсказки.
-				cutWarn = cut.reason;
-				live.push_back({0, count - 1});
-			}
-
-			// Эффективный тик: мёртвые интервалы времени не занимают, поэтому окно
-			// «1 с назад / 6 с вперёд» непрерывно переходит через стык разреза.
-			u32 effBase = 0;
-			std::vector<KZLeadService::Vertex> raw;
-			for (const awr::Interval &iv : live)
-			{
-				if (iv.from >= count || iv.to >= count || iv.from > iv.to)
+				data::CutSource src = data::LoadCutSourceFromMemory(bytes.data(), bytes.size());
+				if (!src.valid || src.ticks.empty())
 				{
-					continue;
+					failReason = "parse_failed";
 				}
-				const u32 firstVertex = (u32)raw.size();
-				const u32 baseTick = src.ticks[iv.from].serverTick;
-				for (u32 i = iv.from; i <= iv.to; i++)
+				else
 				{
-					KZLeadService::Vertex v;
-					v.pos = src.ticks[i].post.origin;
-					v.onGround = (src.ticks[i].post.entityFlags & FL_ONGROUND) != 0;
-					v.tickIdx = effBase + (src.ticks[i].serverTick - baseTick);
-					raw.push_back(v);
-				}
-				effBase += src.ticks[iv.to].serverTick - baseTick + 1;
+					const u32 count = (u32)src.ticks.size();
+					const RpEvent *events = src.events.empty() ? nullptr : src.events.data();
+					const u32 numEvents = (u32)src.events.size();
 
-				// Упрощение — ПО КАЖДОМУ живому интервалу отдельно: сшивать соседние через
-				// вырезанную петлю нельзя, там нет пути.
-				const u32 lastVertex = (u32)raw.size() - 1;
-				std::vector<bool> keep(raw.size(), false);
-				keep[firstVertex] = true;
-				keep[lastVertex] = true;
-				// Вершины смены onGround обязательны: на них меняется цвет отрезка, и
-				// упрощение не имеет права стирать отрыв и приземление.
-				for (u32 i = firstVertex + 1; i <= lastVertex; i++)
-				{
-					if (raw[i].onGround != raw[i - 1].onGround)
+					// Окно САМОГО рана: в файле есть ~5 с предзаписи и хвост после финиша, и
+					// без этой границы луч уводил бы новичка по дороге к старту и за финиш.
+					// Окна нет (оборванный ран, разные курсы пары) — берём файл целиком, как
+					// прежде: подсказка с лишними хвостами полезнее отсутствия подсказки.
+					u32 runStart = 0, runEnd = count - 1;
+					u32 wStart = 0, wEnd = 0;
+					i32 runCourseId = -1;
+					// Возврат читаем именно как bool: RunWindowFromEvents умеет вернуть false
+					// УЖЕ записав вырожденное окно (outStart >= outEnd), и брать его нельзя.
+					if (playback::RunWindowFromEvents(src.ticks.data(), count, events, numEvents, wStart, wEnd, runCourseId)
+						&& wStart < wEnd && wEnd < count)
 					{
-						keep[i] = true;
-						keep[i - 1] = true;
+						runStart = wStart;
+						runEnd = wEnd;
+					}
+
+					const u64 timeMs =
+						(src.header.has_run() && src.header.run().time() > 0.0f) ? (u64)(src.header.run().time() * 1000.0 + 0.5) : 0;
+					awr::CutResult cut = playback::ComputeCutFor(src.ticks.data(), count, events, numEvents, timeMs);
+					std::vector<awr::Interval> live;
+					if (cut.ok)
+					{
+						live = awr::LiveIntervals(cut.dead, count);
+					}
+					else
+					{
+						// Разрез не сошёлся — рисуем путь целиком: луч без вырезки всё равно
+						// показывает маршрут, а отказ оставил бы новичка вообще без подсказки.
+						cutWarn = cut.reason;
+						live.push_back({0, count - 1});
+					}
+
+					// Эффективный тик: мёртвые интервалы времени не занимают, поэтому окно
+					// «1 с назад / 6 с вперёд» непрерывно переходит через стык разреза.
+					u32 effBase = 0;
+					std::vector<KZLeadService::Vertex> raw;
+					for (const awr::Interval &full : live)
+					{
+						// Пересечение живого интервала с окном рана. LiveIntervals — дополнение
+						// мёртвых по ВСЕМУ файлу, поэтому первый и последний интервалы всегда
+						// вылезают за ран.
+						if (full.to < runStart || full.from > runEnd)
+						{
+							continue;
+						}
+						// Без std::min/max: у awr::Interval поля uint32_t, у окна — u32 форка,
+						// и вывод шаблона на разных платформах мог бы не сойтись.
+						const u32 ivFrom = full.from > runStart ? full.from : runStart;
+						const u32 ivTo = full.to < runEnd ? full.to : runEnd;
+						awr::Interval iv {ivFrom, ivTo};
+						if (iv.from >= count || iv.to >= count || iv.from > iv.to)
+						{
+							continue;
+						}
+						const u32 firstVertex = (u32)raw.size();
+						const u32 baseTick = src.ticks[iv.from].serverTick;
+						for (u32 i = iv.from; i <= iv.to; i++)
+						{
+							KZLeadService::Vertex v;
+							v.pos = src.ticks[i].post.origin;
+							v.onGround = (src.ticks[i].post.entityFlags & FL_ONGROUND) != 0;
+							v.tickIdx = effBase + (src.ticks[i].serverTick - baseTick);
+							raw.push_back(v);
+						}
+						effBase += src.ticks[iv.to].serverTick - baseTick + 1;
+
+						// Упрощение — ПО КАЖДОМУ живому интервалу отдельно: сшивать соседние через
+						// вырезанную петлю нельзя, там нет пути.
+						const u32 lastVertex = (u32)raw.size() - 1;
+						std::vector<bool> keep(raw.size(), false);
+						keep[firstVertex] = true;
+						keep[lastVertex] = true;
+						// Вершины смены onGround обязательны: на них меняется цвет отрезка, и
+						// упрощение не имеет права стирать отрыв и приземление.
+						for (u32 i = firstVertex + 1; i <= lastVertex; i++)
+						{
+							if (raw[i].onGround != raw[i - 1].onGround)
+							{
+								keep[i] = true;
+								keep[i - 1] = true;
+							}
+						}
+						// Между обязательными вершинами — свой прогон РДП (так они и «прибиты»).
+						u32 anchor = firstVertex;
+						for (u32 i = firstVertex + 1; i <= lastVertex; i++)
+						{
+							if (!keep[i])
+							{
+								continue;
+							}
+							SimplifyRange(raw, anchor, i, KZ_LEAD_RDP_TOLERANCE * KZ_LEAD_RDP_TOLERANCE, keep);
+							anchor = i;
+						}
+						for (u32 i = firstVertex; i <= lastVertex; i++)
+						{
+							if (keep[i])
+							{
+								out.push_back(raw[i]);
+							}
+						}
+					}
+
+					if (out.size() < 2)
+					{
+						failReason = "path_too_short";
+						out.clear();
 					}
 				}
-				// Между обязательными вершинами — свой прогон РДП (так они и «прибиты»).
-				u32 anchor = firstVertex;
-				for (u32 i = firstVertex + 1; i <= lastVertex; i++)
-				{
-					if (!keep[i])
-					{
-						continue;
-					}
-					SimplifyRange(raw, anchor, i, KZ_LEAD_RDP_TOLERANCE * KZ_LEAD_RDP_TOLERANCE, keep);
-					anchor = i;
-				}
-				for (u32 i = firstVertex; i <= lastVertex; i++)
-				{
-					if (keep[i])
-					{
-						out.push_back(raw[i]);
-					}
-				}
 			}
-
-			if (out.size() < 2)
-			{
-				failReason = "path_too_short";
-				out.clear();
-			}
+		}
+		catch (...)
+		{
+			// Битый файл: отдаём отказ, игрок увидит «нет реплея», сервер жив.
+			out.clear();
+			failReason = "parse_failed";
+			cutWarn = nullptr;
 		}
 
 		{
@@ -355,18 +412,18 @@ void KZLeadService::Toggle(CybReplayDownload::Kind kind)
 	const u32 gen = ++this->generation;
 	this->player->languageService->PrintChat(true, false, "Lead - Loading");
 	CybReplayDownload::RequestFile(this->player, kind, this->player->GetSteamId64(),
-								   [gen](CPlayerUserId userID, std::vector<char> bytes)
+								   [gen](CPlayerUserId userID, std::string filePath)
 								   {
 									   KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
 									   if (!player || !player->leadService)
 									   {
 										   return;
 									   }
-									   player->leadService->OnFileReady(gen, std::move(bytes));
+									   player->leadService->OnFileReady(gen, std::move(filePath));
 								   });
 }
 
-void KZLeadService::OnFileReady(u32 gen, std::vector<char> &&bytes)
+void KZLeadService::OnFileReady(u32 gen, std::string &&filePath)
 {
 	if (gen != this->generation)
 	{
@@ -374,7 +431,7 @@ void KZLeadService::OnFileReady(u32 gen, std::vector<char> &&bytes)
 		// этому запросу, снимать его нельзя.
 		return;
 	}
-	if (bytes.empty())
+	if (filePath.empty())
 	{
 		this->loading = false;
 		this->player->languageService->PrintChat(true, false, "Lead - No Replay");
@@ -384,7 +441,7 @@ void KZLeadService::OnFileReady(u32 gen, std::vector<char> &&bytes)
 	this->pending->generation = gen;
 	// Дальше гейтом служит сам pending — сетевая фаза кончилась.
 	this->loading = false;
-	std::thread(BuildPathWorker, std::move(bytes), this->pending).detach();
+	std::thread(BuildPathWorker, std::move(filePath), this->pending).detach();
 }
 
 void KZLeadService::PollPending()
@@ -561,9 +618,27 @@ void KZLeadService::UpdateWindow()
 		{
 			from = this->nearest - backBudget;
 		}
-		to = from + maxSegments;
+		// Кламп по КОНЦУ пути обязателен: у финиша `from + maxSegments` уходит за последнюю
+		// вершину, и ApplyWindow читал бы path[newFrom + i + 1] за концом вектора.
+		to = (std::min)(from + maxSegments, count - 1);
+		if (from > to)
+		{
+			from = to;
+		}
 	}
 
+	// Инвариант окна: ApplyWindow читает path[to] (и path[newFrom + i + 1] до него), поэтому
+	// обе границы обязаны лежать В пути. Держим его ЗДЕСЬ, одной проверкой, а не выводим из
+	// двух циклов и клампа выше: цена — два сравнения дважды в секунду, а цена ошибки —
+	// чтение за концом вектора.
+	if (to >= count)
+	{
+		to = count - 1;
+	}
+	if (from > to)
+	{
+		from = to;
+	}
 	this->ApplyWindow(from, to);
 }
 

@@ -29,7 +29,7 @@
 #include "sdk/datatypes.h"
 
 #include <functional>
-#include <vector>
+#include <string>
 
 class KZPlayer;
 
@@ -52,15 +52,20 @@ namespace CybReplayDownload
 	// резолв рекорда сети не фильтрует по игроку.
 	void RequestAndPlay(KZPlayer *player, Kind kind, u64 targetSteamId64);
 
-	// Тот же резолв и та же докачка, но БЕЗ плейбека: байты файла уезжают колбэку
-	// (`!lead`, src/kz/lead). Ни SetPendingAwr, ни LoadReplay здесь не зовутся — реплей-бот
-	// не спавнится, состояние глобального плейбека не трогается.
+	// Тот же резолв и та же докачка, но БЕЗ плейбека: колбэку уезжает ПУТЬ к готовому
+	// файлу в `downloads/` (`!lead`, src/kz/lead). Ни SetPendingAwr, ни LoadReplay здесь не
+	// зовутся — реплей-бот не спавнится, состояние глобального плейбека не трогается.
+	//
+	// Путь, а не байты, намеренно: файл реплея — до 32 МБ, и его чтение обязано жить на
+	// рабочем потоке получателя, а не в тике колбэка. К моменту вызова файл гарантированно
+	// лежит на диске (кэш-хит либо только что записанная докачка) — ровно то же, на что
+	// опирается путь плейбека (LoadReplay читает файл сам, асинхронно).
 	//
 	// Колбэк зовётся на ГЛАВНОМ потоке (колбэк Steam HTTP). Игрок к этому моменту мог уйти —
 	// поэтому в него приходит CPlayerUserId, а не указатель: получатель обязан сам сделать
-	// ToPlayer и проверить результат. ПУСТОЙ буфер означает отказ (нет записи, сеть, мусор в
+	// ToPlayer и проверить результат. ПУСТАЯ строка означает отказ (нет записи, сеть, мусор в
 	// ответе): фразу в чат выбирает вызывающая фича, сам RequestFile в чат НЕ пишет.
-	void RequestFile(KZPlayer *player, Kind kind, u64 targetSteamId64, std::function<void(CPlayerUserId, std::vector<char>)> onReady);
+	void RequestFile(KZPlayer *player, Kind kind, u64 targetSteamId64, std::function<void(CPlayerUserId, std::string)> onReady);
 
 	// Ожидание AWR-режима для следующего LoadReplay: резолв асинхронный, а путь загрузки
 	// общий (кэш downloads/ и докачка оба зовут commands::LoadReplay, и туда нечем донести

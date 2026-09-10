@@ -124,7 +124,8 @@ namespace
 	void StartDownload(const std::string &uuid, const std::string &url, bool dryRun);
 	void SpawnWorker(const std::string &uuid, std::vector<char> data, bool dryRun);
 	void PublishResult(const WorkerResult &res);
-	void SendResult(const WorkerResult &res);
+	// По значению: блокирующий инвариант шапки может понизить res.ok до отправки.
+	void SendResult(WorkerResult res);
 
 	// Попытка завершена (успешно или нет) — освобождаем слот и списываем одну из
 	// запрошенных. Списываем и на отказе: иначе битая сеть крутила бы один файл
@@ -298,9 +299,26 @@ namespace
 		req.Send(
 			[uuid, dryRun](HTTP::Response resp)
 			{
+				if (resp.status >= 400 && resp.status < 500)
+				{
+					// 4xx — отказ ФАЙЛА, а не сети (403 протухшая ссылка, 404/410 объект
+					// удалён из S3). Помечаем строку в api (awrMs:null): бэклог отдаётся
+					// desc(createdAt) с limit=1, и непомеченный файл возвращался бы первым
+					// вечно — весь бэклог встал бы намертво на одном мёртвом объекте.
+					KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] download failed uuid=%s reason=http_%u\n", uuid.c_str(),
+								(unsigned)resp.status);
+					WorkerResult res;
+					res.uuid = uuid;
+					res.ok = false;
+					res.reason = "http_4xx";
+					res.dryRun = dryRun;
+					SendResult(res);
+					return;
+				}
 				if (resp.status < 200 || resp.status >= 300)
 				{
-					// Сетевой класс отказа: файл в бэклоге не помечаем, вернёмся к нему позже.
+					// 5xx и прочее — сетевой класс отказа: файл в бэклоге не помечаем,
+					// вернёмся к нему позже.
 					KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] download failed uuid=%s reason=http_%u\n", uuid.c_str(),
 								(unsigned)resp.status);
 					FinishAttempt();
@@ -405,15 +423,31 @@ namespace
 	}
 
 	// Главный поток: лог, инварианты, отправка результата в api.
-	void SendResult(const WorkerResult &res)
+	void SendResult(WorkerResult res)
 	{
+		// Инвариант шапки — БЛОКИРУЮЩИЙ, в отличие от двух остальных: число прибытий ТП,
+		// найденных разрезом, обязано совпасть с num_teleports из шапки файла. Расхождение
+		// означает, что окно рана выбрано неверно (лишний или пропущенный телепорт), то есть
+		// awr_ms посчитан не по тому набору кадров. Записать такое время в api хуже, чем
+		// пометить строку посчитанной с awrMs:null: ложный AWR попадёт в витрину и на него
+		// будут смотреть как на правду. Ровно эта проверка ловит любую ошибку выбора окна.
+		if (res.ok && res.headerTeleports >= 0 && (u32)res.headerTeleports != res.teleports)
+		{
+			KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] invariant uuid=%s reason=header_tp_mismatch tps=%u header_tps=%d\n",
+						res.uuid.c_str(), (unsigned)res.teleports, res.headerTeleports);
+			res.ok = false;
+			res.reason = "header_tp_mismatch";
+			res.awrMs = 0;
+		}
+
 		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill uuid=%s time_ms=%llu awr_ms=%llu tps=%u ok=%d reason=%s dry=%d\n",
 					res.uuid.c_str(), (unsigned long long)res.timeMs, (unsigned long long)res.awrMs, (unsigned)res.teleports,
 					res.ok ? 1 : 0, res.reason, res.dryRun ? 1 : 0);
 
 		if (res.ok)
 		{
-			// Инварианты спеки §4.5: расхождение не блокирует отправку, но должно быть видно.
+			// Остальные инварианты спеки §4.5: расхождение отправку НЕ блокирует (это
+			// свойства самого рана, а не признак неверного окна), но должно быть видно.
 			if (res.awrMs > res.timeMs)
 			{
 				KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] invariant uuid=%s reason=awr_gt_time awr_ms=%llu time_ms=%llu\n",
@@ -423,11 +457,6 @@ namespace
 			{
 				KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] invariant uuid=%s reason=no_tp_time_differs awr_ms=%llu time_ms=%llu\n",
 							res.uuid.c_str(), (unsigned long long)res.awrMs, (unsigned long long)res.timeMs);
-			}
-			if (res.headerTeleports >= 0 && (u32)res.headerTeleports != res.teleports)
-			{
-				KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] invariant uuid=%s reason=tp_count_mismatch tps=%u header_tps=%d\n",
-							res.uuid.c_str(), (unsigned)res.teleports, res.headerTeleports);
 			}
 		}
 

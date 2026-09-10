@@ -21,6 +21,7 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <vector>
 
 class KZLeadService : public KZBaseService
@@ -67,9 +68,10 @@ public:
 	void Toggle(CybReplayDownload::Kind kind);
 	// `!lead off`, смена карты/режима, дисконнект, телепорт-петля данных.
 	void Disable(const char *reason);
-	// Байты файла из CybReplayDownload::RequestFile (главный поток, колбэк Steam HTTP):
-	// отсюда стартует разбор на рабочем потоке. Пустой буфер — реплея нет.
-	void OnFileReady(u32 gen, std::vector<char> &&bytes);
+	// Путь к готовому файлу из CybReplayDownload::RequestFile (главный поток, колбэк Steam
+	// HTTP): отсюда стартует ЧТЕНИЕ и разбор на рабочем потоке — в тике не читаем ничего.
+	// Пустая строка — реплея нет.
+	void OnFileReady(u32 gen, std::string &&filePath);
 	// Готовый путь с рабочего потока (зовётся с ГЛАВНОГО потока, из PollPending).
 	void OnPathLoaded(std::vector<Vertex> &&newPath);
 	void OnPhysicsSimulatePost();

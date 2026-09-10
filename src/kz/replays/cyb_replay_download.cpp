@@ -120,13 +120,15 @@ namespace
 	// auth). replayUuid уже провалидирован как корректный UUID вызывающим кодом (см.
 	// OnResolveResponse ниже).
 	//
-	// wantBytes — нужны ли байты в колбэке. Путь плейбека их НЕ берёт: LoadReplay читает
-	// файл с диска сам и асинхронно, и синхронное чтение здесь было бы лишним хитчем на
-	// десятки мегабайт. Путь !lead берёт (ему нужен разбор на своём потоке).
+	// Колбэк получает ПУТЬ (относительный, как его понимают utils::Read/WriteBufferToFile) к
+	// файлу, который к этому моменту лежит на диске — и ничего не читает сам: реплей до
+	// 32 МБ, чтение в тике было бы хитчем. Кто хочет содержимое, читает его на своём
+	// рабочем потоке (так же устроен и путь плейбека: LoadReplay читает файл асинхронно).
+	//
 	// announce — печатать ли игроку служебные фразы («качаю», «ошибка запроса»). У !lead
 	// свои фразы, дублировать незачем.
-	void FetchReplayBytes(CPlayerUserId userID, const std::string &replayUuid, const std::string &downloadUrl, bool wantBytes,
-						  bool announce, std::function<void(CPlayerUserId, bool, std::vector<char> &&)> onDone)
+	void FetchReplayFile(CPlayerUserId userID, const std::string &replayUuid, const std::string &downloadUrl, bool announce,
+						 std::function<void(CPlayerUserId, bool, std::string)> onDone)
 	{
 		char cachedPath[512];
 		V_snprintf(cachedPath, sizeof(cachedPath), KZ_REPLAY_DOWNLOADS_PATH "/%s.replay", replayUuid.c_str());
@@ -134,19 +136,7 @@ namespace
 		// Уже скачан раньше (кэш в downloads/) — сети не дёргаем.
 		if (g_pFullFileSystem->FileExists(cachedPath))
 		{
-			std::vector<char> cached;
-			if (wantBytes && !utils::ReadBufferFromFile(cachedPath, cached))
-			{
-				KZ_LOG_WARN(LogChannel::Replays, "[cyb_replay] failed to read cached replay %s\n", cachedPath);
-				if (announce)
-				{
-					KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
-					if (player) player->languageService->PrintChat(true, false, "Replay Request - Error");
-				}
-				onDone(userID, false, {});
-				return;
-			}
-			onDone(userID, true, std::move(cached));
+			onDone(userID, true, cachedPath);
 			return;
 		}
 
@@ -162,14 +152,14 @@ namespace
 		HTTP::Request req(HTTP::Method::GET, downloadUrl);
 		// clang-format off
 		req.Send(
-			[userID, replayUuid, wantBytes, announce, onDone](HTTP::Response resp)
+			[userID, replayUuid, announce, onDone](HTTP::Response resp)
 			{
 				KZPlayer *player = announce ? g_pKZPlayerManager->ToPlayer(userID) : nullptr;
 				if (resp.status < 200 || resp.status >= 300)
 				{
 					KZ_LOG_INFO(LogChannel::Replays, "[cyb_replay] download HTTP %u for %s\n", (unsigned)resp.status, replayUuid.c_str());
 					if (player) player->languageService->PrintChat(true, false, "Replay Request - Error");
-					onDone(userID, false, {});
+					onDone(userID, false, "");
 					return;
 				}
 
@@ -178,7 +168,7 @@ namespace
 				{
 					KZ_LOG_INFO(LogChannel::Replays, "[cyb_replay] empty download body for %s\n", replayUuid.c_str());
 					if (player) player->languageService->PrintChat(true, false, "Replay Request - Error");
-					onDone(userID, false, {});
+					onDone(userID, false, "");
 					return;
 				}
 
@@ -194,11 +184,11 @@ namespace
 				{
 					KZ_LOG_WARN(LogChannel::Replays, "[cyb_replay] failed to write downloaded replay to %s\n", replayPath);
 					if (player) player->languageService->PrintChat(true, false, "Replay Request - Error");
-					onDone(userID, false, {});
+					onDone(userID, false, "");
 					return;
 				}
 
-				onDone(userID, true, wantBytes ? std::move(*raw) : std::vector<char>());
+				onDone(userID, true, replayPath);
 			},
 			[userID, replayUuid, announce, onDone]()
 			{
@@ -208,7 +198,7 @@ namespace
 					KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
 					if (player) player->languageService->PrintChat(true, false, "Replay Request - Error");
 				}
-				onDone(userID, false, {});
+				onDone(userID, false, "");
 			});
 		// clang-format on
 	}
@@ -217,13 +207,13 @@ namespace
 	// включая семантику ожидания AWR: оно снимается в КАЖДОЙ ветке, где LoadReplay не будет
 	// вызван (любой отказ докачки/чтения кэша — ok=false; игрок ушёл — звать некому).
 	//
-	// Гашение живёт ЗДЕСЬ, а не в FetchReplayBytes: тот общий с `!lead`, а `!lead` ожидания
+	// Гашение живёт ЗДЕСЬ, а не в FetchReplayFile: тот общий с `!lead`, а `!lead` ожидания
 	// AWR не ставит и трогать его не имеет права — иначе отказ загрузки луча съедал бы
 	// ожидание одновременно запущенного `!replay awr`.
 	void DownloadAndPlay(CPlayerUserId userID, const std::string &replayUuid, const std::string &downloadUrl)
 	{
-		FetchReplayBytes(userID, replayUuid, downloadUrl, false, true,
-						 [replayUuid](CPlayerUserId uid, bool ok, std::vector<char> &&)
+		FetchReplayFile(userID, replayUuid, downloadUrl, true,
+						 [replayUuid](CPlayerUserId uid, bool ok, std::string)
 						 {
 							 KZPlayer *player = ok ? g_pKZPlayerManager->ToPlayer(uid) : nullptr;
 							 if (!player)
@@ -394,7 +384,7 @@ void CybReplayDownload::RequestAndPlay(KZPlayer *player, Kind kind, u64 targetSt
 			 });
 }
 
-void CybReplayDownload::RequestFile(KZPlayer *player, Kind kind, u64 targetSteamId64, std::function<void(CPlayerUserId, std::vector<char>)> onReady)
+void CybReplayDownload::RequestFile(KZPlayer *player, Kind kind, u64 targetSteamId64, std::function<void(CPlayerUserId, std::string)> onReady)
 {
 	if (!player || !onReady)
 	{
@@ -407,7 +397,7 @@ void CybReplayDownload::RequestFile(KZPlayer *player, Kind kind, u64 targetSteam
 	ResolveKey key;
 	if (!PrepareResolve(player, fullUrl, token, key))
 	{
-		onReady(userID, {});
+		onReady(userID, "");
 		return;
 	}
 
@@ -436,7 +426,7 @@ void CybReplayDownload::RequestFile(KZPlayer *player, Kind kind, u64 targetSteam
 				{
 					KZ_LOG_INFO(LogChannel::Replays, "[cyb_replay] file resolve HTTP %u\n", (unsigned)resp.status);
 				}
-				onReady(userID, {});
+				onReady(userID, "");
 				return;
 			}
 
@@ -444,7 +434,7 @@ void CybReplayDownload::RequestFile(KZPlayer *player, Kind kind, u64 targetSteam
 			if (!bodyStr.has_value())
 			{
 				KZ_LOG_WARN(LogChannel::Replays, "[cyb_replay] file resolve 200 with no body\n");
-				onReady(userID, {});
+				onReady(userID, "");
 				return;
 			}
 
@@ -456,20 +446,20 @@ void CybReplayDownload::RequestFile(KZPlayer *player, Kind kind, u64 targetSteam
 				|| !UUID_t::FromString(replayUuidStr.c_str(), &parsedUuid))
 			{
 				KZ_LOG_WARN(LogChannel::Replays, "[cyb_replay] file resolve returned unusable JSON\n");
-				onReady(userID, {});
+				onReady(userID, "");
 				return;
 			}
 
-			FetchReplayBytes(userID, parsedUuid.ToString(), downloadUrl, true, false,
-							 [onReady](CPlayerUserId uid, bool ok, std::vector<char> &&bytes)
+			FetchReplayFile(userID, parsedUuid.ToString(), downloadUrl, false,
+							 [onReady](CPlayerUserId uid, bool ok, std::string path)
 							 {
-								 onReady(uid, ok ? std::move(bytes) : std::vector<char>());
+								 onReady(uid, ok ? std::move(path) : std::string());
 							 });
 		},
 		[userID, onReady]()
 		{
 			KZ_LOG_INFO(LogChannel::Replays, "[cyb_replay] file resolve network error\n");
-			onReady(userID, {});
+			onReady(userID, "");
 		});
 	// clang-format on
 }
