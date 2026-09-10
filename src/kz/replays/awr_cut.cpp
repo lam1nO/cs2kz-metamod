@@ -173,12 +173,16 @@ namespace KZ::replaysystem::awr
 				cursor--;
 				continue;
 			}
-			DestProbe probe;
-			int64_t d = DestFrame(frames, (uint32_t)cursor, cpSet, runStart, &probe);
+			int64_t d = DestFrame(frames, (uint32_t)cursor, cpSet, runStart, nullptr);
 			if (d < 0)
 			{
 				r.reason = "dest_not_found";
 				r.dead.clear();
+				// Второй проход — только ради строки detail. Считать дистанции на КАЖДОМ кадре
+				// удачного скана незачем: успешный путь обычно обрывается на первых кадрах, а
+				// неудачный и так уже прошёл всё окно — лишний проход платится один раз за файл.
+				DestProbe probe;
+				DestFrame(frames, (uint32_t)cursor, cpSet, runStart, &probe);
 				const Frame &a = frames[cursor];
 				const float bestDist = probe.bestDistSq >= 0.0f ? std::sqrt(probe.bestDistSq) : -1.0f;
 				std::snprintf(

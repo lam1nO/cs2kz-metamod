@@ -38,6 +38,25 @@ static void FillPre(std::vector<Frame> &v)
 	}
 }
 
+// Кадр с двумя координатами: нужен тестам ветки pre, где «поздний проход рядом» обязан
+// отличаться от точки чекпоинта по второй оси, иначе кандидатов в радиусе слишком много.
+static Frame F2(uint32_t tick, int32_t cpIndex, int32_t cpCount, int32_t tpCount, float x, float y)
+{
+	Frame f = F(tick, cpIndex, cpCount, tpCount, x);
+	f.origin[1] = y;
+	return f;
+}
+
+// Задать pre кадра ВРУЧНУЮ (после FillPre): рекордер пишет pre = post предыдущего кадра, но
+// позиция чекпоинта снимается в середине тика, и именно её несовпадение с обоими концами
+// проверяют тесты ниже.
+static void SetPre(Frame &f, float x, float y)
+{
+	f.preOrigin[0] = x;
+	f.preOrigin[1] = y;
+	f.preOrigin[2] = 0.0f;
+}
+
 static void test_no_teleports()
 {
 	std::vector<Frame> v; for (uint32_t i = 0; i < 100; i++) v.push_back(FC(i, 0, 0, 0, (float)i));
@@ -274,6 +293,50 @@ static void test_counter_mismatch_detail()
 	assert(std::strstr(r.detail, "arrivals=1") && std::strstr(r.detail, "expected=2"));
 }
 
+// Ветка pre, отличимая от скана по post. Сценарий: cp снят на рывке — записанная позиция
+// совпадает ТОЛЬКО с pre кадра постановки (post того же кадра уже в 34 u), а позже маршрут
+// проходит в 15 u от той же точки. Без ветки pre скан (б) зачёл бы живым почти всю петлю
+// (dead начался бы у позднего прохода), с ней — сшивка идёт к кадру постановки.
+// Тест обязан падать при: удалении ветки pre, замене j-1 на j, TOL=0.
+static void test_pre_branch_beats_later_pass()
+{
+	std::vector<Frame> v;
+	for (uint32_t i = 0; i <= 9; i++) v.push_back(F2(i, 0, 0, 0, 6.0f * i, 0.0f));      // ..54
+	v.push_back(F2(10, 0, 1, 0, 90.0f, 0.0f));                                          // рывок; cp снят в (56, 0)
+	for (uint32_t i = 11; i <= 39; i++) v.push_back(F2(i, 0, 1, 0, 90.0f, 6.0f * (i - 10)));
+	v.push_back(F2(40, 0, 1, 0, 56.0f, 15.0f));                                         // поздний проход в 15 u
+	for (uint32_t i = 41; i <= 50; i++) v.push_back(F2(i, 0, 1, 0, 56.0f, 15.0f + 20.0f * (i - 40)));
+	v.push_back(F2(51, 0, 1, 1, 56.0f, 0.0f));                                          // прибытие = позиция cp
+	for (uint32_t i = 52; i < 60; i++) v.push_back(F2(i, 0, 1, 1, 56.0f + 6.0f * (i - 51), 0.0f));
+	FillPre(v);
+	SetPre(v[10], 55.0f, 0.0f); // начало тика рывка: игрок ещё в 1 u от точки чекпоинта
+	CutResult r = ComputeAwrCut(v.data(), v.size(), nullptr, 0, 10000, TI, 0, v.size() - 1);
+	assert(r.ok && r.teleports == 1 && r.dead.size() == 1);
+	// post кадра 10 — в 34 u (мимо), pre — в 1 u: последний живой кадр 9, мёртвое 10..51.
+	// Без ветки pre скан нашёл бы кадр 40 и вернул dead = {41, 51}.
+	assert(r.dead[0].from == 10 && r.dead[0].to == 51);
+}
+
+// Клампа на нижней границе окна: совпадение по pre кадра runStart не имеет права дать
+// D = runStart - 1 — это кадр ПРЕДЗАПИСИ, вне окна, и стартовый кадр рана оказался бы мёртвым.
+// Тест обязан падать при мутации `return (int64_t)j - 1` без клампы.
+static void test_pre_match_at_run_start_clamped()
+{
+	std::vector<Frame> v;
+	// Предзапись 0..9 — далеко в стороне, чтобы в скан не попала.
+	for (uint32_t i = 0; i <= 9; i++) v.push_back(F2(i, 0, 0, 0, -500.0f + 6.0f * i, 0.0f));
+	v.push_back(F2(10, 0, 0, 0, 140.0f, 0.0f));                                         // runStart, рывок из (100, 0)
+	for (uint32_t i = 11; i <= 30; i++) v.push_back(F2(i, 0, 0, 0, 140.0f, 6.0f * (i - 10)));
+	v.push_back(F2(31, 0, 0, 1, 100.0f, 0.0f));                                         // прибытие = начало тика 10
+	for (uint32_t i = 32; i < 40; i++) v.push_back(F2(i, 0, 0, 1, 100.0f - 6.0f * (i - 31), 0.0f));
+	FillPre(v);
+	SetPre(v[10], 100.0f, 0.0f);
+	CutResult r = ComputeAwrCut(v.data(), v.size(), nullptr, 0, 10000, TI, 10, v.size() - 1);
+	assert(r.ok && r.teleports == 1 && r.dead.size() == 1);
+	// D зажат в runStart = 10, поэтому мёртвое начинается с 11; без клампы было бы 10.
+	assert(r.dead[0].from == 11 && r.dead[0].to == 31);
+}
+
 int main()
 {
 	test_no_teleports(); test_single_tp(); test_repeat_tp_same_cp(); test_prevcp_nextcp_keeps_middle();
@@ -282,6 +345,7 @@ int main()
 	test_no_run_window();
 	test_cp_set_while_running(); test_cp_matches_pre_side(); test_undo_mid_tick();
 	test_dest_not_found_detail(); test_counter_mismatch_detail();
+	test_pre_branch_beats_later_pass(); test_pre_match_at_run_start_clamped();
 	std::puts("awr_cut: all tests passed");
 	return 0;
 }

@@ -448,8 +448,15 @@ namespace KZ::replaysystem::commands
 					if (!cut.ok)
 					{
 						// Ложная сшивка хуже отказа (спека §4): играем как обычный реплей.
-						KZ_LOG_WARN(LogChannel::Replays, "[cyb_replay] awr_cut_failed reason=%s uuid=%s detail=%s\n", cut.reason,
-									replay->uuid.ToString().c_str(), cut.detail);
+						// detail есть не у всех причин (not_a_run/course_mismatch ставим сами) —
+						// голое «detail=» в логе только мешает грепу.
+						char detailSuffix[224] = {};
+						if (cut.detail[0] != '\0')
+						{
+							V_snprintf(detailSuffix, sizeof(detailSuffix), " detail=%s", cut.detail);
+						}
+						KZ_LOG_WARN(LogChannel::Replays, "[cyb_replay] awr_cut_failed reason=%s uuid=%s%s\n", cut.reason,
+									replay->uuid.ToString().c_str(), detailSuffix);
 						replay->awrMode = false;
 						replay->awrMs = 0;
 						player->languageService->PrintChat(true, false, "Replay - AWR Cut Failed");
