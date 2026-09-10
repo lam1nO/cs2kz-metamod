@@ -75,16 +75,35 @@ namespace
 	// плагина намеренно: «мягкий» отказ снимает правка НАШЕГО кода, то есть новый бинарь.
 	std::unordered_set<std::string> g_softFailed;
 
-	// Потолок смещения бэклога: `offset` в api ограничен zod'ом (`.max(100000)`), запрос с
-	// большим значением вернул бы 400. Кламп + один warn, а не молчаливое усечение.
+	// Потолок смещения бэклога: `offset` в api ограничен zod'ом (`.max(100000)`, граница
+	// включительная), запрос с большим значением вернул бы 400.
 	constexpr size_t AWR_BACKLOG_MAX_OFFSET = 100000;
-	// Про потолок предупреждаем один раз на прогон: шаг у прогона на каждый файл, и без
-	// защёлки лог залило бы одинаковыми строками.
-	bool g_offsetCapWarned = false;
+	// Сколько записей просить у бэклога, когда нужен ВЫБОР (dry-run или непустой набор
+	// мягких отказов): иначе хватает одной свежайшей строки.
+	constexpr size_t AWR_BACKFILL_PAGE_LIMIT = 50;
+	constexpr const char *AWR_BACKFILL_PAGE_LIMIT_STR = "50";
 
-	// Сколько записей просить у бэклога в dry-run: обычному прогону хватает свежайшей, а
-	// dry-run нужен выбор, чтобы было из чего взять невиденную.
-	constexpr const char *AWR_BACKFILL_DRY_LIMIT = "50";
+	// Идёт ЯВНЫЙ прогон (команда `kz_awr_backfill N`) или автоподбор по таймеру. Смещение
+	// бэклога — свойство ТОЛЬКО явного прогона: автоподбор обязан брать свежие загрузки, а
+	// они стоят в НАЧАЛЕ выдачи (created_at desc), то есть ровно там, куда смещение не
+	// смотрит. С общим смещением автоподбор после первого же прогона не считал бы новые
+	// рекорды до перезапуска плагина.
+	bool g_explicitRun = false;
+	// Курсор смещения ТЕКУЩЕГО явного прогона. Ведётся по ФАКТИЧЕСКОЙ странице: пока в
+	// странице есть невиденный файл, курсор не двигается вовсе; если вся страница из
+	// виденных — курсор прибавляет её размер и запрос повторяется. Так прогон не встаёт ни
+	// на 50 мягких отказах, ни на 50 реплеях, залитых во время прогона (позиции 0..k-1 при
+	// новых загрузках сдвигают набор, и «offset = |g_softFailed|» упёрся бы в ту же стену).
+	//
+	// Курсор монотонен внутри прогона, и это безопасно: он прибавляется только за страницу,
+	// в которой ВСЁ виденное, а файлы уходят из бэклога только с позиций >= курсора (берём
+	// их из страницы, начинающейся с курсора) — значит префикс [0, курсор) не теряет
+	// записей и не может «подтянуть» под курсор невиденную.
+	size_t g_backlogOffset = 0;
+	// Про потолок смещения предупреждаем один раз на прогон: шаг у прогона на каждый файл,
+	// и без защёлки лог залило бы одинаковыми строками. Снимается в Run() вместе с курсором
+	// — потолок и существует только у явного прогона.
+	bool g_offsetCapWarned = false;
 
 	// Результат разбора одного файла: рабочий поток заполняет, главный забирает.
 	struct WorkerResult
@@ -195,7 +214,7 @@ namespace
 	// Шаги цикла одного файла
 	// ------------------------------------------------------------------
 
-	void FetchOne();
+	void FetchOne(bool explicitRun);
 	void StartDownload(const std::string &uuid, const std::string &url, bool dryRun);
 	void SpawnWorker(const std::string &uuid, std::vector<char> data, bool dryRun);
 	void PublishResult(const WorkerResult &res);
@@ -224,7 +243,7 @@ namespace
 		FinishAttempt();
 		if (!g_busy && g_remaining > 0)
 		{
-			FetchOne();
+			FetchOne(g_explicitRun);
 		}
 	}
 
@@ -279,7 +298,7 @@ namespace
 
 		if (g_remaining > 0)
 		{
-			FetchOne();
+			FetchOne(g_explicitRun);
 			return AWR_BACKFILL_BUSY_INTERVAL;
 		}
 
@@ -291,11 +310,13 @@ namespace
 		{
 			if (g_autoDue)
 			{
-				// Период выждан — берём ОДИН файл, всегда «по-настоящему» (не dry-run).
+				// Период выждан — берём ОДИН файл, всегда «по-настоящему» (не dry-run) и
+				// всегда БЕЗ смещения: автоподбор существует ради свежих загрузок.
 				g_autoDue = false;
 				g_remaining = 1;
 				g_dryRun = false;
-				FetchOne();
+				g_explicitRun = false;
+				FetchOne(false);
 				return AWR_BACKFILL_BUSY_INTERVAL;
 			}
 			g_autoDue = true;
@@ -316,7 +337,7 @@ namespace
 		g_timer = StartTimer(Tick, AWR_BACKFILL_BUSY_INTERVAL, true, true);
 	}
 
-	void FetchOne()
+	void FetchOne(bool explicitRun)
 	{
 		std::string url = ApiUrl("/replays/v1/awr-backlog");
 		if (url.empty())
@@ -334,49 +355,25 @@ namespace
 		const u32 epoch = g_epoch;
 
 		HTTP::Request req(HTTP::Method::GET, url);
-		// В обычном режиме хватает одной свежайшей строки: обработанная помечается в api и
-		// в бэклог не возвращается. В dry-run пометки нет, поэтому берём страницу и ищем в
-		// ней невиденную (см. g_dryRunSeen). Тот же выбор нужен при непустом наборе «мягко»
-		// отказавших: они в api не помечены и приезжают первыми.
+		// Одной свежайшей строки хватает, пока выбирать не из чего: обработанная помечается
+		// в api и в бэклог не возвращается. Выбор нужен в dry-run (пометки нет, см.
+		// g_dryRunSeen) и при непустом наборе мягких отказов: они в api не помечены и
+		// приезжают первыми.
 		const bool needPage = dryRun || !g_softFailed.empty();
-		req.SetQuery("limit", needPage ? AWR_BACKFILL_DRY_LIMIT : "1");
+		req.SetQuery("limit", needPage ? AWR_BACKFILL_PAGE_LIMIT_STR : "1");
 
-		// СМЕЩЕНИЕ на число «мягко» отказавших. Без него догон истории структурно вставал:
-		// бэклог отдаёт максимум 50 строк (кап в api), сортировка created_at desc, а мягкий
-		// отказ строку не помечает — набралось 50 таких, и каждая следующая страница состояла
-		// только из них (живой прогон на канарейке cyb.182: `soft_failed_exhausted soft=50`
-		// после 706 файлов из 17 714, то есть на первых же ~7 % отказов).
-		//
-		// Почему именно |g_softFailed|: посчитанные строки из выборки уходят, а мягко
-		// отказавшие остаются и держатся в НАЧАЛЕ выдачи, поэтому смещение ровно на их число
-		// даёт следующий непросмотренный файл. Сортировка в api стабилизирована вторичным
-		// ключом (`created_at desc, id desc`, api-v0.1.77), иначе строки с равным created_at
-		// могли бы переставляться между запросами и смещение перескакивало бы через файлы.
-		//
-		// Если во время прогона зальют новые реплеи, они встанут ПЕРЕД мягко отказавшими и
-		// смещение их пропустит — на этом прогоне. Ни к застреванию, ни к потере это не
-		// ведёт: страница всё равно проверяется на виденных, а новые файлы возьмёт следующий
-		// прогон (или автоподбор). Прогон-догон истории важнее свежих единиц.
-		size_t offset = 0;
-		if (!dryRun && !g_softFailed.empty())
+		// СМЕЩЕНИЕ — только на шаге ЯВНОГО прогона (см. g_explicitRun) и только реального:
+		// dry-run ходит по первой странице и ограничен ей осознанно. Курсор ведётся по
+		// фактической странице в колбэке ниже, здесь его лишь применяем.
+		const size_t offset = (explicitRun && !dryRun) ? g_backlogOffset : 0;
+		if (offset > 0)
 		{
-			offset = g_softFailed.size();
-			if (offset > AWR_BACKLOG_MAX_OFFSET)
-			{
-				if (!g_offsetCapWarned)
-				{
-					g_offsetCapWarned = true;
-					KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] backlog offset capped soft=%u cap=%u\n", (unsigned)g_softFailed.size(),
-								(unsigned)AWR_BACKLOG_MAX_OFFSET);
-				}
-				offset = AWR_BACKLOG_MAX_OFFSET;
-			}
 			req.SetQuery("offset", std::to_string(offset));
 		}
 		SetAuthHeader(req);
 		// clang-format off
 		req.Send(
-			[dryRun, epoch, offset](HTTP::Response resp)
+			[dryRun, epoch, offset, explicitRun, needPage](HTTP::Response resp)
 			{
 				if (StaleEpoch(epoch, "backlog", nullptr))
 				{
@@ -415,12 +412,22 @@ namespace
 
 				if (items.empty())
 				{
-					// Бэклог пуст — прогон закончен, следующий тик ничего не запросит.
-					// При НЕПУСТОМ смещении это тоже конец бэклога (за смещением строк не
-					// осталось), а не «нечего брать»: печатаем offset, чтобы это было видно.
+					// Пусто — прогон закончен, следующий тик ничего не запросит. Причины
+					// РАЗНЫЕ и различать их обязательно: при offset == 0 посчитано всё,
+					// при offset > 0 за смещением строк не осталось, а хвост НАЧАЛА выдачи
+					// (свежие загрузки и мягкие отказы) этот прогон не смотрел — его возьмёт
+					// автоподбор или следующая команда.
 					g_remaining = 0;
 					g_busy = false;
-					KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill done reason=empty_backlog offset=%u\n", (unsigned)offset);
+					if (offset > 0)
+					{
+						KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill done reason=backlog_end_after_offset offset=%u\n",
+									(unsigned)offset);
+					}
+					else
+					{
+						KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill done reason=empty_backlog\n");
+					}
 					return;
 				}
 
@@ -435,16 +442,52 @@ namespace
 						StartDownload(item.replayUuid, item.url, dryRun);
 						return;
 					}
-					// Страница целиком из виденных ПРИ уже применённом смещении. В норме
-					// недостижимо (смещение на их число как раз и уводит выборку за них), и
-					// остаётся как диагностический тупик: если строка появилась в логе —
-					// значит смещение не соответствует выдаче api (порядок нестабилен, api
-					// без поддержки offset, потолок смещения) и разбираться надо там.
-					// Поэтому warn, а не info.
+					// Страница ЦЕЛИКОМ из уже виденных. Достижимо двумя способами: мягких
+					// отказов накопилось на страницу, либо во время прогона залили пачку
+					// реплеев и они сдвинули набор вправо. Оба лечит один приём — двигать
+					// курсор по ФАКТИЧЕСКОЙ странице и повторять запрос.
+					if (explicitRun && !dryRun)
+					{
+						if (items.size() < AWR_BACKFILL_PAGE_LIMIT)
+						{
+							// Страница неполная — за ней записей нет вовсе: это конец
+							// бэклога, а не тупик.
+							g_remaining = 0;
+							g_busy = false;
+							KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill done reason=backlog_tail_seen offset=%u items=%u\n",
+										(unsigned)offset, (unsigned)items.size());
+							return;
+						}
+						const size_t next = offset + items.size();
+						if (next > AWR_BACKLOG_MAX_OFFSET)
+						{
+							// Дальше api не пустит (потолок offset). Прогон останавливаем:
+							// молча ходить по кругу хуже, чем сказать, где встали.
+							if (!g_offsetCapWarned)
+							{
+								g_offsetCapWarned = true;
+								KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] backlog offset capped offset=%u next=%u cap=%u\n",
+											(unsigned)offset, (unsigned)next, (unsigned)AWR_BACKLOG_MAX_OFFSET);
+							}
+							g_remaining = 0;
+							g_busy = false;
+							KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] backfill done reason=backlog_offset_cap offset=%u soft=%u\n",
+										(unsigned)offset, (unsigned)g_softFailed.size());
+							return;
+						}
+						g_backlogOffset = next;
+						// Повтор в рамках ТОГО ЖЕ шага: файл не взят, поэтому ни g_remaining,
+						// ни защёлку g_busy не трогаем (FinishAttempt здесь не зовём).
+						// Стека не растим — Send асинхронный.
+						FetchOne(true);
+						return;
+					}
+					// Автоподбор (и dry-run) ходят только по первой странице: их дело —
+					// свежие загрузки, а догон истории — дело явного прогона. Идти некуда.
 					g_remaining = 0;
 					g_busy = false;
-					KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] backfill done reason=soft_failed_exhausted soft=%u offset=%u items=%u\n",
-								(unsigned)g_softFailed.size(), (unsigned)offset, (unsigned)items.size());
+					KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] backfill done reason=soft_failed_exhausted soft=%u page=%u items=%u\n",
+								(unsigned)g_softFailed.size(), (unsigned)(needPage ? AWR_BACKFILL_PAGE_LIMIT : 1), (unsigned)items.size());
 					return;
 				}
 
@@ -803,7 +846,11 @@ void CybAwrBackfill::Run(u32 count, bool dryRun)
 	// повтора (трафик + счётчик на уже виденные файлы) приемлема. АВТОПОДБОР по таймеру
 	// (Tick без Run) множество не чистит: там повтор был бы вечным циклом.
 	g_softFailed.clear();
+	// Курсор смещения и его защёлка — состояние ОДНОГО прогона.
+	g_backlogOffset = 0;
 	g_offsetCapWarned = false;
+	// Этот прогон — явный: только ему разрешено смещение (автоподбор его сбрасывает сам).
+	g_explicitRun = true;
 	// Насос может быть не запущен (cybAwrBackfillIntervalSec 0) — команда обязана работать.
 	EnsureTimer();
 	KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill started count=%u dry=%d\n", (unsigned)count, dryRun ? 1 : 0);
