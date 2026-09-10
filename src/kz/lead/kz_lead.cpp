@@ -44,7 +44,8 @@
 // 8 проходов = 4 с. Защита от мигающего ключа и от частых повторов после сетевого отказа.
 #define KZ_LEAD_ARM_COOLDOWN_CYCLES 8
 // Сколько раз повторить молчаливую загрузку под ОДНИМ ключом, прежде чем считать, что записи
-// нет: пустой путь приходит и на 404, и на сетевую ошибку (см. OnLoadFailed).
+// нет. Только для ПУСТОГО пути (нет файла / сеть): 404 и сетевую ошибку различить нечем. Отказ
+// РАЗБОРА скачанного файла детерминирован и защёлкивается сразу — см. OnLoadFailed(retryable).
 #define KZ_LEAD_FAIL_RETRIES 2
 // Допуск упрощения пути (юниты). Меньше — лишние сущности на прямых, больше — срезанные углы.
 #define KZ_LEAD_RDP_TOLERANCE 2.0f
@@ -635,7 +636,7 @@ void KZLeadService::OnFileReady(u32 gen, std::string &&filePath)
 		// карты, а не отказ нашего кода; для молчаливой загрузки это единственный след.
 		KZ_LOG_DEBUG(LogChannel::Replays, "[lead] lead_load_failed reason=no_file course=%i mode=%s steam_id=%llu\n", this->requestCourse,
 					 this->requestMode, (unsigned long long)this->player->GetSteamId64());
-		this->OnLoadFailed();
+		this->OnLoadFailed(/* retryable */ true);
 		return;
 	}
 	this->pending = std::make_shared<PendingLoad>();
@@ -645,21 +646,27 @@ void KZLeadService::OnFileReady(u32 gen, std::string &&filePath)
 	std::thread(BuildPathWorker, std::move(filePath), this->pending).detach();
 }
 
-void KZLeadService::OnLoadFailed()
+void KZLeadService::OnLoadFailed(bool retryable)
 {
 	// Защёлка — ВСЕГДА, кто бы ни просил, и ПО КЛЮЧУ ЗАПРОСА (курс+режим): под ним пути нет, и
 	// проверка раз в 32 тика иначе ходила бы в сеть до конца карты; на другом курсе она
-	// снимется сама (см. ArmProgressPath).
-	//
-	// Но не сразу насмерть: пустой путь приходит и на «записи нет», и на сетевую ошибку, а
-	// различить их нечем (см. reason=no_file в OnFileReady). Поэтому под НОВЫМ ключом даём
-	// KZ_LEAD_FAIL_RETRIES повторов с паузой — сетевая рябь так лечится сама, а курс без
-	// AWR-записи защёлкивается, исчерпав их (ArmProgressPath уменьшает счётчик).
+	// снимется сама (см. ArmProgressPath), а успешная загрузка снимает её совсем (OnPathLoaded).
 	if (!(this->failedCourse == this->requestCourse && KZ_STREQI(this->failedMode, this->requestMode)))
 	{
 		this->failedCourse = this->requestCourse;
 		V_strncpy(this->failedMode, this->requestMode, sizeof(this->failedMode));
+		// Пустой путь приходит и на «записи нет», и на сетевую ошибку, а различить их нечем
+		// (см. reason=no_file в OnFileReady) — такому отказу даём KZ_LEAD_FAIL_RETRIES повторов
+		// с паузой: сетевая рябь лечится сама, а курс без AWR-записи защёлкнётся, исчерпав их
+		// (счётчик расходует ArmProgressPath).
 		this->failRetriesLeft = KZ_LEAD_FAIL_RETRIES;
+	}
+	if (!retryable)
+	{
+		// Отказ РАЗБОРА: файл уже скачан, и второй заход прочитает тот же файл тем же кодом с
+		// тем же исходом — это три докачки и три потока разбора впустую. Защёлкиваем сразу
+		// (в т.ч. поверх ретраев, начисленных прошлым сетевым отказом под этим же ключом).
+		this->failRetriesLeft = 0;
 	}
 	this->armCooldown = KZ_LEAD_ARM_COOLDOWN_CYCLES;
 	if (!this->beamOnLoad)
@@ -699,7 +706,9 @@ void KZLeadService::PollPending()
 	{
 		KZ_LOG_WARN(LogChannel::Replays, "[lead] lead_load_failed reason=%s steam_id=%llu\n", failReason,
 					(unsigned long long)this->player->GetSteamId64());
-		this->OnLoadFailed();
+		// Файл скачан, но путь из него не построился — причина в САМОМ файле (битый, обрезанный,
+		// ран не сошёлся): повторять нечего, см. retryable у OnLoadFailed.
+		this->OnLoadFailed(/* retryable */ false);
 		return;
 	}
 	if (cutWarn && cutWarn[0])
@@ -743,6 +752,15 @@ void KZLeadService::OnPathLoaded(std::vector<Vertex> &&newPath)
 	// на смену режима посреди загрузки: путь чужого режима будет снят тиком с сообщением.
 	this->pathCourse = this->requestCourse;
 	V_strncpy(this->modeName, this->requestMode, sizeof(this->modeName));
+	// УСПЕХ снимает пометку отказа: под этим ключом путь ЕСТЬ, и прошлые (сетевые) отказы о нём
+	// больше ничего не говорят. Без этого исчерпанный счётчик оставался бы висеть на ключе, и
+	// когда путь под ним понадобится заново — main → бонус → main, где на смене курса при
+	// выключенном луче путь освобождается, — ArmProgressPath ушёл бы в глухую защёлку до смены
+	// карты. Счётчик перезарядит сам OnLoadFailed: со снятой пометкой любой следующий отказ
+	// попадает в его ветку «новый ключ».
+	this->failedCourse = -1;
+	this->failedMode[0] = '\0';
+	this->failRetriesLeft = 0;
 	if (!this->beamOnLoad)
 	{
 		// Путь просил элемент худа — луч не поднимаем и в чат не пишем.
