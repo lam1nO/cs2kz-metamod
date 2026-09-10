@@ -354,7 +354,10 @@ void KZLeadService::ResetState(bool keepEntities)
 	this->failedCourse = -1;
 	this->failedMode[0] = '\0';
 	this->failRetriesLeft = 0;
-	this->armCooldown = 0;
+	// Разброс по слоту, а не 0: на смене карты ResetState зовётся всем сразу, и все, у кого
+	// процент включён, ушли бы резолвить и качать ОДИН файл в одном тике (кэш downloads/ пуст,
+	// дедупа запросов в полёте нет) — N докачек до 32 МБ и N потоков разбора вместо одной.
+	this->armCooldown = this->player->GetPlayerSlot().Get() % KZ_LEAD_ARM_COOLDOWN_CYCLES;
 	// Преф прогресса здесь НЕ трогаем: OnMapChanged зовёт этот метод на смене карты, а
 	// настройка игрока карту переживает — иначе элемент худа молча умирал бы до следующего
 	// захода в меню. Гасит его только Reset() (дисконнект, слот освободился).
