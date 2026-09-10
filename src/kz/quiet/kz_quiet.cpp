@@ -290,33 +290,43 @@ void KZ::quiet::OnPostEvent(INetworkMessageInternal *pEvent, const CNetMessage *
 		{
 			auto msg = const_cast<CNetMessage *>(pData)->ToPB<CUserMessageSayText2>();
 			// Диагностика инцидента 10.09 (чат невидим после апдейта CS2 09.09): какие поля несут
-			// SayText2, проходящие через PostEventAbstract (движок и другие плагины — источник
-			// различать по msg/entidx). Только базовое UM_SayText2: для легаси-id 306 в SDK нет
-			// proto-класса, ToPB туда — чтение чужой раскладки. Первые 5 на процесс, не в такте.
-			static i32 diagLeft = 5;
-			if (diagLeft > 0 && info->m_MessageId != UM_SayText2)
+			// SayText2, проходящие через PostEventAbstract. Два счётчика: «чужие» (движок и другие
+			// плагины: params непустые и без нашего маркера) и «наши». Не в такте — только на
+			// чат-сообщениях; для легаси-id 306 поля не печатаем (класса в SDK нет; чтение ниже —
+			// унаследованное от апстрима).
+			static i32 diagForeignLeft = 20;
+			static i32 diagOwnLeft = 5;
+			if (info->m_MessageId != UM_SayText2)
 			{
-				// Легаси-id (306): класса в SDK нет, поля не читаем — только факт и имя.
-				diagLeft--;
-				Msg("[cyb] saytext2_seen id=%d msg=%s (legacy id, fields not parsed)\n", (int)info->m_MessageId, pEvent->GetUnscopedName());
-			}
-			if (diagLeft > 0 && info->m_MessageId == UM_SayText2)
-			{
-				diagLeft--;
-				const auto &unk = msg->unknown_fields();
-				char unkBuf[128] = {};
-				i32 off = 0;
-				for (i32 u = 0; u < unk.field_count() && off < (i32)sizeof(unkBuf) - 24; u++)
+				// Легаси-id: поля по нашему классу не читаем вовсе (src неизвестен).
+				if (diagForeignLeft > 0)
 				{
-					const auto &f = unk.field(u);
-					if (f.type() == google::protobuf::UnknownField::TYPE_VARINT)
-					{
-						off += V_snprintf(unkBuf + off, sizeof(unkBuf) - off, " f%d=%llu", f.number(), (unsigned long long)f.varint());
-					}
+					diagForeignLeft--;
+					Msg("[cyb] saytext2_seen src=? id=%d msg=%s (legacy id, fields not parsed)\n", (int)info->m_MessageId, pEvent->GetUnscopedName());
 				}
-				Msg("[cyb] saytext2_seen id=%d msg=%s entidx=%d chat=%d name=\"%s\" p1=\"%s\" p2=\"%s\" unknown=%d%s\n", (int)info->m_MessageId,
-					pEvent->GetUnscopedName(), msg->entityindex(), (int)msg->chat(), msg->messagename().c_str(), msg->param1().c_str(),
-					msg->param2().c_str(), unk.field_count(), unkBuf);
+			}
+			else if (diagForeignLeft > 0 || diagOwnLeft > 0)
+			{
+				const bool isOwn = msg->param3() == KZ_CHAT_OWN_MARKER || (msg->param1().empty() && msg->param2().empty());
+				i32 &budget = isOwn ? diagOwnLeft : diagForeignLeft;
+				if (budget > 0)
+				{
+					budget--;
+					const auto &unk = msg->unknown_fields();
+					char unkBuf[128] = {};
+					i32 off = 0;
+					for (i32 u = 0; u < unk.field_count() && off < (i32)sizeof(unkBuf) - 24; u++)
+					{
+						const auto &f = unk.field(u);
+						if (f.type() == google::protobuf::UnknownField::TYPE_VARINT)
+						{
+							off += V_snprintf(unkBuf + off, sizeof(unkBuf) - off, " f%d=%llu", f.number(), (unsigned long long)f.varint());
+						}
+					}
+					Msg("[cyb] saytext2_seen src=%s id=%d msg=%s entidx=%d chat=%d name=\"%s\" p1=\"%s\" p2=\"%s\" unknown=%d%s\n", isOwn ? "own" : "foreign",
+						(int)info->m_MessageId, pEvent->GetUnscopedName(), msg->entityindex(), (int)msg->chat(), msg->messagename().c_str(),
+						msg->param1().c_str(), msg->param2().c_str(), unk.field_count(), unkBuf);
+				}
 			}
 			if (!KZOptionService::GetOptionInt("overridePlayerChat", true))
 			{
@@ -324,6 +334,12 @@ void KZ::quiet::OnPostEvent(INetworkMessageInternal *pEvent, const CNetMessage *
 			}
 			i32 index = msg->entityindex();
 			if (index == -1)
+			{
+				return;
+			}
+			// Наше SayText2 в режиме kz_chat_mode 1 тоже несёт params — маркер в param3 отличает
+			// его от движкового чата, который и надо глушить (инцидент 10.09.2026).
+			if (info->m_MessageId == UM_SayText2 && msg->param3() == KZ_CHAT_OWN_MARKER)
 			{
 				return;
 			}

@@ -4,6 +4,9 @@
 #include "sdk/datatypes.h"
 #include "igameevents.h"
 
+// Маркер «наше SayText2» в param3 (инцидент чата 10.09.2026, см. utils_print.cpp / kz_quiet.cpp).
+inline constexpr char KZ_CHAT_OWN_MARKER[] = "cyb";
+
 class KZUtils;
 class CBasePlayerController;
 

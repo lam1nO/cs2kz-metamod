@@ -4,7 +4,7 @@
 #include "sdk/entity/cbaseplayercontroller.h"
 #include "sdk/recipientfilters.h"
 #include "utils.h"
-#include "kz/option/kz_option.h"
+#include <string>
 
 #include "tier0/memdbgon.h"
 
@@ -259,35 +259,63 @@ bool utils::CFormat(char *buffer, u64 buffer_size, const char *text)
 	return true;
 }
 
+// Режим рассылки чата игроков (инцидент 10.09.2026, чат невидим после апдейта CS2 09.09).
+// Диагностика saytext2_seen на канарейке: движок шлёт SayText2 id=118 (имя в реестре
+// «CUserMessageSayText2 [118]» — поэтому поиск по id, а не по имени класса), chat=1,
+// messagename="Cstrike_Chat_All", param1=ник, param2=текст; мы слали chat=0 с кастомным
+// messagename без params. Что именно из этого клиент перестал рисовать — решает канарейка
+// переключением cvar по RCON, без пересборки (каждая сборка ~40 мин):
+//   0 — SayText2 как раньше, но chat=true (кастомный messagename без params);
+//   1 — SayText2 как движок: messagename="Cstrike_Chat_All", param1=префикс+ник, param2=текст
+//       (param3 = маркер "cyb", чтобы собственный quiet-хук не глушил наше сообщение);
+//   2 — TextMsg/HUD_PRINTTALK (путь ответов !pb, доказанно рисуется; без привязки к игроку).
+// Дефолт — 2: единственный путь, доказанно живой на флоте; 0/1 — гипотезы, их проверяет
+// канарейка по RCON, победитель станет дефолтом отдельным коммитом (+CYBER.md).
+CConVar<i32> kz_chat_mode("kz_chat_mode", FCVAR_NONE, "Player chat send mode: 0 saytext2 raw (chat=1), 1 saytext2 token (Cstrike_Chat_All), 2 textmsg (default)",
+						  2);
+
+// Сетевое сообщение по id с фолбэком на подстроку имени; nullptr + однократный warn при отказе.
+// Точный FindNetworkMessage по имени protobuf-класса на живом сервере НЕ находит: реестр хранит
+// имена вида «CUserMessageTextMsg [124]». Реальное имя логируем один раз на сообщение.
+struct ResolveLogState
+{
+	bool warned = false;   // отказ уже залогирован
+	bool resolved = false; // успешный резолв уже залогирован (отдельно: отказ не должен глушить будущий успех)
+};
+
+static INetworkMessageInternal *ResolveUserMessage(int id, const char *partialName, ResolveLogState &log)
+{
+	INetworkMessageInternal *netmsg = g_pNetworkMessages->FindNetworkMessageById(id);
+	if (!netmsg)
+	{
+		netmsg = g_pNetworkMessages->FindNetworkMessagePartial(partialName);
+	}
+	if (!netmsg)
+	{
+		if (!log.warned)
+		{
+			log.warned = true;
+			Warning("[cyb] print_failed reason=netmsg_not_found name=%s id=%d\n", partialName, id);
+		}
+		return nullptr;
+	}
+	if (!log.resolved)
+	{
+		log.resolved = true;
+		NetMessageInfo_t *info = netmsg->GetNetMessageInfo();
+		Msg("[cyb] print_netmsg_resolved name=%s id=%d\n", netmsg->GetUnscopedName(), info ? (int)info->m_MessageId : -1);
+	}
+	return netmsg;
+}
+
 void utils::ClientPrintFilter(IRecipientFilter *filter, int msg_dest, const char *msg_name, const char *param1, const char *param2,
 							  const char *param3, const char *param4)
 {
-	// Поиск по ID (UM_TextMsg = 124) с фолбэком на подстроку «TextMsg» — так работало на флоте
-	// до апдейта. Точное имя FindNetworkMessage("CUserMessageTextMsg") на живом сервере 10.09 НЕ
-	// нашлось (print_failed reason=netmsg_not_found) — реестр хранит сообщения не под именем
-	// protobuf-класса; реальное имя пишем в лог один раз (print_netmsg_resolved), чтобы больше
-	// не гадать.
-	INetworkMessageInternal *netmsg = g_pNetworkMessages->FindNetworkMessageById(UM_TextMsg);
+	static ResolveLogState textMsgLog;
+	INetworkMessageInternal *netmsg = ResolveUserMessage(UM_TextMsg, "TextMsg", textMsgLog);
 	if (!netmsg)
 	{
-		netmsg = g_pNetworkMessages->FindNetworkMessagePartial("TextMsg");
-	}
-	if (!netmsg)
-	{
-		static bool warned = false;
-		if (!warned)
-		{
-			warned = true;
-			Warning("[cyb] print_failed reason=netmsg_not_found name=TextMsg id=%d\n", (int)UM_TextMsg);
-		}
 		return;
-	}
-	static bool resolvedLogged = false;
-	if (!resolvedLogged)
-	{
-		resolvedLogged = true;
-		NetMessageInfo_t *info = netmsg->GetNetMessageInfo();
-		Msg("[cyb] print_netmsg_resolved name=%s id=%d\n", netmsg->GetUnscopedName(), info ? (int)info->m_MessageId : -1);
 	}
 	auto msg = netmsg->AllocateMessage()->ToPB<CUserMessageTextMsg>();
 	msg->set_dest(msg_dest);
@@ -310,6 +338,10 @@ void utils::ClientPrintFilter(IRecipientFilter *filter, int msg_dest, const char
 
 void utils::SayChat(CBaseEntity *entity, const char *format, ...)
 {
+	if (!entity)
+	{
+		return;
+	}
 	FORMAT_STRING(buffer);
 
 	char coloredBuffer[512];
@@ -320,16 +352,18 @@ void utils::SayChat(CBaseEntity *entity, const char *format, ...)
 		return;
 	}
 
-	// Инцидент 10.09.2026 (чат игроков невидим после апдейта CS2 09.09). Диагностика
-	// saytext2_seen на канарейке показала: движок шлёт SayText2 id=118 с chat=1
-	// (name="Cstrike_Chat_All", p1=ник, p2=текст, без новых полей), а мы слали chat=0 с
-	// кастомным messagename — и клиент такое больше не рисует. Мимикрируем под движок:
-	// тот же id и chat=true; entityindex оставляем (клиентский блок-лист/мут через таб,
-	// аватар в строке чата). Имя в реестре — «CUserMessageSayText2 [118]», поэтому поиск по id,
-	// а не по имени класса; фолбэк — подстрока (так работало до апдейта).
-	// Страховка без пересборки: серверная опция chatViaTextMsg=true переводит чат на путь
-	// TextMsg/HUD_PRINTTALK (тот же, что у ответов !pb) — без привязки к игроку.
-	if (KZOptionService::GetOptionInt("chatViaTextMsg", false))
+	i32 mode = kz_chat_mode.Get();
+	if (mode < 0 || mode > 2)
+	{
+		static bool warnedMode = false;
+		if (!warnedMode)
+		{
+			warnedMode = true;
+			Warning("[cyb] kz_chat_mode=%d out of range, using 2\n", mode);
+		}
+		mode = 2;
+	}
+	if (mode == 2)
 	{
 		CBroadcastRecipientFilter *filter = new CBroadcastRecipientFilter;
 		ClientPrintFilter(filter, HUD_PRINTTALK, coloredBuffer, "", "", "", "");
@@ -337,32 +371,42 @@ void utils::SayChat(CBaseEntity *entity, const char *format, ...)
 		return;
 	}
 
-	INetworkMessageInternal *netmsg = g_pNetworkMessages->FindNetworkMessageById(UM_SayText2);
+	static ResolveLogState sayText2Log;
+	INetworkMessageInternal *netmsg = ResolveUserMessage(UM_SayText2, "SayText2", sayText2Log);
 	if (!netmsg)
 	{
-		netmsg = g_pNetworkMessages->FindNetworkMessagePartial("SayText2");
-	}
-	if (!netmsg)
-	{
-		static bool warned = false;
-		if (!warned)
-		{
-			warned = true;
-			Warning("[cyb] print_failed reason=netmsg_not_found name=SayText2 id=%d\n", (int)UM_SayText2);
-		}
 		return;
-	}
-	static bool resolvedLogged = false;
-	if (!resolvedLogged)
-	{
-		resolvedLogged = true;
-		NetMessageInfo_t *info = netmsg->GetNetMessageInfo();
-		Msg("[cyb] chat_netmsg_resolved name=%s id=%d\n", netmsg->GetUnscopedName(), info ? (int)info->m_MessageId : -1);
 	}
 	auto msg = netmsg->AllocateMessage()->ToPB<CUserMessageSayText2>();
 	msg->set_entityindex(entity->entindex());
-	msg->set_messagename(coloredBuffer);
 	msg->set_chat(true);
+	if (mode == 1)
+	{
+		// Как движок: токен локализации + параметры. Строка из kz_misc.cpp имеет вид
+		// «<префикс> <цвет><ник>{default}: <текст>», CFormat превращает {default} в байт 0x01 —
+		// режем по ПЕРВОМУ вхождению "\x01: " (наш разделитель, а не текст игрока: «: » внутри
+		// сообщения границу не сдвигает и в слот имени не попадает).
+		const char *sep = V_strstr(coloredBuffer, "\x01: ");
+		msg->set_messagename("Cstrike_Chat_All");
+		if (sep)
+		{
+			std::string p1(coloredBuffer, (sep + 1) - coloredBuffer); // ник с байтом {default}
+			msg->set_param1(p1);
+			msg->set_param2(sep + 3);
+		}
+		else
+		{
+			msg->set_param1("");
+			msg->set_param2(coloredBuffer);
+		}
+		// Маркер «своё»: quiet-хук глушит SayText2 с непустыми params (движковый чат) — наше
+		// сообщение он должен пропустить. %s3 в Cstrike_Chat_All клиент не рисует.
+		msg->set_param3(KZ_CHAT_OWN_MARKER);
+	}
+	else
+	{
+		msg->set_messagename(coloredBuffer);
+	}
 
 	CBroadcastRecipientFilter *filter = new CBroadcastRecipientFilter;
 	interfaces::pGameEventSystem->PostEventAbstract(0, false, filter, netmsg, msg, 0);
