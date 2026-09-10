@@ -302,33 +302,29 @@ void utils::SayChat(CBaseEntity *entity, const char *format, ...)
 {
 	FORMAT_STRING(buffer);
 
+	// Инцидент 10.09.2026: после апдейта CS2 09.09 клиент перестал рисовать наш SayText2
+	// (гипотеза — новое поле textallchat=8 в CUserMessageSayText2, движок его выставляет, наш
+	// .proto в SDK его не знает; проверяется диагностикой saytext2_seen в kz_quiet.cpp; поиск по
+	// подстроке «SayText2» к тому же порядок-зависим после переименования CS_UM_SayText2 →
+	// *_CSGOLegacy). Чат игроков шлём тем же путём, что и все ответы плагина — TextMsg в
+	// область чата (HUD_PRINTTALK): он на флоте доказанно рисуется, цвета/префиксы через
+	// CFormat те же. Цена: сообщение не привязано к entityindex игрока — клиентский
+	// блок-лист/мут через таб его не фильтруют, аватар/клик по нику в строке чата пропадают;
+	// фильтрацией занимается платформенный мут (cyber-presence). Вернуть SayText2 — после
+	// регенерации .proto SDK с textallchat.
+	(void)entity;
 	char coloredBuffer[512];
-	if (!CFormat(coloredBuffer, sizeof(coloredBuffer), buffer))
+	CBroadcastRecipientFilter *filter = new CBroadcastRecipientFilter;
+	if (CFormat(coloredBuffer, sizeof(coloredBuffer), buffer))
 	{
+		ClientPrintFilter(filter, HUD_PRINTTALK, coloredBuffer, "", "", "", "");
+	}
+	else
+	{
+		// CFormat при нехватке места НЕ завершает строку нулём — слать такой буфер нельзя.
 		Warning("utils::SayChat did not have enough space to print: %s\n", buffer);
 	}
-
-	// См. комментарий у CUserMessageTextMsg выше: полное имя, не подстрока.
-	INetworkMessageInternal *netmsg = g_pNetworkMessages->FindNetworkMessage("CUserMessageSayText2");
-	if (!netmsg)
-	{
-		static bool warned = false;
-		if (!warned)
-		{
-			warned = true;
-			Warning("[cyb] print_failed reason=netmsg_not_found name=CUserMessageSayText2\n");
-		}
-		return;
-	}
-	auto msg = netmsg->AllocateMessage()->ToPB<CUserMessageSayText2>();
-	msg->set_entityindex(entity->entindex());
-	msg->set_messagename(coloredBuffer);
-	msg->set_chat(false);
-
-	CBroadcastRecipientFilter *filter = new CBroadcastRecipientFilter;
-
-	interfaces::pGameEventSystem->PostEventAbstract(0, false, filter, netmsg, msg, 0);
-	delete msg;
+	delete filter;
 }
 
 void utils::PrintConsole(CBaseEntity *entity, const char *format, ...)

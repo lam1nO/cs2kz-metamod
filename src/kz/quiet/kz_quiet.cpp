@@ -288,11 +288,34 @@ void KZ::quiet::OnPostEvent(INetworkMessageInternal *pEvent, const CNetMessage *
 		case CS_UM_SayText2:
 		case UM_SayText2:
 		{
+			auto msg = const_cast<CNetMessage *>(pData)->ToPB<CUserMessageSayText2>();
+			// Диагностика инцидента 10.09 (чат невидим после апдейта CS2 09.09): какие поля несут
+			// SayText2, проходящие через PostEventAbstract (движок и другие плагины — источник
+			// различать по msg/entidx). Только базовое UM_SayText2: для легаси-id 306 в SDK нет
+			// proto-класса, ToPB туда — чтение чужой раскладки. Первые 5 на процесс, не в такте.
+			static i32 diagLeft = 5;
+			if (diagLeft > 0 && info->m_MessageId == UM_SayText2)
+			{
+				diagLeft--;
+				const auto &unk = msg->unknown_fields();
+				char unkBuf[128] = {};
+				i32 off = 0;
+				for (i32 u = 0; u < unk.field_count() && off < (i32)sizeof(unkBuf) - 24; u++)
+				{
+					const auto &f = unk.field(u);
+					if (f.type() == google::protobuf::UnknownField::TYPE_VARINT)
+					{
+						off += V_snprintf(unkBuf + off, sizeof(unkBuf) - off, " f%d=%llu", f.number(), (unsigned long long)f.varint());
+					}
+				}
+				Msg("[cyb] saytext2_seen id=%d msg=%s entidx=%d chat=%d name=\"%s\" p1=\"%s\" p2=\"%s\" unknown=%d%s\n", (int)info->m_MessageId,
+					pEvent->GetUnscopedName(), msg->entityindex(), (int)msg->chat(), msg->messagename().c_str(), msg->param1().c_str(),
+					msg->param2().c_str(), unk.field_count(), unkBuf);
+			}
 			if (!KZOptionService::GetOptionInt("overridePlayerChat", true))
 			{
 				return;
 			}
-			auto msg = const_cast<CNetMessage *>(pData)->ToPB<CUserMessageSayText2>();
 			i32 index = msg->entityindex();
 			if (index == -1)
 			{
