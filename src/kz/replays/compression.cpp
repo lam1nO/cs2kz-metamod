@@ -399,8 +399,9 @@ i32 KZ::replaysystem::compression::WriteTickDataCompressed(std::vector<char> &ou
 	return bytesWritten;
 }
 
-bool KZ::replaysystem::compression::ReadTickDataCompressed(const char *&cursor, const char *end, std::vector<TickData> &outTickData,
-														   std::vector<SubtickData> &outSubtickData, u32 replayVersion)
+// Секция ТИКОВ: распаковать и раскодировать. Вынесена из ReadTickDataCompressed, чтобы
+// тракту AWR можно было прочитать тики и ПРОПУСТИТЬ сабтики (см. ReadTickDataSkipSubticks).
+static_function bool ReadTickSection(const char *&cursor, const char *end, std::vector<TickData> &outTickData, u32 replayVersion)
 {
 	if (cursor + (ptrdiff_t)sizeof(CompressedSectionHeader) > end)
 	{
@@ -433,12 +434,12 @@ bool KZ::replaysystem::compression::ReadTickDataCompressed(const char *&cursor, 
 	bool decoded = DecodeTickDataBuffer(decompressedData, header.uncompressedSize, header.elementCount, replayVersion, outTickData);
 
 	delete[] decompressedData;
-	if (!decoded)
-	{
-		return false;
-	}
+	return decoded;
+}
 
-	// Read subtick data
+// Секция САБТИКОВ: распаковать в outSubtickData.
+static_function bool ReadSubtickSection(const char *&cursor, const char *end, std::vector<SubtickData> &outSubtickData, u32 replayVersion)
+{
 	if (cursor + (ptrdiff_t)sizeof(CompressedSectionHeader) > end)
 	{
 		return false;
@@ -452,6 +453,7 @@ bool KZ::replaysystem::compression::ReadTickDataCompressed(const char *&cursor, 
 		return false;
 	}
 
+	bool success;
 	// v4+ uses subtickMoves[MAX_SUBTICK_MOVES]; older replays used subtickMoves[64].
 	if (replayVersion >= 4)
 	{
@@ -480,6 +482,38 @@ bool KZ::replaysystem::compression::ReadTickDataCompressed(const char *&cursor, 
 	}
 	cursor += subtickHeader.compressedSize;
 	return success;
+}
+
+// Пропустить секцию, не распаковывая: двигаем курсор по compressedSize из её шапки.
+// Аллокаций по числам из файла тут нет вообще, поэтому единственная проверка — что курсор
+// остаётся в буфере.
+static_function bool SkipSectionRaw(const char *&cursor, const char *end)
+{
+	if (cursor + (ptrdiff_t)sizeof(CompressedSectionHeader) > end)
+	{
+		return false;
+	}
+	CompressedSectionHeader header;
+	memcpy(&header, cursor, sizeof(header));
+	cursor += sizeof(header);
+	if (cursor + (ptrdiff_t)header.compressedSize > end)
+	{
+		return false;
+	}
+	cursor += header.compressedSize;
+	return true;
+}
+
+bool KZ::replaysystem::compression::ReadTickDataCompressed(const char *&cursor, const char *end, std::vector<TickData> &outTickData,
+														   std::vector<SubtickData> &outSubtickData, u32 replayVersion)
+{
+	return ReadTickSection(cursor, end, outTickData, replayVersion) && ReadSubtickSection(cursor, end, outSubtickData, replayVersion);
+}
+
+bool KZ::replaysystem::compression::ReadTickDataSkipSubticks(const char *&cursor, const char *end, std::vector<TickData> &outTickData,
+															 u32 replayVersion)
+{
+	return ReadTickSection(cursor, end, outTickData, replayVersion) && SkipSectionRaw(cursor, end);
 }
 
 static_function bool DecodeTickDataBuffer(const char *decompressedData, size_t uncompressedSize, u32 elementCount, u32 replayVersion,

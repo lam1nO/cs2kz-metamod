@@ -25,6 +25,12 @@ namespace KZ::replaysystem::compression
 	bool ReadTickDataCompressed(const char *&cursor, const char *end, std::vector<TickData> &outTickData, std::vector<SubtickData> &outSubtickData,
 								u32 replayVersion);
 
+	// То же, но секция САБТИКОВ пропускается без распаковки. Для тракта AWR (разрез, !lead,
+	// воркер бэкфилла) сабтики не нужны вовсе, а стоят они 868 Б на кадр против 264 Б у
+	// самих тиков — то есть три четверти пика памяти разбора (на двухчасовом ране это ~400
+	// МиБ на один файл). Курсор остаётся ровно там же, где после полного чтения.
+	bool ReadTickDataSkipSubticks(const char *&cursor, const char *end, std::vector<TickData> &outTickData, u32 replayVersion);
+
 	// Read compressed weapon changes
 	bool ReadWeaponsCompressed(const char *&cursor, const char *end, std::vector<std::pair<i32, EconInfo>> &outWeaponTable);
 

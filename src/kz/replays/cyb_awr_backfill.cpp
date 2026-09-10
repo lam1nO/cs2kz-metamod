@@ -12,6 +12,7 @@
 #include "utils/utils.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstdlib>
 #include <mutex>
 #include <optional>
@@ -19,6 +20,13 @@
 #include <thread>
 #include <unordered_set>
 #include <vector>
+
+// Сколько файлов бэкфилл держит в полёте одновременно. Конвар, а не опция серверного cfg:
+// опции читаются один раз на загрузке плагина, а этот параметр нужно крутить ЖИВЬЁМ под
+// нагрузкой по RCON, не перезапуская прогон. Потолок и обоснование —
+// AWR_BACKFILL_MAX_CONCURRENCY.
+CConVar<i32> kz_awr_backfill_concurrency("kz_awr_backfill_concurrency", FCVAR_NONE,
+										 "How many AWR backfill files to process concurrently (1-8; memory scales with it)", 1);
 
 namespace
 {
@@ -109,18 +117,20 @@ namespace
 	static_assert(ParseDecimal(AWR_BACKFILL_PAGE_LIMIT_STR) == AWR_BACKFILL_PAGE_LIMIT, "limit query string must match AWR_BACKFILL_PAGE_LIMIT");
 
 	// Потолок одновременных файлов. Больше 8 не даём: разбор держит в памяти и сырой файл,
-	// и распакованные тики (~264 Б на кадр, то есть ~5 размеров файла), а это ЖИВОЙ игровой
-	// сервер — арифметика в CYBER.md и в fix-отчёте.
-	constexpr i64 AWR_BACKFILL_MAX_CONCURRENCY = 8;
+	// и распакованные тики (264 Б на кадр против 72 Б в файле, то есть ~4 размера файла),
+	// а это ЖИВОЙ игровой сервер — арифметика в CYBER.md и в fix-отчёте.
+	constexpr i32 AWR_BACKFILL_MAX_CONCURRENCY = 8;
 	// Про кламп предупреждаем один раз на процесс: конвар читается на каждое решение.
 	bool g_concurrencyWarned = false;
 
-	// Сколько файлов разрешено держать в полёте. Читается ЖИВЬЁМ на каждое решение (как
-	// прочие опции сервера — pServerCfgKeyValues), поэтому правка настроек действует без
-	// пересборки и без перезапуска прогона. Дефолт 1 = прежнее поведение.
+	// Сколько файлов разрешено держать в полёте. Читается на каждое решение, поэтому
+	// правится ЖИВЬЁМ по RCON (`kz_awr_backfill_concurrency 4`) — без пересборки и без
+	// перезапуска прогона. Именно конвар, а не опция серверного cfg: `pServerCfgKeyValues`
+	// грузится один раз в KZPlugin::Load, и менять N в ходе прогона через него нельзя.
+	// Дефолт 1 = прежнее поведение.
 	u32 Concurrency()
 	{
-		i64 value = KZOptionService::GetOptionInt("cybAwrBackfillConcurrency", 1);
+		i32 value = kz_awr_backfill_concurrency.Get();
 		if (value < 1)
 		{
 			value = 1;
@@ -130,8 +140,7 @@ namespace
 			if (!g_concurrencyWarned)
 			{
 				g_concurrencyWarned = true;
-				KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] concurrency capped requested=%lld cap=%lld\n", (long long)value,
-							(long long)AWR_BACKFILL_MAX_CONCURRENCY);
+				KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] concurrency capped requested=%d cap=%d\n", value, AWR_BACKFILL_MAX_CONCURRENCY);
 			}
 			value = AWR_BACKFILL_MAX_CONCURRENCY;
 		}
@@ -339,7 +348,14 @@ namespace
 	// (чтобы N слотов заполнились без ожидания тика), а тик работает страховкой.
 	void MaybeFetchNext()
 	{
-		if (g_remaining == 0 || g_backlogBusy || g_inFlight >= Concurrency())
+		// Гейт по СУММЕ слотов и живых рабочих потоков. Слоты гасятся на смене карты
+		// (OnMapChanged), а потоки прошлой эпохи в этот момент живы и держат свои сырые
+		// буферы и распакованные тики: без этого слагаемого сразу после changelevel брались
+		// бы до N новых файлов ПРИ до N ещё считающихся — пик памяти удваивался ровно там,
+		// где сервер и так занят загрузкой карты.
+		const i32 workers = g_workersInFlight.load();
+		const u32 busy = g_inFlight + (u32)(workers > 0 ? workers : 0);
+		if (g_remaining == 0 || g_backlogBusy || busy >= Concurrency())
 		{
 			return;
 		}
@@ -1040,9 +1056,10 @@ void CybAwrBackfill::Run(u32 count, bool dryRun)
 	// повтора (трафик + счётчик на уже виденные файлы) приемлема. АВТОПОДБОР по таймеру
 	// (Tick без Run) множество не чистит: там повтор был бы вечным циклом.
 	g_softFailed.clear();
-	// Слоты и пик — состояние прогона. Полёты прошлого прогона к этому моменту слились
-	// (иначе Run не дошёл бы до сюда: g_remaining они не держат, а взятие нового файла
-	// гейтится счётчиком), но пик обнулить обязаны, иначе строка finished соврёт.
+	// Пик — величина ЭТОГО прогона, поэтому обнуляем. Полёты прошлого прогона при этом
+	// могут быть ещё живы (оператор вправе запустить команду повторно, не дожидаясь конца):
+	// их слоты продолжают считаться, и в пик нового прогона они войдут — это честно, память
+	// сервер держит одну на всех.
 	g_peakInFlight = 0;
 	// Курсор смещения и его защёлка — состояние ОДНОГО прогона.
 	g_backlogOffset = 0;
@@ -1057,6 +1074,40 @@ void CybAwrBackfill::Run(u32 count, bool dryRun)
 	// же секунду, а не через интервал таймера, каким бы он ни был. Дальше файлы гонит
 	// сцепка FinishFileAndChain, тоже без ожидания тика.
 	Tick();
+}
+
+void CybAwrBackfill::Shutdown()
+{
+	// Выгрузка плагина. Рабочие потоки запущены detached и держат указатели в НАШ .so
+	// (data::LoadCutSourceFromMemory, playback::ComputeCutFor, аллокаторы): если .so
+	// выгрузят под живым потоком, это вызов в выгруженный код, то есть падение сервера. При
+	// одном файле в полёте окно было узким, при восьми оно шире ровно в восемь раз — поэтому
+	// закрываем его теперь явно.
+	//
+	// Эпоха вперёд: доехавшие результаты будут отброшены, новые файлы не возьмутся
+	// (g_remaining обнулён). Дальше ЖДЁМ, пока живые потоки допишут свои результаты — ждём
+	// ограниченно: повиснуть на выгрузке навсегда хуже, чем рискнуть, но тогда об этом
+	// останется строка в логе.
+	g_epoch++;
+	g_remaining = 0;
+	g_inFlight = 0;
+	g_takenInFlight.clear();
+	g_backlogBusy = false;
+	constexpr int AWR_SHUTDOWN_WAIT_MS = 3000;
+	int waited = 0;
+	while (g_workersInFlight.load() > 0 && waited < AWR_SHUTDOWN_WAIT_MS)
+	{
+		std::this_thread::sleep_for(std::chrono::milliseconds(5));
+		waited += 5;
+	}
+	if (g_workersInFlight.load() > 0)
+	{
+		KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] shutdown timeout workers=%d waited_ms=%d\n", g_workersInFlight.load(), waited);
+	}
+	else if (waited > 0)
+	{
+		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] shutdown waited_ms=%d\n", waited);
+	}
 }
 
 void CybAwrBackfill::OnMapChanged()
