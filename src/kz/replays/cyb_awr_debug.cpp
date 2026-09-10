@@ -203,10 +203,14 @@ CON_COMMAND_F(kz_awr_debug, "Explain the AWR cut of one replay file. Usage: kz_a
 	{
 		V_snprintf(framesText, sizeof(framesText), "n/a");
 	}
+	// dead_n / tp_collapsed — те же метрики, что в строке бэкфилла: по ним принимают
+	// пересчёт (число вырезов падает при склейке петель разных чекпоинтов).
+	const unsigned collapsed = cut.teleports > (u32)cut.dead.size() ? (unsigned)(cut.teleports - (u32)cut.dead.size()) : 0u;
 	KZ_LOG_INFO(LogChannel::Replays,
-				"[cyb_awr] debug uuid=%s arrivals=%zu teleports=%u max_gap=%s frames=%s ok=%d reason=%s awr_ms=%llu detail=%s\n", uuid.c_str(),
-				trace.size(), cut.teleports, maxGapText, framesText, cut.ok ? 1 : 0, cut.ok ? "ok" : cut.reason, (unsigned long long)cut.awrMs,
-				cut.detail);
+				"[cyb_awr] debug uuid=%s arrivals=%zu teleports=%u dead_n=%zu tp_collapsed=%u max_gap=%s frames=%s ok=%d reason=%s awr_ms=%llu "
+				"detail=%s\n",
+				uuid.c_str(), trace.size(), cut.teleports, cut.dead.size(), collapsed, maxGapText, framesText, cut.ok ? 1 : 0,
+				cut.ok ? "ok" : cut.reason, (unsigned long long)cut.awrMs, cut.detail);
 
 	for (size_t i = 0; i < trace.size(); i++)
 	{
@@ -258,8 +262,8 @@ CON_COMMAND_F(kz_awr_debug, "Explain the AWR cut of one replay file. Usage: kz_a
 	{
 		Msg("[cyb_awr]   window=<none> (no TIMER_START/TIMER_END pair, or the pair has different course ids)\n");
 	}
-	Msg("[cyb_awr]   arrivals=%zu teleports=%u ok=%d reason=%s awr_ms=%llu time_ms=%llu cuts=%zu\n", trace.size(), cut.teleports, cut.ok ? 1 : 0,
-		cut.ok ? "ok" : cut.reason, (unsigned long long)cut.awrMs, (unsigned long long)timeMs, cut.dead.size());
+	Msg("[cyb_awr]   arrivals=%zu teleports=%u ok=%d reason=%s awr_ms=%llu time_ms=%llu cuts=%zu tp_collapsed=%u\n", trace.size(), cut.teleports,
+		cut.ok ? 1 : 0, cut.ok ? "ok" : cut.reason, (unsigned long long)cut.awrMs, (unsigned long long)timeMs, cut.dead.size(), collapsed);
 	// Разрыв записи внутри вырезов: метрика доверия к awr_ms (сколько времени в вырезах не
 	// подтверждено кадрами — prac, пауза, смерть); на сам результат он не влияет, мёртвое
 	// время считается в кадрах. Если

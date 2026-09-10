@@ -38,6 +38,20 @@ static void FillPre(std::vector<Frame> &v)
 	}
 }
 
+// Кадр с тремя координатами: нужен фикстуре по РЕАЛЬНЫМ числам живого файла.
+static Frame F3(uint32_t tick, int32_t cpIndex, int32_t cpCount, int32_t tpCount, float x, float y, float z)
+{
+	Frame f {};
+	f.serverTick = tick;
+	f.cpIndex = cpIndex;
+	f.cpCount = cpCount;
+	f.tpCount = tpCount;
+	f.origin[0] = x;
+	f.origin[1] = y;
+	f.origin[2] = z;
+	return f;
+}
+
 // Кадр с двумя координатами: нужен тестам ветки pre, где «поздний проход рядом» обязан
 // отличаться от точки чекпоинта по второй оси, иначе кандидатов в радиусе слишком много.
 static Frame F2(uint32_t tick, int32_t cpIndex, int32_t cpCount, int32_t tpCount, float x, float y)
@@ -261,13 +275,13 @@ static std::vector<Frame> BuildChainFixture(uint32_t arrivals)
 static void test_many_arrivals_chain_no_double_count()
 {
 	std::vector<Frame> v = BuildChainFixture(200);
-	// Якорь первого прибытия — кадр 0: игрок стоял в точке чекпоинта ещё до его постановки,
-	// и по каноническому правилу это стояние тоже мёртвое (самый ранний кадр пребывания).
-	const uint64_t deadTicks = 601 - 0;
+	// Якорь первого прибытия — кадр ПОСТАНОВКИ чекпоинта (1), а не кадр 0: правило режет
+	// «от постановки чекпоинта до прибытия», поэтому стояние ДО постановки остаётся живым.
+	const uint64_t deadTicks = 601 - 1;
 	const uint64_t deadMs = (uint64_t)((double)deadTicks * TI * 1000.0 + 0.5);
 	CutResult r = ComputeAwrCut(v.data(), v.size(), nullptr, 0, 20000, TI, 0, (uint32_t)v.size() - 1);
 	assert(r.ok && r.teleports == 200);
-	assert(r.dead.size() == 1 && r.dead[0].from == 1 && r.dead[0].to == 601);
+	assert(r.dead.size() == 1 && r.dead[0].from == 2 && r.dead[0].to == 601);
 	assert(r.awrMs == 20000 - deadMs);
 }
 
@@ -276,7 +290,7 @@ static void test_many_arrivals_chain_no_double_count()
 static void test_awr_implausible_guard()
 {
 	std::vector<Frame> v = BuildChainFixture(200);
-	const uint64_t deadMs = (uint64_t)((double)(601 - 0) * TI * 1000.0 + 0.5); // 9391
+	const uint64_t deadMs = (uint64_t)((double)(601 - 1) * TI * 1000.0 + 0.5); // 9375
 	// (1) мёртвого времени насчитали больше, чем длился ран → кламп в ноль запрещён.
 	CutResult zero = ComputeAwrCut(v.data(), v.size(), nullptr, 0, deadMs - 375, TI, 0, (uint32_t)v.size() - 1);
 	assert(!zero.ok && std::strcmp(zero.reason, "awr_implausible") == 0);
@@ -495,8 +509,9 @@ static void test_pre_match_at_run_start_clamped()
 // путь (а) выключен, работает запасной скан. Живое наблюдение на канарейке: без сшивки к
 // прибытию вырезался только забег между двумя ТП, а само прибытие и стояние после него
 // оставались живыми — бот «дёргался» у чекпоинта, а секунды стояния оставались в awrMs.
-// Тест обязан падать, если убрать откат якоря к самому раннему кадру пребывания в радиусе
-// ИЛИ слияние смежных dead-интервалов (схлопывание держится на этой паре).
+// Тест обязан падать, если убрать якорь по кадру ПОСТАНОВКИ, откат участка пребывания ИЛИ
+// слияние смежных вырезов: схлопывание держится на этой связке, а точка назначения у всех
+// трёх прибытий одна, поэтому сшивка не рвётся.
 static void test_repeat_tp_collapses_to_one_dead()
 {
 	std::vector<Frame> v;
@@ -514,19 +529,20 @@ static void test_repeat_tp_collapses_to_one_dead()
 	FillPre(v);
 	CutResult r = ComputeAwrCut(v.data(), v.size(), nullptr, 0, 10000, TI, 0, v.size() - 1);
 	assert(r.ok && r.teleports == 3);
-	// Все три попытки — ОДИН вырез до последнего прибытия (якорь очередного прибытия
-	// упирается в предыдущее, смежные интервалы сливаются). from == 9, а не 11: путь (б)
-	// откатывает якорь к началу пребывания в допуске, и два последних кадра плавного подхода
-	// (9 — 54 u, 8 — 48 u) в него попадают; при валидном cpIndex (путь «а») было бы ровно 11 —
-	// см. test_cp_index_and_scan_agree.
-	assert(r.dead.size() == 1 && r.dead[0].from == 9 && r.dead[0].to == 71);
+	// Все три попытки — ОДИН вырез до последнего прибытия (точка назначения у всех одна,
+	// якорь очередного прибытия упирается в предыдущее, смежные интервалы сливаются).
+	// from == 11: путь (б) берёт якорем кадр ПОСТАНОВКИ чекпоинта (10) внутри участка
+	// пребывания. Раньше здесь было 9 — якорь откатывался к началу пребывания в допуске и
+	// съедал два последних кадра плавного подхода; теперь оба пути дают один ответ (ср.
+	// test_cp_index_and_scan_agree), а подход остаётся живым.
+	assert(r.dead.size() == 1 && r.dead[0].from == 11 && r.dead[0].to == 71);
 }
 
-// Стояние на чекпоинте ПЕРЕД первой попыткой тоже вырезается: каноническое правило —
-// «вырезаем всё от постановки чекпоинта до последнего телепорта на него», и стояние на месте
-// постановки в этот промежуток входит (решение пользователя 10.09). Здесь работает путь (б)
-// (cpIndex = -1), и видна его цена: якорь уходит к началу пребывания в радиусе, поэтому в
-// вырез попадают ещё два кадра подхода (9 — 54 u, 8 — 48 u; кадр 7 в 42 u уже за допуском).
+// Стояние на чекпоинте ПОСЛЕ его постановки и перед первой попыткой вырезается: правило
+// режет всё от постановки чекпоинта до телепорта на него, и стояние на месте постановки в
+// этот промежуток входит. Здесь работает путь (б) (cpIndex = -1), и он берёт якорем кадр
+// ПОСТАНОВКИ внутри участка пребывания, поэтому подход к чекпоинту и сама постановка
+// остаются ЖИВЫМИ — прежде якорь уходил к началу пребывания и съедал два кадра подхода.
 static void test_standing_before_first_tp_is_cut()
 {
 	std::vector<Frame> v;
@@ -539,9 +555,12 @@ static void test_standing_before_first_tp_is_cut()
 	FillPre(v);
 	CutResult r = ComputeAwrCut(v.data(), v.size(), nullptr, 0, 10000, TI, 0, v.size() - 1);
 	assert(r.ok && r.teleports == 1 && r.dead.size() == 1);
-	assert(r.dead[0].from == 9 && r.dead[0].to == 41);
+	// from == 11: вырез идёт от кадра ПОСТАНОВКИ (10), сама постановка и подход к ней живые,
+	// а стояние ПОСЛЕ постановки (11..20) — мёртвое, это и проверяет тест. Раньше было 9:
+	// якорь откатывался к началу пребывания в допуске и съедал два кадра подхода.
+	assert(r.dead[0].from == 11 && r.dead[0].to == 41);
 	auto live = LiveIntervals(r.dead, v.size());
-	assert(live.size() == 2 && live[0].from == 0 && live[0].to == 8);
+	assert(live.size() == 2 && live[0].from == 0 && live[0].to == 10);
 }
 
 // Пути (а) и (б) обязаны давать ОДИН И ТОТ ЖЕ вырез и одно awrMs: иначе один и тот же ран
@@ -600,8 +619,11 @@ static void test_trace_reports_every_arrival()
 	assert(trace[0].frame == 31 && trace[1].frame == 51 && trace[2].frame == 71);
 	// cpIndex невалиден — сшивка только сканом; каждое следующее прибытие сшито к предыдущему.
 	assert(trace[0].method == 'b' && trace[1].method == 'b' && trace[2].method == 'b');
-	assert(trace[0].dest == 8 && trace[1].dest == 31 && trace[2].dest == 51);
-	assert(trace[0].deadFrom == 9 && trace[0].deadTo == 31);
+	// dest первого прибытия — кадр ПОСТАНОВКИ (10), а не начало пребывания в допуске (8):
+	// правило режет от постановки. Второе и третье сшиты к предыдущему прибытию — точка
+	// назначения та же, поэтому цепочка не рвётся.
+	assert(trace[0].dest == 10 && trace[1].dest == 31 && trace[2].dest == 51);
+	assert(trace[0].deadFrom == 11 && trace[0].deadTo == 31);
 	// standTicks мерится тем же допуском, поэтому включает и пару тиков разгона — важно
 	// лишь, что стояние после прибытия видно.
 	assert(trace[0].standTicks >= 4 && trace[2].cpFrame == -1);
@@ -753,6 +775,190 @@ static void test_timer_frames_check()
 	assert(!destFail.ok && std::strcmp(destFail.reason, "dest_not_found") == 0 && destFail.timerFramesChecked);
 }
 
+// --- Смена точки назначения рвёт сшивку ---------------------------------------------------
+// ФИКСТУРА ПО РЕАЛЬНЫМ ЧИСЛАМ живого файла 01a06ca3-0570-7c54-a732-eba372716594
+// (kz_slide_arid main ckz, AWR 42 281 мс, вырез №9). Кадры и позиции — из разбора файла,
+// индексы сдвинуты на -30087, то есть кадр 0 здесь это кадр 30087 в файле:
+//   30087 последний живой   494.9 / 1042.6 / 83.5
+//   30142 постановка cp19   510.4 / 1049.5 / 80.0
+//   30168 постановка cp20   504.3 / 1054.0 / 80.0
+//   30325, 30414, 30571, 30725 — четыре прибытия ТП на точку cp20
+//   30769 cp21 500.5/1055.9, 30783 cp22 498.2/1059.7, 30795 cp23 497.8/1060.3
+//   31006 постановка cp24   497.9 / 1060.2 / 80.0
+//   … прибытия на точку cp24 …  34595 последнее, 34596 первый живой
+// Соседние чекпоинты стоят в 8.9 u друг от друга — это ВНУТРИ AWR_DEST_TOLERANCE (16), и
+// именно поэтому прежний якорь склеивал два кластера в один вырез на 70.4 с.
+static void test_real_file_dest_change_breaks_chain()
+{
+	const float P1x = 504.3f, P1y = 1054.0f;  // точка cp20
+	const float P2x = 497.9f, P2y = 1060.2f;  // точка cp24
+	std::vector<Frame> v;
+	// 0..54: подход от последнего живого кадра к cp19.
+	for (uint32_t i = 0; i <= 54; i++)
+	{
+		const float t = (float)i / 55.0f;
+		v.push_back(F3(i, -1, 18, 0, 494.9f + t * 15.5f, 1042.6f + t * 6.9f, 83.5f - t * 3.5f));
+	}
+	v.push_back(F3(55, -1, 19, 0, 510.4f, 1049.5f, 80.0f));  // 30142: cp19
+	for (uint32_t i = 56; i <= 80; i++)
+	{
+		const float t = (float)(i - 55) / 26.0f;
+		v.push_back(F3(i, -1, 19, 0, 510.4f - t * 6.1f, 1049.5f + t * 4.5f, 80.0f));
+	}
+	v.push_back(F3(81, -1, 20, 0, P1x, P1y, 80.0f));  // 30168: cp20
+	// Четыре попытки на cp20: уход (слайд, далеко) и прибытие в ТУ ЖЕ точку.
+	const uint32_t p1Arrivals[4] = {238, 327, 484, 638}; // 30325, 30414, 30571, 30725
+	// Прибытия на ОДНУ точку разнесены на доли юнита (0.0 / 0.6 / 1.2 / 1.8): в живом файле
+	// они совпали до 0.1 u, но битовое равенство в фикстуре не пинало бы
+	// AWR_SAME_DEST_TOLERANCE снизу вовсе — его можно было бы молча обнулить, и тест не
+	// заметил бы. Разброс меньше допуска (2 u) и больше половины допуска, поэтому мутации
+	// «допуск 0» и «допуск 0.5» ломают именно этот тест.
+	const float p1Jitter[4] = {0.0f, 0.6f, 1.2f, 1.8f};
+	uint32_t frame = 82;
+	int32_t tp = 0;
+	for (uint32_t a = 0; a < 4; a++)
+	{
+		for (; frame < p1Arrivals[a]; frame++)
+		{
+			v.push_back(F3(frame, -1, 20, tp, P1x + 90.0f, P1y + 70.0f, 80.0f));
+		}
+		tp++;
+		v.push_back(F3(frame, -1, 20, tp, P1x + p1Jitter[a], P1y, 80.0f));
+		frame++;
+	}
+	// Переход к новой точке: 0.7 с шага (639..681), потом три постановки и стояние до cp24.
+	for (; frame <= 681; frame++)
+	{
+		const float t = (float)(frame - 639) / 43.0f;
+		v.push_back(F3(frame, -1, 20, tp, P1x - t * 3.8f, P1y + t * 1.9f, 80.0f));
+	}
+	v.push_back(F3(682, -1, 21, tp, 500.5f, 1055.9f, 80.0f));  // 30769: cp21
+	for (frame = 683; frame <= 695; frame++) v.push_back(F3(frame, -1, 21, tp, 500.5f, 1055.9f, 80.0f));
+	v.push_back(F3(696, -1, 22, tp, 498.2f, 1059.7f, 80.0f));  // 30783: cp22
+	for (frame = 697; frame <= 707; frame++) v.push_back(F3(frame, -1, 22, tp, 498.2f, 1059.7f, 80.0f));
+	v.push_back(F3(708, -1, 23, tp, 497.8f, 1060.3f, 80.0f));  // 30795: cp23
+	for (frame = 709; frame <= 918; frame++) v.push_back(F3(frame, -1, 23, tp, 497.8f, 1060.3f, 80.0f));
+	v.push_back(F3(919, -1, 24, tp, P2x, P2y, 80.0f));         // 31006: cp24
+	// Петли на cp24 (в файле их 17, здесь три — правило от их числа не зависит).
+	const uint32_t p2Arrivals[3] = {1500, 3000, 4508}; // последнее = 34595
+	frame = 920;
+	for (uint32_t a = 0; a < 3; a++)
+	{
+		for (; frame < p2Arrivals[a]; frame++)
+		{
+			v.push_back(F3(frame, -1, 24, tp, P2x + 90.0f, P2y + 70.0f, 80.0f));
+		}
+		tp++;
+		v.push_back(F3(frame, -1, 24, tp, P2x, P2y, 80.0f));
+		frame++;
+	}
+	// 34596 и далее — живой хвост до финиша.
+	for (; frame <= 4600; frame++) v.push_back(F3(frame, -1, 24, tp, P2x + 6.0f * (frame - 4509), P2y, 80.0f));
+	FillPre(v);
+
+	const uint32_t runEnd = (uint32_t)v.size() - 1;
+	CutResult r = ComputeAwrCut(v.data(), v.size(), nullptr, 0, 520000, TI, 0, runEnd);
+	assert(r.ok && r.teleports == 7);
+	// ДВА выреза, а не один: точка назначения сменилась.
+	assert(r.dead.size() == 2);
+	// Четыре петли cp20 схлопнулись в один вырез — от постановки cp20 (81) до последнего
+	// прибытия (638).
+	assert(r.dead[0].from == 82 && r.dead[0].to == 638);
+	// Петли cp24 — свой вырез, от постановки cp24 (919) до последнего прибытия (4508).
+	assert(r.dead[1].from == 920 && r.dead[1].to == 4508);
+	// Переход между чекпоинтами ЖИВОЙ, и постановки cp21/22/23 видны.
+	auto live = LiveIntervals(r.dead, v.size());
+	assert(live.size() == 3);
+	assert(live[0].from == 0 && live[0].to == 81);
+	assert(live[1].from == 639 && live[1].to == 919);
+	assert(live[2].from == 4509 && live[2].to == runEnd);
+	// Сумма живых кадров выросла ровно на длину перехода: прежнее правило давало ОДИН вырез
+	// с 82 по 4508 (в файле — 30088..34595), то есть переход 639..919 был мёртвым.
+	const uint64_t liveNow = (uint64_t)(81 - 0 + 1) + (919 - 639 + 1) + (runEnd - 4509 + 1);
+	const uint64_t liveBefore = (uint64_t)(81 - 0 + 1) + (runEnd - 4509 + 1);
+	assert(liveNow - liveBefore == 919 - 639 + 1);
+}
+
+// Тот же разрыв, но БЕЗ постановки чекпоинта у второй точки (модель `!undo` и сдвига
+// индексов): якорь второго кластера обязан упереться в прибытие первого, а не пройти сквозь
+// него. Точки в 8.9 u друг от друга — внутри AWR_DEST_TOLERANCE, то есть прежний якорь
+// склеил бы кластеры в один вырез.
+static void test_dest_change_breaks_chain_without_placement()
+{
+	std::vector<Frame> v;
+	for (uint32_t i = 0; i <= 9; i++) v.push_back(F3(i, -1, 0, 0, 500.0f + 6.0f * i, 1000.0f, 80.0f));
+	v.push_back(F3(10, -1, 1, 0, 560.0f, 1000.0f, 80.0f)); // постановка первой точки
+	for (uint32_t i = 11; i <= 20; i++) v.push_back(F3(i, -1, 1, 0, 560.0f + 10.0f * (i - 10), 1060.0f, 80.0f));
+	v.push_back(F3(21, -1, 1, 1, 560.0f, 1000.0f, 80.0f)); // прибытие на первую точку
+	// Игрок сдвинулся на 8.9 u и оказался на второй точке (чекпоинт не ставился).
+	for (uint32_t i = 22; i <= 25; i++) v.push_back(F3(i, -1, 1, 1, 566.4f, 1006.2f, 80.0f));
+	for (uint32_t i = 26; i <= 40; i++) v.push_back(F3(i, -1, 1, 1, 566.4f + 10.0f * (i - 25), 1106.0f, 80.0f));
+	v.push_back(F3(41, -1, 1, 2, 566.4f, 1006.2f, 80.0f)); // прибытие на ВТОРУЮ точку
+	for (uint32_t i = 42; i < 60; i++) v.push_back(F3(i, -1, 1, 2, 566.4f + 10.0f * (i - 41), 1006.2f, 80.0f));
+	FillPre(v);
+	CutResult r = ComputeAwrCut(v.data(), v.size(), nullptr, 0, 10000, TI, 0, v.size() - 1);
+	assert(r.ok && r.teleports == 2);
+	// ДВА выреза, а не один: якорь второго кластера упёрся в прибытие первого (кадр 21) и
+	// дальше не пошёл, хотя 8.9 u — это внутри AWR_DEST_TOLERANCE. Прежнее правило склеивало
+	// оба кластера в один вырез 11..41.
+	assert(r.dead.size() == 2);
+	assert(r.dead[0].from == 11 && r.dead[0].to == 21);
+	assert(r.dead[1].from == 23 && r.dead[1].to == 41);
+	// Между вырезами есть живой кадр 22 — тот самый момент, когда игрок оказался на новой
+	// точке. Постановки чекпоинта здесь нет, поэтому живым остаётся один кадр, а не весь
+	// переход: путь (а) знает кадр постановки точно, путь (б) — только начало пребывания.
+	auto live = LiveIntervals(r.dead, v.size());
+	assert(live.size() == 3 && live[1].from == 22 && live[1].to == 22);
+}
+
+// Стык КАДР В КАДР при РАЗНОЙ точке назначения: вырез второго кластера начинается ровно на
+// следующем кадре после прибытия первого (живых кадров между ними нет), и слияние обязано
+// это НЕ сшить. На awrMs не влияет — кадры те же, — но влияет на число вырезов, а по нему
+// принимают пересчёт и читают трассу. Фикстура ревью: реальный код даёт [11,21]+[22,41],
+// мутант «сливать стык без сверки точки» — [11,41].
+static void test_adjacent_cuts_with_different_dest_not_merged()
+{
+	std::vector<Frame> v;
+	for (uint32_t i = 0; i <= 9; i++) v.push_back(F3(i, -1, 0, 0, 500.0f + 6.0f * i, 1000.0f, 80.0f));
+	v.push_back(F3(10, -1, 1, 0, 560.0f, 1000.0f, 80.0f)); // постановка точки A
+	for (uint32_t i = 11; i <= 20; i++) v.push_back(F3(i, -1, 1, 0, 560.0f + 30.0f * (i - 10), 1200.0f, 80.0f));
+	v.push_back(F3(21, -1, 1, 1, 560.0f, 1000.0f, 80.0f)); // прибытие на A
+	// Сразу уходим далеко: скан второго прибытия не найдёт кадра в допуске от точки B
+	// раньше, чем дойдёт до кадра 21 (точки A и B в 8.9 u — внутри AWR_DEST_TOLERANCE).
+	for (uint32_t i = 22; i <= 40; i++) v.push_back(F3(i, -1, 1, 1, 560.0f + 30.0f * (i - 21), 1400.0f, 80.0f));
+	v.push_back(F3(41, -1, 1, 2, 566.4f, 1006.2f, 80.0f)); // прибытие на B (не чекпоинт: undo)
+	for (uint32_t i = 42; i < 60; i++) v.push_back(F3(i, -1, 1, 2, 566.4f + 30.0f * (i - 41), 1006.2f, 80.0f));
+	FillPre(v);
+	CutResult r = ComputeAwrCut(v.data(), v.size(), nullptr, 0, 10000, TI, 0, v.size() - 1);
+	assert(r.ok && r.teleports == 2);
+	assert(r.dead.size() == 2);
+	assert(r.dead[0].from == 11 && r.dead[0].to == 21);
+	assert(r.dead[1].from == 22 && r.dead[1].to == 41);
+	// Именно стык: между вырезами нет живых кадров, и всё равно это ДВА выреза.
+	assert(r.dead[0].to + 1 == r.dead[1].from);
+}
+
+// `!undo` по-прежнему снимает и телепорт, и его вырез: игрок возвращается туда, откуда
+// телепортировался, и живой маршрут продолжается как будто телепорта не было.
+static void test_undo_cancels_teleport_and_its_cut()
+{
+	std::vector<Frame> v;
+	for (uint32_t i = 0; i <= 20; i++) v.push_back(FC(i, 0, i >= 10 ? 1 : 0, 0, (float)i));
+	v.push_back(FC(21, 0, 1, 1, 10.0f));                                     // ТП на чекпоинт
+	for (uint32_t i = 22; i <= 22; i++) v.push_back(FC(i, 0, 1, 1, 10.0f));  // стоит на нём
+	v.push_back(FC(23, 0, 1, 2, 20.0f));                                     // !undo — назад в кадр 20
+	for (uint32_t i = 24; i < 40; i++) v.push_back(FC(i, 0, 1, 2, 20.0f + (i - 23)));
+	FillPre(v);
+	CutResult r = ComputeAwrCut(v.data(), v.size(), nullptr, 0, 10000, TI, 0, v.size() - 1);
+	assert(r.ok && r.teleports == 2 && r.dead.size() == 1);
+	// Вырезано ровно то, что создал телепорт: кадры 21..23. Точка undo — НЕ точка чекпоинта,
+	// поэтому цепочка не сшивается с вырезом чекпоинта, а маршрут до кадра 20 и после 23
+	// остаётся живым.
+	assert(r.dead[0].from == 21 && r.dead[0].to == 23);
+	auto live = LiveIntervals(r.dead, v.size());
+	assert(live.size() == 2 && live[0].from == 0 && live[0].to == 20 && live[1].from == 24);
+}
+
 int main()
 {
 	test_no_teleports(); test_single_tp(); test_repeat_tp_same_cp(); test_prevcp_nextcp_keeps_middle();
@@ -767,6 +973,8 @@ int main()
 	test_pre_branch_beats_later_pass(); test_pre_match_at_run_start_clamped();
 	test_repeat_tp_collapses_to_one_dead(); test_standing_before_first_tp_is_cut(); test_cp_index_and_scan_agree();
 	test_trace_reports_every_arrival();
+	test_real_file_dest_change_breaks_chain(); test_dest_change_breaks_chain_without_placement();
+	test_adjacent_cuts_with_different_dest_not_merged(); test_undo_cancels_teleport_and_its_cut();
 	test_dead_frames_up_to(); test_seek_live_frames_identity(); test_seek_scale_matches_cut_scale();
 	test_timer_frames_check();
 	std::puts("awr_cut: all tests passed");

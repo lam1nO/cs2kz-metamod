@@ -26,7 +26,7 @@
 // нагрузкой по RCON, не перезапуская прогон. Потолок и обоснование —
 // AWR_BACKFILL_MAX_CONCURRENCY.
 CConVar<i32> kz_awr_backfill_concurrency("kz_awr_backfill_concurrency", FCVAR_NONE,
-										 "How many AWR backfill files to process concurrently (1-8; memory scales with it)", 1);
+										 "How many AWR backfill files to process concurrently (1-24; above 8 only for selective/drained runs)", 1);
 
 namespace
 {
@@ -153,21 +153,28 @@ namespace
 
 	static_assert(ParseDecimal(AWR_BACKFILL_PAGE_LIMIT_STR) == AWR_BACKFILL_PAGE_LIMIT, "limit query string must match AWR_BACKFILL_PAGE_LIMIT");
 
-	// Потолок одновременных файлов. Разбор держит на слот ТРИ буфера сразу: сырой файл,
-	// дельта-буфер распаковки и вектор тиков. Три РАЗНЫЕ величины (двухчасовой ран,
-	// ~460 000 кадров, файл 32 МБ):
-	//   - типичный пик ~209 МБ (32 + 121 тики + ~56 дельта-буфер по оценке самого форка,
-	//     `reserve(size * 120)` в compression.cpp);
-	//   - худший ЛЕГИТИМНЫЙ ~275 МБ (дельта-буфер вырастает до 264 Б на кадр, если меняются
-	//     все поля каждый кадр);
-	//   - разрешённый ПРЕ-ВАЛИДАЦИЕЙ ~550 МБ (256 МиБ на секцию + миллион кадров по 264 Б +
-	//     32 МБ сырых): 32-мегабайтный zstd законно разжимается в 256 МиБ.
-	// При N=8 это 1.7 / 2.2 / 4.4 ГБ соответственно. Восьмёрка держится НЕ на объёме, а на
-	// том, что файлы — вывод нашего же рекордера (лимит аплоада 32 МБ, кадры пишет он сам),
-	// а не то, что прислал игрок; на ноде с игроками рекомендуется 4 (см. CYBER.md).
-	constexpr i32 AWR_BACKFILL_MAX_CONCURRENCY = 8;
-	// Про кламп предупреждаем один раз на процесс: конвар читается на каждое решение.
+	// Потолок одновременных файлов — 24, и он держится на ЗАМЕРЕ, а не на модели. Живой
+	// прогон на канарейке cyb.185 (шесть слотов): темп 394 файла/мин против 61 при одном
+	// слоте (масштабирование линейное, ~61 файл/мин на слот), память контейнера 1.353 ГиБ
+	// против 983 МиБ у спокойного соседа — то есть ~370 МиБ за шесть слотов, около 60 МиБ на
+	// слот, потому что медианный файл ~830 КБ. CPU 9.15 %. При 24 слотах типичный расход
+	// порядка 1.5 ГБ, худший случай (двухчасовой гринд во ВСЕХ слотах) 24 × 275 МБ ≈ 6.6 ГБ
+	// против 43 ГБ свободных на ноде.
+	//
+	// Замер и худший случай — РАЗНЫЕ величины, путать их нельзя: 60 МиБ это цена слота на
+	// нынешнем распределении файлов, 275 МБ — предел, разрешённый форматом (см. CYBER.md,
+	// «Память разбора»). Потолок по-прежнему держится и на том, что файлы — вывод НАШЕГО
+	// рекордера (лимит аплоада 32 МБ, кадры пишет он сам), а не присланное игроком.
+	constexpr i32 AWR_BACKFILL_MAX_CONCURRENCY = 24;
+	// Выше этого значения прогон считается ВЫБОРОЧНЫМ или разгрузочным: на сервере с игроками
+	// столько слотов держать не следует (память и потоки разбора конкурируют с игровым
+	// потоком). Не запрет, а отдельная строка в логе — это решение оператора.
+	constexpr i32 AWR_BACKFILL_ADVISORY_CONCURRENCY = 8;
+	// Про кламп предупреждаем один раз НА ПРОГОН (защёлки сбрасываются в Run): конвар
+	// читается на каждое решение, и без защёлки строка шла бы на каждый файл.
 	bool g_concurrencyWarned = false;
+	// Про «выше 8» — тоже один раз на прогон и отдельно от клампа: это разные события.
+	bool g_concurrencyAdvised = false;
 
 	// Сколько файлов разрешено держать в полёте. Читается на каждое решение, поэтому
 	// правится ЖИВЬЁМ по RCON (`kz_awr_backfill_concurrency 4`) — без пересборки и без
@@ -189,6 +196,13 @@ namespace
 				KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] concurrency capped requested=%d cap=%d\n", value, AWR_BACKFILL_MAX_CONCURRENCY);
 			}
 			value = AWR_BACKFILL_MAX_CONCURRENCY;
+		}
+		if (value > AWR_BACKFILL_ADVISORY_CONCURRENCY && !g_concurrencyAdvised)
+		{
+			g_concurrencyAdvised = true;
+			KZ_LOG_WARN(LogChannel::Replays,
+						"[cyb_awr] concurrency high reason=selective_or_drained_run value=%d advisory=%d (not for a server with players)\n", value,
+						AWR_BACKFILL_ADVISORY_CONCURRENCY);
 		}
 		return (u32)value;
 	}
@@ -238,6 +252,12 @@ namespace
 		u32 teleports = 0;
 		// Число ТП из шапки реплея (RunReplayData::num_teleports); -1 = поля нет.
 		i32 headerTeleports = -1;
+		// Число ВЫРЕЗОВ и число схлопнутых прибытий — ВТОРАЯ метрика приёмки пересчёта.
+		// Разница времён её не заменяет: склейка петель РАЗНЫХ чекпоинтов уменьшает число
+		// вырезов (и даёт секунды разницы), а безобидный сдвиг курсора в полосе допуска —
+		// увеличивает (и даёт десятки миллисекунд). До этой правки число вырезов печаталось
+		// только в detail= НА ОТКАЗЕ, то есть сравнить успешные прогоны было нечем.
+		u32 deadCuts = 0;
 		// Самый большой разрыв записи внутри вырезов и его кадр — диагностика доверия
 		// (awr::CutResult::maxRecordGapTicks). Печатается на КАЖДОМ файле, где метрика
 		// вообще посчитана (в том числе на успехе): распределение разрывов надо видеть до
@@ -932,6 +952,7 @@ namespace
 				res.detail = cut.detail;
 				res.awrMs = cut.awrMs;
 				res.teleports = cut.teleports;
+				res.deadCuts = (u32)cut.dead.size();
 				res.timerFramesChecked = cut.timerFramesChecked;
 				res.timerFramesRecorded = cut.timerFramesRecorded;
 				res.timerFramesExpected = cut.timerFramesExpected;
@@ -1008,10 +1029,15 @@ namespace
 		{
 			V_snprintf(framesText, sizeof(framesText), "n/a");
 		}
+		// tp_collapsed — прибытия, не получившие своего выреза: они попали внутрь чужого
+		// (повторные попытки одного чекпоинта). deadCuts <= teleports по построению (каждый
+		// вырез кончается на прибытии), поэтому вычитание безопасно.
+		const unsigned collapsed = res.teleports > res.deadCuts ? (unsigned)(res.teleports - res.deadCuts) : 0u;
 		KZ_LOG_INFO(LogChannel::Replays,
-					"[cyb_awr] backfill uuid=%s time_ms=%llu awr_ms=%llu tps=%u max_gap=%s frames=%s ok=%d reason=%s dry=%d%s\n",
-					res.uuid.c_str(), (unsigned long long)res.timeMs, (unsigned long long)res.awrMs, (unsigned)res.teleports, maxGapText,
-					framesText, res.ok ? 1 : 0, res.reason, res.dryRun ? 1 : 0, detailSuffix);
+					"[cyb_awr] backfill uuid=%s time_ms=%llu awr_ms=%llu tps=%u dead_n=%u tp_collapsed=%u max_gap=%s frames=%s ok=%d reason=%s "
+					"dry=%d%s\n",
+					res.uuid.c_str(), (unsigned long long)res.timeMs, (unsigned long long)res.awrMs, (unsigned)res.teleports,
+					(unsigned)res.deadCuts, collapsed, maxGapText, framesText, res.ok ? 1 : 0, res.reason, res.dryRun ? 1 : 0, detailSuffix);
 
 		// Сверка кадров с таймером — независимо от ok: она про сам файл, а не про разрез, и
 		// на отказе тоже говорит, можно ли верить его числам. Порога-отказа тут нет
@@ -1169,6 +1195,10 @@ void CybAwrBackfill::Run(u32 count, bool dryRun)
 	// Курсор смещения и его защёлка — состояние ОДНОГО прогона.
 	g_backlogOffset = 0;
 	g_offsetCapWarned = false;
+	// Защёлки предупреждений о параллельности — на прогон: оператор вправе увидеть строку
+	// «слотов больше 8» в каждом прогоне, который он так запускает.
+	g_concurrencyWarned = false;
+	g_concurrencyAdvised = false;
 	// Этот прогон — явный: только ему разрешено смещение (автоподбор его сбрасывает сам).
 	g_explicitRun = true;
 	// Насос может быть не запущен (cybAwrBackfillIntervalSec 0) — команда обязана работать.
