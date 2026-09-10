@@ -109,8 +109,9 @@ static_function void LeadCpIndexChanged(i32 index)
 	if (index != -1 && !LeadCpIndexUsable(index))
 	{
 		KZ_LOG_WARN(LogChannel::Replays, "[lead] cp_index_rejected value=%i reason=%s allowed=0..63_except_1_and_16 note=-1_disables\n", index,
-					index == 255 ? "sentinel_free_slot"
-								 : (index >= KZ_LEAD_CP_COUNT ? "out_of_range" : (index == 1 ? "data_cp_taken" : "tint_cp_taken")));
+					index < 0 ? "negative"
+							  : (index == 255 ? "sentinel_free_slot"
+											  : (index >= KZ_LEAD_CP_COUNT ? "out_of_range" : (index == 1 ? "data_cp_taken" : "tint_cp_taken"))));
 	}
 	LeadLookChanged();
 }
@@ -551,13 +552,17 @@ void KZLeadService::RefreshSegments(const char *reason)
 	// Разброс по слоту — та же идиома, что у armCooldown в ResetState: колбэк конвара зовёт
 	// этот метод сразу ВСЕМ, и без разброса при четырёх включённых лучах в ОДИН тик пришлось
 	// бы до 512 снятий и столько же созданий сущностей. Слот 0 перестроится на ближайшем
-	// тике, слот 31 — через 31 (≤0.5 с, штатный шаг пересчёта окна), слоты 32+ делят фазу с
-	// первыми — на глаз это незаметно, а пик размазан.
+	// тике, слот 31 — через 32 (≤0.5 с, штатный шаг пересчёта окна), слоты 32+ делят фазу с
+	// первыми — на глаз это незаметно, а пик размазан. Минус единица обязательна: проход идёт
+	// при `++ticksSinceUpdate >= KZ_LEAD_UPDATE_TICKS`, поэтому без неё слоты 0 и 1 попали бы
+	// в один тик, а один тик фазы остался бы пустым.
 	const i32 slot = this->player->GetPlayerSlot().Get();
-	this->ticksSinceUpdate = (u32)(KZ_LEAD_UPDATE_TICKS - (slot % KZ_LEAD_UPDATE_TICKS));
+	this->ticksSinceUpdate = (u32)(KZ_LEAD_UPDATE_TICKS - 1 - (slot % KZ_LEAD_UPDATE_TICKS));
 	// Побочный эффект обнуления окна: до своего прохода прямой скан ближайшей вершины
-	// (UpdateNearest при включённом луче) ограничен ею же, то есть один проход ближайшая может
-	// не сдвинуться. Само исправляется на том же проходе, который строит новое окно.
+	// (UpdateNearest при включённом луче) ограничен ею же, то есть ближайшая может не сдвинуться.
+	// Догоняет СЛЕДУЮЩИЙ проход (+32 тика): на том, который строит новое окно, UpdateNearest
+	// ещё видит windowTo == 0. Практически незаметно — отход больше 300 юнитов даёт полный
+	// ресинк тем же проходом, и мусора в проценте не возникает.
 }
 
 void KZLeadService::RefreshAllSegments(const char *reason)
