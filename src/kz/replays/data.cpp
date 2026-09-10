@@ -240,11 +240,25 @@ namespace KZ::replaysystem::data
 		return true;
 	}
 
-	// Максимум на РАСПАКОВАННУЮ секцию и на массив её элементов — 1 ГиБ. Ориентир: самый
-	// длинный мыслимый ран (2 часа) это ~460 800 кадров при sizeof(TickData) ~300 Б, то есть
-	// ~135 МБ сырых тиков, а лимит файла на аплоаде — 32 МБ сжатых. 1 ГиБ даёт к этому
-	// семикратный запас и при этом делает невозможными абсурдные аллокации от мусора в шапке.
-	static constexpr u64 KZ_CUT_MAX_SECTION_BYTES = 1024ull * 1024ull * 1024ull;
+	// Максимум на РАСПАКОВАННЫЕ БАЙТЫ одной секции — 256 МиБ. Ориентир: самый длинный
+	// мыслимый ран (2 часа) это ~460 800 кадров при sizeof(TickData) ~300 Б, то есть ~135 МБ
+	// сырых тиков, а лимит файла на аплоаде — 32 МБ сжатых. 256 МиБ — примерно двукратный
+	// запас к этому потолку, и он же держит суммарный запрос памяти: у тиков в пике живут ОБА
+	// буфера сразу (`new char[uncompressedSize]` в compression.cpp:417 плюс
+	// `resize(elementCount)` на :489), то есть лимит фактически удваивается.
+	static constexpr u64 KZ_CUT_MAX_SECTION_BYTES = 256ull * 1024ull * 1024ull;
+
+	// Максимум на ЧИСЛО КАДРОВ (elementCount секций тиков и сабтиков) — 1 000 000, это ~4.3
+	// часа при 64 тик/с, двукратный запас к самому длинному мыслимому рану.
+	//
+	// Почему отдельной границей, а не теми же 256 МиБ: массив сабтиков стоит 868 Б на кадр
+	// (`MAX_SUBTICK_MOVES = 36`, замерено), и у ЛЕГИТИМНОГО двухчасового рана это 381 МБ —
+	// байтовый потолок 256 МиБ отверг бы такой файл начиная примерно с 84 минут. Отказ здесь
+	// необратим: воркер бэкфилла отправляет на него `awrMs: null`, и файл больше никогда не
+	// вернётся в бэклог. Поэтому длину рана ограничиваем длиной рана, а не байтами; смысл
+	// проверки — отсечь абсурд из мусорной шапки (там elementCount доходит до 4 млрд, то есть
+	// до терабайтов запроса), а не выгадать десятки мегабайт на легальных файлах.
+	static constexpr u64 KZ_CUT_MAX_TICKS = 1000000ull;
 
 	// Подглядеть шапку секции, НЕ сдвигая курсор, и проверить общие границы: шапка целиком
 	// лежит в буфере, сжатые байты не выходят за его конец, распакованный размер в пределах
@@ -298,8 +312,8 @@ namespace KZ::replaysystem::data
 
 		// Секция тиков. compression.cpp:417 делает `new char[uncompressedSize]` (границу
 		// держит PeekSectionHeader), compression.cpp:489 — `resize(elementCount)` уже
-		// массивом TickData, поэтому ограничиваем И число элементов.
-		if (!PeekSectionHeader(probe, end, tickHeader) || (u64)tickHeader.elementCount * sizeof(TickData) > KZ_CUT_MAX_SECTION_BYTES)
+		// массивом TickData, поэтому ограничиваем И число кадров (KZ_CUT_MAX_TICKS).
+		if (!PeekSectionHeader(probe, end, tickHeader) || (u64)tickHeader.elementCount > KZ_CUT_MAX_TICKS)
 		{
 			return out;
 		}
@@ -307,19 +321,22 @@ namespace KZ::replaysystem::data
 
 		// Секция сабтиков идёт сразу за тиками (её читает та же ReadTickDataCompressed).
 		// compression.cpp:458 делает `resize(elementCount)`, а следом Decompress пишет в этот
-		// же буфер `uncompressedSize` байт — то есть для v4+ размеры обязаны совпадать ТОЧНО,
-		// иначе распаковка вылезет за пределы вектора (это не только аллокация, это запись за
-		// границу). Для v<4 раскладка другая (`oldEntrySize = uncompressedSize / elementCount`):
-		// там нужна делимость и НЕнулевой elementCount — на нуле апстримный читатель делит на
+		// же буфер до `uncompressedSize` байт. Проверяем ВЕРХНЮЮ ГРАНИЦУ, а не равенство:
+		// `uncompressedSize` МЕНЬШЕ ёмкости вектора — законная ситуация (секции не
+		// версионируются отдельно от файла, и zstd просто запишет меньше байт, чем ёмкость,
+		// записи за границу тут нет), а вот БОЛЬШЕ — уже перезапись за концом вектора.
+		// Равенство отвергало бы легитимные файлы, а отказ необратим: воркер бэкфилла на него
+		// отправляет `awrMs: null`, и файл больше никогда не вернётся в бэклог.
+		// Для v<4 раскладка другая (`oldEntrySize = uncompressedSize / elementCount`): там
+		// нужна делимость и НЕнулевой elementCount — на нуле апстримный читатель делит на
 		// ноль. Отказ от древнего файла без сабтиков дешевле, чем деление на ноль.
-		if (!PeekSectionHeader(probe, end, subtickHeader)
-			|| (u64)subtickHeader.elementCount * sizeof(SubtickData) > KZ_CUT_MAX_SECTION_BYTES)
+		if (!PeekSectionHeader(probe, end, subtickHeader) || (u64)subtickHeader.elementCount > KZ_CUT_MAX_TICKS)
 		{
 			return out;
 		}
 		if (out.header.version() >= 4)
 		{
-			if ((u64)subtickHeader.elementCount * sizeof(SubtickData) != (u64)subtickHeader.uncompressedSize)
+			if ((u64)subtickHeader.uncompressedSize > (u64)subtickHeader.elementCount * sizeof(SubtickData))
 			{
 				return out;
 			}
@@ -345,11 +362,17 @@ namespace KZ::replaysystem::data
 		}
 
 		// Секция событий: compression.cpp:716 делает `resize(elementCount)` массивом RpEvent,
-		// а Decompress следом пишет туда `uncompressedSize` байт — размеры обязаны совпадать
-		// точно (писатель WriteEventsCompressed так их и заполняет). Проверка одновременно
-		// ограничивает аллокацию и закрывает запись за границу вектора.
+		// а Decompress следом пишет туда до `uncompressedSize` байт. Как и у сабтиков —
+		// ВЕРХНЯЯ ГРАНИЦА, не равенство: меньший `uncompressedSize` законен, больший означает
+		// запись за концом вектора.
+		//
+		// Число элементов здесь ограничиваем БАЙТОВЫМ потолком (а не KZ_CUT_MAX_TICKS, как у
+		// кадров): событий в ране единицы тысяч (сплиты, ТП, смены стиля), и 256 МиБ — это
+		// миллионы записей, то есть на легальный файл граница не влияет вообще. Без неё
+		// мусорный elementCount (до 4 млрд) ушёл бы прямо в resize.
 		if (!PeekSectionHeader(cursor, end, eventHeader)
-			|| (u64)eventHeader.elementCount * sizeof(RpEvent) != (u64)eventHeader.uncompressedSize)
+			|| (u64)eventHeader.elementCount * sizeof(RpEvent) > KZ_CUT_MAX_SECTION_BYTES
+			|| (u64)eventHeader.uncompressedSize > (u64)eventHeader.elementCount * sizeof(RpEvent))
 		{
 			return out;
 		}
