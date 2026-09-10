@@ -75,11 +75,13 @@ namespace KZ::replaysystem::awr
 		// распределение разрывов было видно ДО того, как оно испортит результат.
 		//
 		// maxUncoveredGapMeasured — дошли ли до подсчёта вообще. На РАННИХ отказах (empty,
-		// no_run_window, counter_mismatch, dest_not_found, awr_interval_overflow) цикл по
+		// no_run_window, counter_mismatch, dest_not_found) цикл по
 		// вырезам не выполнялся, и ноль в метрике означал бы «разрыва нет» — читателю
 		// распределения это соврало бы. Пустой список вырезов (телепортов не было) — НЕ этот
 		// случай: там подсчёт прошёл, а разрывов внутри вырезов не бывает по построению,
 		// поэтому measured=true и ноль правдив.
+		// У awr_interval_overflow подсчёт УЖЕ прошёл (переполнение видно только после него),
+		// поэтому там печатается настоящее число, а не n/a.
 		bool maxUncoveredGapMeasured = false;
 		uint64_t maxUncoveredGapTicks = 0;
 		uint32_t maxUncoveredGapFrame = 0;

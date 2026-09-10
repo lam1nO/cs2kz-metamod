@@ -94,7 +94,7 @@ namespace
 		// (awr::CutResult::maxUncoveredGapTicks). Печатается на КАЖДОМ файле, где метрика
 		// вообще посчитана (в том числе на успехе): распределение разрывов надо видеть до
 		// того, как оно испортит awr_ms. На ранних отказах (parse_failed, not_a_run, empty,
-		// no_run_window, dest_not_found, counter_mismatch, awr_interval_overflow) подсчёта не
+		// no_run_window, dest_not_found, counter_mismatch) подсчёта не
 		// было — печатаем max_gap=n/a, а не 0@0: ноль читался бы как «разрыва нет».
 		bool maxGapMeasured = false;
 		u64 maxGapTicks = 0;
