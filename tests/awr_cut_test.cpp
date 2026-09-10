@@ -187,6 +187,31 @@ static void test_record_gap_without_pause_refused()
 	assert(std::strstr(r.detail, "max_gap=20001@21") && std::strstr(r.detail, "gap_s="));
 }
 
+// Флаг «метрика разрывов посчитана»: на РАННЕМ отказе её печатать нельзя (ноль читался бы
+// как «разрыва нет»), а на успехе без телепортов ноль правдив.
+static void test_max_gap_measured_flag()
+{
+	// (1) окна нет — до подсчёта не дошли.
+	std::vector<Frame> plain;
+	for (uint32_t i = 0; i < 20; i++) plain.push_back(FC(i, 0, 0, 0, (float)i));
+	FillPre(plain);
+	CutResult noWindow = ComputeAwrCut(plain.data(), plain.size(), nullptr, 0, 10000, TI, 0, 0);
+	assert(!noWindow.ok && !noWindow.maxUncoveredGapMeasured && noWindow.maxUncoveredGapTicks == 0);
+
+	// (2) счётчик ТП прыгнул на 2 — тоже ранний отказ.
+	std::vector<Frame> bad;
+	for (uint32_t i = 0; i <= 20; i++) bad.push_back(FC(i, 0, i >= 10 ? 1 : 0, 0, (float)i));
+	bad.push_back(FC(21, 0, 1, 2, 10.0f));
+	for (uint32_t i = 22; i < 30; i++) bad.push_back(FC(i, 0, 1, 2, 10.0f + (i - 21)));
+	FillPre(bad);
+	CutResult mismatch = ComputeAwrCut(bad.data(), bad.size(), nullptr, 0, 10000, TI, 0, bad.size() - 1);
+	assert(!mismatch.ok && !mismatch.maxUncoveredGapMeasured);
+
+	// (3) успех без телепортов: вырезов нет, значит и разрывов внутри них — ноль ПРАВДИВ.
+	CutResult ok = ComputeAwrCut(plain.data(), plain.size(), nullptr, 0, 5000, TI, 0, plain.size() - 1);
+	assert(ok.ok && ok.maxUncoveredGapMeasured && ok.maxUncoveredGapTicks == 0);
+}
+
 // Разрыв короче порога (хитч сервера) отказом НЕ является, но в метрике виден.
 static void test_small_record_gap_allowed()
 {
@@ -649,7 +674,8 @@ int main()
 	test_no_teleports(); test_single_tp(); test_repeat_tp_same_cp(); test_prevcp_nextcp_keeps_middle();
 	test_undo(); test_pause_overlap_not_double_counted(); test_dest_not_found();
 	test_prac_gap_pause_subtracted_by_ticks(); test_many_arrivals_chain_no_double_count(); test_awr_implausible_guard();
-	test_record_gap_without_pause_refused(); test_small_record_gap_allowed(); test_overlapping_pauses_not_double_subtracted();
+	test_record_gap_without_pause_refused(); test_max_gap_measured_flag(); test_small_record_gap_allowed();
+	test_overlapping_pauses_not_double_subtracted();
 	test_tail_teleport_after_run_end(); test_prerecord_teleport_before_run_start(); test_counter_mismatch();
 	test_no_run_window();
 	test_cp_set_while_running(); test_cp_matches_pre_side(); test_undo_mid_tick();

@@ -91,8 +91,12 @@ namespace
 		// Число ТП из шапки реплея (RunReplayData::num_teleports); -1 = поля нет.
 		i32 headerTeleports = -1;
 		// Самый большой разрыв записи внутри вырезов, не покрытый паузой, и его кадр
-		// (awr::CutResult::maxUncoveredGapTicks). Печатается ВСЕГДА, в том числе на успехе:
-		// распределение разрывов надо видеть до того, как оно испортит awr_ms.
+		// (awr::CutResult::maxUncoveredGapTicks). Печатается на КАЖДОМ файле, где метрика
+		// вообще посчитана (в том числе на успехе): распределение разрывов надо видеть до
+		// того, как оно испортит awr_ms. На ранних отказах (parse_failed, not_a_run, empty,
+		// no_run_window, dest_not_found, counter_mismatch, awr_interval_overflow) подсчёта не
+		// было — печатаем max_gap=n/a, а не 0@0: ноль читался бы как «разрыва нет».
+		bool maxGapMeasured = false;
 		u64 maxGapTicks = 0;
 		u32 maxGapFrame = 0;
 		// Разбор отказа из awr::CutResult::detail (пусто при ok). Копия, а не указатель:
@@ -555,6 +559,7 @@ namespace
 				res.detail = cut.detail;
 				res.awrMs = cut.awrMs;
 				res.teleports = cut.teleports;
+				res.maxGapMeasured = cut.maxUncoveredGapMeasured;
 				res.maxGapTicks = cut.maxUncoveredGapTicks;
 				res.maxGapFrame = cut.maxUncoveredGapFrame;
 				PublishResult(res);
@@ -606,9 +611,18 @@ namespace
 		{
 			V_snprintf(detailSuffix, sizeof(detailSuffix), " detail=%s", res.detail.c_str());
 		}
-		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill uuid=%s time_ms=%llu awr_ms=%llu tps=%u max_gap=%llu@%u ok=%d reason=%s dry=%d%s\n",
-					res.uuid.c_str(), (unsigned long long)res.timeMs, (unsigned long long)res.awrMs, (unsigned)res.teleports,
-					(unsigned long long)res.maxGapTicks, res.maxGapFrame, res.ok ? 1 : 0, res.reason, res.dryRun ? 1 : 0, detailSuffix);
+		char maxGapText[32];
+		if (res.maxGapMeasured)
+		{
+			V_snprintf(maxGapText, sizeof(maxGapText), "%llu@%u", (unsigned long long)res.maxGapTicks, res.maxGapFrame);
+		}
+		else
+		{
+			V_snprintf(maxGapText, sizeof(maxGapText), "n/a");
+		}
+		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill uuid=%s time_ms=%llu awr_ms=%llu tps=%u max_gap=%s ok=%d reason=%s dry=%d%s\n",
+					res.uuid.c_str(), (unsigned long long)res.timeMs, (unsigned long long)res.awrMs, (unsigned)res.teleports, maxGapText,
+					res.ok ? 1 : 0, res.reason, res.dryRun ? 1 : 0, detailSuffix);
 
 		if (res.ok)
 		{
@@ -735,6 +749,15 @@ void CybAwrBackfill::Run(u32 count, bool dryRun)
 	// Множество виденного — на прогон, а не на жизнь сервера: повторный `-dry-run` обязан
 	// снова пройти по тем же файлам, иначе второй прогон печатал бы сразу exhausted.
 	g_dryRunSeen.clear();
+	// «Мягко» отказавшие — тоже на прогон. Иначе прогон застревает структурно: бэклог
+	// отдаёт максимум 50 строк (жёсткий кап в api), сортировка createdAt DESC, а мягкий
+	// отказ строку в api НЕ помечает — как только таких наберётся 50 и свежее них не
+	// окажется непроверенных, каждый следующий шаг видел бы только их и уходил в
+	// soft_failed_exhausted, а весь более старый бэклог был бы недостижим до перезапуска
+	// плагина. Явный `kz_awr_backfill N` — осознанная просьба оператора повторить, и цена
+	// повтора (трафик + счётчик на уже виденные файлы) приемлема. АВТОПОДБОР по таймеру
+	// (Tick без Run) множество не чистит: там повтор был бы вечным циклом.
+	g_softFailed.clear();
 	// Насос может быть не запущен (cybAwrBackfillIntervalSec 0) — команда обязана работать.
 	EnsureTimer();
 	KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill started count=%u dry=%d\n", (unsigned)count, dryRun ? 1 : 0);

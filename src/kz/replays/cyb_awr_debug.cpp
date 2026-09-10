@@ -181,10 +181,20 @@ CON_COMMAND_F(kz_awr_debug, "Explain the AWR cut of one replay file. Usage: kz_a
 	KZ::replaysystem::awr::CutResult cut = KZ::replaysystem::playback::ComputeCutForTraced(
 		src.ticks.data(), (u32)src.ticks.size(), src.events.data(), (u32)src.events.size(), timeMs, &trace);
 
-	KZ_LOG_INFO(LogChannel::Replays,
-				"[cyb_awr] debug uuid=%s arrivals=%zu teleports=%u max_gap=%llu@%u ok=%d reason=%s awr_ms=%llu detail=%s\n", uuid.c_str(),
-				trace.size(), cut.teleports, (unsigned long long)cut.maxUncoveredGapTicks, cut.maxUncoveredGapFrame, cut.ok ? 1 : 0,
-				cut.ok ? "ok" : cut.reason, (unsigned long long)cut.awrMs, cut.detail);
+	// max_gap печатаем только если разрез до подсчёта дошёл: на раннем отказе ноль читался
+	// бы как «разрыва записи нет» (см. CutResult::maxUncoveredGapMeasured).
+	char maxGapText[32];
+	if (cut.maxUncoveredGapMeasured)
+	{
+		V_snprintf(maxGapText, sizeof(maxGapText), "%llu@%u", (unsigned long long)cut.maxUncoveredGapTicks, cut.maxUncoveredGapFrame);
+	}
+	else
+	{
+		V_snprintf(maxGapText, sizeof(maxGapText), "n/a");
+	}
+	KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] debug uuid=%s arrivals=%zu teleports=%u max_gap=%s ok=%d reason=%s awr_ms=%llu detail=%s\n",
+				uuid.c_str(), trace.size(), cut.teleports, maxGapText, cut.ok ? 1 : 0, cut.ok ? "ok" : cut.reason,
+				(unsigned long long)cut.awrMs, cut.detail);
 
 	for (size_t i = 0; i < trace.size(); i++)
 	{
@@ -238,11 +248,19 @@ CON_COMMAND_F(kz_awr_debug, "Explain the AWR cut of one replay file. Usage: kz_a
 	}
 	Msg("[cyb_awr]   arrivals=%zu teleports=%u ok=%d reason=%s awr_ms=%llu time_ms=%llu cuts=%zu\n", trace.size(), cut.teleports, cut.ok ? 1 : 0,
 		cut.ok ? "ok" : cut.reason, (unsigned long long)cut.awrMs, (unsigned long long)timeMs, cut.dead.size());
-	// Разрыв записи внутри вырезов — печатаем всегда: на успешном файле это метрика доверия
-	// к awr_ms (сколько времени в вырезах не подтверждено кадрами), на отказе — сам диагноз.
-	Msg("[cyb_awr]   max_uncovered_gap=%llu ticks (%.1f s) at frame %u; refuse threshold %llu\n",
-		(unsigned long long)cut.maxUncoveredGapTicks, (double)cut.maxUncoveredGapTicks * ENGINE_FIXED_TICK_INTERVAL, cut.maxUncoveredGapFrame,
-		(unsigned long long)KZ::replaysystem::awr::AWR_MAX_RECORD_GAP_TICKS);
+	// Разрыв записи внутри вырезов: на успешном файле это метрика доверия к awr_ms (сколько
+	// времени в вырезах не подтверждено кадрами), на отказе по разрыву — сам диагноз. Если
+	// разрез до подсчёта не дошёл (ранний отказ) — так и говорим, а не печатаем ноль.
+	if (cut.maxUncoveredGapMeasured)
+	{
+		Msg("[cyb_awr]   max_uncovered_gap=%llu ticks (%.1f s) at frame %u; refuse threshold %llu\n",
+			(unsigned long long)cut.maxUncoveredGapTicks, (double)cut.maxUncoveredGapTicks * ENGINE_FIXED_TICK_INTERVAL, cut.maxUncoveredGapFrame,
+			(unsigned long long)KZ::replaysystem::awr::AWR_MAX_RECORD_GAP_TICKS);
+	}
+	else
+	{
+		Msg("[cyb_awr]   max_uncovered_gap=n/a (the cut refused before measuring; see reason above)\n");
+	}
 	if (!cut.ok && cut.detail[0] != '\0')
 	{
 		Msg("[cyb_awr]   detail=%s\n", cut.detail);
