@@ -46,5 +46,7 @@
 		"#format"	"percent:d"
 		"en"		"Progress: {percent}%%"
 		"ru"		"Прогресс: {percent}%%"
+		"chi"		"进度: {percent}%%"
+		"ua"		"Прогрес: {percent}%%"
 	}
 }

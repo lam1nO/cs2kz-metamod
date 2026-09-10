@@ -547,6 +547,7 @@ static_function bool ApplyVisibilityFloor(KZPlayer *player)
 		{
 			continue;
 		}
+		const LayoutElementDef &def = LAYOUT_ELEMENTS[e];
 		// Дефолт тумблера — ПОЭЛЕМЕНТНЫЙ (def.enabledDefault), а не константа true: у элемента
 		// с дефолтом false отсутствующий в префах ключ читался бы как «включён», и весь этот
 		// предохранитель превращался бы в мёртвый код (он возвращал бы false всегда).

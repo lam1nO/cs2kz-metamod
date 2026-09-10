@@ -40,6 +40,12 @@
 // Страховка к границе выше: сверхплотная петля (стояние, слайд) может уложить в 1024 юнита
 // тысячи вершин, а стоимость скана обязана оставаться ограниченной.
 #define KZ_LEAD_SCAN_MAX_VERTS 1024u
+// Пауза между МОЛЧАЛИВЫМИ загрузками пути, в проходах дросселированной ветки (32 тика каждый):
+// 8 проходов = 4 с. Защита от мигающего ключа и от частых повторов после сетевого отказа.
+#define KZ_LEAD_ARM_COOLDOWN_CYCLES 8
+// Сколько раз повторить молчаливую загрузку под ОДНИМ ключом, прежде чем считать, что записи
+// нет: пустой путь приходит и на 404, и на сетевую ошибку (см. OnLoadFailed).
+#define KZ_LEAD_FAIL_RETRIES 2
 // Допуск упрощения пути (юниты). Меньше — лишние сущности на прямых, больше — срезанные углы.
 #define KZ_LEAD_RDP_TOLERANCE 2.0f
 // Верхняя граница потолка отрезков: защита от опечатки в конфиге (лимит сущностей движка).
@@ -346,6 +352,8 @@ void KZLeadService::ResetState(bool keepEntities)
 	// завёлся бы вовсе. Смены курса и режима ВНУТРИ карты защёлка различает сама.
 	this->failedCourse = -1;
 	this->failedMode[0] = '\0';
+	this->failRetriesLeft = 0;
+	this->armCooldown = 0;
 	// Преф прогресса здесь НЕ трогаем: OnMapChanged зовёт этот метод на смене карты, а
 	// настройка игрока карту переживает — иначе элемент худа молча умирал бы до следующего
 	// захода в меню. Гасит его только Reset() (дисконнект, слот освободился).
@@ -433,9 +441,12 @@ void KZLeadService::Toggle(CybReplayDownload::Kind kind)
 		this->Disable("toggle");
 		return;
 	}
-	// Явная команда игрока — повод сходить в сеть заново даже после отказа молчаливой загрузки.
+	// Явная команда игрока — повод сходить в сеть заново, даже если молчаливая загрузка под
+	// этот ключ уже отказала и защёлкнулась (и не дожидаясь её паузы).
 	this->failedCourse = -1;
 	this->failedMode[0] = '\0';
+	this->failRetriesLeft = 0;
+	this->armCooldown = 0;
 	if (!this->path.empty())
 	{
 		if (this->PathKeyMatchesCurrent())
@@ -456,12 +467,21 @@ void KZLeadService::Toggle(CybReplayDownload::Kind kind)
 	}
 	if (this->loading || this->pending)
 	{
-		// Загрузка уже идёт (сеть или разбор) — второй запрос ничего не ускорит, но завёл бы
-		// ещё один резолв, ещё одну докачку и ещё один поток. Если её начал процент (молча),
-		// метим результат как ожидаемый ИГРОКОМ: придёт путь — поднимем луч и отчитаемся.
-		this->beamOnLoad = true;
-		this->player->languageService->PrintChat(true, false, "Lead - Loading");
-		return;
+		if (this->RequestKeyMatchesCurrent())
+		{
+			// Загрузка уже идёт (сеть или разбор) под ТЕКУЩИЙ ключ — второй запрос ничего не
+			// ускорит, но завёл бы ещё один резолв, ещё одну докачку и ещё один поток. Если её
+			// начал процент (молча), метим результат как ожидаемый ИГРОКОМ: придёт путь —
+			// поднимем луч и отчитаемся.
+			this->beamOnLoad = true;
+			this->player->languageService->PrintChat(true, false, "Lead - Loading");
+			return;
+		}
+		// Идущая загрузка ушла под ДРУГОЙ курс/режим (её начал процент, а игрок с тех пор
+		// сменил курс). Подхватить её значило бы поднять луч по чужому маршруту и отчитаться
+		// «включён» — ровно то, что запрещает инвариант ветки выше: `!lead` всегда показывает
+		// маршрут ТЕКУЩЕГО ключа. Протухший запрос бросаем (поколение отбросит его результат).
+		this->ReleasePath();
 	}
 
 	this->player->languageService->PrintChat(true, false, "Lead - Loading");
@@ -482,6 +502,11 @@ const char *KZLeadService::CurrentModeName() const
 bool KZLeadService::PathKeyMatchesCurrent() const
 {
 	return this->pathCourse == this->CurrentCourseKey() && KZ_STREQI(this->modeName, this->CurrentModeName());
+}
+
+bool KZLeadService::RequestKeyMatchesCurrent() const
+{
+	return this->requestCourse == this->CurrentCourseKey() && KZ_STREQI(this->requestMode, this->CurrentModeName());
 }
 
 void KZLeadService::RequestPath(CybReplayDownload::Kind kind, bool fromPlayer)
@@ -511,11 +536,23 @@ void KZLeadService::ArmProgressPath()
 	{
 		return;
 	}
+	if (this->armCooldown > 0)
+	{
+		// Пауза после отказа или после отброшенного протухшего пути: без неё мигающий ключ
+		// (игрок топчется на границе двух курсов) гнал бы резолв и докачку каждые 32 тика.
+		return;
+	}
 	// Защёлка отказа сверяется ПО КЛЮЧУ: отказ на main ничего не говорит о бонусе, куда игрок
 	// может уйти через минуту (иначе процент умирал бы до конца карты).
 	if (this->failedCourse == this->CurrentCourseKey() && KZ_STREQI(this->failedMode, this->CurrentModeName()))
 	{
-		return;
+		if (this->failRetriesLeft <= 0)
+		{
+			return;
+		}
+		// Повторы под тем же ключом (возможная сетевая рябь) — расходуем их здесь: исчерпав,
+		// эта же проверка станет глухой защёлкой до смены ключа или карты.
+		this->failRetriesLeft--;
 	}
 	// AWR — тот же вид записи, что у `!lead` по умолчанию: процент считается по ТОМУ ЖЕ
 	// маршруту, который показывает луч. Молча (fromPlayer=false): элемент худа в чат не пишет.
@@ -537,6 +574,8 @@ void KZLeadService::SetProgressWanted(bool wanted)
 		// включение элемента руками — такой же явный повод сходить в сеть, как `!lead`.
 		this->failedCourse = -1;
 		this->failedMode[0] = '\0';
+		this->failRetriesLeft = 0;
+		this->armCooldown = 0;
 		return;
 	}
 	// Процент выключили: своих сущностей у него нет, снимать нечего. Путь держит только луч —
@@ -588,11 +627,13 @@ void KZLeadService::OnFileReady(u32 gen, std::string &&filePath)
 	if (filePath.empty())
 	{
 		this->loading = false;
-		// Резолв не нашёл записи (или отказала сеть — RequestFile различает это только в своём
-		// логе). Пишем сами: для молчаливой загрузки под процент это ЕДИНСТВЕННЫЙ след, в чат
-		// она не пишет ничего. DEBUG, а не WARN: «на этом курсе нет AWR-записи» — ожидаемое
-		// состояние карты, а не отказ нашего кода.
-		KZ_LOG_DEBUG(LogChannel::Replays, "[lead] lead_load_failed reason=no_record course=%i mode=%s steam_id=%llu\n", this->requestCourse,
+		// reason=no_file, а НЕ no_record: пустой путь означает ровно «файла не дали», и записи
+		// может не быть (404), а может отказать сеть или api — RequestFile нам этого не
+		// сообщает. Настоящая причина есть в ЕГО логе (`file resolve HTTP %u` /
+		// `file resolve network error`; 404 он не логирует намеренно), а врать в своей строке
+		// нельзя. DEBUG, а не WARN: «на этом курсе нет AWR-записи» — ожидаемое состояние
+		// карты, а не отказ нашего кода; для молчаливой загрузки это единственный след.
+		KZ_LOG_DEBUG(LogChannel::Replays, "[lead] lead_load_failed reason=no_file course=%i mode=%s steam_id=%llu\n", this->requestCourse,
 					 this->requestMode, (unsigned long long)this->player->GetSteamId64());
 		this->OnLoadFailed();
 		return;
@@ -609,8 +650,18 @@ void KZLeadService::OnLoadFailed()
 	// Защёлка — ВСЕГДА, кто бы ни просил, и ПО КЛЮЧУ ЗАПРОСА (курс+режим): под ним пути нет, и
 	// проверка раз в 32 тика иначе ходила бы в сеть до конца карты; на другом курсе она
 	// снимется сама (см. ArmProgressPath).
-	this->failedCourse = this->requestCourse;
-	V_strncpy(this->failedMode, this->requestMode, sizeof(this->failedMode));
+	//
+	// Но не сразу насмерть: пустой путь приходит и на «записи нет», и на сетевую ошибку, а
+	// различить их нечем (см. reason=no_file в OnFileReady). Поэтому под НОВЫМ ключом даём
+	// KZ_LEAD_FAIL_RETRIES повторов с паузой — сетевая рябь так лечится сама, а курс без
+	// AWR-записи защёлкивается, исчерпав их (ArmProgressPath уменьшает счётчик).
+	if (!(this->failedCourse == this->requestCourse && KZ_STREQI(this->failedMode, this->requestMode)))
+	{
+		this->failedCourse = this->requestCourse;
+		V_strncpy(this->failedMode, this->requestMode, sizeof(this->failedMode));
+		this->failRetriesLeft = KZ_LEAD_FAIL_RETRIES;
+	}
+	this->armCooldown = KZ_LEAD_ARM_COOLDOWN_CYCLES;
 	if (!this->beamOnLoad)
 	{
 		// Молчаливая загрузка под элемент худа: ни строки в чат (решение дизайна — элемент
@@ -670,6 +721,9 @@ void KZLeadService::OnPathLoaded(std::vector<Vertex> &&newPath)
 	{
 		KZ_LOG_DEBUG(LogChannel::Replays, "[lead] path_dropped reason=key_changed course=%i mode=%s steam_id=%llu\n", this->requestCourse,
 					 this->requestMode, (unsigned long long)this->player->GetSteamId64());
+		// Пауза перед следующей попыткой: без неё мигающий ключ давал бы резолв и докачку
+		// каждые 32 тика (путь приходит — ключ снова другой — путь снова в мусор).
+		this->armCooldown = KZ_LEAD_ARM_COOLDOWN_CYCLES;
 		return;
 	}
 	this->ClearSegments(false);
@@ -716,6 +770,12 @@ void KZLeadService::OnPhysicsSimulatePost()
 		return;
 	}
 	this->ticksSinceUpdate = 0;
+	if (this->armCooldown > 0)
+	{
+		// Пауза молчаливых загрузок считается в проходах ЭТОЙ ветки (один проход = 32 тика):
+		// отдельного таймера ради неё заводить незачем.
+		this->armCooldown--;
+	}
 
 	// Путь режим-зависим: в другом режиме он врал бы и про траекторию, и про процент.
 	// Отдельного хука на смену режима у игрока нет, поэтому сверяем имя здесь — раз в 32 тика
@@ -818,15 +878,20 @@ void KZLeadService::UpdateNearest(const Vector &origin)
 		// маршруту дальше KZ_LEAD_SCAN_UNITS юнитов, а вершин на этой длине бывает и две (на
 		// прямой), и сотни (в петле). Вершинный потолок — только страховка от сверхплотной
 		// петли, чтобы стоимость скана оставалась ограниченной.
-		u32 to = this->nearest;
+		// Ниже — ТОЛЬКО bestIdx, а не this->nearest: строкой выше nearest трактуется как
+		// потенциально невалидный (при nearest >= count bestIdx обнуляется), и одна из двух
+		// трактовок в одной функции — прямой путь к чтению cumLen за концом вектора.
+		// Исключение — ветка луча: там сохранена ПРЕЖНЯЯ формула дословно (её нельзя менять),
+		// а индексами cumLen она не пользуется вовсе, и цикл всё равно ограничен `i < count`.
+		u32 to = bestIdx;
 		if (this->beam)
 		{
 			to = this->windowTo > this->nearest ? this->windowTo : this->nearest;
 		}
 		else if (this->cumLen.size() == (size_t)count)
 		{
-			const f32 limit = this->cumLen[this->nearest] + KZ_LEAD_SCAN_UNITS;
-			while (to + 1 < count && this->cumLen[to + 1] <= limit && to - this->nearest < KZ_LEAD_SCAN_MAX_VERTS)
+			const f32 limit = this->cumLen[bestIdx] + KZ_LEAD_SCAN_UNITS;
+			while (to + 1 < count && this->cumLen[to + 1] <= limit && to - bestIdx < KZ_LEAD_SCAN_MAX_VERTS)
 			{
 				to++;
 			}
@@ -834,8 +899,8 @@ void KZLeadService::UpdateNearest(const Vector &origin)
 		else
 		{
 			// Кумулятивных длин нет (быть не должно: их строит OnPathLoaded вместе с путём) —
-			// не читаем их за границей, а падаем на вершинный потолок.
-			to = this->nearest + KZ_LEAD_SCAN_MAX_VERTS;
+			// не читаем их вовсе, а падаем на вершинный потолок.
+			to = bestIdx + KZ_LEAD_SCAN_MAX_VERTS;
 		}
 		for (u32 i = bestIdx; i <= to && i < count; i++)
 		{
