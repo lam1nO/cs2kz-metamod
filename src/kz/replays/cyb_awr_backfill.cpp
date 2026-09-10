@@ -516,8 +516,8 @@ namespace
 					// снимке. Молча превращать в ноль нельзя — это означало бы, что снимок
 					// в OnMapChanged врёт, и занятость слотов считается неверно.
 					KZ_LOG_WARN(LogChannel::Replays,
-								"[cyb_awr] invariant reason=orphan_counter_underflow uuid=%s in_flight=%u unconsumed=%u epoch=%u\n",
-								res.uuid.c_str(), (unsigned)g_inFlight, (unsigned)g_unconsumedResults, (unsigned)g_epoch);
+								"[cyb_awr] invariant reason=orphan_counter_underflow uuid=%s in_flight=%u unconsumed=%u epoch=%u\n", res.uuid.c_str(),
+								(unsigned)g_inFlight, (unsigned)g_unconsumedResults, (unsigned)g_epoch);
 				}
 				continue;
 			}
@@ -949,9 +949,8 @@ namespace
 				res.timeMs = (u64)((f64)src.header.run().time() * 1000.0 + 0.5);
 				res.headerTeleports = src.header.run().has_num_teleports() ? src.header.run().num_teleports() : -1;
 
-				KZ::replaysystem::awr::CutResult cut =
-					KZ::replaysystem::playback::ComputeCutFor(src.ticks.data(), (u32)src.ticks.size(), src.events.data(),
-															 (u32)src.events.size(), res.timeMs);
+				KZ::replaysystem::awr::CutResult cut = KZ::replaysystem::playback::ComputeCutFor(
+					src.ticks.data(), (u32)src.ticks.size(), src.events.data(), (u32)src.events.size(), res.timeMs);
 				res.ok = cut.ok;
 				res.reason = cut.ok ? "ok" : cut.reason;
 				res.detail = cut.detail;
@@ -1001,8 +1000,8 @@ namespace
 		// будут смотреть как на правду. Ровно эта проверка ловит любую ошибку выбора окна.
 		if (res.ok && res.headerTeleports >= 0 && (u32)res.headerTeleports != res.teleports)
 		{
-			KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] invariant uuid=%s reason=header_tp_mismatch tps=%u header_tps=%d\n",
-						res.uuid.c_str(), (unsigned)res.teleports, res.headerTeleports);
+			KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] invariant uuid=%s reason=header_tp_mismatch tps=%u header_tps=%d\n", res.uuid.c_str(),
+						(unsigned)res.teleports, res.headerTeleports);
 			res.ok = false;
 			res.reason = "header_tp_mismatch";
 			res.awrMs = 0;
@@ -1043,16 +1042,14 @@ namespace
 		KZ_LOG_INFO(LogChannel::Replays,
 					"[cyb_awr] backfill uuid=%s time_ms=%llu awr_ms=%llu tps=%u dead_n=%u tp_collapsed=%u max_dest_spread=%.3f max_gap=%s "
 					"frames=%s ok=%d reason=%s dry=%d%s\n",
-					res.uuid.c_str(), (unsigned long long)res.timeMs, (unsigned long long)res.awrMs, (unsigned)res.teleports,
-					(unsigned)res.deadCuts, collapsed, res.destSpread, maxGapText, framesText, res.ok ? 1 : 0, res.reason, res.dryRun ? 1 : 0,
-					detailSuffix);
+					res.uuid.c_str(), (unsigned long long)res.timeMs, (unsigned long long)res.awrMs, (unsigned)res.teleports, (unsigned)res.deadCuts,
+					collapsed, res.destSpread, maxGapText, framesText, res.ok ? 1 : 0, res.reason, res.dryRun ? 1 : 0, detailSuffix);
 		// Нарушение инварианта правила — отдельной строкой уровня error, файл при этом
 		// отправляется как обычно (ошибка наша, а не файла).
 		if (res.destSpread > KZ::replaysystem::awr::AWR_SAME_DEST_TOLERANCE)
 		{
-			KZ_LOG_ERROR(LogChannel::Replays,
-						 "[cyb_awr] invariant uuid=%s reason=dest_spread_violation spread=%.3f tol=%.1f cut=%u dead_n=%u\n", res.uuid.c_str(),
-						 res.destSpread, KZ::replaysystem::awr::AWR_SAME_DEST_TOLERANCE, res.destSpreadCut, (unsigned)res.deadCuts);
+			KZ_LOG_ERROR(LogChannel::Replays, "[cyb_awr] invariant uuid=%s reason=dest_spread_violation spread=%.3f tol=%.1f cut=%u dead_n=%u\n",
+						 res.uuid.c_str(), res.destSpread, KZ::replaysystem::awr::AWR_SAME_DEST_TOLERANCE, res.destSpreadCut, (unsigned)res.deadCuts);
 		}
 
 		// Сверка кадров с таймером — независимо от ok: она про сам файл, а не про разрез, и
@@ -1064,8 +1061,8 @@ namespace
 			const i64 delta = (i64)res.timerFramesRecorded - (i64)res.timerFramesExpected;
 			KZ_LOG_WARN(LogChannel::Replays,
 						"[cyb_awr] invariant uuid=%s reason=timer_frames_mismatch recorded=%llu expected=%llu delta=%lld max_gap=%s\n",
-						res.uuid.c_str(), (unsigned long long)res.timerFramesRecorded, (unsigned long long)res.timerFramesExpected,
-						(long long)delta, maxGapText);
+						res.uuid.c_str(), (unsigned long long)res.timerFramesRecorded, (unsigned long long)res.timerFramesExpected, (long long)delta,
+						maxGapText);
 		}
 
 		if (res.ok)
@@ -1074,13 +1071,13 @@ namespace
 			// свойства самого рана, а не признак неверного окна), но должно быть видно.
 			if (res.awrMs > res.timeMs)
 			{
-				KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] invariant uuid=%s reason=awr_gt_time awr_ms=%llu time_ms=%llu\n",
-							res.uuid.c_str(), (unsigned long long)res.awrMs, (unsigned long long)res.timeMs);
+				KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] invariant uuid=%s reason=awr_gt_time awr_ms=%llu time_ms=%llu\n", res.uuid.c_str(),
+							(unsigned long long)res.awrMs, (unsigned long long)res.timeMs);
 			}
 			if (res.teleports == 0 && res.awrMs != res.timeMs)
 			{
-				KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] invariant uuid=%s reason=no_tp_time_differs awr_ms=%llu time_ms=%llu\n",
-							res.uuid.c_str(), (unsigned long long)res.awrMs, (unsigned long long)res.timeMs);
+				KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] invariant uuid=%s reason=no_tp_time_differs awr_ms=%llu time_ms=%llu\n", res.uuid.c_str(),
+							(unsigned long long)res.awrMs, (unsigned long long)res.timeMs);
 			}
 		}
 
@@ -1098,8 +1095,8 @@ namespace
 		if (!res.ok && IsSoftFailure(res.reason))
 		{
 			g_softFailed.insert(res.uuid);
-			KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill soft_failed uuid=%s reason=%s not_posted=1 soft=%u\n", res.uuid.c_str(),
-						res.reason, (unsigned)g_softFailed.size());
+			KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill soft_failed uuid=%s reason=%s not_posted=1 soft=%u\n", res.uuid.c_str(), res.reason,
+						(unsigned)g_softFailed.size());
 			FinishFileAndChain(res.uuid);
 			return;
 		}
@@ -1295,8 +1292,7 @@ void CybAwrBackfill::OnMapChanged()
 	// безопасно и с живым потоком: ячейка результата больше не одна, затирать нечего.
 	if (g_inFlight > 0 || g_backlogBusy)
 	{
-		KZ_LOG_INFO(LogChannel::Replays,
-					"[cyb_awr] map_changed reason=flights_cleared in_flight=%u orphans=%u workers=%d remaining=%u epoch=%u\n",
+		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] map_changed reason=flights_cleared in_flight=%u orphans=%u workers=%d remaining=%u epoch=%u\n",
 					(unsigned)g_inFlight, (unsigned)g_unconsumedResults, g_workersInFlight.load(), (unsigned)g_remaining, (unsigned)g_epoch);
 	}
 	// Снимок ОСИРОТЕВШИХ разборов: слоты гасим, но эти разборы память держат, значит держат
@@ -1329,8 +1325,7 @@ CON_COMMAND_F(kz_awr_backfill, "Compute AWR cut for N replays from the platform 
 {
 	if (utils::GetController(context.GetPlayerSlot()))
 	{
-		KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] cmd_denied cmd=kz_awr_backfill reason=not_server slot=%d\n",
-					context.GetPlayerSlot().Get());
+		KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] cmd_denied cmd=kz_awr_backfill reason=not_server slot=%d\n", context.GetPlayerSlot().Get());
 		return;
 	}
 

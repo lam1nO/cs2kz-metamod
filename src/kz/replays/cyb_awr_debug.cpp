@@ -178,8 +178,8 @@ CON_COMMAND_F(kz_awr_debug, "Explain the AWR cut of one replay file. Usage: kz_a
 	}
 
 	std::vector<KZ::replaysystem::awr::ArrivalTrace> trace;
-	KZ::replaysystem::awr::CutResult cut = KZ::replaysystem::playback::ComputeCutForTraced(
-		src.ticks.data(), (u32)src.ticks.size(), src.events.data(), (u32)src.events.size(), timeMs, &trace);
+	KZ::replaysystem::awr::CutResult cut = KZ::replaysystem::playback::ComputeCutForTraced(src.ticks.data(), (u32)src.ticks.size(), src.events.data(),
+																						   (u32)src.events.size(), timeMs, &trace);
 
 	// max_gap печатаем только если разрез до подсчёта дошёл: на раннем отказе ноль читался
 	// бы как «разрыва записи нет» (см. CutResult::maxRecordGapMeasured).
@@ -256,8 +256,8 @@ CON_COMMAND_F(kz_awr_debug, "Explain the AWR cut of one replay file. Usage: kz_a
 		(unsigned long long)timeMs);
 	if (hasWindow)
 	{
-		Msg("[cyb_awr]   window=%u..%u (ticks %u..%u) course_id=%d\n", runStart, runEnd, src.ticks[runStart].serverTick,
-			src.ticks[runEnd].serverTick, runCourseId);
+		Msg("[cyb_awr]   window=%u..%u (ticks %u..%u) course_id=%d\n", runStart, runEnd, src.ticks[runStart].serverTick, src.ticks[runEnd].serverTick,
+			runCourseId);
 	}
 	else
 	{
@@ -284,8 +284,8 @@ CON_COMMAND_F(kz_awr_debug, "Explain the AWR cut of one replay file. Usage: kz_a
 	}
 	if (cut.maxRecordGapMeasured)
 	{
-		Msg("[cyb_awr]   max_record_gap=%llu ticks (%.1f s) at frame %u; refuse threshold %llu\n",
-			(unsigned long long)cut.maxRecordGapTicks, (double)cut.maxRecordGapTicks * ENGINE_FIXED_TICK_INTERVAL, cut.maxRecordGapFrame,
+		Msg("[cyb_awr]   max_record_gap=%llu ticks (%.1f s) at frame %u; refuse threshold %llu\n", (unsigned long long)cut.maxRecordGapTicks,
+			(double)cut.maxRecordGapTicks * ENGINE_FIXED_TICK_INTERVAL, cut.maxRecordGapFrame,
 			(unsigned long long)KZ::replaysystem::awr::AWR_MAX_RECORD_GAP_TICKS);
 	}
 	else

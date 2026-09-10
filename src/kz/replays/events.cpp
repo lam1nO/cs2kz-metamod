@@ -290,9 +290,8 @@ namespace KZ::replaysystem::events
 				replay->pausedTime =
 					event->data.timer.time > 0.0f
 						? event->data.timer.time
-						: (replay->startTime != 0.0f
-							   ? g_pKZUtils->GetServerGlobals()->curtime - replay->startTime - replay->accumulatedPauseTime
-							   : 0.0f);
+						: (replay->startTime != 0.0f ? g_pKZUtils->GetServerGlobals()->curtime - replay->startTime - replay->accumulatedPauseTime
+													 : 0.0f);
 				// Якорь аккумулятора: curtime входа в паузу. startTime НЕ трогаем.
 				replay->pauseStartTime = g_pKZUtils->GetServerGlobals()->curtime;
 				replay->paused = true;
@@ -625,8 +624,8 @@ namespace KZ::replaysystem::events
 			{
 				std::vector<awr::Interval> pauses =
 					playback::PauseIntervalsFromEvents(replay->tickData, replay->tickCount, replay->events, replay->numEvents);
-				const u64 deadFrames = awr::DeadFramesUpTo(replay->awrDead->data(), (u32)replay->awrDead->size(), pauses.data(),
-														   (u32)pauses.size(), targetTick);
+				const u64 deadFrames =
+					awr::DeadFramesUpTo(replay->awrDead->data(), (u32)replay->awrDead->size(), pauses.data(), (u32)pauses.size(), targetTick);
 				replay->accumulatedPauseTime += (f32)((f64)deadFrames * ENGINE_FIXED_TICK_INTERVAL);
 			}
 			// Если перемотка приземлилась ВНУТРИ записанной паузы — заякорить её для

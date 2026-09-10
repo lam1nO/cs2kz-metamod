@@ -143,8 +143,7 @@ namespace KZ::replaysystem::playback
 	// Дополнительно сверяются id курса (event->data.timer.index) у START и END: пара обязана
 	// быть одного курса. Сверка с именем курса из шапки — в commands.cpp: id курса живёт
 	// только в событиях, имя — только в шапке, и разрешает одно в другое лишь реестр курсов.
-	bool RunWindowFromEvents(const TickData *ticks, u32 tickCount, const RpEvent *events, u32 numEvents, u32 &outStart, u32 &outEnd,
-							 i32 &outCourseId)
+	bool RunWindowFromEvents(const TickData *ticks, u32 tickCount, const RpEvent *events, u32 numEvents, u32 &outStart, u32 &outEnd, i32 &outCourseId)
 	{
 		if (!ticks || tickCount == 0 || !events || numEvents == 0)
 		{

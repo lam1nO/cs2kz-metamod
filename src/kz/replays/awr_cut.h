@@ -10,11 +10,11 @@ namespace KZ::replaysystem::awr
 	struct Frame
 	{
 		uint32_t serverTick;
-		int32_t cpIndex;     // TickData::checkpoint.index
-		int32_t cpCount;     // TickData::checkpoint.checkpointCount
-		int32_t tpCount;     // TickData::checkpoint.teleportCount
-		float origin[3];     // TickData::post.origin — конец тика
-		float preOrigin[3];  // TickData::pre.origin — начало тика
+		int32_t cpIndex;    // TickData::checkpoint.index
+		int32_t cpCount;    // TickData::checkpoint.checkpointCount
+		int32_t tpCount;    // TickData::checkpoint.teleportCount
+		float origin[3];    // TickData::post.origin — конец тика
+		float preOrigin[3]; // TickData::pre.origin — начало тика
 	};
 
 	// Допуск сопоставления позиции прибытия телепорта с кадром, юниты.
@@ -65,9 +65,9 @@ namespace KZ::replaysystem::awr
 		// нормально. Бэкфилл их в api не отправляет, чтобы строка осталась в бэклоге
 		// (cyb_awr_backfill.cpp, IsSoftFailure).
 		const char *reason = "";
-		std::vector<Interval> dead;      // мёртвые интервалы, по возрастанию, без пересечений
-		uint32_t teleports = 0;          // число прибытий ТП по кадрам
-		uint64_t awrMs = 0;              // timeMs - мёртвое время (за вычетом пересечения с паузами); при !ok не используется
+		std::vector<Interval> dead; // мёртвые интервалы, по возрастанию, без пересечений
+		uint32_t teleports = 0;     // число прибытий ТП по кадрам
+		uint64_t awrMs = 0; // timeMs - мёртвое время (за вычетом пересечения с паузами); при !ok не используется
 		// Разбор отказа для лога (пусто при ok): что именно не сошлось и насколько. Без него
 		// живой прогон бэкфилла отвечает только «dest_not_found», и следующий шаг требует
 		// ещё одного цикла сборка→канарейка. Фиксированный буфер: структура уходит между
@@ -120,9 +120,9 @@ namespace KZ::replaysystem::awr
 		// Отказа она НЕ вызывает намеренно: живой разброс неизвестен, сначала нужно его
 		// увидеть (предупреждение в лог с числами), и только потом решать про порог.
 		bool timerFramesChecked = false;
-		uint64_t timerFramesRecorded = 0;  // кадры окна минус паузные
-		uint64_t timerFramesExpected = 0;  // timeMs / tickInterval
-		bool timerFramesMismatch = false;  // расхождение сверх допуска (см. AWR_TIMER_FRAMES_TOLERANCE_*)
+		uint64_t timerFramesRecorded = 0; // кадры окна минус паузные
+		uint64_t timerFramesExpected = 0; // timeMs / tickInterval
+		bool timerFramesMismatch = false; // расхождение сверх допуска (см. AWR_TIMER_FRAMES_TOLERANCE_*)
 	};
 
 	// Трасса одного прибытия телепорта — только для диагностической команды kz_awr_debug.
@@ -130,17 +130,17 @@ namespace KZ::replaysystem::awr
 	// работы в горячем пути.
 	struct ArrivalTrace
 	{
-		uint32_t frame = 0;      // T — кадр прибытия
+		uint32_t frame = 0; // T — кадр прибытия
 		uint32_t serverTick = 0;
 		int32_t cpIndex = 0;
 		int32_t cpCount = 0;
 		int32_t tpCount = 0;
-		float origin[3] = {};    // позиция прибытия
-		int64_t dest = -1;       // D; -1 — не нашли или прибытие пропущено
+		float origin[3] = {}; // позиция прибытия
+		int64_t dest = -1;    // D; -1 — не нашли или прибытие пропущено
 		// 'a' — сшивка по индексу чекпоинта, 'b' — скан назад, '-' — отказ,
 		// 's' — прибытие пропущено обходом (лежит внутри уже объявленного выреза).
 		char method = 's';
-		int64_t cpFrame = -1;    // S — кадр постановки чекпоинта; -1, если индекс не дал кандидата
+		int64_t cpFrame = -1; // S — кадр постановки чекпоинта; -1, если индекс не дал кандидата
 		float cpPostDist = -1.0f;
 		float cpPreDist = -1.0f;
 		uint32_t standTicks = 0; // сколько кадров после T игрок остаётся в той же точке
@@ -226,4 +226,4 @@ namespace KZ::replaysystem::awr
 
 	// Живые интервалы (дополнение dead на [0, count-1]) — нужны !lead.
 	std::vector<Interval> LiveIntervals(const std::vector<Interval> &dead, uint32_t count);
-}
+} // namespace KZ::replaysystem::awr

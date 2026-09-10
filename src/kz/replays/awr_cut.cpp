@@ -142,12 +142,12 @@ namespace KZ::replaysystem::awr
 	// Разбор неудачного поиска назначения — только для строки detail в логе.
 	struct DestProbe
 	{
-		int64_t cpFrame = -1;    // S: кадр постановки чекпоинта по индексу, -1 если нет
+		int64_t cpFrame = -1; // S: кадр постановки чекпоинта по индексу, -1 если нет
 		float cpPostDist = -1.0f;
 		float cpPreDist = -1.0f;
-		int64_t bestFrame = -1;  // ближайший кадр скана
+		int64_t bestFrame = -1; // ближайший кадр скана
 		float bestDistSq = -1.0f;
-		char method = '-';       // чем сшили: 'a' — индекс чекпоинта, 'b' — скан назад
+		char method = '-'; // чем сшили: 'a' — индекс чекпоинта, 'b' — скан назад
 	};
 
 	// Кадр назначения телепорта, прибывшего на кадре t; -1 — не нашли.
@@ -330,8 +330,7 @@ namespace KZ::replaysystem::awr
 			}
 			r.timerFramesRecorded = windowFramesTotal - std::min(windowFramesTotal, pausedInWindow);
 			r.timerFramesExpected = tickInterval > 0.0 ? (uint64_t)((double)timeMs / (tickInterval * 1000.0) + 0.5) : 0;
-			const uint64_t tolerance =
-				std::max(AWR_TIMER_FRAMES_TOLERANCE_TICKS, r.timerFramesExpected / AWR_TIMER_FRAMES_TOLERANCE_DIVISOR);
+			const uint64_t tolerance = std::max(AWR_TIMER_FRAMES_TOLERANCE_TICKS, r.timerFramesExpected / AWR_TIMER_FRAMES_TOLERANCE_DIVISOR);
 			const uint64_t delta = r.timerFramesRecorded > r.timerFramesExpected ? r.timerFramesRecorded - r.timerFramesExpected
 																				 : r.timerFramesExpected - r.timerFramesRecorded;
 			r.timerFramesMismatch = delta > tolerance;
@@ -629,8 +628,8 @@ namespace KZ::replaysystem::awr
 		if (deadFrames > windowFrames)
 		{
 			r.reason = "awr_interval_overflow";
-			std::snprintf(r.detail, sizeof(r.detail), "dead_frames=%llu window_frames=%llu dead_n=%zu window=%u..%u",
-						  (unsigned long long)deadFrames, (unsigned long long)windowFrames, r.dead.size(), runStart, runEnd);
+			std::snprintf(r.detail, sizeof(r.detail), "dead_frames=%llu window_frames=%llu dead_n=%zu window=%u..%u", (unsigned long long)deadFrames,
+						  (unsigned long long)windowFrames, r.dead.size(), runStart, runEnd);
 			return r;
 		}
 
@@ -708,4 +707,4 @@ namespace KZ::replaysystem::awr
 		}
 		return live;
 	}
-}
+} // namespace KZ::replaysystem::awr
