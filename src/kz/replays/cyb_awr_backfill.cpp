@@ -258,6 +258,11 @@ namespace
 		// увеличивает (и даёт десятки миллисекунд). До этой правки число вырезов печаталось
 		// только в detail= НА ОТКАЗЕ, то есть сравнить успешные прогоны было нечем.
 		u32 deadCuts = 0;
+		// Инвариант правила: разброс точек прибытий внутри одного выреза (см.
+		// awr::CutResult::maxDestSpread). Печатается на каждом файле и проверяется на главном
+		// потоке; это ТОТ различитель правила, которым «дельта числа вырезов» не стала.
+		f32 destSpread = 0.0f;
+		u32 destSpreadCut = 0;
 		// Самый большой разрыв записи внутри вырезов и его кадр — диагностика доверия
 		// (awr::CutResult::maxRecordGapTicks). Печатается на КАЖДОМ файле, где метрика
 		// вообще посчитана (в том числе на успехе): распределение разрывов надо видеть до
@@ -953,6 +958,8 @@ namespace
 				res.awrMs = cut.awrMs;
 				res.teleports = cut.teleports;
 				res.deadCuts = (u32)cut.dead.size();
+				res.destSpread = cut.maxDestSpread;
+				res.destSpreadCut = cut.maxDestSpreadCut;
 				res.timerFramesChecked = cut.timerFramesChecked;
 				res.timerFramesRecorded = cut.timerFramesRecorded;
 				res.timerFramesExpected = cut.timerFramesExpected;
@@ -1034,10 +1041,19 @@ namespace
 		// вырез кончается на прибытии), поэтому вычитание безопасно.
 		const unsigned collapsed = res.teleports > res.deadCuts ? (unsigned)(res.teleports - res.deadCuts) : 0u;
 		KZ_LOG_INFO(LogChannel::Replays,
-					"[cyb_awr] backfill uuid=%s time_ms=%llu awr_ms=%llu tps=%u dead_n=%u tp_collapsed=%u max_gap=%s frames=%s ok=%d reason=%s "
-					"dry=%d%s\n",
+					"[cyb_awr] backfill uuid=%s time_ms=%llu awr_ms=%llu tps=%u dead_n=%u tp_collapsed=%u max_dest_spread=%.3f max_gap=%s "
+					"frames=%s ok=%d reason=%s dry=%d%s\n",
 					res.uuid.c_str(), (unsigned long long)res.timeMs, (unsigned long long)res.awrMs, (unsigned)res.teleports,
-					(unsigned)res.deadCuts, collapsed, maxGapText, framesText, res.ok ? 1 : 0, res.reason, res.dryRun ? 1 : 0, detailSuffix);
+					(unsigned)res.deadCuts, collapsed, res.destSpread, maxGapText, framesText, res.ok ? 1 : 0, res.reason, res.dryRun ? 1 : 0,
+					detailSuffix);
+		// Нарушение инварианта правила — отдельной строкой уровня error, файл при этом
+		// отправляется как обычно (ошибка наша, а не файла).
+		if (res.destSpread > KZ::replaysystem::awr::AWR_SAME_DEST_TOLERANCE)
+		{
+			KZ_LOG_ERROR(LogChannel::Replays,
+						 "[cyb_awr] invariant uuid=%s reason=dest_spread_violation spread=%.3f tol=%.1f cut=%u dead_n=%u\n", res.uuid.c_str(),
+						 res.destSpread, KZ::replaysystem::awr::AWR_SAME_DEST_TOLERANCE, res.destSpreadCut, (unsigned)res.deadCuts);
+		}
 
 		// Сверка кадров с таймером — независимо от ok: она про сам файл, а не про разрез, и
 		// на отказе тоже говорит, можно ли верить его числам. Порога-отказа тут нет

@@ -60,6 +60,13 @@ namespace KZ::replaysystem::playback
 	// Разрез AWR по уже разобранным данным реплея (адаптер TickData→awr::Frame внутри).
 	awr::CutResult ComputeCutFor(const TickData *ticks, u32 tickCount, const RpEvent *events, u32 numEvents, u64 timeMs);
 
+	// Проверить инвариант правила разреза «внутри одного выреза все прибытия в одной точке»
+	// (awr::CutResult::maxDestSpread) и, если он нарушен, написать в лог `error` с машинной
+	// причиной. Файл НЕ отвергается: превышение означает дефект НАШЕГО кода, а реплей должен
+	// остаться играбельным. Зовётся только с ГЛАВНОГО потока (логи из рабочего потока
+	// воркера бэкфилла не пишем — там всё уходит через очередь результатов).
+	void LogDestSpreadViolation(const char *uuid, const awr::CutResult &cut);
+
 	// То же плюс трасса прибытий для kz_awr_debug. Отдельная функция, а не параметр
 	// ComputeCutFor: её сигнатуру зовут воркер бэкфилла и !lead, менять её нельзя, а второй
 	// адаптер TickData→awr::Frame заводить тем более (он обязан остаться один).

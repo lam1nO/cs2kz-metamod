@@ -938,6 +938,63 @@ static void test_adjacent_cuts_with_different_dest_not_merged()
 	assert(r.dead[0].to + 1 == r.dead[1].from);
 }
 
+// ИНВАРИАНТ ПРАВИЛА: внутри одного выреза все прибытия лежат в одной точке, то есть
+// max_dest_spread <= AWR_SAME_DEST_TOLERANCE при любом входе. Фикстура — из разбора
+// kz_devon main ckz (тот единственный файл из 17 680, где пересчёт дал −437 мс): там старый
+// разрез склеивал в вырез №3 прибытия на точки в 15.843 u друг от друга, новый развёл их по
+// двум вырезам и разброс стал 0.000. Здесь то же расстояние: 15.843 u — внутри
+// AWR_DEST_TOLERANCE (16), то есть старое правило склеило бы, а новое обязано разделить.
+static void test_dest_spread_invariant_holds()
+{
+	std::vector<Frame> v;
+	// Точка A и точка B в 15.843 u (по x: 15.843 — ровно как в разборе devon).
+	const float ax = 1000.0f, bx = 1015.843f;
+	for (uint32_t i = 0; i <= 9; i++) v.push_back(F3(i, -1, 0, 0, 940.0f + 6.0f * i, 500.0f, 64.0f));
+	v.push_back(F3(10, -1, 1, 0, ax, 500.0f, 64.0f)); // постановка A
+	for (uint32_t i = 11; i <= 25; i++) v.push_back(F3(i, -1, 1, 0, ax + 40.0f * (i - 10), 700.0f, 64.0f));
+	v.push_back(F3(26, -1, 1, 1, ax, 500.0f, 64.0f)); // прибытие на A
+	for (uint32_t i = 27; i <= 30; i++) v.push_back(F3(i, -1, 1, 1, ax, 500.0f, 64.0f));
+	v.push_back(F3(31, -1, 2, 1, bx, 500.0f, 64.0f)); // постановка B (в 15.843 u от A)
+	for (uint32_t i = 32; i <= 45; i++) v.push_back(F3(i, -1, 2, 1, bx + 40.0f * (i - 31), 700.0f, 64.0f));
+	v.push_back(F3(46, -1, 2, 2, bx, 500.0f, 64.0f)); // прибытие на B
+	for (uint32_t i = 47; i < 60; i++) v.push_back(F3(i, -1, 2, 2, bx + 6.0f * (i - 46), 500.0f, 64.0f));
+	FillPre(v);
+	CutResult r = ComputeAwrCut(v.data(), v.size(), nullptr, 0, 10000, TI, 0, v.size() - 1);
+	assert(r.ok && r.teleports == 2);
+	// Главное: инвариант держится — ни один вырез не склеил прибытия дальше допуска.
+	assert(r.maxDestSpread <= AWR_SAME_DEST_TOLERANCE);
+	// И это ДВА выреза, а не один: точки разные, сшивка прервана.
+	assert(r.dead.size() == 2);
+	assert(r.dead[0].from == 11 && r.dead[0].to == 26);
+	assert(r.dead[1].from == 32 && r.dead[1].to == 46);
+	// Разброс внутри каждого выреза нулевой: в каждом ровно одно прибытие.
+	assert(r.maxDestSpread == 0.0f);
+}
+
+// Инвариант держится и там, где прибытий в вырезе МНОГО: разброс внутри кластера
+// (0.0…1.8 u в фикстуре по реальным числам) обязан остаться в допуске.
+static void test_dest_spread_invariant_within_cluster()
+{
+	std::vector<Frame> v;
+	for (uint32_t i = 0; i <= 9; i++) v.push_back(F3(i, -1, 0, 0, 940.0f + 6.0f * i, 500.0f, 64.0f));
+	v.push_back(F3(10, -1, 1, 0, 1000.0f, 500.0f, 64.0f));
+	const float jitter[4] = {0.0f, 0.6f, 1.2f, 1.8f};
+	uint32_t frame = 11;
+	for (uint32_t a = 0; a < 4; a++)
+	{
+		for (uint32_t k = 0; k < 12; k++, frame++) v.push_back(F3(frame, -1, 1, (int32_t)a, 1000.0f + 40.0f * (k + 1), 700.0f, 64.0f));
+		v.push_back(F3(frame, -1, 1, (int32_t)a + 1, 1000.0f + jitter[a], 500.0f, 64.0f));
+		frame++;
+	}
+	for (uint32_t i = 0; i < 10; i++, frame++) v.push_back(F3(frame, -1, 1, 4, 1000.0f + 6.0f * (i + 1), 500.0f, 64.0f));
+	FillPre(v);
+	CutResult r = ComputeAwrCut(v.data(), v.size(), nullptr, 0, 10000, TI, 0, (uint32_t)v.size() - 1);
+	assert(r.ok && r.teleports == 4 && r.dead.size() == 1);
+	// Четыре прибытия в одном вырезе, максимум попарного расстояния — 1.8 u, это в допуске.
+	assert(r.maxDestSpread > 1.7f && r.maxDestSpread < 1.9f);
+	assert(r.maxDestSpread <= AWR_SAME_DEST_TOLERANCE);
+}
+
 // `!undo` по-прежнему снимает и телепорт, и его вырез: игрок возвращается туда, откуда
 // телепортировался, и живой маршрут продолжается как будто телепорта не было.
 static void test_undo_cancels_teleport_and_its_cut()
@@ -975,6 +1032,7 @@ int main()
 	test_trace_reports_every_arrival();
 	test_real_file_dest_change_breaks_chain(); test_dest_change_breaks_chain_without_placement();
 	test_adjacent_cuts_with_different_dest_not_merged(); test_undo_cancels_teleport_and_its_cut();
+	test_dest_spread_invariant_holds(); test_dest_spread_invariant_within_cluster();
 	test_dead_frames_up_to(); test_seek_live_frames_identity(); test_seek_scale_matches_cut_scale();
 	test_timer_frames_check();
 	std::puts("awr_cut: all tests passed");
