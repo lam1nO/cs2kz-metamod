@@ -240,6 +240,36 @@ namespace KZ::replaysystem::data
 		return true;
 	}
 
+	// Максимум на РАСПАКОВАННУЮ секцию и на массив её элементов — 1 ГиБ. Ориентир: самый
+	// длинный мыслимый ран (2 часа) это ~460 800 кадров при sizeof(TickData) ~300 Б, то есть
+	// ~135 МБ сырых тиков, а лимит файла на аплоаде — 32 МБ сжатых. 1 ГиБ даёт к этому
+	// семикратный запас и при этом делает невозможными абсурдные аллокации от мусора в шапке.
+	static constexpr u64 KZ_CUT_MAX_SECTION_BYTES = 1024ull * 1024ull * 1024ull;
+
+	// Подглядеть шапку секции, НЕ сдвигая курсор, и проверить общие границы: шапка целиком
+	// лежит в буфере, сжатые байты не выходят за его конец, распакованный размер в пределах
+	// лимита. false — файл битый.
+	static_function bool PeekSectionHeader(const char *cursor, const char *end,
+										   KZ::replaysystem::compression::CompressedSectionHeader &out)
+	{
+		using SectionHeader = KZ::replaysystem::compression::CompressedSectionHeader;
+		if (!cursor || cursor > end || (size_t)(end - cursor) < sizeof(SectionHeader))
+		{
+			return false;
+		}
+		memcpy(&out, cursor, sizeof(out));
+		const size_t avail = (size_t)(end - cursor) - sizeof(SectionHeader);
+		if ((u64)out.compressedSize > (u64)avail)
+		{
+			return false;
+		}
+		if ((u64)out.uncompressedSize > KZ_CUT_MAX_SECTION_BYTES)
+		{
+			return false;
+		}
+		return true;
+	}
+
 	CutSource LoadCutSourceFromMemory(const char *data, size_t size)
 	{
 		CutSource out;
@@ -256,6 +286,49 @@ namespace KZ::replaysystem::data
 			return out;
 		}
 
+		// ПРЕ-ВАЛИДАЦИЯ секций до всякой распаковки. Это единственная защита от битого файла
+		// в данном тракте: форк собирается с `-fno-exceptions` (AMBuildScript), то есть
+		// bad_alloc/length_error поймать нечем в принципе, а распаковщик аллоцирует ровно по
+		// числам ИЗ ФАЙЛА. Поэтому абсурдные размеры отсекаются здесь, а не в аллокаторе.
+		// Все проверки — на подглядывании шапки без сдвига курсора, сам разбор ниже не
+		// меняется.
+		using SectionHeader = KZ::replaysystem::compression::CompressedSectionHeader;
+		SectionHeader tickHeader {}, subtickHeader {}, eventHeader {};
+		const char *probe = cursor;
+
+		// Секция тиков. compression.cpp:417 делает `new char[uncompressedSize]` (границу
+		// держит PeekSectionHeader), compression.cpp:489 — `resize(elementCount)` уже
+		// массивом TickData, поэтому ограничиваем И число элементов.
+		if (!PeekSectionHeader(probe, end, tickHeader) || (u64)tickHeader.elementCount * sizeof(TickData) > KZ_CUT_MAX_SECTION_BYTES)
+		{
+			return out;
+		}
+		probe += sizeof(SectionHeader) + tickHeader.compressedSize;
+
+		// Секция сабтиков идёт сразу за тиками (её читает та же ReadTickDataCompressed).
+		// compression.cpp:458 делает `resize(elementCount)`, а следом Decompress пишет в этот
+		// же буфер `uncompressedSize` байт — то есть для v4+ размеры обязаны совпадать ТОЧНО,
+		// иначе распаковка вылезет за пределы вектора (это не только аллокация, это запись за
+		// границу). Для v<4 раскладка другая (`oldEntrySize = uncompressedSize / elementCount`):
+		// там нужна делимость и НЕнулевой elementCount — на нуле апстримный читатель делит на
+		// ноль. Отказ от древнего файла без сабтиков дешевле, чем деление на ноль.
+		if (!PeekSectionHeader(probe, end, subtickHeader)
+			|| (u64)subtickHeader.elementCount * sizeof(SubtickData) > KZ_CUT_MAX_SECTION_BYTES)
+		{
+			return out;
+		}
+		if (out.header.version() >= 4)
+		{
+			if ((u64)subtickHeader.elementCount * sizeof(SubtickData) != (u64)subtickHeader.uncompressedSize)
+			{
+				return out;
+			}
+		}
+		else if (subtickHeader.elementCount == 0 || subtickHeader.uncompressedSize % subtickHeader.elementCount != 0)
+		{
+			return out;
+		}
+
 		// Сабтики читаются той же функцией, что и тики, и здесь не нужны — вектор живёт
 		// до конца разбора и уходит вместе с ним.
 		std::vector<SubtickData> subticks;
@@ -267,6 +340,16 @@ namespace KZ::replaysystem::data
 		// Оружие и джампстаты — мимо: разрезу и !lead они не нужны, а распаковка стоила бы
 		// памяти на рабочем потоке.
 		if (!SkipCompressedSection(cursor, end) || !SkipCompressedSection(cursor, end))
+		{
+			return out;
+		}
+
+		// Секция событий: compression.cpp:716 делает `resize(elementCount)` массивом RpEvent,
+		// а Decompress следом пишет туда `uncompressedSize` байт — размеры обязаны совпадать
+		// точно (писатель WriteEventsCompressed так их и заполняет). Проверка одновременно
+		// ограничивает аллокацию и закрывает запись за границу вектора.
+		if (!PeekSectionHeader(cursor, end, eventHeader)
+			|| (u64)eventHeader.elementCount * sizeof(RpEvent) != (u64)eventHeader.uncompressedSize)
 		{
 			return out;
 		}

@@ -361,54 +361,38 @@ namespace
 				res.uuid = uuid;
 				res.dryRun = dryRun;
 
-				// try/catch обязателен: разбор аллоцирует по размерам ИЗ ФАЙЛА
-				// (compression.cpp:417 `new char[header.uncompressedSize]`,
-				// compression.cpp:458 `resize(elementCount)`), и на битом файле прилетит
-				// bad_alloc/length_error. Необработанное исключение в detached-потоке —
-				// std::terminate, то есть падение сервера из-за одного мусорного реплея.
-				try
+				// Защита от битого файла — НЕ try/catch: форк собирается с
+				// `-fno-exceptions` (AMBuildScript), исключение поймать нечем. Абсурдные
+				// размеры из шапки секций (по ним аллоцирует compression.cpp:417/458)
+				// отсекает пре-валидация внутри data::LoadCutSourceFromMemory — она отдаёт
+				// valid=false, и это ровно та же причина отказа parse_failed ниже.
+				KZ::replaysystem::data::CutSource src = KZ::replaysystem::data::LoadCutSourceFromMemory(data.data(), data.size());
+				if (!src.valid)
 				{
-					KZ::replaysystem::data::CutSource src =
-						KZ::replaysystem::data::LoadCutSourceFromMemory(data.data(), data.size());
-					if (!src.valid)
-					{
-						res.reason = "parse_failed";
-						PublishResult(res);
-						return;
-					}
-
-					if (!src.header.has_run() || src.header.run().time() <= 0.0f)
-					{
-						// Не ран-реплей: времени рана нет, считать AWR не от чего.
-						res.reason = "not_a_run";
-						PublishResult(res);
-						return;
-					}
-
-					res.timeMs = (u64)((f64)src.header.run().time() * 1000.0 + 0.5);
-					res.headerTeleports = src.header.run().has_num_teleports() ? src.header.run().num_teleports() : -1;
-
-					KZ::replaysystem::awr::CutResult cut =
-						KZ::replaysystem::playback::ComputeCutFor(src.ticks.data(), (u32)src.ticks.size(), src.events.data(),
-																  (u32)src.events.size(), res.timeMs);
-					res.ok = cut.ok;
-					res.reason = cut.ok ? "ok" : cut.reason;
-					res.awrMs = cut.awrMs;
-					res.teleports = cut.teleports;
-					PublishResult(res);
-				}
-				catch (...)
-				{
-					// Битый файл: отдаём отказ, api пометит строку (awrMs:null) и файл
-					// перестанет возвращаться в бэклог. Сервер при этом жив.
-					res.ok = false;
 					res.reason = "parse_failed";
-					res.timeMs = 0;
-					res.awrMs = 0;
-					res.teleports = 0;
-					res.headerTeleports = -1;
 					PublishResult(res);
+					return;
 				}
+
+				if (!src.header.has_run() || src.header.run().time() <= 0.0f)
+				{
+					// Не ран-реплей: времени рана нет, считать AWR не от чего.
+					res.reason = "not_a_run";
+					PublishResult(res);
+					return;
+				}
+
+				res.timeMs = (u64)((f64)src.header.run().time() * 1000.0 + 0.5);
+				res.headerTeleports = src.header.run().has_num_teleports() ? src.header.run().num_teleports() : -1;
+
+				KZ::replaysystem::awr::CutResult cut =
+					KZ::replaysystem::playback::ComputeCutFor(src.ticks.data(), (u32)src.ticks.size(), src.events.data(),
+															 (u32)src.events.size(), res.timeMs);
+				res.ok = cut.ok;
+				res.reason = cut.ok ? "ok" : cut.reason;
+				res.awrMs = cut.awrMs;
+				res.teleports = cut.teleports;
+				PublishResult(res);
 			});
 		worker.detach();
 	}
