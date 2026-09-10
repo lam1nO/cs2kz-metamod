@@ -59,6 +59,12 @@ namespace KZ::replaysystem::playback
 	// Разрез AWR по уже разобранным данным реплея (адаптер TickData→awr::Frame внутри).
 	awr::CutResult ComputeCutFor(const TickData *ticks, u32 tickCount, const RpEvent *events, u32 numEvents, u64 timeMs);
 
+	// То же плюс трасса прибытий для kz_awr_debug. Отдельная функция, а не параметр
+	// ComputeCutFor: её сигнатуру зовут воркер бэкфилла и !lead, менять её нельзя, а второй
+	// адаптер TickData→awr::Frame заводить тем более (он обязан остаться один).
+	awr::CutResult ComputeCutForTraced(const TickData *ticks, u32 tickCount, const RpEvent *events, u32 numEvents, u64 timeMs,
+									   std::vector<awr::ArrivalTrace> *trace);
+
 	// ЭФФЕКТИВНАЯ шкала тиков — запись без паузных сегментов (их плейбек пропускает). Всё, что
 	// видит зритель (время в меню/!rpinfo, перемотка ±N сек, шаг по тикам), считается в ней и
 	// переводится в сырой индекс tickData только на границе: иначе длительность включала бы

@@ -387,6 +387,36 @@ static void test_standing_before_first_tp_stays_live()
 	assert(live.size() == 2 && live[0].from == 0 && live[0].to == 20);
 }
 
+// Трасса прибытий (её печатает kz_awr_debug): по записи на каждое прибытие окна, в порядке
+// кадров, с методом сшивки и объявленным вырезом.
+static void test_trace_reports_every_arrival()
+{
+	std::vector<Frame> v;
+	for (uint32_t i = 0; i <= 9; i++) v.push_back(F(i, -1, 0, 0, 6.0f * i));
+	v.push_back(F(10, -1, 1, 0, 60.0f));
+	for (uint32_t i = 11; i <= 30; i++) v.push_back(F(i, -1, 1, 0, 60.0f + 6.0f * (i - 10)));
+	v.push_back(F(31, -1, 1, 1, 60.0f));
+	for (uint32_t i = 32; i <= 35; i++) v.push_back(F(i, -1, 1, 1, 60.0f));
+	for (uint32_t i = 36; i <= 50; i++) v.push_back(F(i, -1, 1, 1, 60.0f + 6.0f * (i - 35)));
+	v.push_back(F(51, -1, 1, 2, 60.0f));
+	for (uint32_t i = 52; i <= 55; i++) v.push_back(F(i, -1, 1, 2, 60.0f));
+	for (uint32_t i = 56; i <= 70; i++) v.push_back(F(i, -1, 1, 2, 60.0f + 6.0f * (i - 55)));
+	v.push_back(F(71, -1, 1, 3, 60.0f));
+	for (uint32_t i = 72; i < 86; i++) v.push_back(F(i, -1, 1, 3, 60.0f + 6.0f * (i - 71)));
+	FillPre(v);
+	std::vector<ArrivalTrace> trace;
+	CutResult r = ComputeAwrCut(v.data(), v.size(), nullptr, 0, 10000, TI, 0, v.size() - 1, &trace);
+	assert(r.ok && trace.size() == 3);
+	assert(trace[0].frame == 31 && trace[1].frame == 51 && trace[2].frame == 71);
+	// cpIndex невалиден — сшивка только сканом; каждое следующее прибытие сшито к предыдущему.
+	assert(trace[0].method == 'b' && trace[1].method == 'b' && trace[2].method == 'b');
+	assert(trace[0].dest == 10 && trace[1].dest == 31 && trace[2].dest == 51);
+	assert(trace[0].deadFrom == 11 && trace[0].deadTo == 31);
+	// standTicks мерится тем же допуском, поэтому включает и пару тиков разгона — важно
+	// лишь, что стояние после прибытия видно.
+	assert(trace[0].standTicks >= 4 && trace[2].cpFrame == -1);
+}
+
 int main()
 {
 	test_no_teleports(); test_single_tp(); test_repeat_tp_same_cp(); test_prevcp_nextcp_keeps_middle();
@@ -397,6 +427,7 @@ int main()
 	test_dest_not_found_detail(); test_counter_mismatch_detail();
 	test_pre_branch_beats_later_pass(); test_pre_match_at_run_start_clamped();
 	test_repeat_tp_collapses_to_one_dead(); test_standing_before_first_tp_stays_live();
+	test_trace_reports_every_arrival();
 	std::puts("awr_cut: all tests passed");
 	return 0;
 }

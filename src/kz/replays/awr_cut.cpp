@@ -75,6 +75,7 @@ namespace KZ::replaysystem::awr
 		float cpPreDist = -1.0f;
 		int64_t bestFrame = -1;  // ближайший кадр скана
 		float bestDistSq = -1.0f;
+		char method = '-';       // чем сшили: 'a' — индекс чекпоинта, 'b' — скан назад
 	};
 
 	// Кадр назначения телепорта, прибывшего на кадре t; -1 — не нашли.
@@ -98,6 +99,10 @@ namespace KZ::replaysystem::awr
 			int64_t d = MatchDest(frames, sFrame, arrival, runStart);
 			if (d >= 0)
 			{
+				if (probe)
+				{
+					probe->method = 'a';
+				}
 				return d;
 			}
 		}
@@ -164,6 +169,10 @@ namespace KZ::replaysystem::awr
 					nearestDistSq = dSq;
 				}
 			}
+			if (probe)
+			{
+				probe->method = 'b';
+			}
 			if (firstArrival >= 0)
 			{
 				// Кадр прибытия сам остаётся живым: обход обработает его следующим шагом и
@@ -175,8 +184,19 @@ namespace KZ::replaysystem::awr
 		return -1;
 	}
 
+	// Длина стояния в точке кадра t: сколько последующих кадров окна не ушли из допуска.
+	static uint32_t StandTicks(const Frame *frames, uint32_t t, uint32_t runEnd)
+	{
+		uint32_t n = 0;
+		for (uint32_t k = t + 1; k <= runEnd && DistSq(frames[t].origin, frames[k].origin) <= AWR_DEST_TOLERANCE_SQ; k++)
+		{
+			n++;
+		}
+		return n;
+	}
+
 	CutResult ComputeAwrCut(const Frame *frames, uint32_t count, const Interval *pauses, uint32_t pauseCount, uint64_t timeMs, double tickInterval,
-							uint32_t runStart, uint32_t runEnd)
+							uint32_t runStart, uint32_t runEnd, std::vector<ArrivalTrace> *trace)
 	{
 		CutResult r;
 		if (!frames || count == 0)
@@ -225,11 +245,44 @@ namespace KZ::replaysystem::awr
 				cursor--;
 				continue;
 			}
-			int64_t d = DestFrame(frames, (uint32_t)cursor, cpSet, runStart, arrival.data(), nullptr);
+			// probe считаем только под трассу: на обычном пути диагностика не нужна.
+			DestProbe walkProbe;
+			int64_t d = DestFrame(frames, (uint32_t)cursor, cpSet, runStart, arrival.data(), trace ? &walkProbe : nullptr);
+			if (trace)
+			{
+				const Frame &a = frames[cursor];
+				ArrivalTrace tr;
+				tr.frame = (uint32_t)cursor;
+				tr.serverTick = a.serverTick;
+				tr.cpIndex = a.cpIndex;
+				tr.cpCount = a.cpCount;
+				tr.tpCount = a.tpCount;
+				tr.origin[0] = a.origin[0];
+				tr.origin[1] = a.origin[1];
+				tr.origin[2] = a.origin[2];
+				tr.dest = d;
+				tr.method = d >= 0 ? walkProbe.method : '-';
+				tr.cpFrame = walkProbe.cpFrame;
+				tr.cpPostDist = walkProbe.cpPostDist;
+				tr.cpPreDist = walkProbe.cpPreDist;
+				tr.standTicks = StandTicks(frames, (uint32_t)cursor, runEnd);
+				if (d >= 0)
+				{
+					tr.deadFrom = (uint32_t)d + 1;
+					tr.deadTo = (uint32_t)cursor;
+				}
+				trace->push_back(tr);
+			}
 			if (d < 0)
 			{
 				r.reason = "dest_not_found";
 				r.dead.clear();
+				if (trace)
+				{
+					// Трасса собиралась в порядке обхода (от финиша назад) — для чтения
+					// глазами упорядочиваем по кадру, как и на успешном пути.
+					std::sort(trace->begin(), trace->end(), [](const ArrivalTrace &x, const ArrivalTrace &y) { return x.frame < y.frame; });
+				}
 				// Второй проход — только ради строки detail. Считать дистанции на КАЖДОМ кадре
 				// удачного скана незачем: успешный путь обычно обрывается на первых кадрах, а
 				// неудачный и так уже прошёл всё окно — лишний проход платится один раз за файл.
@@ -248,6 +301,45 @@ namespace KZ::replaysystem::awr
 			cursor = d;
 		}
 		std::reverse(r.dead.begin(), r.dead.end());
+
+		if (trace)
+		{
+			// Обход прыгает с прибытия на его назначение, поэтому прибытия, оказавшиеся
+			// ВНУТРИ уже объявленного выреза, он не разбирает. Для диагностики их всё равно
+			// надо видеть: помечаем method='s' и упорядочиваем трассу по кадру.
+			for (uint32_t i = runStart + 1; i <= runEnd; i++)
+			{
+				if (!arrival[i])
+				{
+					continue;
+				}
+				bool seen = false;
+				for (const ArrivalTrace &tr : *trace)
+				{
+					if (tr.frame == i)
+					{
+						seen = true;
+						break;
+					}
+				}
+				if (!seen)
+				{
+					const Frame &a = frames[i];
+					ArrivalTrace tr;
+					tr.frame = i;
+					tr.serverTick = a.serverTick;
+					tr.cpIndex = a.cpIndex;
+					tr.cpCount = a.cpCount;
+					tr.tpCount = a.tpCount;
+					tr.origin[0] = a.origin[0];
+					tr.origin[1] = a.origin[1];
+					tr.origin[2] = a.origin[2];
+					tr.standTicks = StandTicks(frames, i, runEnd);
+					trace->push_back(tr);
+				}
+			}
+			std::sort(trace->begin(), trace->end(), [](const ArrivalTrace &x, const ArrivalTrace &y) { return x.frame < y.frame; });
+		}
 
 		// Слить СМЕЖНЫЕ интервалы. Повторные попытки на одном чекпоинте дают цепочку
 		// вырезов, стыкующихся кадр в кадр ([D+1,T1], [T1+1,T2], …) — сшивка ведёт каждый

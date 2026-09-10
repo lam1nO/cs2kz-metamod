@@ -205,6 +205,12 @@ namespace KZ::replaysystem::playback
 
 	awr::CutResult ComputeCutFor(const TickData *ticks, u32 tickCount, const RpEvent *events, u32 numEvents, u64 timeMs)
 	{
+		return ComputeCutForTraced(ticks, tickCount, events, numEvents, timeMs, nullptr);
+	}
+
+	awr::CutResult ComputeCutForTraced(const TickData *ticks, u32 tickCount, const RpEvent *events, u32 numEvents, u64 timeMs,
+									   std::vector<awr::ArrivalTrace> *trace)
+	{
 		if (!ticks || tickCount == 0)
 		{
 			awr::CutResult empty;
@@ -242,7 +248,8 @@ namespace KZ::replaysystem::playback
 			frames[i].preOrigin[2] = t.pre.origin.z;
 		}
 		std::vector<awr::Interval> pauses = PauseIntervalsFromEvents(ticks, tickCount, events, numEvents);
-		return awr::ComputeAwrCut(frames.data(), tickCount, pauses.data(), (u32)pauses.size(), timeMs, ENGINE_FIXED_TICK_INTERVAL, runStart, runEnd);
+		return awr::ComputeAwrCut(frames.data(), tickCount, pauses.data(), (u32)pauses.size(), timeMs, ENGINE_FIXED_TICK_INTERVAL, runStart, runEnd,
+								  trace);
 	}
 
 	void BuildSkipSegments()
