@@ -126,8 +126,8 @@ static void test_undo()
 	assert(r.ok && r.dead.size() == 1 && r.dead[0].from == 21 && r.dead[0].to == 23);
 }
 
-// Пауза (TIMER_PAUSE на тике 15, TIMER_RESUME на тике 18) внутри мёртвого интервала 11..31 —
-// её длительность из мёртвого времени вычитается. Паузы задаются в СЕРВЕРНЫХ ТИКАХ.
+// Пауза на КАДРАХ 15..18 внутри мёртвого интервала 11..31: эти кадры записаны (игрок
+// заморожен, физика идёт), но таймер их не считал — из мёртвого времени они вычитаются.
 static void test_pause_overlap_not_double_counted()
 {
 	std::vector<Frame> v;
@@ -137,43 +137,54 @@ static void test_pause_overlap_not_double_counted()
 	Interval pause {15, 18};
 	FillPre(v);
 	CutResult r = ComputeAwrCut(v.data(), v.size(), &pause, 1, 10000, TI, 0, v.size() - 1);
-	// мёртвое 21 тик (31-10) минус пауза (18-15 = 3 тика) = 18 тиков
-	assert(r.ok && r.awrMs == 10000 - (uint64_t)(18 * TI * 1000.0 + 0.5));
+	// мёртвых кадров 21 (11..31) минус 4 паузных (15..18) = 17
+	assert(r.ok && r.awrMs == 10000 - (uint64_t)(17 * TI * 1000.0 + 0.5));
 }
 
-// КОРЕНЬ awr_ms = 0 на длинных гриндах: `!prac` не пишет тиков вовсе, а таймер на это время
-// стоит на паузе — в файле остаётся РАЗРЫВ serverTick между двумя соседними кадрами. Пауза,
-// измеренная в индексах кадров, съёживается в один кадр, и её тики оставались в мёртвом
-// времени: deadMs > timeMs → awrMs = 0. Пересечение считается по тикам и разрыв покрывает.
-static void test_prac_gap_pause_subtracted_by_ticks()
+// КОРЕНЬ отказов замера cyb.183: `!prac` не пишет тиков вовсе, а таймер на это время стоит
+// — в файле остаётся РАЗРЫВ serverTick между соседними кадрами. Мёртвое время измеряется
+// числом ЗАПИСАННЫХ КАДРОВ, поэтому неписанный промежуток не даёт вклада ни в time_ms, ни в
+// мёртвое. По длине интервала в серверных тиках вклад был бы 20015 тиков вместо 15 кадров, и
+// мёртвое выходило БОЛЬШЕ времени рана (живой пример: time_ms=706539, dead_ms=720094).
+static void test_dead_counts_frames_not_server_ticks()
 {
 	const uint32_t GAP = 20000; // ~5 минут prac между кадрами 20 и 21
 	std::vector<Frame> v;
 	for (uint32_t i = 0; i <= 20; i++) v.push_back(FC(i, 0, i >= 10 ? 1 : 0, 0, (float)i));
-	// После prac игрок продолжает с того же места; тики прыгнули на GAP.
 	for (uint32_t i = 21; i <= 24; i++) v.push_back(FC(i + GAP, 0, 1, 0, (float)i));
 	v.push_back(FC(25 + GAP, 0, 1, 1, 10.0f)); // ТП на чекпоинт кадра 10
 	for (uint32_t i = 26; i <= 30; i++) v.push_back(FC(i + GAP, 0, 1, 1, 10.0f + (i - 25)));
 	FillPre(v);
-	// TIMER_PAUSE на тике 20, TIMER_RESUME на тике 21+GAP — ровно как их пишет рекордер.
-	Interval pause {20, 21 + GAP};
-	// Время рана: окно 0..(30+GAP) тиков минус пауза = 30 - 1 + 1 ... считаем по-честному.
-	const uint64_t windowTicks = 30 + GAP;
-	const uint64_t timeMs = (uint64_t)((double)(windowTicks - GAP) * TI * 1000.0 + 0.5);
-	CutResult r = ComputeAwrCut(v.data(), v.size(), &pause, 1, timeMs, TI, 0, v.size() - 1);
+	// Пауз НЕТ вовсе: в prac кадров не писали, и паре PAUSE/RESUME в кадрах соответствовать
+	// нечему — вклад всё равно обязан быть равен числу кадров выреза.
+	CutResult r = ComputeAwrCut(v.data(), v.size(), nullptr, 0, 10000, TI, 0, v.size() - 1);
 	assert(r.ok && r.teleports == 1 && r.dead.size() == 1);
 	assert(r.dead[0].from == 11 && r.dead[0].to == 25);
-	// Мёртвое: тики 10..(25+GAP) = 15 + GAP, минус пауза GAP+1 → 14 тиков.
-	assert(r.awrMs == timeMs - (uint64_t)(14 * TI * 1000.0 + 0.5));
-	// Разрыв целиком покрыт записанной паузой — «непокрытого» разрыва нет.
-	assert(r.maxUncoveredGapTicks == 1);
+	assert(r.awrMs == 10000 - (uint64_t)(15 * TI * 1000.0 + 0.5));
+	// Разрыв виден в метрике, но отказом больше не является.
+	assert(r.maxRecordGapTicks == GAP + 1 && r.maxRecordGapFrame == 21);
 }
 
-// Тот же разрыв, но БЕЗ записанной паузы (неизвестный источник: реконнект с восстановлением
-// рана и пр.) — отнести это время ни к мёртвому, ни к живому нечем, поэтому измеримый отказ.
-static void test_record_gap_without_pause_refused()
+// Тридцать секунд prac внутри выреза (медиана живого замера) — законная история, проходит.
+static void test_prac_sized_gap_allowed()
 {
-	const uint32_t GAP = 20000;
+	const uint32_t GAP = 64 * 31; // ~31 с
+	std::vector<Frame> v;
+	for (uint32_t i = 0; i <= 20; i++) v.push_back(FC(i, 0, i >= 10 ? 1 : 0, 0, (float)i));
+	for (uint32_t i = 21; i <= 24; i++) v.push_back(FC(i + GAP, 0, 1, 0, (float)i));
+	v.push_back(FC(25 + GAP, 0, 1, 1, 10.0f));
+	for (uint32_t i = 26; i <= 30; i++) v.push_back(FC(i + GAP, 0, 1, 1, 10.0f + (i - 25)));
+	FillPre(v);
+	CutResult r = ComputeAwrCut(v.data(), v.size(), nullptr, 0, 10000, TI, 0, v.size() - 1);
+	assert(r.ok && r.maxRecordGapTicks == GAP + 1);
+	assert(r.awrMs == 10000 - (uint64_t)(15 * TI * 1000.0 + 0.5));
+}
+
+// Разрыв длиннее часа игрового времени — уже не пауза, а битый/склеенный файл: отказ.
+// Порог существует ТОЛЬКО для этого случая.
+static void test_absurd_record_gap_refused()
+{
+	const uint32_t GAP = 64 * 60 * 60 + 100; // час с лишним
 	std::vector<Frame> v;
 	for (uint32_t i = 0; i <= 20; i++) v.push_back(FC(i, 0, i >= 10 ? 1 : 0, 0, (float)i));
 	for (uint32_t i = 21; i <= 24; i++) v.push_back(FC(i + GAP, 0, 1, 0, (float)i));
@@ -182,9 +193,7 @@ static void test_record_gap_without_pause_refused()
 	FillPre(v);
 	CutResult r = ComputeAwrCut(v.data(), v.size(), nullptr, 0, 10000, TI, 0, v.size() - 1);
 	assert(!r.ok && std::strcmp(r.reason, "awr_record_gap") == 0);
-	// Разрыв = тик кадра 21 (21+GAP) минус тик кадра 20 (20).
-	assert(r.maxUncoveredGapTicks == GAP + 1 && r.maxUncoveredGapFrame == 21);
-	assert(std::strstr(r.detail, "max_gap=20001@21") && std::strstr(r.detail, "gap_s="));
+	assert(std::strstr(r.detail, "gap_s=") && std::strstr(r.detail, "dead_frames="));
 }
 
 // Флаг «метрика разрывов посчитана»: на РАННЕМ отказе её печатать нельзя (ноль читался бы
@@ -196,7 +205,7 @@ static void test_max_gap_measured_flag()
 	for (uint32_t i = 0; i < 20; i++) plain.push_back(FC(i, 0, 0, 0, (float)i));
 	FillPre(plain);
 	CutResult noWindow = ComputeAwrCut(plain.data(), plain.size(), nullptr, 0, 10000, TI, 0, 0);
-	assert(!noWindow.ok && !noWindow.maxUncoveredGapMeasured && noWindow.maxUncoveredGapTicks == 0);
+	assert(!noWindow.ok && !noWindow.maxRecordGapMeasured && noWindow.maxRecordGapTicks == 0);
 
 	// (2) счётчик ТП прыгнул на 2 — тоже ранний отказ.
 	std::vector<Frame> bad;
@@ -205,25 +214,11 @@ static void test_max_gap_measured_flag()
 	for (uint32_t i = 22; i < 30; i++) bad.push_back(FC(i, 0, 1, 2, 10.0f + (i - 21)));
 	FillPre(bad);
 	CutResult mismatch = ComputeAwrCut(bad.data(), bad.size(), nullptr, 0, 10000, TI, 0, bad.size() - 1);
-	assert(!mismatch.ok && !mismatch.maxUncoveredGapMeasured);
+	assert(!mismatch.ok && !mismatch.maxRecordGapMeasured);
 
 	// (3) успех без телепортов: вырезов нет, значит и разрывов внутри них — ноль ПРАВДИВ.
 	CutResult ok = ComputeAwrCut(plain.data(), plain.size(), nullptr, 0, 5000, TI, 0, plain.size() - 1);
-	assert(ok.ok && ok.maxUncoveredGapMeasured && ok.maxUncoveredGapTicks == 0);
-}
-
-// Разрыв короче порога (хитч сервера) отказом НЕ является, но в метрике виден.
-static void test_small_record_gap_allowed()
-{
-	std::vector<Frame> v;
-	for (uint32_t i = 0; i <= 20; i++) v.push_back(FC(i, 0, i >= 10 ? 1 : 0, 0, (float)i));
-	// Кадры 21..25 записаны с пропуском 10 тиков сразу после кадра 20.
-	for (uint32_t i = 21; i <= 24; i++) v.push_back(FC(i + 10, 0, 1, 0, (float)i));
-	v.push_back(FC(35, 0, 1, 1, 10.0f));
-	for (uint32_t i = 26; i <= 30; i++) v.push_back(FC(i + 10, 0, 1, 1, 10.0f + (i - 25)));
-	FillPre(v);
-	CutResult r = ComputeAwrCut(v.data(), v.size(), nullptr, 0, 10000, TI, 0, v.size() - 1);
-	assert(r.ok && r.maxUncoveredGapTicks == 11 && r.maxUncoveredGapFrame == 21);
+	assert(ok.ok && ok.maxRecordGapMeasured && ok.maxRecordGapTicks == 0);
 }
 
 // Пересекающиеся/неупорядоченные паузы нормализуются: пересечение не вычитается дважды.
@@ -234,11 +229,12 @@ static void test_overlapping_pauses_not_double_subtracted()
 	v.push_back(FC(31, 0, 1, 1, 10.0f));
 	for (uint32_t i = 32; i < 40; i++) v.push_back(FC(i, 0, 1, 1, 10.0f + (i - 31)));
 	FillPre(v);
-	// Две пересекающиеся паузы (14,20] и (18,24] в обратном порядке = одна (14,24] = 10 тиков.
+	// Две пересекающиеся паузы (кадры 14..20 и 18..24, в обратном порядке) = одна 14..24,
+	// то есть 11 паузных кадров; мёртвых кадров 21 (11..31) → 10.
 	const Interval pauses[2] = {{18, 24}, {14, 20}};
 	CutResult r = ComputeAwrCut(v.data(), v.size(), pauses, 2, 10000, TI, 0, v.size() - 1);
-	assert(r.ok && r.awrMs == 10000 - (uint64_t)((21 - 10) * TI * 1000.0 + 0.5));
-	// Без нормализации вычлось бы 6+6=12 тиков вместо 10 → мёртвое 9, awrMs больше.
+	assert(r.ok && r.awrMs == 10000 - (uint64_t)(10 * TI * 1000.0 + 0.5));
+	// Без нормализации вычлось бы 7+7=14 кадров вместо 11 → мёртвое 7, awrMs больше.
 }
 
 // Фикстура формы живого дефекта: N прибытий подряд, каждое сшивается к предыдущему, стояний
@@ -611,49 +607,50 @@ static void test_trace_reports_every_arrival()
 	assert(trace[0].standTicks >= 4 && trace[2].cpFrame == -1);
 }
 
-// --- Перемотка: сколько вырезанного времени лежит до целевого тика --------------------------
+// --- Перемотка: сколько вырезанных КАДРОВ лежит до целевого кадра ------------------------
 // Отображаемое время бота при сике = сырое время от старта рана до цели, минус записанные
-// паузы, минус вырезы. Паузы вычитает аккумулятор плейбека, поэтому DeadTicksUpTo обязана
-// исключить их из выреза — иначе двойной вычет (та же ловушка, что в подсчёте мёртвого).
-static void test_dead_ticks_up_to()
+// паузы, минус вырезы. Паузы вычитает аккумулятор плейбека, поэтому DeadFramesUpTo обязана
+// исключить кадры, записанные на паузе — иначе двойной вычет.
+static void test_dead_frames_up_to()
 {
-	const Interval dead[2] = {{150, 300}, {400, 500}}; // полуинтервалы (from, to] в ТИКАХ
+	const Interval dead[2] = {{150, 300}, {400, 500}};   // индексы кадров, включительно
 	const Interval pauses[2] = {{200, 250}, {600, 650}}; // первая внутри выреза, вторая в живом
 
-	// Цель за всеми вырезами: (300-150) - 50 + (500-400) = 200.
-	assert(DeadTicksUpTo(dead, 2, pauses, 2, 1000) == 200);
-	// Без пауз пересечение не вычитается: 150 + 100 = 250.
-	assert(DeadTicksUpTo(dead, 2, nullptr, 0, 1000) == 250);
-	// Цель В СЕРЕДИНЕ второго выреза — обрезаем по цели: 100 + (450-400) = 150.
-	assert(DeadTicksUpTo(dead, 2, pauses, 2, 450) == 150);
-	// Цель до всех вырезов — ноль (и на границе входа в вырез тоже).
-	assert(DeadTicksUpTo(dead, 2, pauses, 2, 150) == 0);
-	assert(DeadTicksUpTo(dead, 2, pauses, 2, 0) == 0);
-	assert(DeadTicksUpTo(nullptr, 0, pauses, 2, 1000) == 0);
-	// Пауза, целиком накрывшая вырез (prac внутри петли), обнуляет его вклад.
+	// Цель за всеми вырезами: 151 - 51 + 101 = 201 кадр.
+	assert(DeadFramesUpTo(dead, 2, pauses, 2, 1000) == 201);
+	// Без пауз паузные кадры не вычитаются: 151 + 101 = 252.
+	assert(DeadFramesUpTo(dead, 2, nullptr, 0, 1000) == 252);
+	// Цель В СЕРЕДИНЕ второго выреза — обрезаем по цели: (151 - 51) + (450-400+1) = 151.
+	assert(DeadFramesUpTo(dead, 2, pauses, 2, 450) == 151);
+	// Цель до всех вырезов — ноль; ровно на первом кадре выреза — один кадр.
+	assert(DeadFramesUpTo(dead, 2, pauses, 2, 149) == 0);
+	assert(DeadFramesUpTo(dead, 2, pauses, 2, 150) == 1);
+	assert(DeadFramesUpTo(dead, 2, pauses, 2, 0) == 0);
+	assert(DeadFramesUpTo(nullptr, 0, pauses, 2, 1000) == 0);
+	// Пауза, целиком накрывшая вырез, обнуляет его вклад.
 	const Interval bigPause[1] = {{140, 320}};
-	assert(DeadTicksUpTo(dead, 1, bigPause, 1, 1000) == 0);
+	assert(DeadFramesUpTo(dead, 1, bigPause, 1, 1000) == 0);
 }
 
-// Тождество: живые тики от старта рана до цели == сырое - паузы - вырезы. Считаем правую
-// часть формулой, левую — прямым перебором тиков, и сверяем.
-static void test_seek_live_time_identity()
+// Тождество: живые кадры от старта рана до цели == все кадры минус паузные минус вырезанные.
+// Правую часть считаем формулой перемотки, левую — прямым перебором кадров.
+static void test_seek_live_frames_identity()
 {
-	const uint32_t runStartTick = 100, targetTick = 1000;
+	const uint32_t runStart = 100, target = 1000;
 	const Interval dead[2] = {{150, 300}, {400, 500}};
 	const Interval pauses[2] = {{200, 250}, {600, 650}};
 
 	uint64_t liveDirect = 0;
-	for (uint32_t t = runStartTick + 1; t <= targetTick; t++)
+	for (uint32_t f = runStart + 1; f <= target; f++)
 	{
 		bool skipped = false;
 		for (const Interval &d : dead)
 		{
-			if (t > d.from && t <= d.to) skipped = true;
+			if (f >= d.from && f <= d.to) skipped = true;
 		}
 		for (const Interval &p : pauses)
 		{
-			if (t > p.from && t <= p.to) skipped = true;
+			if (f >= p.from && f <= p.to) skipped = true;
 		}
 		if (!skipped) liveDirect++;
 	}
@@ -661,20 +658,20 @@ static void test_seek_live_time_identity()
 	uint64_t pausedUpTo = 0;
 	for (const Interval &p : pauses)
 	{
-		const uint32_t to = p.to < targetTick ? p.to : targetTick;
-		if (to > p.from) pausedUpTo += to - p.from;
+		const uint32_t to = p.to < target ? p.to : target;
+		if (to >= p.from) pausedUpTo += to - p.from + 1;
 	}
-	const uint64_t raw = targetTick - runStartTick;
-	const uint64_t formula = raw - pausedUpTo - DeadTicksUpTo(dead, 2, pauses, 2, targetTick);
-	assert(liveDirect == 600 && formula == liveDirect);
+	const uint64_t all = target - runStart;
+	const uint64_t formula = all - pausedUpTo - DeadFramesUpTo(dead, 2, pauses, 2, target);
+	assert(formula == liveDirect);
 }
 
 int main()
 {
 	test_no_teleports(); test_single_tp(); test_repeat_tp_same_cp(); test_prevcp_nextcp_keeps_middle();
 	test_undo(); test_pause_overlap_not_double_counted(); test_dest_not_found();
-	test_prac_gap_pause_subtracted_by_ticks(); test_many_arrivals_chain_no_double_count(); test_awr_implausible_guard();
-	test_record_gap_without_pause_refused(); test_max_gap_measured_flag(); test_small_record_gap_allowed();
+	test_dead_counts_frames_not_server_ticks(); test_prac_sized_gap_allowed(); test_absurd_record_gap_refused();
+	test_many_arrivals_chain_no_double_count(); test_awr_implausible_guard(); test_max_gap_measured_flag();
 	test_overlapping_pauses_not_double_subtracted();
 	test_tail_teleport_after_run_end(); test_prerecord_teleport_before_run_start(); test_counter_mismatch();
 	test_no_run_window();
@@ -683,7 +680,7 @@ int main()
 	test_pre_branch_beats_later_pass(); test_pre_match_at_run_start_clamped();
 	test_repeat_tp_collapses_to_one_dead(); test_standing_before_first_tp_is_cut(); test_cp_index_and_scan_agree();
 	test_trace_reports_every_arrival();
-	test_dead_ticks_up_to(); test_seek_live_time_identity();
+	test_dead_frames_up_to(); test_seek_live_frames_identity();
 	std::puts("awr_cut: all tests passed");
 	return 0;
 }

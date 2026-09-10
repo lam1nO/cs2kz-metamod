@@ -615,28 +615,19 @@ namespace KZ::replaysystem::events
 			// которое прошло, но в таймер рана не идёт».
 			//
 			// Пересечение вырезов с записанными паузами вычитается ОДИН раз: паузы уже
-			// набраны в totalPauseTime выше, поэтому DeadTicksUpTo их из выреза исключает.
-			// Аллокация здесь допустима: путь — перемотка (действие зрителя), не игровой такт.
+			// набраны в totalPauseTime выше, поэтому DeadFramesUpTo исключает из выреза
+			// кадры, записанные на паузе. Считаем в КАДРАХ (один записанный кадр = один тик
+			// таймера), а не в серверных тиках: в разрыв записи попадает время, которого
+			// таймер никогда не считал, и оно и так уже вычтено через totalPauseTime (тот
+			// мерится по gameTime кадров вокруг разрыва). Аллокация здесь допустима: путь —
+			// перемотка (действие зрителя), не игровой такт.
 			if (replay->awrMode && replay->awrDead && !replay->awrDead->empty())
 			{
-				std::vector<awr::Interval> deadTickSpans;
-				deadTickSpans.reserve(replay->awrDead->size());
-				for (const awr::Interval &iv : *replay->awrDead)
-				{
-					// Вырез [from, to] в кадрах — это тики (tick[from-1], tick[to]]: кадр
-					// from-1 (назначение телепорта) остаётся живым, как в ComputeAwrCut.
-					if (iv.from == 0 || iv.to >= replay->tickCount || iv.from > iv.to)
-					{
-						continue;
-					}
-					deadTickSpans.push_back({replay->tickData[iv.from - 1].serverTick, replay->tickData[iv.to].serverTick});
-				}
-				std::vector<awr::Interval> pauseTicks =
-					playback::PauseIntervalsFromEvents(replay->tickData, replay->tickCount, replay->events, replay->numEvents,
-													   playback::PauseUnits::ServerTicks);
-				const u64 deadTicks = awr::DeadTicksUpTo(deadTickSpans.data(), (u32)deadTickSpans.size(), pauseTicks.data(), (u32)pauseTicks.size(),
-														 targetServerTick);
-				replay->accumulatedPauseTime += (f32)((f64)deadTicks * ENGINE_FIXED_TICK_INTERVAL);
+				std::vector<awr::Interval> pauses =
+					playback::PauseIntervalsFromEvents(replay->tickData, replay->tickCount, replay->events, replay->numEvents);
+				const u64 deadFrames = awr::DeadFramesUpTo(replay->awrDead->data(), (u32)replay->awrDead->size(), pauses.data(),
+														   (u32)pauses.size(), targetTick);
+				replay->accumulatedPauseTime += (f32)((f64)deadFrames * ENGINE_FIXED_TICK_INTERVAL);
 			}
 			// Если перемотка приземлилась ВНУТРИ записанной паузы — заякорить её для
 			// последующего live-TIMER_RESUME, чтобы остаток паузы (от target до фактического

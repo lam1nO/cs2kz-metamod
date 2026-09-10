@@ -145,8 +145,8 @@ namespace
 		u32 teleports = 0;
 		// Число ТП из шапки реплея (RunReplayData::num_teleports); -1 = поля нет.
 		i32 headerTeleports = -1;
-		// Самый большой разрыв записи внутри вырезов, не покрытый паузой, и его кадр
-		// (awr::CutResult::maxUncoveredGapTicks). Печатается на КАЖДОМ файле, где метрика
+		// Самый большой разрыв записи внутри вырезов и его кадр — диагностика доверия
+		// (awr::CutResult::maxRecordGapTicks). Печатается на КАЖДОМ файле, где метрика
 		// вообще посчитана (в том числе на успехе): распределение разрывов надо видеть до
 		// того, как оно испортит awr_ms. На ранних отказах (parse_failed, not_a_run, empty,
 		// no_run_window, dest_not_found, counter_mismatch) подсчёта не
@@ -701,9 +701,9 @@ namespace
 				res.detail = cut.detail;
 				res.awrMs = cut.awrMs;
 				res.teleports = cut.teleports;
-				res.maxGapMeasured = cut.maxUncoveredGapMeasured;
-				res.maxGapTicks = cut.maxUncoveredGapTicks;
-				res.maxGapFrame = cut.maxUncoveredGapFrame;
+				res.maxGapMeasured = cut.maxRecordGapMeasured;
+				res.maxGapTicks = cut.maxRecordGapTicks;
+				res.maxGapFrame = cut.maxRecordGapFrame;
 				PublishResult(res);
 			});
 		worker.detach();

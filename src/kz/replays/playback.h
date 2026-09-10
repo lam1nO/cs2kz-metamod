@@ -44,22 +44,11 @@ namespace KZ::replaysystem::playback
 	// Первый индекс кадра с serverTick >= заданного; tickCount, если такого нет.
 	u32 TickIndexForServerTick(const TickData *ticks, u32 tickCount, u32 serverTick);
 
-	// В чём измерять записанные паузы. Frames — индексы кадров (их пропускает плейбек);
-	// ServerTicks — тики событий TIMER_PAUSE/TIMER_RESUME (в них считает мёртвое время
-	// разрез AWR). Разные единицы обязательны: в `!prac` тиков не пишут вовсе, и
-	// многоминутная пауза в индексах кадров съёживается в один кадр (см. awr_cut.h).
-	enum class PauseUnits
-	{
-		Frames,
-		ServerTicks,
-	};
-
-	// Записанные паузы: в индексах кадров включительно ([startIdx, endIdx-1]) либо в
-	// серверных тиках ({тик TIMER_PAUSE, тик TIMER_RESUME}) — общий код для BuildSkipSegments
-	// и для разреза AWR. Публичен: тем же кодом пользуются воркер бэкфилла и !lead, у которых
-	// нет g_currentReplay.
-	std::vector<awr::Interval> PauseIntervalsFromEvents(const TickData *ticks, u32 tickCount, const RpEvent *events, u32 numEvents,
-													   PauseUnits units = PauseUnits::Frames);
+	// Записанные паузы в ИНДЕКСАХ кадров, включительно ([startIdx, endIdx-1]) — общий код
+	// для BuildSkipSegments и для разреза AWR (мёртвое время он считает в кадрах, поэтому и
+	// паузы ему нужны в кадрах). Публичен: тем же кодом пользуются воркер бэкфилла и !lead,
+	// у которых нет g_currentReplay.
+	std::vector<awr::Interval> PauseIntervalsFromEvents(const TickData *ticks, u32 tickCount, const RpEvent *events, u32 numEvents);
 
 	// Окно САМОГО рана в индексах кадров (включительно) по событиям таймера плюс id курса
 	// этой пары START/END. false — окна нет (нет пары START/END, курсы пары разные, окно

@@ -182,11 +182,11 @@ CON_COMMAND_F(kz_awr_debug, "Explain the AWR cut of one replay file. Usage: kz_a
 		src.ticks.data(), (u32)src.ticks.size(), src.events.data(), (u32)src.events.size(), timeMs, &trace);
 
 	// max_gap печатаем только если разрез до подсчёта дошёл: на раннем отказе ноль читался
-	// бы как «разрыва записи нет» (см. CutResult::maxUncoveredGapMeasured).
+	// бы как «разрыва записи нет» (см. CutResult::maxRecordGapMeasured).
 	char maxGapText[32];
-	if (cut.maxUncoveredGapMeasured)
+	if (cut.maxRecordGapMeasured)
 	{
-		V_snprintf(maxGapText, sizeof(maxGapText), "%llu@%u", (unsigned long long)cut.maxUncoveredGapTicks, cut.maxUncoveredGapFrame);
+		V_snprintf(maxGapText, sizeof(maxGapText), "%llu@%u", (unsigned long long)cut.maxRecordGapTicks, cut.maxRecordGapFrame);
 	}
 	else
 	{
@@ -248,18 +248,19 @@ CON_COMMAND_F(kz_awr_debug, "Explain the AWR cut of one replay file. Usage: kz_a
 	}
 	Msg("[cyb_awr]   arrivals=%zu teleports=%u ok=%d reason=%s awr_ms=%llu time_ms=%llu cuts=%zu\n", trace.size(), cut.teleports, cut.ok ? 1 : 0,
 		cut.ok ? "ok" : cut.reason, (unsigned long long)cut.awrMs, (unsigned long long)timeMs, cut.dead.size());
-	// Разрыв записи внутри вырезов: на успешном файле это метрика доверия к awr_ms (сколько
-	// времени в вырезах не подтверждено кадрами), на отказе по разрыву — сам диагноз. Если
+	// Разрыв записи внутри вырезов: метрика доверия к awr_ms (сколько времени в вырезах не
+	// подтверждено кадрами — prac, пауза, смерть); на сам результат он не влияет, мёртвое
+	// время считается в кадрах. Если
 	// разрез до подсчёта не дошёл (ранний отказ) — так и говорим, а не печатаем ноль.
-	if (cut.maxUncoveredGapMeasured)
+	if (cut.maxRecordGapMeasured)
 	{
-		Msg("[cyb_awr]   max_uncovered_gap=%llu ticks (%.1f s) at frame %u; refuse threshold %llu\n",
-			(unsigned long long)cut.maxUncoveredGapTicks, (double)cut.maxUncoveredGapTicks * ENGINE_FIXED_TICK_INTERVAL, cut.maxUncoveredGapFrame,
+		Msg("[cyb_awr]   max_record_gap=%llu ticks (%.1f s) at frame %u; refuse threshold %llu\n",
+			(unsigned long long)cut.maxRecordGapTicks, (double)cut.maxRecordGapTicks * ENGINE_FIXED_TICK_INTERVAL, cut.maxRecordGapFrame,
 			(unsigned long long)KZ::replaysystem::awr::AWR_MAX_RECORD_GAP_TICKS);
 	}
 	else
 	{
-		Msg("[cyb_awr]   max_uncovered_gap=n/a (the cut refused before measuring; see reason above)\n");
+		Msg("[cyb_awr]   max_record_gap=n/a (the cut refused before measuring; see reason above)\n");
 	}
 	if (!cut.ok && cut.detail[0] != '\0')
 	{
