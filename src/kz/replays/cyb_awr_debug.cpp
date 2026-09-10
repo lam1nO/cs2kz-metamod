@@ -192,12 +192,21 @@ CON_COMMAND_F(kz_awr_debug, "Explain the AWR cut of one replay file. Usage: kz_a
 	{
 		V_snprintf(maxGapText, sizeof(maxGapText), "n/a");
 	}
+	// frames=n/a, если до сверки не дошли: `0/0 mismatch=0` читалось бы как «сошлось».
+	char framesText[64];
+	if (cut.timerFramesChecked)
+	{
+		V_snprintf(framesText, sizeof(framesText), "%llu/%llu mismatch=%d", (unsigned long long)cut.timerFramesRecorded,
+				   (unsigned long long)cut.timerFramesExpected, cut.timerFramesMismatch ? 1 : 0);
+	}
+	else
+	{
+		V_snprintf(framesText, sizeof(framesText), "n/a");
+	}
 	KZ_LOG_INFO(LogChannel::Replays,
-				"[cyb_awr] debug uuid=%s arrivals=%zu teleports=%u max_gap=%s frames=%llu/%llu frames_mismatch=%d ok=%d reason=%s awr_ms=%llu "
-				"detail=%s\n",
-				uuid.c_str(), trace.size(), cut.teleports, maxGapText, (unsigned long long)cut.timerFramesRecorded,
-				(unsigned long long)cut.timerFramesExpected, cut.timerFramesMismatch ? 1 : 0, cut.ok ? 1 : 0, cut.ok ? "ok" : cut.reason,
-				(unsigned long long)cut.awrMs, cut.detail);
+				"[cyb_awr] debug uuid=%s arrivals=%zu teleports=%u max_gap=%s frames=%s ok=%d reason=%s awr_ms=%llu detail=%s\n", uuid.c_str(),
+				trace.size(), cut.teleports, maxGapText, framesText, cut.ok ? 1 : 0, cut.ok ? "ok" : cut.reason, (unsigned long long)cut.awrMs,
+				cut.detail);
 
 	for (size_t i = 0; i < trace.size(); i++)
 	{

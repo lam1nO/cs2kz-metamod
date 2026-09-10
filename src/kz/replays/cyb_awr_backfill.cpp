@@ -28,16 +28,25 @@ namespace
 	constexpr i64 AWR_BACKFILL_MAX_COUNT = 100000;
 
 	// ------------------------------------------------------------------
-	// Состояние (главный поток; g_result* — под мьютексом)
+	// Состояние (главный поток; очередь результатов — под мьютексом)
 	// ------------------------------------------------------------------
 
-	// Один файл в работе: от GET бэклога до POST результата.
-	bool g_busy = false;
-	// Эпоха, которой принадлежит текущая защёлка g_busy. Нужна, чтобы снять её мог только
-	// тот, кто её ставил: после смены карты защёлку сбрасывает OnMapChanged, но если в этот
-	// момент был жив рабочий поток, она остаётся до отбрасывания его результата (см. Tick).
-	u32 g_busyEpoch = 0;
-	// Сколько попыток осталось в текущем прогоне.
+	// Файлов В ПОЛЁТЕ: от взятия из бэклога до POST результата (скачивание + разбор на
+	// рабочем потоке + отправка). Было защёлкой на один файл; стало счётчиком, потому что
+	// упор прогона — СЕТЬ, а не разбор: файл до 32 МБ качается ~секунду, и один файл за
+	// раз давал 59 файлов в минуту (замер cyb.184: 17 748 файлов = 4.7 часа).
+	u32 g_inFlight = 0;
+	// Пик за прогон — печатается в строке завершения: по нему видно, дал ли конвар эффект.
+	u32 g_peakInFlight = 0;
+	// uuid файлов в полёте. В api они помечаются только POST'ом, поэтому до его доезда
+	// бэклог отдаёт их снова — без этого множества N слотов взяли бы ОДИН И ТОТ ЖЕ файл N
+	// раз (та же природа, что у g_softFailed и g_dryRunSeen).
+	std::unordered_set<std::string> g_takenInFlight;
+	// Запрос бэклога СЕРИАЛИЗОВАН: одновременно летит не больше одного. Курсор смещения
+	// (g_backlogOffset) читается и двигается только в этом пути, поэтому гонки за него нет
+	// по построению. Параллелятся скачивание и разбор — там и лежит время.
+	bool g_backlogBusy = false;
+	// Сколько попыток осталось в текущем прогоне (списывается на ВЗЯТИИ файла).
 	u32 g_remaining = 0;
 	bool g_dryRun = false;
 	// Период автоподбора из опции; 0 = автоматически не берём (только командой).
@@ -54,15 +63,14 @@ namespace
 	CTimerBase *g_timer = nullptr;
 	// ЭПОХА цикла: увеличивается на каждой смене карты. Плагин на changelevel не
 	// выгружается, поэтому колбэки Steam-HTTP, отправленные до смены карты, спокойно
-	// доезжают ПОСЛЕ неё — и, если защёлка g_busy уже снята (OnMapChanged), такой опоздавший
-	// колбэк запустил бы ВТОРУЮ цепочку поверх идущей: `g_result` — одна ячейка, результаты
-	// затирали бы друг друга, а `g_remaining` списывался бы вдвое. Каждая из трёх отправок
-	// (GET бэклога, GET файла, POST результата) и каждый её колбэк ошибки запоминают эпоху и
-	// на чужой молча уходят, не трогая ни g_busy, ни g_remaining, ни сцепку.
+	// доезжают ПОСЛЕ неё — и, если слоты уже погашены (OnMapChanged), такой опоздавший
+	// колбэк освободил бы ЧУЖОЙ слот или списал бы попытку нового прогона. Каждая из трёх
+	// отправок (GET бэклога, GET файла, POST результата) и каждый её колбэк ошибки запоминают
+	// эпоху и на чужой молча уходят, не трогая ни слоты, ни g_remaining, ни сцепку.
 	u32 g_epoch = 0;
-	// Рабочих потоков в полёте. Атомик, потому что декремент делает сам поток: главному
-	// нужно знать, безопасно ли снимать защёлку g_busy на смене карты (иначе два файла
-	// разбирались бы одновременно в одну ячейку результата).
+	// Рабочих потоков в полёте. Атомик, потому что декремент делает сам поток. Осталось
+	// диагностикой (печатается на смене карты): результаты теперь копятся в ОЧЕРЕДИ, а не в
+	// одной ячейке, поэтому живой поток больше ничему не мешает.
 	std::atomic<int> g_workersInFlight {0};
 	// dry-run: uuid, уже взятые в ЭТОМ прогоне. В dry-run строка в api не помечается, а
 	// `awr-backlog` отдаёт свежайшие записи, поэтому без этого множества `kz_awr_backfill 50
@@ -99,6 +107,36 @@ namespace
 	}
 
 	static_assert(ParseDecimal(AWR_BACKFILL_PAGE_LIMIT_STR) == AWR_BACKFILL_PAGE_LIMIT, "limit query string must match AWR_BACKFILL_PAGE_LIMIT");
+
+	// Потолок одновременных файлов. Больше 8 не даём: разбор держит в памяти и сырой файл,
+	// и распакованные тики (~264 Б на кадр, то есть ~5 размеров файла), а это ЖИВОЙ игровой
+	// сервер — арифметика в CYBER.md и в fix-отчёте.
+	constexpr i64 AWR_BACKFILL_MAX_CONCURRENCY = 8;
+	// Про кламп предупреждаем один раз на процесс: конвар читается на каждое решение.
+	bool g_concurrencyWarned = false;
+
+	// Сколько файлов разрешено держать в полёте. Читается ЖИВЬЁМ на каждое решение (как
+	// прочие опции сервера — pServerCfgKeyValues), поэтому правка настроек действует без
+	// пересборки и без перезапуска прогона. Дефолт 1 = прежнее поведение.
+	u32 Concurrency()
+	{
+		i64 value = KZOptionService::GetOptionInt("cybAwrBackfillConcurrency", 1);
+		if (value < 1)
+		{
+			value = 1;
+		}
+		if (value > AWR_BACKFILL_MAX_CONCURRENCY)
+		{
+			if (!g_concurrencyWarned)
+			{
+				g_concurrencyWarned = true;
+				KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] concurrency capped requested=%lld cap=%lld\n", (long long)value,
+							(long long)AWR_BACKFILL_MAX_CONCURRENCY);
+			}
+			value = AWR_BACKFILL_MAX_CONCURRENCY;
+		}
+		return (u32)value;
+	}
 
 	// Идёт ЯВНЫЙ прогон (команда `kz_awr_backfill N`) или автоподбор по таймеру. Смещение
 	// бэклога — свойство ТОЛЬКО явного прогона: автоподбор обязан брать свежие загрузки, а
@@ -175,9 +213,10 @@ namespace
 		u32 epoch = 0;
 	};
 
+	// ОЧЕРЕДЬ результатов, а не одна ячейка: при N файлах в полёте два разбора могут
+	// закончиться в одном такте, и вторая публикация затёрла бы первую.
 	std::mutex g_resultMutex;
-	bool g_resultReady = false;
-	WorkerResult g_result;
+	std::vector<WorkerResult> g_results;
 
 	// ------------------------------------------------------------------
 	// HTTP-мелочи (тот же конфиг, что у cyb_outbox/cyb_emitter)
@@ -251,103 +290,143 @@ namespace
 	// ------------------------------------------------------------------
 
 	void FetchOne(bool explicitRun);
+	void MaybeFetchNext();
 	void StartDownload(const std::string &uuid, const std::string &url, bool dryRun);
 	void SpawnWorker(const std::string &uuid, std::vector<char> data, bool dryRun);
 	void PublishResult(const WorkerResult &res);
 	// По значению: блокирующий инвариант шапки может понизить res.ok до отправки.
 	void SendResult(WorkerResult res);
 
-	// Попытка завершена (успешно или нет) — освобождаем слот и списываем одну из
-	// запрошенных. Списываем и на отказе: иначе битая сеть крутила бы один файл
-	// вечно, а `count` перестал бы что-либо ограничивать.
-	void FinishAttempt()
+	// Попытка ВЗЯТИЯ файла не удалась на уровне БЭКЛОГА (сеть, битый json, http) —
+	// освобождаем сериализованный запрос и списываем одну из запрошенных попыток. Списываем
+	// и на отказе: иначе битая сеть крутила бы запрос вечно, а `count` перестал бы
+	// что-либо ограничивать.
+	void FinishBacklogAttempt()
 	{
-		g_busy = false;
+		g_backlogBusy = false;
 		if (g_remaining > 0)
 		{
 			g_remaining--;
 		}
 	}
 
-	// Файл ОБРАБОТАН (результат отправлен или посчитан вхолостую) — берём следующий сразу,
-	// не дожидаясь тика: иначе на файл уходило бы два тика (взять → отдать) вместо одного.
-	// Темп 1 файл/с сохраняется: забор результата у рабочего потока всё равно гейтится тиком.
-	// Зовётся ТОЛЬКО с путей завершения файла: на отказе бэклога/докачки сцепки нет, иначе
-	// битая сеть крутилась бы петлёй со скоростью HTTP-раундтрипа.
-	void FinishFileAndChain()
+	// Файл в полёте закончился (результат отправлен, посчитан вхолостую или отброшен) —
+	// освобождаем слот. `g_remaining` здесь НЕ трогаем: она списывается на ВЗЯТИИ файла,
+	// иначе при N в полёте прогон взял бы больше `count` файлов.
+	void FinishFile(const std::string &uuid)
 	{
-		FinishAttempt();
-		if (!g_busy && g_remaining > 0)
+		g_takenInFlight.erase(uuid);
+		if (g_inFlight > 0)
 		{
-			FetchOne(g_explicitRun);
+			g_inFlight--;
 		}
+		// ПРОГОН ЗАКОНЧЕН = брать больше нечего И все полёты слились. Отдельная строка нужна
+		// именно потому, что `done reason=…` печатается раньше — в момент, когда бэклог
+		// исчерпан, а файлы ещё летят; при N > 1 между этими событиями секунды.
+		// Только для ЯВНОГО прогона: у автоподбора «прогон» — это один файл, и он уже
+		// напечатал свою строку; лишняя строка раз в минуту была бы шумом.
+		if (g_explicitRun && g_remaining == 0 && g_inFlight == 0 && g_peakInFlight > 0)
+		{
+			KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill finished peak_in_flight=%u concurrency=%u soft=%u\n", (unsigned)g_peakInFlight,
+						(unsigned)Concurrency(), (unsigned)g_softFailed.size());
+			g_peakInFlight = 0;
+		}
+	}
+
+	// Запросить следующий файл, если есть право брать и свободен слот. Запрос бэклога
+	// сериализован (g_backlogBusy): курсор смещения живёт только в этом пути, и внахлёст
+	// идущие запросы гоняли бы его наперегонки. Зовётся из завершения файла и из взятия
+	// (чтобы N слотов заполнились без ожидания тика), а тик работает страховкой.
+	void MaybeFetchNext()
+	{
+		if (g_remaining == 0 || g_backlogBusy || g_inFlight >= Concurrency())
+		{
+			return;
+		}
+		FetchOne(g_explicitRun);
+	}
+
+	// ВЗЯТЬ файл: занять слот, списать попытку, начать скачивание и сразу попробовать занять
+	// следующий слот — чтобы N скачиваний шли внахлёст, а не по одному за тик.
+	void TakeFile(const std::string &uuid, const std::string &url, bool dryRun)
+	{
+		if (g_remaining > 0)
+		{
+			g_remaining--;
+		}
+		g_inFlight++;
+		g_takenInFlight.insert(uuid);
+		if (g_inFlight > g_peakInFlight)
+		{
+			g_peakInFlight = g_inFlight;
+		}
+		// Запрос бэклога отработал — освобождаем его для следующего слота.
+		g_backlogBusy = false;
+		StartDownload(uuid, url, dryRun);
+		MaybeFetchNext();
+	}
+
+	// Файл ОБРАБОТАН — освобождаем слот и сразу пробуем взять следующий, не дожидаясь тика:
+	// иначе на файл уходило бы два тика (взять → отдать) вместо одного.
+	void FinishFileAndChain(const std::string &uuid)
+	{
+		FinishFile(uuid);
+		MaybeFetchNext();
 	}
 
 	// Насос: держим один файл в работе, забираем результат рабочего потока.
 	f64 Tick()
 	{
-		WorkerResult res;
-		bool haveResult = false;
+		// Забираем ВСЕ готовые результаты: при N файлах в полёте их может накопиться
+		// несколько за такт, и оставлять их в очереди до следующего тика значит терять темп.
+		std::vector<WorkerResult> ready;
 		{
 			std::lock_guard<std::mutex> lock(g_resultMutex);
-			if (g_resultReady)
-			{
-				g_resultReady = false;
-				res = g_result;
-				g_result = {};
-				haveResult = true;
-			}
+			ready.swap(g_results);
 		}
 
 		// Отправка — вне лока: колбэки HTTP и логи не должны держать мьютекс.
-		if (haveResult)
+		for (WorkerResult &res : ready)
 		{
 			// Результат потока, запущенного до смены карты. Разрез сам по себе верен (файл
 			// от карты не зависит), но отправлять его отсюда нельзя: SendResult на всех
-			// своих путях трогает общее состояние — FinishFileAndChain, а на
-			// not_configured ещё и g_remaining/g_busy, — а это состояние принадлежит уже
-			// НОВОЙ эпохе и, возможно, идущему прямо сейчас файлу. Заводить ради этого
-			// вторую, «безсостояночную» ветку отправки — лишний путь ради одного файла.
-			// Цена отказа мала и ограничена: строка в api не помечена, значит бэклог отдаст
-			// её снова следующим же тиком, и файл досчитается в текущей эпохе.
+			// своих путях трогает общее состояние — слоты и сцепку, а на not_configured ещё
+			// и g_remaining, — а это состояние принадлежит уже НОВОЙ эпохе и, возможно,
+			// идущим прямо сейчас файлам. Цена отказа мала и ограничена: строка в api не
+			// помечена, значит бэклог отдаст её снова, и файл досчитается в текущей эпохе.
+			//
+			// Слот такого файла НЕ освобождаем: OnMapChanged обнулил счётчик полётов
+			// целиком, и декремент здесь уехал бы в чужой, уже новый файл.
 			if (res.epoch != g_epoch)
 			{
 				KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] callback dropped reason=stale_epoch what=worker uuid=%s epoch=%u now=%u\n",
 							res.uuid.c_str(), (unsigned)res.epoch, (unsigned)g_epoch);
-				// Защёлку снимаем ТОЛЬКО если она всё ещё принадлежит той, прошлой цепочке:
-				// OnMapChanged её не тронул именно потому, что этот поток был в полёте.
-				// Если новая эпоха уже взяла свой файл — защёлка её, и трогать нельзя.
-				if (g_busy && g_busyEpoch != g_epoch)
-				{
-					g_busy = false;
-				}
-				return AWR_BACKFILL_BUSY_INTERVAL;
+				continue;
 			}
 			SendResult(res);
-			return AWR_BACKFILL_BUSY_INTERVAL;
 		}
 
-		if (g_busy)
+		// Заполняем свободные слоты. Запрос бэклога сериализован, поэтому за такт уходит
+		// один — остальные слоты набираются сцепкой из колбэков (взятие файла и завершение
+		// файла зовут MaybeFetchNext сами), а тик остаётся страховкой на случай, когда
+		// сцепка оборвалась (например отказ бэклога).
+		if (g_remaining > 0 || g_inFlight > 0)
 		{
-			return AWR_BACKFILL_BUSY_INTERVAL;
-		}
-
-		if (g_remaining > 0)
-		{
-			FetchOne(g_explicitRun);
+			MaybeFetchNext();
 			return AWR_BACKFILL_BUSY_INTERVAL;
 		}
 
 		// Холостой тик: работы нет и брать нечего — только здесь возвращается период
-		// автоподбора. Пока файл в работе, интервал обязан быть коротким, иначе результат
-		// разбора пролежал бы в g_result до конца периода и темп упал бы до одного файла
-		// на два периода.
+		// автоподбора. Пока файлы в работе, интервал обязан быть коротким, иначе результат
+		// разбора пролежал бы в очереди до конца периода и темп упал бы до одного файла на
+		// два периода.
 		if (g_autoIntervalSec > 0)
 		{
 			if (g_autoDue)
 			{
-				// Период выждан — берём ОДИН файл, всегда «по-настоящему» (не dry-run) и
-				// всегда БЕЗ смещения: автоподбор существует ради свежих загрузок.
+				// Период выждан — берём ОДИН файл, всегда «по-настоящему» (не dry-run),
+				// всегда БЕЗ смещения (автоподбор существует ради свежих загрузок) и всегда
+				// в одном экземпляре: конвар параллельности — про догон истории.
 				g_autoDue = false;
 				g_remaining = 1;
 				g_dryRun = false;
@@ -378,17 +457,17 @@ namespace
 		std::string url = ApiUrl("/replays/v1/awr-backlog");
 		if (url.empty())
 		{
-			// Защёлку снимаем обязательно: сюда попадает и ПОВТОР из колбэка (курсор
-			// сдвинулся), где g_busy уже поднят, — а с защёлкнутым g_busy насос молчал бы до
-			// смены карты. Тот же порядок, что на пути not_configured в SendResult.
+			// Сериализованный запрос освобождаем обязательно: сюда попадает и ПОВТОР из
+			// колбэка (курсор сдвинулся), где флаг уже поднят, — а с поднятым флагом насос
+			// молчал бы до смены карты. Тот же порядок, что на пути not_configured в
+			// SendResult.
 			g_remaining = 0;
-			g_busy = false;
+			g_backlogBusy = false;
 			KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] backfill stopped reason=not_configured\n");
 			return;
 		}
 
-		g_busy = true;
-		g_busyEpoch = g_epoch;
+		g_backlogBusy = true;
 		// Снапшот режима на момент взятия файла — см. WorkerResult::dryRun.
 		const bool dryRun = g_dryRun;
 		// Снапшот эпохи: ответ может приехать уже после смены карты.
@@ -397,9 +476,11 @@ namespace
 		HTTP::Request req(HTTP::Method::GET, url);
 		// Одной свежайшей строки хватает, пока выбирать не из чего: обработанная помечается
 		// в api и в бэклог не возвращается. Выбор нужен в dry-run (пометки нет, см.
-		// g_dryRunSeen) и при непустом наборе мягких отказов: они в api не помечены и
-		// приезжают первыми.
-		const bool needPage = dryRun || !g_softFailed.empty();
+		// g_dryRunSeen), при непустом наборе мягких отказов (они в api не помечены и приезжают
+		// первыми) и при ПАРАЛЛЕЛЬНОМ прогоне: летящие файлы тоже ещё не помечены и стоят в
+		// начале выдачи, а с limit=1 страница состояла бы ровно из одного такого — прогон
+		// ждал бы освобождения слота и выродился в один файл за раз.
+		const bool needPage = dryRun || !g_softFailed.empty() || Concurrency() > 1 || g_inFlight > 0;
 		// Запрошенный лимит держим числом РЯДОМ со строкой запроса: колбэк сравнивает размер
 		// страницы именно с ним (см. «страница неполная = конец бэклога»).
 		const size_t limit = needPage ? AWR_BACKFILL_PAGE_LIMIT : 1;
@@ -425,7 +506,7 @@ namespace
 				if (resp.status < 200 || resp.status >= 300)
 				{
 					KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] backlog failed reason=http_%u\n", (unsigned)resp.status);
-					FinishAttempt();
+					FinishBacklogAttempt();
 					return;
 				}
 
@@ -433,7 +514,7 @@ namespace
 				if (!body.has_value())
 				{
 					KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] backlog failed reason=empty_response\n");
-					FinishAttempt();
+					FinishBacklogAttempt();
 					return;
 				}
 
@@ -441,7 +522,7 @@ namespace
 				if (!json.IsValid())
 				{
 					KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] backlog failed reason=bad_json\n");
-					FinishAttempt();
+					FinishBacklogAttempt();
 					return;
 				}
 
@@ -449,56 +530,79 @@ namespace
 				if (!json.Get("items", items))
 				{
 					KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] backlog failed reason=bad_items\n");
-					FinishAttempt();
+					FinishBacklogAttempt();
 					return;
 				}
 
 				if (items.empty())
 				{
-					// Пусто — прогон закончен, следующий тик ничего не запросит. Причины
-					// РАЗНЫЕ и различать их обязательно: при offset == 0 посчитано всё,
-					// при offset > 0 за смещением строк не осталось, а хвост НАЧАЛА выдачи
-					// (свежие загрузки и мягкие отказы) этот прогон не смотрел — его возьмёт
-					// автоподбор или следующая команда.
+					// Пусто — брать больше нечего. Причины РАЗНЫЕ и различать их обязательно:
+					// при offset == 0 посчитано всё, при offset > 0 за смещением строк не
+					// осталось, а хвост НАЧАЛА выдачи (свежие загрузки и мягкие отказы) этот
+					// прогон не смотрел — его возьмёт автоподбор или следующая команда.
+					// Файлы, уже летящие в этот момент, продолжают считаться: «прогон
+					// закончен» печатает FinishFile, когда сольётся последний (см. там).
 					g_remaining = 0;
-					g_busy = false;
+					g_backlogBusy = false;
 					if (offset > 0)
 					{
-						KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill done reason=backlog_end_after_offset offset=%u\n",
-									(unsigned)offset);
+						KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill done reason=backlog_end_after_offset offset=%u in_flight=%u\n",
+									(unsigned)offset, (unsigned)g_inFlight);
 					}
 					else
 					{
-						KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill done reason=empty_backlog\n");
+						KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill done reason=empty_backlog in_flight=%u\n", (unsigned)g_inFlight);
 					}
 					return;
 				}
 
 				if (!dryRun)
 				{
+					// Пропускаем и мягко отказавших, и УЖЕ ЛЕТЯЩИХ: в api файл помечается
+					// только POST'ом, поэтому до его доезда бэклог отдаёт взятый файл снова, и
+					// без этой проверки N слотов взяли бы один и тот же файл N раз.
+					bool blockedByInFlight = false;
 					for (const BacklogItem &item : items)
 					{
 						if (g_softFailed.count(item.replayUuid) != 0)
 						{
 							continue;
 						}
-						StartDownload(item.replayUuid, item.url, dryRun);
+						if (g_takenInFlight.count(item.replayUuid) != 0)
+						{
+							blockedByInFlight = true;
+							continue;
+						}
+						TakeFile(item.replayUuid, item.url, dryRun);
 						return;
 					}
-					// Страница ЦЕЛИКОМ из уже виденных. Достижимо двумя способами: мягких
-					// отказов накопилось на страницу, либо во время прогона залили пачку
-					// реплеев и они сдвинули набор вправо. Оба лечит один приём — двигать
-					// курсор по ФАКТИЧЕСКОЙ странице и повторять запрос.
-					if (explicitRun && !dryRun)
+
+					// Страница целиком из виденных. Если её занимают ЛЕТЯЩИЕ файлы — курсор
+					// двигать НЕЛЬЗЯ: они уйдут из бэклога, как только доедет POST, выдача
+					// сдвинется влево, и смещение перешагнуло бы живые строки. Просто ждём
+					// освобождения слота: следующий MaybeFetchNext придёт из FinishFile (а
+					// тик — страховка).
+					if (blockedByInFlight)
+					{
+						g_backlogBusy = false;
+						return;
+					}
+
+					// Дальше — страница целиком из МЯГКО ОТКАЗАВШИХ. Достижимо двумя
+					// способами: их накопилось на страницу, либо во время прогона залили
+					// пачку реплеев и они сдвинули набор вправо. Оба лечит один приём —
+					// двигать курсор по ФАКТИЧЕСКОЙ странице и повторять запрос.
+					if (explicitRun)
 					{
 						if (items.size() < limit)
 						{
 							// Страница неполная — за ней записей нет вовсе: это конец
 							// бэклога, а не тупик.
 							g_remaining = 0;
-							g_busy = false;
-							KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill done reason=backlog_tail_seen offset=%u items=%u\n",
-										(unsigned)offset, (unsigned)items.size());
+							g_backlogBusy = false;
+							KZ_LOG_INFO(LogChannel::Replays,
+										"[cyb_awr] backfill done reason=backlog_tail_seen offset=%u items=%u in_flight=%u\n", (unsigned)offset,
+										(unsigned)items.size(), (unsigned)g_inFlight);
 							return;
 						}
 						const size_t next = offset + items.size();
@@ -513,7 +617,7 @@ namespace
 											(unsigned)offset, (unsigned)next, (unsigned)AWR_BACKLOG_MAX_OFFSET);
 							}
 							g_remaining = 0;
-							g_busy = false;
+							g_backlogBusy = false;
 							KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] backfill done reason=backlog_offset_cap offset=%u soft=%u\n",
 										(unsigned)offset, (unsigned)g_softFailed.size());
 							return;
@@ -526,8 +630,8 @@ namespace
 									(unsigned)next, (unsigned)items.size(), (unsigned)g_softFailed.size());
 						g_backlogOffset = next;
 						// Повтор в рамках ТОГО ЖЕ шага: файл не взят, поэтому ни g_remaining,
-						// ни защёлку g_busy не трогаем (FinishAttempt здесь не зовём).
-						// Стека не растим — Send асинхронный.
+						// ни счётчик полётов не трогаем, а сериализованный запрос остаётся
+						// занятым — им же и повторяем. Стека не растим: Send асинхронный.
 						FetchOne(true);
 						return;
 					}
@@ -538,7 +642,7 @@ namespace
 					// стационарное состояние, и одинаковый warn раз в минуту вечно — шум, в
 					// котором тонет всё остальное.
 					g_remaining = 0;
-					g_busy = false;
+					g_backlogBusy = false;
 					if (!g_autoPageSeenWarned)
 					{
 						g_autoPageSeenWarned = true;
@@ -555,7 +659,7 @@ namespace
 					if (g_dryRunSeen.count(item.replayUuid) == 0)
 					{
 						g_dryRunSeen.insert(item.replayUuid);
-						StartDownload(item.replayUuid, item.url, dryRun);
+						TakeFile(item.replayUuid, item.url, dryRun);
 						return;
 					}
 				}
@@ -563,9 +667,9 @@ namespace
 				// Страница выбрана целиком. Дальше идти некуда: пометки в api нет, и
 				// следующий запрос вернул бы ту же страницу — прогон остановится сам.
 				g_remaining = 0;
-				g_busy = false;
-				KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill done reason=dry_run_exhausted seen=%u\n",
-							(unsigned)g_dryRunSeen.size());
+				g_backlogBusy = false;
+				KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill done reason=dry_run_exhausted seen=%u in_flight=%u\n",
+							(unsigned)g_dryRunSeen.size(), (unsigned)g_inFlight);
 			},
 			[epoch]()
 			{
@@ -574,7 +678,7 @@ namespace
 					return;
 				}
 				KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] backlog failed reason=network\n");
-				FinishAttempt();
+				FinishBacklogAttempt();
 			});
 		// clang-format on
 	}
@@ -618,7 +722,7 @@ namespace
 					// вернёмся к нему позже.
 					KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] download failed uuid=%s reason=http_%u\n", uuid.c_str(),
 								(unsigned)resp.status);
-					FinishAttempt();
+					FinishFileAndChain(uuid);
 					return;
 				}
 
@@ -645,7 +749,7 @@ namespace
 					return;
 				}
 				KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] download failed uuid=%s reason=network\n", uuid.c_str());
-				FinishAttempt();
+				FinishFileAndChain(uuid);
 			});
 		// clang-format on
 	}
@@ -729,13 +833,12 @@ namespace
 		return KZ_STREQ(reason, "awr_implausible") || KZ_STREQ(reason, "awr_record_gap");
 	}
 
-	// Рабочий поток: отдать результат главному. Один файл в работе, поэтому очередь
-	// вырождена в одну ячейку.
+	// Рабочий поток: отдать результат главному. Файлов в полёте до N, поэтому это ОЧЕРЕДЬ:
+	// два разбора, закончившиеся в одном такте, обязаны доехать оба.
 	void PublishResult(const WorkerResult &res)
 	{
 		std::lock_guard<std::mutex> lock(g_resultMutex);
-		g_result = res;
-		g_resultReady = true;
+		g_results.push_back(res);
 	}
 
 	// Главный поток: лог, инварианты, отправка результата в api.
@@ -820,7 +923,7 @@ namespace
 
 		if (res.dryRun)
 		{
-			FinishFileAndChain();
+			FinishFileAndChain(res.uuid);
 			return;
 		}
 
@@ -834,7 +937,7 @@ namespace
 			g_softFailed.insert(res.uuid);
 			KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill soft_failed uuid=%s reason=%s not_posted=1 soft=%u\n", res.uuid.c_str(),
 						res.reason, (unsigned)g_softFailed.size());
-			FinishFileAndChain();
+			FinishFileAndChain(res.uuid);
 			return;
 		}
 
@@ -842,8 +945,10 @@ namespace
 		if (url.empty())
 		{
 			KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] post failed uuid=%s reason=not_configured\n", res.uuid.c_str());
+			// Прогон дальше не идёт, но СЛОТ освободить обязаны: иначе счётчик полётов не
+			// сойдётся к нулю и насос не увидит завершения.
 			g_remaining = 0;
-			g_busy = false;
+			FinishFile(res.uuid);
 			return;
 		}
 
@@ -863,9 +968,8 @@ namespace
 		// res.epoch для этого не годится: синтетические WorkerResult в колбэке докачки его
 		// не заполняют (и не должны — он про межпоточную передачу), там остаётся 0. После
 		// первой же смены карты (g_epoch >= 1) оба колбэка POST такого файла отбрасывались
-		// бы как stale_epoch, FinishFileAndChain не вызывался бы, а g_busy оставался бы true
-		// с g_busyEpoch == g_epoch — то есть и спасательная ветка в Tick не сработала бы:
-		// вечная защёлка, воркер молчит до рестарта сервера.
+		// бы как stale_epoch, FinishFileAndChain не вызывался бы, и слот навсегда остался бы
+		// занятым: при N=1 воркер молчит до рестарта сервера.
 		const u32 epoch = g_epoch;
 		HTTP::Request req(HTTP::Method::POST, url);
 		req.SetHeader("Content-Type", "application/json");
@@ -886,8 +990,8 @@ namespace
 				{
 					return;
 				}
-				// Файл обработан (попытка списана в любом случае) — сразу следующий.
-				FinishFileAndChain();
+				// Файл обработан (попытка списана при взятии) — сразу следующий.
+				FinishFileAndChain(uuid);
 			},
 			[uuid, epoch]()
 			{
@@ -896,7 +1000,7 @@ namespace
 				{
 					return;
 				}
-				FinishFileAndChain();
+				FinishFileAndChain(uuid);
 			});
 		// clang-format on
 	}
@@ -936,6 +1040,10 @@ void CybAwrBackfill::Run(u32 count, bool dryRun)
 	// повтора (трафик + счётчик на уже виденные файлы) приемлема. АВТОПОДБОР по таймеру
 	// (Tick без Run) множество не чистит: там повтор был бы вечным циклом.
 	g_softFailed.clear();
+	// Слоты и пик — состояние прогона. Полёты прошлого прогона к этому моменту слились
+	// (иначе Run не дошёл бы до сюда: g_remaining они не держат, а взятие нового файла
+	// гейтится счётчиком), но пик обнулить обязаны, иначе строка finished соврёт.
+	g_peakInFlight = 0;
 	// Курсор смещения и его защёлка — состояние ОДНОГО прогона.
 	g_backlogOffset = 0;
 	g_offsetCapWarned = false;
@@ -943,7 +1051,8 @@ void CybAwrBackfill::Run(u32 count, bool dryRun)
 	g_explicitRun = true;
 	// Насос может быть не запущен (cybAwrBackfillIntervalSec 0) — команда обязана работать.
 	EnsureTimer();
-	KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill started count=%u dry=%d\n", (unsigned)count, dryRun ? 1 : 0);
+	KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill started count=%u dry=%d concurrency=%u in_flight=%u\n", (unsigned)count, dryRun ? 1 : 0,
+				(unsigned)Concurrency(), (unsigned)g_inFlight);
 	// ПЕРВЫЙ шаг — сразу, не дожидаясь тика насоса: команда должна начинать работать в ту
 	// же секунду, а не через интервал таймера, каким бы он ни был. Дальше файлы гонит
 	// сцепка FinishFileAndChain, тоже без ожидания тика.
@@ -956,25 +1065,29 @@ void CybAwrBackfill::OnMapChanged()
 	// доезжают в любом случае — плагин на смене карты не выгружается. Любой такой колбэк,
 	// сработав уже по новому состоянию, увёл бы цикл в ДВЕ параллельные цепочки: ячейка
 	// g_result одна (результаты затирали бы друг друга), а g_remaining списывался бы вдвое.
-	// С этой строки все они молча уходят (StaleEpoch), не трогая ни g_busy, ни g_remaining,
+	// С этой строки все они молча уходят (StaleEpoch), не трогая ни слоты, ни g_remaining,
 	// ни сцепку.
 	g_epoch++;
 
-	// Защёлка «файл в работе». HTTP-запрос, начатый до changelevel, может не довести ни
+	// Слоты «файл в работе». HTTP-запрос, начатый до changelevel, может не довести ни
 	// колбэк ответа, ни колбэк ошибки — а теперь ещё и сознательно отбрасывается по эпохе;
-	// в обоих случаях g_busy остался бы true навсегда, и Tick выходил бы на первой же
-	// проверке: `kz_awr_backfill 1` печатает started и больше ничего не делает (наблюдено
+	// в обоих случаях слот остался бы занятым навсегда, и при N=1 Tick выходил бы на первой
+	// же проверке: `kz_awr_backfill 1` печатает started и больше ничего не делает (наблюдено
 	// на канарейке kz 0.191.0 после смены карты).
 	//
-	// Снимаем ТОЛЬКО когда в полёте нет рабочего потока: иначе его результат приехал бы в
-	// одну ячейку g_result с результатом нового файла, и один из двух потерялся бы молча.
-	// Если поток жив — защёлку снимет Tick, отбросив его результат как чужой по эпохе.
-	if (g_busy && g_workersInFlight.load() == 0)
+	// Гасим ВСЕ полёты сразу, а не по одному: их колбэки уже отброшены по эпохе и слот сами
+	// не освободят. Рабочие потоки, если они ещё живы, свои результаты опубликуют — Tick
+	// отбросит их как чужие по эпохе и слот НЕ тронет (см. там), поэтому обнуление здесь
+	// безопасно и с живым потоком: ячейка результата больше не одна, затирать нечего.
+	if (g_inFlight > 0 || g_backlogBusy)
 	{
-		g_busy = false;
-		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] map_changed reason=busy_latch_cleared remaining=%u epoch=%u\n",
-					(unsigned)g_remaining, (unsigned)g_epoch);
+		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] map_changed reason=flights_cleared in_flight=%u workers=%d remaining=%u epoch=%u\n",
+					(unsigned)g_inFlight, g_workersInFlight.load(), (unsigned)g_remaining, (unsigned)g_epoch);
 	}
+	g_inFlight = 0;
+	g_takenInFlight.clear();
+	g_backlogBusy = false;
+	g_peakInFlight = 0;
 	// Период автоподбора начинается заново: отсчитывать его от прошлой карты смысла нет.
 	g_autoDue = false;
 	// Страховка от дефекта ctimer (память проекта fork-timers-stall-after-map-change):

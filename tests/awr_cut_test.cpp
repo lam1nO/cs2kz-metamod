@@ -717,12 +717,40 @@ static void test_timer_frames_check()
 	// И это НЕ отказ: метрика только предупреждает.
 	assert(bad.ok);
 
+	// ОПАСНОЕ направление: пара PAUSE/RESUME потеряна (например порвана посторонним
+	// TIMER_START), паузные кадры не вычлись → recorded > expected сверх допуска. Мёртвое
+	// время при этом ЗАВЫШЕНО, awr_ms занижен — это и есть класс «правдоподобный чужой
+	// рекорд», ради которого метрика заведена.
+	std::vector<Frame> longPause;
+	for (uint32_t i = 0; i <= 30; i++) longPause.push_back(FC(i, 0, i >= 10 ? 1 : 0, 0, (float)i));
+	longPause.push_back(FC(31, 0, 1, 1, 10.0f));
+	// 40 кадров стояния на месте — модель записанной паузы, которую разрез не увидел.
+	for (uint32_t i = 32; i <= 71; i++) longPause.push_back(FC(i, 0, 1, 1, 10.0f));
+	for (uint32_t i = 72; i < 80; i++) longPause.push_back(FC(i, 0, 1, 1, 10.0f + (i - 71)));
+	FillPre(longPause);
+	// Таймер за паузу не тикал: ожидание 79 - 40 = 39 тиков, записано 79 кадров.
+	const uint64_t lostPauseMs = (uint64_t)(39 * TI * 1000.0 + 0.5);
+	CutResult lost = ComputeAwrCut(longPause.data(), longPause.size(), nullptr, 0, lostPauseMs, TI, 0, (uint32_t)longPause.size() - 1);
+	assert(lost.timerFramesChecked && lost.timerFramesMismatch);
+	assert(lost.timerFramesRecorded == 79 && lost.timerFramesExpected == 39);
+	// Отказа нет — только метрика; ловить такое обязан читатель лога.
+	assert(lost.ok);
+
 	// На раннем отказе сверка не выполнялась — печатать её нельзя.
 	std::vector<Frame> plain;
 	for (uint32_t i = 0; i < 20; i++) plain.push_back(FC(i, 0, 0, 0, (float)i));
 	FillPre(plain);
 	CutResult noWindow = ComputeAwrCut(plain.data(), plain.size(), nullptr, 0, 10000, TI, 0, 0);
 	assert(!noWindow.ok && !noWindow.timerFramesChecked);
+
+	// А вот на отказе ОБХОДА (окно уже известно) сверка обязана быть посчитана: именно эти
+	// файлы и разбирают по логу.
+	std::vector<Frame> lostDest;
+	for (uint32_t i = 0; i <= 20; i++) lostDest.push_back(FC(i, 0, i >= 10 ? 1 : 0, 0, (float)i));
+	lostDest.push_back(FC(21, 0, 1, 1, 999.0f));
+	FillPre(lostDest);
+	CutResult destFail = ComputeAwrCut(lostDest.data(), lostDest.size(), nullptr, 0, 10000, TI, 0, lostDest.size() - 1);
+	assert(!destFail.ok && std::strcmp(destFail.reason, "dest_not_found") == 0 && destFail.timerFramesChecked);
 }
 
 int main()
