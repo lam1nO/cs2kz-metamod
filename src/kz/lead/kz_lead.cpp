@@ -40,6 +40,10 @@
 // Страховка к границе выше: сверхплотная петля (стояние, слайд) может уложить в 1024 юнита
 // тысячи вершин, а стоимость скана обязана оставаться ограниченной.
 #define KZ_LEAD_SCAN_MAX_VERTS 1024u
+// Сколько control point'ов бывает у системы частиц: MAX_PARTICLE_CONTROL_POINTS из
+// public/particles/particles.h:137 (движок на выходе за границу бьёт Assert'ом). Своя константа
+// здесь, чтобы не тащить в файл тяжёлый particles.h ради одного числа.
+#define KZ_LEAD_CP_COUNT 64
 // Пауза между МОЛЧАЛИВЫМИ загрузками пути, в проходах дросселированной ветки (32 тика каждый):
 // 8 проходов = 4 с. Защита от мигающего ключа и от частых повторов после сетевого отказа.
 #define KZ_LEAD_ARM_COOLDOWN_CYCLES 8
@@ -76,12 +80,39 @@ using namespace KZ::replaysystem;
 // указателя на всех не бывает: каждый конвар отдаёт свою лямбду без захвата (идиома
 // utils/logging.cpp), а тело у них одно — функции ниже.
 
+// Годен ли индекс CP для пробы. Проверяем ОБЕ границы и две занятые позиции: цена ошибки здесь
+// не падение, а ложный вывод «этот CP ничего не меняет», — а вся ценность механизма в том, что
+// результату перебора можно верить.
+//   * сверху KZ_LEAD_CP_COUNT: индекс уезжает в uint8-массив назначений
+//     (m_iServerControlPointAssignments, sdk/entity/cparticlesystem.h), поэтому 256 и больше
+//     усеклось бы МОЛЧА в другой индекс, а движок и так не знает CP дальше 63;
+//   * 255 — сентинел «слот свободен» в том же массиве: проба на нём не зарегистрировалась бы;
+//   * 1 и 16 заняты собственными keyvalue отрезка (data_cp = конец, tint_cp = цвет) — запись
+//     поверх них ломает геометрию или цвет, а не «толщину».
+static_function bool LeadCpIndexUsable(i32 index)
+{
+	return index >= 0 && index < KZ_LEAD_CP_COUNT && index != 1 && index != 16;
+}
+
 // Перерисовать отрезки всем, у кого луч включён: значения читаются при создании сущностей,
 // поэтому «применить сейчас» = снять и построить заново по УЖЕ загруженному пути (сам путь не
 // пересобирается, сети это не стоит).
 static_function void LeadLookChanged()
 {
 	KZLeadService::RefreshAllSegments("cvar");
+}
+
+// Отказ по индексу печатаем ЗДЕСЬ, в колбэке конвара (один раз на правку), а не в
+// CreateLeadSegment: тот зовётся на каждый отрезок, и вышел бы залп до 128 строк за тик.
+static_function void LeadCpIndexChanged(i32 index)
+{
+	if (index != -1 && !LeadCpIndexUsable(index))
+	{
+		KZ_LOG_WARN(LogChannel::Replays, "[lead] cp_index_rejected value=%i reason=%s allowed=0..63_except_1_and_16 note=-1_disables\n", index,
+					index == 255 ? "sentinel_free_slot"
+								 : (index >= KZ_LEAD_CP_COUNT ? "out_of_range" : (index == 1 ? "data_cp_taken" : "tint_cp_taken")));
+	}
+	LeadLookChanged();
 }
 
 // Допуск живьём не применить: он работает на СБОРКЕ пути (рабочий поток разбора файла), а не
@@ -113,12 +144,16 @@ CConVar<CUtlString> cyb_lead_particle("cyb_lead_particle", FCVAR_NONE,
 // свои keyvalue): data_cp=1 — КОНЕЦ отрезка, tint_cp=16 — цвет.
 // -1 — CP не задавать (дефолт: вид не меняется). Слотов серверных CP у сущности всего четыре
 // (SetControlPointValue, sdk/entity/cparticlesystem.h), поэтому проб здесь две.
-CConVar<i32> cyb_lead_cp1_index("cyb_lead_cp1_index", FCVAR_NONE, "Extra server control point index for the lead segment asset (-1 = unused).", -1,
-								[](CConVar<i32> *, CSplitScreenSlot, const i32 *, const i32 *) { LeadLookChanged(); });
+CConVar<i32> cyb_lead_cp1_index("cyb_lead_cp1_index", FCVAR_NONE,
+								"Extra server control point index for the lead segment: 0..63 except 1 (data_cp) and 16 (tint_cp); -1 = unused.", -1,
+								[](CConVar<i32> *, CSplitScreenSlot, const i32 *newValue, const i32 *)
+								{ LeadCpIndexChanged(newValue ? *newValue : -1); });
 CConVar<Vector> cyb_lead_cp1_value("cyb_lead_cp1_value", FCVAR_NONE, "Value written to cyb_lead_cp1_index (x y z).", Vector(0.0f, 0.0f, 0.0f),
 								   [](CConVar<Vector> *, CSplitScreenSlot, const Vector *, const Vector *) { LeadLookChanged(); });
-CConVar<i32> cyb_lead_cp2_index("cyb_lead_cp2_index", FCVAR_NONE, "Second extra server control point index for the lead segment asset (-1 = unused).",
-								-1, [](CConVar<i32> *, CSplitScreenSlot, const i32 *, const i32 *) { LeadLookChanged(); });
+CConVar<i32> cyb_lead_cp2_index("cyb_lead_cp2_index", FCVAR_NONE,
+								"Second extra server control point index: 0..63 except 1 (data_cp) and 16 (tint_cp); -1 = unused.", -1,
+								[](CConVar<i32> *, CSplitScreenSlot, const i32 *newValue, const i32 *)
+								{ LeadCpIndexChanged(newValue ? *newValue : -1); });
 CConVar<Vector> cyb_lead_cp2_value("cyb_lead_cp2_value", FCVAR_NONE, "Value written to cyb_lead_cp2_index (x y z).", Vector(0.0f, 0.0f, 0.0f),
 								   [](CConVar<Vector> *, CSplitScreenSlot, const Vector *, const Vector *) { LeadLookChanged(); });
 
@@ -167,13 +202,15 @@ namespace
 		// Индекс -1 (дефолт) не пишем вовсе, чтобы вид по умолчанию не менялся.
 		// Отказ («нет свободных серверных CP») сюда не приходит молча: SetControlPointValue сам
 		// печатает Warning, а слотов четыре против наших двух — упереться в них нельзя.
+		// Негодный индекс пропускаем МОЛЧА: отказ уже назван колбэком конвара
+		// (LeadCpIndexChanged), здесь он повторился бы на каждый отрезок.
 		const i32 cp1 = cyb_lead_cp1_index.Get();
-		if (cp1 >= 0)
+		if (LeadCpIndexUsable(cp1))
 		{
 			line->SetControlPointValue(cp1, cyb_lead_cp1_value.Get());
 		}
 		const i32 cp2 = cyb_lead_cp2_index.Get();
-		if (cp2 >= 0 && cp2 != cp1)
+		if (LeadCpIndexUsable(cp2) && cp2 != cp1)
 		{
 			line->SetControlPointValue(cp2, cyb_lead_cp2_value.Get());
 		}
@@ -505,13 +542,22 @@ void KZLeadService::RefreshSegments(const char *reason)
 	}
 	const unsigned long long steamId = (unsigned long long)this->player->GetSteamId64();
 	KZ_LOG_DEBUG(LogChannel::Replays, "[lead] segments_refresh reason=%s steam_id=%llu\n", reason, steamId);
-	// Снять сущности (по своему targetname, RemoveLeadSegment) и обнулить окно: инкрементальная
-	// ветка ApplyWindow иначе решила бы, что окно то же, и не переставила бы ничего.
-	this->ClearSegments(false);
+	// Обнуляем ОКНО, но сущности здесь НЕ снимаем: снятие и постройку делает штатный проход
+	// ApplyWindow, и делает их вместе. «Прошлого окна нет» для него означает отсутствие
+	// пересечения — значит он снимет прежние отрезки и построит новые одним махом, а луч не
+	// мигнёт пустотой в ожидании своей очереди.
 	this->windowFrom = 0;
 	this->windowTo = 0;
-	// Построить на ближайшем же тике, а не через полсекунды.
-	this->ticksSinceUpdate = KZ_LEAD_UPDATE_TICKS;
+	// Разброс по слоту — та же идиома, что у armCooldown в ResetState: колбэк конвара зовёт
+	// этот метод сразу ВСЕМ, и без разброса при четырёх включённых лучах в ОДИН тик пришлось
+	// бы до 512 снятий и столько же созданий сущностей. Слот 0 перестроится на ближайшем
+	// тике, слот 31 — через 31 (≤0.5 с, штатный шаг пересчёта окна), слоты 32+ делят фазу с
+	// первыми — на глаз это незаметно, а пик размазан.
+	const i32 slot = this->player->GetPlayerSlot().Get();
+	this->ticksSinceUpdate = (u32)(KZ_LEAD_UPDATE_TICKS - (slot % KZ_LEAD_UPDATE_TICKS));
+	// Побочный эффект обнуления окна: до своего прохода прямой скан ближайшей вершины
+	// (UpdateNearest при включённом луче) ограничен ею же, то есть один проход ближайшая может
+	// не сдвинуться. Само исправляется на том же проходе, который строит новое окно.
 }
 
 void KZLeadService::RefreshAllSegments(const char *reason)
