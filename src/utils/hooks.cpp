@@ -18,6 +18,7 @@
 #include "kz/invisible/kz_invisible.h"
 #include "kz/jumpstats/kz_jumpstats.h"
 #include "kz/lead/kz_lead.h"
+#include "kz/replays/cyb_awr_backfill.h"
 #include "kz/option/kz_option.h"
 #include "kz/paint/kz_paint.h"
 #include "kz/quiet/kz_quiet.h"
@@ -741,6 +742,9 @@ static_function void Hook_StartupServer(const GameSessionConfiguration_t &config
 	// на выделенном сервере Reset зовётся только с дисконнекта и late load, этот хук
 	// игроков не сбрасывает (то же ограничение у weapon/hud/zones).
 	KZLeadService::OnMapChanged();
+	// Воркер бэклога AWR: снять защёлку «файл в работе», если HTTP-колбэк прошлой карты
+	// не дошёл, и начать период автоподбора заново.
+	CybAwrBackfill::OnMapChanged();
 	// Смена карты доехала. Закрывает две вещи: «сервер завис на смене карты»
 	// (строки нет — значит загрузка не завершилась) и «на какой версии это было».
 	KZ_LOG_INFO(LogChannel::General, "[cyb] map_loaded map=%s cs2kz=%s\n", g_pKZUtils->GetCurrentMapName().Get(), PLUGIN_FULL_VERSION);

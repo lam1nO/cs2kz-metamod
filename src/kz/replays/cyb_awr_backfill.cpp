@@ -11,11 +11,13 @@
 #include "utils/logging.h"
 #include "utils/utils.h"
 
+#include <atomic>
 #include <cstdlib>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 namespace
@@ -41,6 +43,23 @@ namespace
 	bool g_autoDue = false;
 	// Насос уже запущен — второй таймер на то же состояние не нужен.
 	bool g_timerStarted = false;
+	// Сам таймер: нужен, чтобы на смене карты сбросить его `lastExecute` (см. OnMapChanged).
+	// Указатель не повиснет: ProcessTimerList удаляет таймер только когда Execute вернул
+	// interval <= 0, а Tick всегда возвращает либо AWR_BACKFILL_BUSY_INTERVAL, либо
+	// g_autoIntervalSec > 0.
+	CTimerBase *g_timer = nullptr;
+	// Рабочих потоков в полёте. Атомик, потому что декремент делает сам поток: главному
+	// нужно знать, безопасно ли снимать защёлку g_busy на смене карты (иначе два файла
+	// разбирались бы одновременно в одну ячейку результата).
+	std::atomic<int> g_workersInFlight {0};
+	// dry-run: uuid, уже взятые в ЭТОМ прогоне. В dry-run строка в api не помечается, а
+	// `awr-backlog` отдаёт свежайшие записи, поэтому без этого множества `kz_awr_backfill 50
+	// -dry-run` пережёвывал бы ОДИН И ТОТ ЖЕ файл все 50 раз (наблюдено на канарейке
+	// kz 0.191.0). Живёт до следующего Run.
+	std::unordered_set<std::string> g_dryRunSeen;
+	// Сколько записей просить у бэклога в dry-run: обычному прогону хватает свежайшей, а
+	// dry-run нужен выбор, чтобы было из чего взять невиденную.
+	constexpr const char *AWR_BACKFILL_DRY_LIMIT = "50";
 
 	// Результат разбора одного файла: рабочий поток заполняет, главный забирает.
 	struct WorkerResult
@@ -220,7 +239,7 @@ namespace
 			return;
 		}
 		g_timerStarted = true;
-		StartTimer(Tick, AWR_BACKFILL_BUSY_INTERVAL, true, true);
+		g_timer = StartTimer(Tick, AWR_BACKFILL_BUSY_INTERVAL, true, true);
 	}
 
 	void FetchOne()
@@ -238,7 +257,10 @@ namespace
 		const bool dryRun = g_dryRun;
 
 		HTTP::Request req(HTTP::Method::GET, url);
-		req.SetQuery("limit", "1");
+		// В обычном режиме хватает одной свежайшей строки: обработанная помечается в api и
+		// в бэклог не возвращается. В dry-run пометки нет, поэтому берём страницу и ищем в
+		// ней невиденную (см. g_dryRunSeen).
+		req.SetQuery("limit", dryRun ? AWR_BACKFILL_DRY_LIMIT : "1");
 		SetAuthHeader(req);
 		// clang-format off
 		req.Send(
@@ -284,7 +306,29 @@ namespace
 					return;
 				}
 
-				StartDownload(items[0].replayUuid, items[0].url, dryRun);
+				if (!dryRun)
+				{
+					StartDownload(items[0].replayUuid, items[0].url, dryRun);
+					return;
+				}
+
+				// dry-run: первый, которого в этом прогоне ещё не брали.
+				for (const BacklogItem &item : items)
+				{
+					if (g_dryRunSeen.count(item.replayUuid) == 0)
+					{
+						g_dryRunSeen.insert(item.replayUuid);
+						StartDownload(item.replayUuid, item.url, dryRun);
+						return;
+					}
+				}
+
+				// Страница выбрана целиком. Дальше идти некуда: пометки в api нет, и
+				// следующий запрос вернул бы ту же страницу — прогон остановится сам.
+				g_remaining = 0;
+				g_busy = false;
+				KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill done reason=dry_run_exhausted seen=%u\n",
+							(unsigned)g_dryRunSeen.size());
 			},
 			[]()
 			{
@@ -357,9 +401,20 @@ namespace
 		// Разбор файла и разрез — на рабочем потоке: data::LoadCutSourceFromMemory и
 		// playback::ComputeCutFor глобального состояния не трогают (см. их комментарии),
 		// а распаковка нескольких мегабайт в игровом потоке дала бы просадку кадра.
+		g_workersInFlight++;
 		std::thread worker(
 			[uuid, dryRun, data = std::move(data)]()
 			{
+				// Декремент строго после публикации результата: главный поток по нулю
+				// решает, что в полёте никого нет (OnMapChanged).
+				struct InFlightGuard
+				{
+					~InFlightGuard()
+					{
+						g_workersInFlight--;
+					}
+				} guard;
+
 				WorkerResult res;
 				res.uuid = uuid;
 				res.dryRun = dryRun;
@@ -526,9 +581,46 @@ void CybAwrBackfill::Run(u32 count, bool dryRun)
 	// Режим меняется только для файлов, взятых ПОСЛЕ этой строки: у файла в полёте свой
 	// снапшот в WorkerResult::dryRun.
 	g_dryRun = dryRun;
+	// Множество виденного — на прогон, а не на жизнь сервера: повторный `-dry-run` обязан
+	// снова пройти по тем же файлам, иначе второй прогон печатал бы сразу exhausted.
+	g_dryRunSeen.clear();
 	// Насос может быть не запущен (cybAwrBackfillIntervalSec 0) — команда обязана работать.
 	EnsureTimer();
 	KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill started count=%u dry=%d\n", (unsigned)count, dryRun ? 1 : 0);
+	// ПЕРВЫЙ шаг — сразу, не дожидаясь тика таймера. Ручной прогон не должен зависеть от
+	// того, когда персистентный таймер проснётся после смены карты (известный дефект
+	// ctimer: lastExecute не сбрасывается на changelevel; чинить сам ctimer — чужая зона).
+	// Дальше файлы гонит сцепка FinishFileAndChain, тоже без ожидания тика.
+	Tick();
+}
+
+void CybAwrBackfill::OnMapChanged()
+{
+	// Защёлка «файл в работе». HTTP-запрос, начатый до changelevel, может не довести ни
+	// колбэк ответа, ни колбэк ошибки — тогда g_busy остаётся true навсегда, и Tick выходит
+	// на первой же проверке: `kz_awr_backfill 1` печатает started и больше ничего не делает
+	// (наблюдено на канарейке kz 0.191.0 после смены карты).
+	//
+	// Снимаем ТОЛЬКО когда в полёте нет рабочего потока: иначе его результат приехал бы в
+	// одну ячейку g_result с результатом нового файла, и один из двух потерялся бы молча.
+	// Если поток жив — он опубликует результат сам, и защёлку снимет обычный путь.
+	if (g_busy && g_workersInFlight.load() == 0)
+	{
+		g_busy = false;
+		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] map_changed reason=busy_latch_cleared remaining=%u\n", (unsigned)g_remaining);
+	}
+	// Период автоподбора начинается заново: отсчитывать его от прошлой карты смысла нет.
+	g_autoDue = false;
+	// Страховка от дефекта ctimer (память проекта fork-timers-stall-after-map-change):
+	// lastExecute == -1 заставляет ProcessTimerList взять текущее время за точку отсчёта,
+	// то есть таймер точно проснётся через свой интервал, а не через длительность прошлой
+	// карты. Нашему таймеру это, по идее, не нужно (он заведён с useRealTime = true, а
+	// realtime на changelevel не обнуляется, в отличие от curtime), но проверить это
+	// вживую я не могу, а цена страховки — одно присваивание на смену карты.
+	if (g_timer)
+	{
+		g_timer->lastExecute = -1;
+	}
 }
 
 // Только серверная консоль/RCON: массовый прогон — не действие игрока (та же защита, что
