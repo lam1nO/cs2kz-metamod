@@ -47,8 +47,6 @@
 // нет. Только для ПУСТОГО пути (нет файла / сеть): 404 и сетевую ошибку различить нечем. Отказ
 // РАЗБОРА скачанного файла детерминирован и защёлкивается сразу — см. OnLoadFailed(retryable).
 #define KZ_LEAD_FAIL_RETRIES 2
-// Допуск упрощения пути (юниты). Меньше — лишние сущности на прямых, больше — срезанные углы.
-#define KZ_LEAD_RDP_TOLERANCE 2.0f
 // Верхняя граница потолка отрезков: защита от опечатки в конфиге (лимит сущностей движка).
 #define KZ_LEAD_MAX_SEGMENTS_CAP 512
 // Какая доля потолка отрезков может уйти на хвост ПОЗАДИ ближайшей вершины (1/4).
@@ -64,6 +62,82 @@
 
 using namespace KZ::replaysystem;
 
+// === Живая настройка вида луча (конвары, а НЕ cybLead* из серверного cfg) ===================
+// Серверный cfg (KZOptionService::GetOptionInt/Float) читается ОДИН раз в KZPlugin::Load — по
+// RCON он не правится, и перебирать им варианты на канарейке нельзя. Всё, что пользователь
+// собирается крутить живьём, объявлено здесь конварами (образец — kz_chat_mode,
+// utils/utils_print.cpp): значение применяется к СЛЕДУЮЩЕЙ перерисовке отрезков, а колбэк
+// изменения перерисовывает их сразу всем, у кого луч включён.
+//
+// Дефолты: вид луча остаётся ТЕКУЩИМ (тот же ассет, никаких доп. control point'ов), меняется
+// только густота точек — её и просил пользователь.
+//
+// Колбэк изменения у CConVar ТИПИЗИРОВАН (FnTypedChangeCallback_t<T>), поэтому одного общего
+// указателя на всех не бывает: каждый конвар отдаёт свою лямбду без захвата (идиома
+// utils/logging.cpp), а тело у них одно — функции ниже.
+
+// Перерисовать отрезки всем, у кого луч включён: значения читаются при создании сущностей,
+// поэтому «применить сейчас» = снять и построить заново по УЖЕ загруженному пути (сам путь не
+// пересобирается, сети это не стоит).
+static_function void LeadLookChanged()
+{
+	KZLeadService::RefreshAllSegments("cvar");
+}
+
+// Допуск живьём не применить: он работает на СБОРКЕ пути (рабочий поток разбора файла), а не
+// на отрисовке. Честно говорим это в лог, чтобы на канарейке не ждали мгновенного эффекта.
+static_function void LeadRdpChanged(f32 value)
+{
+	KZ_LOG_INFO(LogChannel::Replays, "[lead] rdp_tolerance_changed value=%.2f note=applies_on_next_path_build_use_lead_off_then_lead\n", value);
+}
+
+// Ассет отрезка. Дефолт — стоковая линия-аннотация (тот же примитив у !measure и рёбер зон).
+// ВАЖНО: клиент получает только ассеты из манифеста ресурсов (utils/hooks.cpp,
+// Hook_BuildGameSessionManifest). Там зарегистрированы РОВНО ДВА пути:
+//   particles/ui/annotation/ui_annotation_line_segment.vpcf — линия между двумя точками;
+//   particles/ui/hud/ui_map_def_utility_trail.vpcf          — трейл луча игрока (!beam).
+// Любой другой путь, выставленный этим конваром, у клиента не прекешируется и, скорее всего,
+// не нарисуется вовсе — новый ассет требует правки манифеста и пересборки.
+CConVar<CUtlString> cyb_lead_particle("cyb_lead_particle", FCVAR_NONE,
+									  "Lead segment particle asset. Only manifest-registered assets render: "
+									  "particles/ui/annotation/ui_annotation_line_segment.vpcf (default), "
+									  "particles/ui/hud/ui_map_def_utility_trail.vpcf.",
+									  CUtlString(KZ_LEAD_PARTICLE),
+									  [](CConVar<CUtlString> *, CSplitScreenSlot, const CUtlString *, const CUtlString *) { LeadLookChanged(); });
+
+// Проба control point'ов чужого ассета: индекс и значение. Чем именно управляют CP стоковой
+// ui_annotation_line_segment.vpcf — НЕИЗВЕСТНО (ассет скомпилирован, файлов игры на машине
+// сборки нет, разобрать его нечем), поэтому «толщина» и «скрыть точки на концах» здесь не
+// зашиты, а ищутся живьём: выставить индекс, выставить значение, посмотреть на луч.
+// Известно только про два CP, которые уже используются (и идут не через эти поля, а через
+// свои keyvalue): data_cp=1 — КОНЕЦ отрезка, tint_cp=16 — цвет.
+// -1 — CP не задавать (дефолт: вид не меняется). Слотов серверных CP у сущности всего четыре
+// (SetControlPointValue, sdk/entity/cparticlesystem.h), поэтому проб здесь две.
+CConVar<i32> cyb_lead_cp1_index("cyb_lead_cp1_index", FCVAR_NONE, "Extra server control point index for the lead segment asset (-1 = unused).", -1,
+								[](CConVar<i32> *, CSplitScreenSlot, const i32 *, const i32 *) { LeadLookChanged(); });
+CConVar<Vector> cyb_lead_cp1_value("cyb_lead_cp1_value", FCVAR_NONE, "Value written to cyb_lead_cp1_index (x y z).", Vector(0.0f, 0.0f, 0.0f),
+								   [](CConVar<Vector> *, CSplitScreenSlot, const Vector *, const Vector *) { LeadLookChanged(); });
+CConVar<i32> cyb_lead_cp2_index("cyb_lead_cp2_index", FCVAR_NONE, "Second extra server control point index for the lead segment asset (-1 = unused).",
+								-1, [](CConVar<i32> *, CSplitScreenSlot, const i32 *, const i32 *) { LeadLookChanged(); });
+CConVar<Vector> cyb_lead_cp2_value("cyb_lead_cp2_value", FCVAR_NONE, "Value written to cyb_lead_cp2_index (x y z).", Vector(0.0f, 0.0f, 0.0f),
+								   [](CConVar<Vector> *, CSplitScreenSlot, const Vector *, const Vector *) { LeadLookChanged(); });
+
+// Живое переопределение потолка отрезков. cybLeadMaxSegments из серверного cfg живьём не
+// правится (см. шапку блока), а перебирать густоту без потолка бессмысленно: вдвое более
+// частые вершины при прежнем потолке дают луч ВДВОЕ КОРОЧЕ. -1 — брать значение из cfg.
+CConVar<i32> cyb_lead_max_segments("cyb_lead_max_segments", FCVAR_NONE,
+								   "Override cybLeadMaxSegments from the server cfg (-1 = use cfg value; hard cap 512).", -1,
+								   [](CConVar<i32> *, CSplitScreenSlot, const i32 *, const i32 *) { LeadLookChanged(); });
+
+// Допуск упрощения пути (юниты): меньше — вершины ГУЩЕ (и сущностей больше), больше —
+// срезанные углы. Дефолт 1.0 вместо прежних 2.0 — «в два раза больше точек» (просьба
+// пользователя 10.09). Применяется при СБОРКЕ пути, то есть с ближайшей загрузки: живая правка
+// этого конвара сама луч не перерисует, нужен `!lead off` + `!lead` (файл уже в кэше
+// downloads/, сети это не стоит) — см. колбэк.
+CConVar<f32> cyb_lead_rdp("cyb_lead_rdp", FCVAR_NONE,
+						  "Path simplification tolerance in units; lower = denser vertices. Applies on the next path build.", 1.0f,
+						  [](CConVar<f32> *, CSplitScreenSlot, const f32 *newValue, const f32 *) { LeadRdpChanged(newValue ? *newValue : 0.0f); });
+
 namespace
 {
 	// Копия CreateMeasureBeam (kz_measure.cpp): тот же примитив, свой цвет на отрезок.
@@ -75,7 +149,10 @@ namespace
 			return CEntityHandle();
 		}
 		CEntityKeyValues *pKeyValues = new CEntityKeyValues();
-		pKeyValues->SetString("effect_name", KZ_LEAD_PARTICLE);
+		// Ассет — из конвара (живой перебор на канарейке); пустая строка = дефолтный.
+		const CUtlString &asset = cyb_lead_particle.Get();
+		const char *effect = (asset.Get() && asset.Get()[0]) ? asset.Get() : KZ_LEAD_PARTICLE;
+		pKeyValues->SetString("effect_name", effect);
 		pKeyValues->SetString("targetname", KZ_LEAD_TARGETNAME);
 		pKeyValues->SetVector("origin", start);
 		pKeyValues->SetInt("tint_cp", 16);
@@ -85,6 +162,21 @@ namespace
 		pKeyValues->SetBool("start_active", true);
 		line->m_iTeamNum(CUSTOM_PARTICLE_SYSTEM_TEAM);
 		line->DispatchSpawn(pKeyValues);
+		// Пробные control point'ы — ПОСЛЕ спавна: SetControlPointValue пишет схему сущности
+		// (m_vServerControlPoints + NetworkStateChanged), до DispatchSpawn писать нечего.
+		// Индекс -1 (дефолт) не пишем вовсе, чтобы вид по умолчанию не менялся.
+		// Отказ («нет свободных серверных CP») сюда не приходит молча: SetControlPointValue сам
+		// печатает Warning, а слотов четыре против наших двух — упереться в них нельзя.
+		const i32 cp1 = cyb_lead_cp1_index.Get();
+		if (cp1 >= 0)
+		{
+			line->SetControlPointValue(cp1, cyb_lead_cp1_value.Get());
+		}
+		const i32 cp2 = cyb_lead_cp2_index.Get();
+		if (cp2 >= 0 && cp2 != cp1)
+		{
+			line->SetControlPointValue(cp2, cyb_lead_cp2_value.Get());
+		}
 		return line->GetRefEHandle();
 	}
 
@@ -174,6 +266,11 @@ namespace
 	// parse_failed. Это единственное место такой защиты на весь тракт.
 	void BuildPathWorker(std::string filePath, std::shared_ptr<KZLeadService::PendingLoad> pending)
 	{
+		// Допуск взят из снимка (см. PendingLoad::rdpTolerance): конвар живой, а рабочий поток
+		// читать его не должен. Ноль/отрицательное значение = «не упрощать вовсе» — вершин
+		// станут десятки тысяч, поэтому пол на 0.01 юнита.
+		const f32 tol = pending->rdpTolerance > 0.01f ? pending->rdpTolerance : 0.01f;
+		const f32 tolSqr = tol * tol;
 		std::vector<KZLeadService::Vertex> out;
 		const char *failReason = nullptr;
 		const char *cutWarn = nullptr;
@@ -286,7 +383,7 @@ namespace
 						{
 							continue;
 						}
-						SimplifyRange(raw, anchor, i, KZ_LEAD_RDP_TOLERANCE * KZ_LEAD_RDP_TOLERANCE, keep);
+						SimplifyRange(raw, anchor, i, tolSqr, keep);
 						anchor = i;
 					}
 					for (u32 i = firstVertex; i <= lastVertex; i++)
@@ -396,6 +493,44 @@ void KZLeadService::ClearSegments(bool keepEntities)
 	}
 	this->segments.clear();
 	this->ownedSorted.clear();
+}
+
+void KZLeadService::RefreshSegments(const char *reason)
+{
+	if (!this->beam || this->path.empty())
+	{
+		// Луч выключен (или пути нет) — перерисовывать нечего: значения конваров прочитаются
+		// сами, когда игрок включит луч.
+		return;
+	}
+	const unsigned long long steamId = (unsigned long long)this->player->GetSteamId64();
+	KZ_LOG_DEBUG(LogChannel::Replays, "[lead] segments_refresh reason=%s steam_id=%llu\n", reason, steamId);
+	// Снять сущности (по своему targetname, RemoveLeadSegment) и обнулить окно: инкрементальная
+	// ветка ApplyWindow иначе решила бы, что окно то же, и не переставила бы ничего.
+	this->ClearSegments(false);
+	this->windowFrom = 0;
+	this->windowTo = 0;
+	// Построить на ближайшем же тике, а не через полсекунды.
+	this->ticksSinceUpdate = KZ_LEAD_UPDATE_TICKS;
+}
+
+void KZLeadService::RefreshAllSegments(const char *reason)
+{
+	// Колбэк конвара срабатывает и на этапе загрузки конфигов, когда менеджера игроков ещё нет,
+	// и на выгрузке плагина — обе проверки обязательны.
+	if (g_KZPlugin.unloading || !g_pKZPlayerManager)
+	{
+		return;
+	}
+	// Граница строго `i < MAXPLAYERS` — та же, что в OnMapChanged (разбор там же).
+	for (i32 i = 0; i < MAXPLAYERS; i++)
+	{
+		KZPlayer *player = g_pKZPlayerManager->ToPlayer(CPlayerSlot(i));
+		if (player && player->leadService)
+		{
+			player->leadService->RefreshSegments(reason);
+		}
+	}
 }
 
 void KZLeadService::RebuildOwnedIndex()
@@ -644,6 +779,8 @@ void KZLeadService::OnFileReady(u32 gen, std::string &&filePath)
 	}
 	this->pending = std::make_shared<PendingLoad>();
 	this->pending->generation = gen;
+	// Снимок допуска — ЗДЕСЬ, на главном потоке: дальше значение уедет в рабочий поток.
+	this->pending->rdpTolerance = cyb_lead_rdp.Get();
 	// Дальше гейтом служит сам pending — сетевая фаза кончилась.
 	this->loading = false;
 	std::thread(BuildPathWorker, std::move(filePath), this->pending).detach();
@@ -970,7 +1107,13 @@ void KZLeadService::UpdateWindow()
 		to++;
 	}
 
-	i64 configured = KZOptionService::GetOptionInt("cybLeadMaxSegments", 64);
+	// Потолок: живой конвар поверх cfg. Конвар -1 (дефолт) означает «как в cfg», то есть
+	// значение оператора не подменяется кодом; всё прочее из конвара побеждает, потому что
+	// cybLeadMaxSegments правится только перезагрузкой плагина (см. шапку блока конваров).
+	// Не `override`: слово контекстно-ключевое, и держать его именем переменной — напрашиваться
+	// на путаницу при чтении.
+	const i32 capOverride = cyb_lead_max_segments.Get();
+	i64 configured = capOverride >= 1 ? (i64)capOverride : KZOptionService::GetOptionInt("cybLeadMaxSegments", 128);
 	if (configured < 1)
 	{
 		configured = 1;
@@ -1064,6 +1207,19 @@ void KZLeadService::ApplyWindow(u32 newFrom, u32 newTo)
 	this->windowFrom = newFrom;
 	this->windowTo = newTo;
 	this->RebuildOwnedIndex();
+}
+
+// Ручной рычаг к колбэкам конваров: перерисовать отрезки всем, у кого луч включён. Нужен, если
+// значение выставили не конваром (например, правкой cfg + перезагрузкой) или колбэк не
+// сработал. Серверная команда, игрокам не отдаём — канон форка (kz_invisible.cpp:453).
+CON_COMMAND_F(kz_lead_refresh, "Rebuild !lead beam segments for everyone (applies cyb_lead_* changes without reloading the path).", FCVAR_NONE)
+{
+	if (utils::GetController(context.GetPlayerSlot()))
+	{
+		KZ_LOG_WARN(LogChannel::Replays, "[lead] refresh_denied reason=not_server slot=%d\n", context.GetPlayerSlot().Get());
+		return;
+	}
+	KZLeadService::RefreshAllSegments("command");
 }
 
 SCMD(kz_lead, SCFL_REPLAY | SCFL_HELP)

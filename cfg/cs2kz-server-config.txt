@@ -116,5 +116,7 @@
 	"cybAwrBackfillIntervalSec"	"60"
 	// !lead: max route segments in the sliding window per player (network entities).
 	// Cost of CheckTransmit grows as segments x receivers - raise only after measuring.
-	"cybLeadMaxSegments"	"64"
+	// 128 since 10.09: vertices are twice as dense (cyb_lead_rdp 1.0), and the old 64 would
+	// halve the visible beam length. Live override without a reload: cyb_lead_max_segments.
+	"cybLeadMaxSegments"	"128"
 }
