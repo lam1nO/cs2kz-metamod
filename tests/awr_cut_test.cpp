@@ -535,6 +535,64 @@ static void test_trace_reports_every_arrival()
 	assert(trace[0].standTicks >= 4 && trace[2].cpFrame == -1);
 }
 
+// --- Перемотка: сколько вырезанного времени лежит до целевого тика --------------------------
+// Отображаемое время бота при сике = сырое время от старта рана до цели, минус записанные
+// паузы, минус вырезы. Паузы вычитает аккумулятор плейбека, поэтому DeadTicksUpTo обязана
+// исключить их из выреза — иначе двойной вычет (та же ловушка, что в подсчёте мёртвого).
+static void test_dead_ticks_up_to()
+{
+	const Interval dead[2] = {{150, 300}, {400, 500}}; // полуинтервалы (from, to] в ТИКАХ
+	const Interval pauses[2] = {{200, 250}, {600, 650}}; // первая внутри выреза, вторая в живом
+
+	// Цель за всеми вырезами: (300-150) - 50 + (500-400) = 200.
+	assert(DeadTicksUpTo(dead, 2, pauses, 2, 1000) == 200);
+	// Без пауз пересечение не вычитается: 150 + 100 = 250.
+	assert(DeadTicksUpTo(dead, 2, nullptr, 0, 1000) == 250);
+	// Цель В СЕРЕДИНЕ второго выреза — обрезаем по цели: 100 + (450-400) = 150.
+	assert(DeadTicksUpTo(dead, 2, pauses, 2, 450) == 150);
+	// Цель до всех вырезов — ноль (и на границе входа в вырез тоже).
+	assert(DeadTicksUpTo(dead, 2, pauses, 2, 150) == 0);
+	assert(DeadTicksUpTo(dead, 2, pauses, 2, 0) == 0);
+	assert(DeadTicksUpTo(nullptr, 0, pauses, 2, 1000) == 0);
+	// Пауза, целиком накрывшая вырез (prac внутри петли), обнуляет его вклад.
+	const Interval bigPause[1] = {{140, 320}};
+	assert(DeadTicksUpTo(dead, 1, bigPause, 1, 1000) == 0);
+}
+
+// Тождество: живые тики от старта рана до цели == сырое - паузы - вырезы. Считаем правую
+// часть формулой, левую — прямым перебором тиков, и сверяем.
+static void test_seek_live_time_identity()
+{
+	const uint32_t runStartTick = 100, targetTick = 1000;
+	const Interval dead[2] = {{150, 300}, {400, 500}};
+	const Interval pauses[2] = {{200, 250}, {600, 650}};
+
+	uint64_t liveDirect = 0;
+	for (uint32_t t = runStartTick + 1; t <= targetTick; t++)
+	{
+		bool skipped = false;
+		for (const Interval &d : dead)
+		{
+			if (t > d.from && t <= d.to) skipped = true;
+		}
+		for (const Interval &p : pauses)
+		{
+			if (t > p.from && t <= p.to) skipped = true;
+		}
+		if (!skipped) liveDirect++;
+	}
+
+	uint64_t pausedUpTo = 0;
+	for (const Interval &p : pauses)
+	{
+		const uint32_t to = p.to < targetTick ? p.to : targetTick;
+		if (to > p.from) pausedUpTo += to - p.from;
+	}
+	const uint64_t raw = targetTick - runStartTick;
+	const uint64_t formula = raw - pausedUpTo - DeadTicksUpTo(dead, 2, pauses, 2, targetTick);
+	assert(liveDirect == 600 && formula == liveDirect);
+}
+
 int main()
 {
 	test_no_teleports(); test_single_tp(); test_repeat_tp_same_cp(); test_prevcp_nextcp_keeps_middle();
@@ -547,6 +605,7 @@ int main()
 	test_pre_branch_beats_later_pass(); test_pre_match_at_run_start_clamped();
 	test_repeat_tp_collapses_to_one_dead(); test_standing_before_first_tp_is_cut(); test_cp_index_and_scan_agree();
 	test_trace_reports_every_arrival();
+	test_dead_ticks_up_to(); test_seek_live_time_identity();
 	std::puts("awr_cut: all tests passed");
 	return 0;
 }

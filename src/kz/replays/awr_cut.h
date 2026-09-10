@@ -112,4 +112,18 @@ namespace KZ::replaysystem::awr
 
 	// Живые интервалы (дополнение dead на [0, count-1]) — нужны !lead.
 	std::vector<Interval> LiveIntervals(const std::vector<Interval> &dead, uint32_t count);
+
+	// Сколько ВЫРЕЗАННОГО времени (в серверных тиках) лежит до тика targetTick включительно,
+	// за вычетом пересечения с записанными паузами. Нужна перемотке: отображаемое время бота
+	// в AWR-режиме = сырое время от старта рана минус паузы минус вырезы, а аккумулятор пауз
+	// плейбека паузы уже вычитает — вычесть их дважды нельзя (та же ловушка, что в подсчёте
+	// мёртвого времени выше).
+	//
+	// deadTickSpans — вырезы, переведённые в ТИКИ полуинтервалом (from, to]: from = serverTick
+	// кадра ПЕРЕД вырезом (то есть кадра-назначения D), to = serverTick последнего кадра
+	// выреза. Ровно так же телескопируется мёртвое время в ComputeAwrCut, поэтому перевод
+	// однозначен, а функция остаётся чистой и тестируемой без типов SDK.
+	// pauseTicks — как в ComputeAwrCut: {тик TIMER_PAUSE, тик TIMER_RESUME}.
+	uint64_t DeadTicksUpTo(const Interval *deadTickSpans, uint32_t deadCount, const Interval *pauseTicks, uint32_t pauseTickCount,
+						   uint32_t targetTick);
 }

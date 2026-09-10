@@ -449,6 +449,37 @@ namespace KZ::replaysystem::awr
 		return r;
 	}
 
+	uint64_t DeadTicksUpTo(const Interval *deadTickSpans, uint32_t deadCount, const Interval *pauseTicks, uint32_t pauseTickCount, uint32_t targetTick)
+	{
+		if (!deadTickSpans || deadCount == 0)
+		{
+			return 0;
+		}
+		uint64_t total = 0;
+		for (uint32_t i = 0; i < deadCount; i++)
+		{
+			const uint32_t a = deadTickSpans[i].from;
+			// Обрезаем по цели: перемотка могла приземлиться и на середину выреза (сегодня
+			// SnapSeekTargetOutOfPause этого не допускает, но полагаться на это незачем).
+			const uint32_t b = std::min(deadTickSpans[i].to, targetTick);
+			if (b <= a)
+			{
+				continue;
+			}
+			uint64_t span = b - a;
+			for (uint32_t p = 0; p < pauseTickCount; p++)
+			{
+				const uint32_t f = std::max(a, pauseTicks[p].from), t = std::min(b, pauseTicks[p].to);
+				if (t > f)
+				{
+					span -= std::min(span, (uint64_t)(t - f));
+				}
+			}
+			total += span;
+		}
+		return total;
+	}
+
 	std::vector<Interval> LiveIntervals(const std::vector<Interval> &dead, uint32_t count)
 	{
 		std::vector<Interval> live;

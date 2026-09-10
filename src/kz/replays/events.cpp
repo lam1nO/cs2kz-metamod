@@ -604,6 +604,40 @@ namespace KZ::replaysystem::events
 		if (replay->startTime != 0.0f)
 		{
 			replay->accumulatedPauseTime += totalPauseTime;
+
+			// AWR: вырезанные интервалы зритель не видит, и в таймер они возвращаться не
+			// должны. При обычном проигрывании это выходило само: пропущенные кадры физически
+			// не проигрываются, curtime на них не идёт. А перемотка восстанавливает время
+			// формулой curtime - startTime - accumulatedPauseTime, где startTime уехал на
+			// СЫРУЮ длительность от старта рана до цели (см. timeDifference у TIMER_START) —
+			// и все вырезы возвращались в таймер («было 0:32, отмотал назад — стало 1:50»).
+			// Лечим тем же аккумулятором, что и записанную паузу: он и означает «время,
+			// которое прошло, но в таймер рана не идёт».
+			//
+			// Пересечение вырезов с записанными паузами вычитается ОДИН раз: паузы уже
+			// набраны в totalPauseTime выше, поэтому DeadTicksUpTo их из выреза исключает.
+			// Аллокация здесь допустима: путь — перемотка (действие зрителя), не игровой такт.
+			if (replay->awrMode && replay->awrDead && !replay->awrDead->empty())
+			{
+				std::vector<awr::Interval> deadTickSpans;
+				deadTickSpans.reserve(replay->awrDead->size());
+				for (const awr::Interval &iv : *replay->awrDead)
+				{
+					// Вырез [from, to] в кадрах — это тики (tick[from-1], tick[to]]: кадр
+					// from-1 (назначение телепорта) остаётся живым, как в ComputeAwrCut.
+					if (iv.from == 0 || iv.to >= replay->tickCount || iv.from > iv.to)
+					{
+						continue;
+					}
+					deadTickSpans.push_back({replay->tickData[iv.from - 1].serverTick, replay->tickData[iv.to].serverTick});
+				}
+				std::vector<awr::Interval> pauseTicks =
+					playback::PauseIntervalsFromEvents(replay->tickData, replay->tickCount, replay->events, replay->numEvents,
+													   playback::PauseUnits::ServerTicks);
+				const u64 deadTicks = awr::DeadTicksUpTo(deadTickSpans.data(), (u32)deadTickSpans.size(), pauseTicks.data(), (u32)pauseTicks.size(),
+														 targetServerTick);
+				replay->accumulatedPauseTime += (f32)((f64)deadTicks * ENGINE_FIXED_TICK_INTERVAL);
+			}
 			// Если перемотка приземлилась ВНУТРИ записанной паузы — заякорить её для
 			// последующего live-TIMER_RESUME, чтобы остаток паузы (от target до фактического
 			// резюма) тоже попал в аккумулятор. pauseStartTime до сюда == 0 (ResetReplayState).
