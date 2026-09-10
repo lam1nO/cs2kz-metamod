@@ -33,6 +33,10 @@ namespace
 
 	// Один файл в работе: от GET бэклога до POST результата.
 	bool g_busy = false;
+	// Эпоха, которой принадлежит текущая защёлка g_busy. Нужна, чтобы снять её мог только
+	// тот, кто её ставил: после смены карты защёлку сбрасывает OnMapChanged, но если в этот
+	// момент был жив рабочий поток, она остаётся до отбрасывания его результата (см. Tick).
+	u32 g_busyEpoch = 0;
 	// Сколько попыток осталось в текущем прогоне.
 	u32 g_remaining = 0;
 	bool g_dryRun = false;
@@ -48,6 +52,14 @@ namespace
 	// interval <= 0, а Tick всегда возвращает либо AWR_BACKFILL_BUSY_INTERVAL, либо
 	// g_autoIntervalSec > 0.
 	CTimerBase *g_timer = nullptr;
+	// ЭПОХА цикла: увеличивается на каждой смене карты. Плагин на changelevel не
+	// выгружается, поэтому колбэки Steam-HTTP, отправленные до смены карты, спокойно
+	// доезжают ПОСЛЕ неё — и, если защёлка g_busy уже снята (OnMapChanged), такой опоздавший
+	// колбэк запустил бы ВТОРУЮ цепочку поверх идущей: `g_result` — одна ячейка, результаты
+	// затирали бы друг друга, а `g_remaining` списывался бы вдвое. Каждая из трёх отправок
+	// (GET бэклога, GET файла, POST результата) и каждый её колбэк ошибки запоминают эпоху и
+	// на чужой молча уходят, не трогая ни g_busy, ни g_remaining, ни сцепку.
+	u32 g_epoch = 0;
 	// Рабочих потоков в полёте. Атомик, потому что декремент делает сам поток: главному
 	// нужно знать, безопасно ли снимать защёлку g_busy на смене карты (иначе два файла
 	// разбирались бы одновременно в одну ячейку результата).
@@ -78,6 +90,8 @@ namespace
 		// Снапшот режима на момент ВЗЯТИЯ файла. Пока файл в полёте, kz_awr_backfill может
 		// переставить g_dryRun — и реальный файл ушёл бы как dry (или наоборот).
 		bool dryRun = false;
+		// Эпоха, в которой файл был взят (см. g_epoch).
+		u32 epoch = 0;
 	};
 
 	std::mutex g_resultMutex;
@@ -138,6 +152,19 @@ namespace
 		}
 	};
 
+	// Колбэк принадлежит уже закончившейся эпохе (между отправкой и ответом сменилась
+	// карта)? Тогда он обязан молча уйти: его цепочка мертва, а состояние принадлежит новой.
+	bool StaleEpoch(u32 epoch, const char *what, const char *uuid)
+	{
+		if (epoch == g_epoch)
+		{
+			return false;
+		}
+		KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] callback dropped reason=stale_epoch what=%s uuid=%s epoch=%u now=%u\n", what,
+					(uuid && uuid[0]) ? uuid : "<none>", (unsigned)epoch, (unsigned)g_epoch);
+		return true;
+	}
+
 	// ------------------------------------------------------------------
 	// Шаги цикла одного файла
 	// ------------------------------------------------------------------
@@ -194,6 +221,27 @@ namespace
 		// Отправка — вне лока: колбэки HTTP и логи не должны держать мьютекс.
 		if (haveResult)
 		{
+			// Результат потока, запущенного до смены карты. Разрез сам по себе верен (файл
+			// от карты не зависит), но отправлять его отсюда нельзя: SendResult на всех
+			// своих путях трогает общее состояние — FinishFileAndChain, а на
+			// not_configured ещё и g_remaining/g_busy, — а это состояние принадлежит уже
+			// НОВОЙ эпохе и, возможно, идущему прямо сейчас файлу. Заводить ради этого
+			// вторую, «безсостояночную» ветку отправки — лишний путь ради одного файла.
+			// Цена отказа мала и ограничена: строка в api не помечена, значит бэклог отдаст
+			// её снова следующим же тиком, и файл досчитается в текущей эпохе.
+			if (res.epoch != g_epoch)
+			{
+				KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] callback dropped reason=stale_epoch what=worker uuid=%s epoch=%u now=%u\n",
+							res.uuid.c_str(), (unsigned)res.epoch, (unsigned)g_epoch);
+				// Защёлку снимаем ТОЛЬКО если она всё ещё принадлежит той, прошлой цепочке:
+				// OnMapChanged её не тронул именно потому, что этот поток был в полёте.
+				// Если новая эпоха уже взяла свой файл — защёлка её, и трогать нельзя.
+				if (g_busy && g_busyEpoch != g_epoch)
+				{
+					g_busy = false;
+				}
+				return AWR_BACKFILL_BUSY_INTERVAL;
+			}
 			SendResult(res);
 			return AWR_BACKFILL_BUSY_INTERVAL;
 		}
@@ -253,8 +301,11 @@ namespace
 		}
 
 		g_busy = true;
+		g_busyEpoch = g_epoch;
 		// Снапшот режима на момент взятия файла — см. WorkerResult::dryRun.
 		const bool dryRun = g_dryRun;
+		// Снапшот эпохи: ответ может приехать уже после смены карты.
+		const u32 epoch = g_epoch;
 
 		HTTP::Request req(HTTP::Method::GET, url);
 		// В обычном режиме хватает одной свежайшей строки: обработанная помечается в api и
@@ -264,8 +315,12 @@ namespace
 		SetAuthHeader(req);
 		// clang-format off
 		req.Send(
-			[dryRun](HTTP::Response resp)
+			[dryRun, epoch](HTTP::Response resp)
 			{
+				if (StaleEpoch(epoch, "backlog", nullptr))
+				{
+					return;
+				}
 				if (resp.status < 200 || resp.status >= 300)
 				{
 					KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] backlog failed reason=http_%u\n", (unsigned)resp.status);
@@ -330,8 +385,12 @@ namespace
 				KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill done reason=dry_run_exhausted seen=%u\n",
 							(unsigned)g_dryRunSeen.size());
 			},
-			[]()
+			[epoch]()
 			{
+				if (StaleEpoch(epoch, "backlog", nullptr))
+				{
+					return;
+				}
 				KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] backlog failed reason=network\n");
 				FinishAttempt();
 			});
@@ -340,12 +399,18 @@ namespace
 
 	void StartDownload(const std::string &uuid, const std::string &url, bool dryRun)
 	{
+		// Эпоха на момент отправки: файл может доехать уже после смены карты.
+		const u32 epoch = g_epoch;
 		// Ссылка выдана самим api (обычно presigned) — свой Bearer сюда не подставляем.
 		HTTP::Request req(HTTP::Method::GET, url);
 		// clang-format off
 		req.Send(
-			[uuid, dryRun](HTTP::Response resp)
+			[uuid, dryRun, epoch](HTTP::Response resp)
 			{
+				if (StaleEpoch(epoch, "download", uuid.c_str()))
+				{
+					return;
+				}
 				if (resp.status >= 400 && resp.status < 500)
 				{
 					// 4xx — отказ ФАЙЛА, а не сети (403 протухшая ссылка, 404/410 объект
@@ -388,8 +453,12 @@ namespace
 
 				SpawnWorker(uuid, std::move(*raw), dryRun);
 			},
-			[uuid]()
+			[uuid, epoch]()
 			{
+				if (StaleEpoch(epoch, "download", uuid.c_str()))
+				{
+					return;
+				}
 				KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] download failed uuid=%s reason=network\n", uuid.c_str());
 				FinishAttempt();
 			});
@@ -402,8 +471,10 @@ namespace
 		// playback::ComputeCutFor глобального состояния не трогают (см. их комментарии),
 		// а распаковка нескольких мегабайт в игровом потоке дала бы просадку кадра.
 		g_workersInFlight++;
+		// Эпоха фиксируется ЗДЕСЬ, на главном потоке: сам поток g_epoch читать не должен.
+		const u32 epoch = g_epoch;
 		std::thread worker(
-			[uuid, dryRun, data = std::move(data)]()
+			[uuid, dryRun, epoch, data = std::move(data)]()
 			{
 				// Декремент строго после публикации результата: главный поток по нулю
 				// решает, что в полёте никого нет (OnMapChanged).
@@ -418,6 +489,7 @@ namespace
 				WorkerResult res;
 				res.uuid = uuid;
 				res.dryRun = dryRun;
+				res.epoch = epoch;
 
 				// Защита от битого файла — НЕ try/catch: форк собирается с
 				// `-fno-exceptions` (AMBuildScript), исключение поймать нечем. Абсурдные
@@ -534,25 +606,38 @@ namespace
 		body.Set("awrMs", awrMs);
 
 		std::string uuid = res.uuid;
+		// Эпоха результата (она же текущая: чужие сюда не доходят, см. Tick) — ответ на POST
+		// может приехать уже после смены карты.
+		const u32 epoch = res.epoch;
 		HTTP::Request req(HTTP::Method::POST, url);
 		req.SetHeader("Content-Type", "application/json");
 		SetAuthHeader(req);
 		req.SetBody(body.ToString());
 		// clang-format off
 		req.Send(
-			[uuid](HTTP::Response resp)
+			[uuid, epoch](HTTP::Response resp)
 			{
 				if (resp.status < 200 || resp.status >= 300)
 				{
 					KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] post failed uuid=%s reason=http_%u\n", uuid.c_str(),
 								(unsigned)resp.status);
 				}
+				// Сам POST уже доехал (строка в api помечена — это полезно и от эпохи не
+				// зависит), но сцепку дальше гнать нельзя: она принадлежит новой эпохе.
+				if (StaleEpoch(epoch, "post", uuid.c_str()))
+				{
+					return;
+				}
 				// Файл обработан (попытка списана в любом случае) — сразу следующий.
 				FinishFileAndChain();
 			},
-			[uuid]()
+			[uuid, epoch]()
 			{
 				KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] post failed uuid=%s reason=network\n", uuid.c_str());
+				if (StaleEpoch(epoch, "post", uuid.c_str()))
+				{
+					return;
+				}
 				FinishFileAndChain();
 			});
 		// clang-format on
@@ -587,27 +672,36 @@ void CybAwrBackfill::Run(u32 count, bool dryRun)
 	// Насос может быть не запущен (cybAwrBackfillIntervalSec 0) — команда обязана работать.
 	EnsureTimer();
 	KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] backfill started count=%u dry=%d\n", (unsigned)count, dryRun ? 1 : 0);
-	// ПЕРВЫЙ шаг — сразу, не дожидаясь тика таймера. Ручной прогон не должен зависеть от
-	// того, когда персистентный таймер проснётся после смены карты (известный дефект
-	// ctimer: lastExecute не сбрасывается на changelevel; чинить сам ctimer — чужая зона).
-	// Дальше файлы гонит сцепка FinishFileAndChain, тоже без ожидания тика.
+	// ПЕРВЫЙ шаг — сразу, не дожидаясь тика насоса: команда должна начинать работать в ту
+	// же секунду, а не через интервал таймера, каким бы он ни был. Дальше файлы гонит
+	// сцепка FinishFileAndChain, тоже без ожидания тика.
 	Tick();
 }
 
 void CybAwrBackfill::OnMapChanged()
 {
+	// ЭПОХА растёт ВСЕГДА и ПЕРВЫМ делом. HTTP-колбэки, отправленные до changelevel,
+	// доезжают в любом случае — плагин на смене карты не выгружается. Любой такой колбэк,
+	// сработав уже по новому состоянию, увёл бы цикл в ДВЕ параллельные цепочки: ячейка
+	// g_result одна (результаты затирали бы друг друга), а g_remaining списывался бы вдвое.
+	// С этой строки все они молча уходят (StaleEpoch), не трогая ни g_busy, ни g_remaining,
+	// ни сцепку.
+	g_epoch++;
+
 	// Защёлка «файл в работе». HTTP-запрос, начатый до changelevel, может не довести ни
-	// колбэк ответа, ни колбэк ошибки — тогда g_busy остаётся true навсегда, и Tick выходит
-	// на первой же проверке: `kz_awr_backfill 1` печатает started и больше ничего не делает
-	// (наблюдено на канарейке kz 0.191.0 после смены карты).
+	// колбэк ответа, ни колбэк ошибки — а теперь ещё и сознательно отбрасывается по эпохе;
+	// в обоих случаях g_busy остался бы true навсегда, и Tick выходил бы на первой же
+	// проверке: `kz_awr_backfill 1` печатает started и больше ничего не делает (наблюдено
+	// на канарейке kz 0.191.0 после смены карты).
 	//
 	// Снимаем ТОЛЬКО когда в полёте нет рабочего потока: иначе его результат приехал бы в
 	// одну ячейку g_result с результатом нового файла, и один из двух потерялся бы молча.
-	// Если поток жив — он опубликует результат сам, и защёлку снимет обычный путь.
+	// Если поток жив — защёлку снимет Tick, отбросив его результат как чужой по эпохе.
 	if (g_busy && g_workersInFlight.load() == 0)
 	{
 		g_busy = false;
-		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] map_changed reason=busy_latch_cleared remaining=%u\n", (unsigned)g_remaining);
+		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] map_changed reason=busy_latch_cleared remaining=%u epoch=%u\n",
+					(unsigned)g_remaining, (unsigned)g_epoch);
 	}
 	// Период автоподбора начинается заново: отсчитывать его от прошлой карты смысла нет.
 	g_autoDue = false;
