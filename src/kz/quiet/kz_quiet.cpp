@@ -294,6 +294,12 @@ void KZ::quiet::OnPostEvent(INetworkMessageInternal *pEvent, const CNetMessage *
 			// различать по msg/entidx). Только базовое UM_SayText2: для легаси-id 306 в SDK нет
 			// proto-класса, ToPB туда — чтение чужой раскладки. Первые 5 на процесс, не в такте.
 			static i32 diagLeft = 5;
+			if (diagLeft > 0 && info->m_MessageId != UM_SayText2)
+			{
+				// Легаси-id (306): класса в SDK нет, поля не читаем — только факт и имя.
+				diagLeft--;
+				Msg("[cyb] saytext2_seen id=%d msg=%s (legacy id, fields not parsed)\n", (int)info->m_MessageId, pEvent->GetUnscopedName());
+			}
 			if (diagLeft > 0 && info->m_MessageId == UM_SayText2)
 			{
 				diagLeft--;

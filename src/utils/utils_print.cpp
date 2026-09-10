@@ -261,23 +261,32 @@ bool utils::CFormat(char *buffer, u64 buffer_size, const char *text)
 void utils::ClientPrintFilter(IRecipientFilter *filter, int msg_dest, const char *msg_name, const char *param1, const char *param2,
 							  const char *param3, const char *param4)
 {
-	// Полное имя базового сообщения, а не подстрока «TextMsg»: обновление CS2 09.09.2026
-	// переименовало CS-специфичные CS_UM_SayText/SayText2/TextMsg в *_CSGOLegacy, и поиск
-	// по подстроке стал попадать в легаси-вариант, который клиент больше не рисует —
-	// весь чат и печать плагина на флоте молча пропали (инцидент 10.09).
-	// Точный поиск, не Partial: подстрока порядок-зависима и однажды уже уехала в легаси.
-	INetworkMessageInternal *netmsg = g_pNetworkMessages->FindNetworkMessage("CUserMessageTextMsg");
+	// Поиск по ID (UM_TextMsg = 124) с фолбэком на подстроку «TextMsg» — так работало на флоте
+	// до апдейта. Точное имя FindNetworkMessage("CUserMessageTextMsg") на живом сервере 10.09 НЕ
+	// нашлось (print_failed reason=netmsg_not_found) — реестр хранит сообщения не под именем
+	// protobuf-класса; реальное имя пишем в лог один раз (print_netmsg_resolved), чтобы больше
+	// не гадать.
+	INetworkMessageInternal *netmsg = g_pNetworkMessages->FindNetworkMessageById(UM_TextMsg);
 	if (!netmsg)
 	{
-		// Единственная страховка при смене реестра сообщений движком: без неё разыменование
-		// nullptr на каждой строке печати уронило бы весь флот вместо невидимого чата.
+		netmsg = g_pNetworkMessages->FindNetworkMessagePartial("TextMsg");
+	}
+	if (!netmsg)
+	{
 		static bool warned = false;
 		if (!warned)
 		{
 			warned = true;
-			Warning("[cyb] print_failed reason=netmsg_not_found name=CUserMessageTextMsg\n");
+			Warning("[cyb] print_failed reason=netmsg_not_found name=TextMsg id=%d\n", (int)UM_TextMsg);
 		}
 		return;
+	}
+	static bool resolvedLogged = false;
+	if (!resolvedLogged)
+	{
+		resolvedLogged = true;
+		NetMessageInfo_t *info = netmsg->GetNetMessageInfo();
+		Msg("[cyb] print_netmsg_resolved name=%s id=%d\n", netmsg->GetUnscopedName(), info ? (int)info->m_MessageId : -1);
 	}
 	auto msg = netmsg->AllocateMessage()->ToPB<CUserMessageTextMsg>();
 	msg->set_dest(msg_dest);
