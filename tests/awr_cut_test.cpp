@@ -337,6 +337,56 @@ static void test_pre_match_at_run_start_clamped()
 	assert(r.dead[0].from == 11 && r.dead[0].to == 31);
 }
 
+// Три ТП на ОДИН чекпоинт со стоянием после каждого прибытия, cpIndex невалиден (-1) —
+// путь (а) выключен, работает запасной скан. Живое наблюдение на канарейке: без сшивки к
+// прибытию вырезался только забег между двумя ТП, а само прибытие и стояние после него
+// оставались живыми — бот «дёргался» у чекпоинта, а секунды стояния оставались в awrMs.
+// Тест обязан падать, если убрать сшивку к самому раннему прибытию в стоянии.
+static void test_repeat_tp_collapses_to_one_dead()
+{
+	std::vector<Frame> v;
+	for (uint32_t i = 0; i <= 9; i++) v.push_back(F(i, -1, 0, 0, 6.0f * i));               // подход, ..54
+	v.push_back(F(10, -1, 1, 0, 60.0f));                                                    // !cp и сразу побежал
+	for (uint32_t i = 11; i <= 30; i++) v.push_back(F(i, -1, 1, 0, 60.0f + 6.0f * (i - 10)));
+	v.push_back(F(31, -1, 1, 1, 60.0f));                                                    // ТП №1
+	for (uint32_t i = 32; i <= 35; i++) v.push_back(F(i, -1, 1, 1, 60.0f));                 // стоит
+	for (uint32_t i = 36; i <= 50; i++) v.push_back(F(i, -1, 1, 1, 60.0f + 6.0f * (i - 35)));
+	v.push_back(F(51, -1, 1, 2, 60.0f));                                                    // ТП №2
+	for (uint32_t i = 52; i <= 55; i++) v.push_back(F(i, -1, 1, 2, 60.0f));                 // стоит
+	for (uint32_t i = 56; i <= 70; i++) v.push_back(F(i, -1, 1, 2, 60.0f + 6.0f * (i - 55)));
+	v.push_back(F(71, -1, 1, 3, 60.0f));                                                    // ТП №3
+	for (uint32_t i = 72; i < 86; i++) v.push_back(F(i, -1, 1, 3, 60.0f + 6.0f * (i - 71)));
+	FillPre(v);
+	CutResult r = ComputeAwrCut(v.data(), v.size(), nullptr, 0, 10000, TI, 0, v.size() - 1);
+	assert(r.ok && r.teleports == 3);
+	// Все три попытки — ОДИН вырез от кадра после постановки до последнего прибытия.
+	// from == 11, а не 13: точка сшивки — ближайший к чекпоинту кадр (сам кадр постановки),
+	// а не «последний в радиусе», иначе первые тики разгона с чекпоинта ушли бы в вырез.
+	assert(r.dead.size() == 1 && r.dead[0].from == 11 && r.dead[0].to == 71);
+}
+
+// Стояние ПЕРЕД первой попыткой (поставил cp, постоял, побежал) обязано остаться ЖИВЫМ:
+// это таймер игрока, а не петля. Тест обязан падать, если откат идёт «пока позиция в
+// радиусе допуска» вместо сшивки к кадру прибытия: тогда живыми не остались бы ни стояние,
+// ни последние кадры подхода.
+static void test_standing_before_first_tp_stays_live()
+{
+	std::vector<Frame> v;
+	for (uint32_t i = 0; i <= 9; i++) v.push_back(F(i, -1, 0, 0, 6.0f * i));               // подход, ..54
+	v.push_back(F(10, -1, 1, 0, 60.0f));                                                    // !cp
+	for (uint32_t i = 11; i <= 20; i++) v.push_back(F(i, -1, 1, 0, 60.0f));                 // стоит ДО попытки
+	for (uint32_t i = 21; i <= 40; i++) v.push_back(F(i, -1, 1, 0, 60.0f + 6.0f * (i - 20)));
+	v.push_back(F(41, -1, 1, 1, 60.0f));                                                    // ТП №1
+	for (uint32_t i = 42; i < 56; i++) v.push_back(F(i, -1, 1, 1, 60.0f + 6.0f * (i - 41)));
+	FillPre(v);
+	CutResult r = ComputeAwrCut(v.data(), v.size(), nullptr, 0, 10000, TI, 0, v.size() - 1);
+	assert(r.ok && r.teleports == 1 && r.dead.size() == 1);
+	// Мёртвое начинается только там, где игрок ушёл с чекпоинта (кадр 21).
+	assert(r.dead[0].from == 21 && r.dead[0].to == 41);
+	auto live = LiveIntervals(r.dead, v.size());
+	assert(live.size() == 2 && live[0].from == 0 && live[0].to == 20);
+}
+
 int main()
 {
 	test_no_teleports(); test_single_tp(); test_repeat_tp_same_cp(); test_prevcp_nextcp_keeps_middle();
@@ -346,6 +396,7 @@ int main()
 	test_cp_set_while_running(); test_cp_matches_pre_side(); test_undo_mid_tick();
 	test_dest_not_found_detail(); test_counter_mismatch_detail();
 	test_pre_branch_beats_later_pass(); test_pre_match_at_run_start_clamped();
+	test_repeat_tp_collapses_to_one_dead(); test_standing_before_first_tp_stays_live();
 	std::puts("awr_cut: all tests passed");
 	return 0;
 }

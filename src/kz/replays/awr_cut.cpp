@@ -78,7 +78,9 @@ namespace KZ::replaysystem::awr
 	};
 
 	// Кадр назначения телепорта, прибывшего на кадре t; -1 — не нашли.
-	static int64_t DestFrame(const Frame *frames, uint32_t t, const std::vector<int64_t> &cpSet, uint32_t runStart, DestProbe *probe)
+	// arrivalFlags — отметки кадров прибытия ТП (см. откат в ветке (б)).
+	static int64_t DestFrame(const Frame *frames, uint32_t t, const std::vector<int64_t> &cpSet, uint32_t runStart, const char *arrivalFlags,
+							 DestProbe *probe)
 	{
 		const float *arrival = frames[t].origin;
 
@@ -114,11 +116,61 @@ namespace KZ::replaysystem::awr
 					probe->bestDistSq = dSq;
 				}
 			}
-			int64_t d = MatchDest(frames, (uint32_t)j, arrival, runStart);
-			if (d >= 0)
+			if (MatchDest(frames, (uint32_t)j, arrival, runStart) < 0)
 			{
-				return d;
+				continue;
 			}
+
+			// Кадр j — лишь ВХОД в участок, который лежит в допуске от точки прибытия;
+			// «самый поздний в радиусе» сам по себе даёт две беды, обе видны живьём:
+			//  - матч попадает в СТОЯНИЕ ПОСЛЕ прибытия предыдущего ТП в ту же точку, и тогда
+			//    живыми остаются и повторный заброс, и стояние после него — то самое «тп, тп,
+			//    тп» у чекпоинта с канарейки, а его секунды остаются в awrMs;
+			//  - на первой попытке матч попадает на кадр УХОДА с чекпоинта (игрок разгоняется,
+			//    первые 2-3 тика он ещё в 16 u), и эти тики живого бега уходят в вырез —
+			//    ошибка в опасную сторону, время рана выглядит лучше настоящего, и на ране с
+			//    сотнями чекпоинтов это уже секунды.
+			// Поэтому проходим весь участок в допуске и выбираем точку сшивки осознанно:
+			//  - есть кадр ПРИБЫТИЯ — берём самый ранний из них (обход продолжится с него, все
+			//    попытки на одном чекпоинте сольются в один вырез, а TELEPORT-события
+			//    промежуточных прибытий окажутся внутри dead и зрителю не проиграются);
+			//  - иначе — БЛИЖАЙШИЙ к точке прибытия кадр (при равенстве самый поздний): это
+			//    сам чекпоинт или стояние на нём, а не кадр ухода с него. Стояние ПЕРЕД
+			//    первой попыткой при этом остаётся живым — это таймер игрока, а не петля.
+			// Началом участка считаем j при совпадении по post и j-1 при совпадении по pre:
+			// в последнем случае позиция была на конце предыдущего тика.
+			const int64_t anchor = DistSq(arrival, frames[j].origin) <= AWR_DEST_TOLERANCE_SQ ? j : j - 1;
+			int64_t firstArrival = -1;
+			int64_t nearest = -1;
+			float nearestDistSq = 0.0f;
+			for (int64_t k = anchor; k >= (int64_t)runStart; k--)
+			{
+				const float dSq = DistSq(arrival, frames[k].origin);
+				if (dSq > AWR_DEST_TOLERANCE_SQ)
+				{
+					break;
+				}
+				if (arrivalFlags && arrivalFlags[k])
+				{
+					firstArrival = k;
+				}
+				// Строгое «<»: идём НАЗАД, поэтому при равных дистанциях побеждает самый
+				// ПОЗДНИЙ кадр. Это и есть стояние на чекпоинте перед попыткой — его время
+				// живое, срезать его нельзя; а кадры разгона С чекпоинта проигрывают по
+				// дистанции самому чекпоинту и в вырез не попадают.
+				if (nearest < 0 || dSq < nearestDistSq)
+				{
+					nearest = k;
+					nearestDistSq = dSq;
+				}
+			}
+			if (firstArrival >= 0)
+			{
+				// Кадр прибытия сам остаётся живым: обход обработает его следующим шагом и
+				// вырезы состыкуются кадр в кадр (их сливает ComputeAwrCut ниже).
+				return firstArrival;
+			}
+			return MatchDest(frames, (uint32_t)(nearest >= 0 ? nearest : j), arrival, runStart);
 		}
 		return -1;
 	}
@@ -173,7 +225,7 @@ namespace KZ::replaysystem::awr
 				cursor--;
 				continue;
 			}
-			int64_t d = DestFrame(frames, (uint32_t)cursor, cpSet, runStart, nullptr);
+			int64_t d = DestFrame(frames, (uint32_t)cursor, cpSet, runStart, arrival.data(), nullptr);
 			if (d < 0)
 			{
 				r.reason = "dest_not_found";
@@ -182,7 +234,7 @@ namespace KZ::replaysystem::awr
 				// удачного скана незачем: успешный путь обычно обрывается на первых кадрах, а
 				// неудачный и так уже прошёл всё окно — лишний проход платится один раз за файл.
 				DestProbe probe;
-				DestFrame(frames, (uint32_t)cursor, cpSet, runStart, &probe);
+				DestFrame(frames, (uint32_t)cursor, cpSet, runStart, arrival.data(), &probe);
 				const Frame &a = frames[cursor];
 				const float bestDist = probe.bestDistSq >= 0.0f ? std::sqrt(probe.bestDistSq) : -1.0f;
 				std::snprintf(
@@ -196,6 +248,28 @@ namespace KZ::replaysystem::awr
 			cursor = d;
 		}
 		std::reverse(r.dead.begin(), r.dead.end());
+
+		// Слить СМЕЖНЫЕ интервалы. Повторные попытки на одном чекпоинте дают цепочку
+		// вырезов, стыкующихся кадр в кадр ([D+1,T1], [T1+1,T2], …) — сшивка ведёт каждый
+		// следующий обход ровно к прибытию предыдущего. Плейбек их и так склеит
+		// (BuildSkipSegments), но с одним интервалом читаемее и трасса, и !lead, и тесты.
+		// Мёртвое время не меняется: длительности считаются по serverTick и телескопируются.
+		{
+			size_t merged = 0;
+			for (size_t i = 0; i < r.dead.size(); i++)
+			{
+				if (merged > 0 && r.dead[i].from <= r.dead[merged - 1].to + 1)
+				{
+					if (r.dead[i].to > r.dead[merged - 1].to)
+					{
+						r.dead[merged - 1].to = r.dead[i].to;
+					}
+					continue;
+				}
+				r.dead[merged++] = r.dead[i];
+			}
+			r.dead.resize(merged);
+		}
 
 		// Мёртвое время по serverTick (кадры могут быть с пропусками), минус пересечение с паузами:
 		// пауза в time_ms уже не входит, вычесть её дважды нельзя.
