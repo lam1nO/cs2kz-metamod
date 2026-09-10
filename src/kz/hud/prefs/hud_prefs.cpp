@@ -97,7 +97,10 @@ static_function void OutlineOnActivate(KZPlayer *player, i64 tag)
 // зовёт RefreshLayoutPrefs сразу после onActivate кнопки. В General своей кнопки «сбросить
 // страницу» нет: там лежит общий Reset All (ниже), а HudType не сбрасывается вовсе — у его
 // Choice-пункта нет префа, и ResetNode такие пункты пропускает.
-// Слоты: пять элементов, прицел (Count), меню реплея (Count + 1) — см. RPMENU_RESET_SLOT ниже.
+// Слоты: по одному на КАЖДЫЙ элемент LAYOUT_ELEMENTS (включая «Прогресс»), затем прицел
+// (Count) и меню реплея (Count + 1) — см. RPMENU_RESET_SLOT ниже. Слоты живут только в памяти
+// (статический массив, наполняется при регистрации реестра), в префах не хранятся — рост
+// Count сдвигает номера двух последних безнаказанно.
 static_global KZOptNode *s_resettableNodes[(i32)LayoutElement::Count + 2] {};
 static constexpr i32 RPMENU_RESET_SLOT = (i32)LayoutElement::Count + 1;
 
@@ -136,7 +139,8 @@ static_function void AddResetButton(KZOptNode *node, i32 slot)
 // Живёт в General, а не на родительской категории «Худ»: у категории с подкатегориями своих
 // пунктов не бывает вовсе (ActiveMenuNode, layout/menu.cpp — родитель возвращает NULL, пока не
 // выбрана подкатегория), так что пункт на ней был бы недостижим для игрока.
-// Сбрасывает страницы всех пяти элементов + прицел + меню реплея (s_resettableNodes) и саму General.
+// Сбрасывает страницы всех элементов LAYOUT_ELEMENTS + прицел + меню реплея (s_resettableNodes)
+// и саму General.
 // HudType при этом НЕ сбрасывается: его Choice-пункт зарегистрирован без prefKey, а ResetNode
 // пункты без префа пропускает — иначе «сбросить оформление» могло бы выключить игроку худ.
 static_global KZOptNode *s_hudGeneralNode {};
@@ -156,7 +160,10 @@ static_function void ResetAllOnActivate(KZPlayer *player, i64 tag)
 static_function void AddHudElementItems(KZOptNode *node, LayoutElement e)
 {
 	const LayoutElementDef &def = LAYOUT_ELEMENTS[(i32)e];
-	KZ::menu::AddToggle(node, "HUD - Menu Label Enabled", def.enabledKey, true);
+	// Дефолт — поэлементный (def.enabledDefault): у «Прогресса» он false. Тот же ответ читает
+	// RefreshLayoutPrefs (layout/prefs.cpp) — разойтись значило бы показать в меню «Вкл» при
+	// фактически выключенном элементе.
+	KZ::menu::AddToggle(node, "HUD - Menu Label Enabled", def.enabledKey, def.enabledDefault);
 	KZ::menu::AddPosition(node, "HUD - Menu Label Position", def.xKey, def.yKey, def.xDefault, def.yDefault);
 	KZ::menu::AddSize(node, "HUD - Menu Label Size", def.sizeKey, def.sizeDefault, LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX);
 	KZ::menu::AddFont(node, "HUD - Menu Label Font", def.fontKey, LAYOUT_DEFAULT_FONT);
@@ -348,6 +355,16 @@ void KZHUDService::InitMenuPrefs()
 	AddHudElementItems(checkpoint, LayoutElement::Checkpoint);
 	KZ::menu::AddColor(checkpoint, "HUD - Menu Label Color", "mhudCheckpointColor", MHUD_DEF_BASE_COLOR);
 	AddResetButton(checkpoint, (i32)LayoutElement::Checkpoint);
+
+	// «Прогресс: N%» по маршруту `!lead` (kz/lead) — страница ровно того же состава, что у
+	// остальных элементов: тумблер, позиция, размер, шрифт, обводка, прозрачность. Своего
+	// цвета у элемента нет (в дизайне не просили), поэтому пункта AddColor здесь тоже нет.
+	// Подтекста здесь нет намеренно: SetItemSubtext вешает подпись на ПОСЛЕДНИЙ добавленный
+	// пункт, а после AddHudElementItems это «Прозрачность» — подсказка про маршрут оказалась бы
+	// не у того пункта. Что считает элемент — в CYBER.md и в описании `!lead`.
+	KZOptNode *leadProgress = KZ::menu::AddSub(hud, "HUD - Menu Cat LeadProgress");
+	AddHudElementItems(leadProgress, LayoutElement::LeadProgress);
+	AddResetButton(leadProgress, (i32)LayoutElement::LeadProgress);
 
 	KZOptNode *crosshair = KZ::menu::AddSub(hud, "HUD - Menu Cat Crosshair");
 	// Дефолт true синхронизирован с текущими настройками игрока (задача hud-defaults).

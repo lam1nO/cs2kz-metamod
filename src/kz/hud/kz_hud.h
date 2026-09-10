@@ -35,6 +35,14 @@ enum class LayoutElement
 	Prespeed,
 	Keys,
 	Checkpoint,
+	// «Прогресс: N%» по маршруту `!lead` (kz/lead). Живёт на ДОПОЛНИТЕЛЬНОЙ копии сущности
+	// худа (ownedLeadProgressLayout): свободного лейбла в чужой разметке mhud.vxml нет, а
+	// лишняя копия страницы даёт ещё один — приём тот же, что у меню реплея (RPMENU_ENTITIES).
+	// ДОБАВЛЯТЬ НОВЫЕ ТОЛЬКО ПЕРЕД Count: индексом адресуются оперативные массивы
+	// (layoutElements/replayLines/s_resettableNodes), а вставка в середину сдвинула бы
+	// RPMENU_*_SLOTS. Префы элементов хранятся по СТРОКОВЫМ ключам (LayoutElementDef), не по
+	// индексу, — сохранённые настройки игроков от добавления элемента не страдают.
+	LeadProgress,
 	Count
 };
 
@@ -52,6 +60,10 @@ struct LayoutElementDef
 	i32 xDefault;
 	i32 yDefault;
 	i32 sizeDefault;
+	// Дефолт общего тумблера элемента. Поле, а не константа `true` в двух местах: элемент
+	// «Прогресс» по умолчанию ВЫКЛЮЧЕН, и один и тот же ответ обязаны давать
+	// RefreshLayoutPrefs (layout/prefs.cpp) и пункт меню (hud/prefs/hud_prefs.cpp).
+	bool enabledDefault;
 };
 
 extern const LayoutElementDef LAYOUT_ELEMENTS[(i32)LayoutElement::Count];
@@ -731,6 +743,18 @@ private:
 
 	// Сущность худа ЭТОГО игрока; чужим не транслируется (KZ::quiet::OnCheckTransmit).
 	CHandle<CBaseEntity> ownedLayout {};
+	// ДОПОЛНИТЕЛЬНАЯ копия страницы худа под элемент «Прогресс» (LayoutElement::LeadProgress).
+	// Зачем копия: в чужой разметке mhud.vxml_c текстовых лейблов ровно четыре, и все четыре
+	// заняты элементами худа — своего лейбла для шестого элемента там нет и добавить его
+	// нельзя (аддон 3469155349 не наш). Лишняя копия страницы у того же клиента даёт ещё один
+	// свободный лейбл `mhud_timer`, который и становится «Прогрессом» со своими
+	// позицией/кеглем/шрифтом/обводкой/прозрачностью. Тот же приём — у меню реплея
+	// (RPMENU_ENTITIES копий). Создаётся ТОЛЬКО под включённый преф, гасится при выключении.
+	CHandle<CBaseEntity> ownedLeadProgressLayout {};
+	// Отказ создания копии уже залогирован (сущность не создалась — лимит энтити): элемент
+	// обновляется каждый тик, и без защёлки это было бы 64 KZ_LOG_ERROR в секунду на игрока
+	// (та же причина, что у replayMenuFailLogged). Снимается на успешном создании.
+	bool leadProgressFailLogged {};
 	LayoutElementState layoutElements[(i32)LayoutElement::Count] {};
 
 	// Слот эффективного источника mhudMimicSpec на МОМЕНТ последней проверки EnsureOwnedLayout:
@@ -846,6 +870,12 @@ private:
 	void UpdatePrespeedElement(CCSCustomHudLayout *layout, const SpeedInfo &info, bool force);
 	void UpdateKeysElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force);
 	void UpdateCheckpointElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force);
+	// «Прогресс: N%» — своя сущность (ownedLeadProgressLayout), поэтому и layout себе ищет
+	// сам, а не получает его от UpdateHudLayout: элемент живёт только пока включён преф и есть
+	// путь маршрута (source->leadService), иначе сущность гасится.
+	void UpdateLeadProgressElement(KZPlayer *source);
+	CCSCustomHudLayout *EnsureLeadProgressLayout(bool &created);
+	void DestroyOwnedLeadProgressLayout();
 
 	// === Меню настроек (Task 11) — состояние и рендер ==================================
 

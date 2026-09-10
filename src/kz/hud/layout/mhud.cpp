@@ -18,9 +18,13 @@
 #include "kz/hud/layout/panorama_tables.h" // FindColorEntry/ResolveColorClass — key-glow-N и осевая тонировка клавиш
 #include "kz/language/kz_language.h"
 #include "kz/checkpoint/kz_checkpoint.h"
+#include "kz/lead/kz_lead.h" // GetProgressPercent — данные элемента «Прогресс»
 #include "kz/replays/kz_replaysystem.h"
 #include "sdk/entity/ccscustomhudlayout.h"
+#include "entitykeyvalues.h"
+#include "utils/utils.h"
 #include "utils/logging.h"
+#include "cs2kz.h"
 
 #include "tier0/memdbgon.h"
 
@@ -356,6 +360,97 @@ void KZHUDService::UpdateCheckpointElement(CCSCustomHudLayout *layout, KZPlayer 
 	this->UpdateLayoutElement(layout, LayoutElement::Checkpoint, show, text.c_str(), color, force);
 }
 
+// === Элемент «Прогресс: N%» по маршруту `!lead` (LayoutElement::LeadProgress) ==============
+// Живёт на СВОЕЙ копии страницы худа: свободного лейбла в чужой разметке mhud.vxml_c нет
+// (четыре текстовых, все заняты элементами худа), а лишняя копия у того же клиента даёт ещё
+// один свободный `mhud_timer` — тот же приём, что у меню реплея (layout/rpmenu.cpp, пять
+// копий). Поэтому элемент не входит в общий проход UpdateHudLayout по ownedLayout, а ищет
+// (и гасит) свою сущность сам.
+
+CCSCustomHudLayout *KZHUDService::EnsureLeadProgressLayout(bool &created)
+{
+	created = false;
+	if (g_KZPlugin.unloading || !KZHUDService::IsMHUDAvailable())
+	{
+		return NULL;
+	}
+	if (CBaseEntity *cached = this->ownedLeadProgressLayout.Get())
+	{
+		return (CCSCustomHudLayout *)cached;
+	}
+	CCSCustomHudLayout *layout = utils::CreateEntityByName<CCSCustomHudLayout>("custom_hud_layout");
+	if (!layout)
+	{
+		return NULL;
+	}
+	CEntityKeyValues *pKeyValues = new CEntityKeyValues();
+	// Та же разметка, что у худа, — это ещё одна копия той же страницы у одного клиента.
+	pKeyValues->SetString("layout", KZ_MHUD_LAYOUT);
+	char name[32];
+	V_snprintf(name, sizeof(name), "kzlp%i", this->player->GetPlayerSlot().Get());
+	pKeyValues->SetString("targetname", name);
+	layout->DispatchSpawn(pKeyValues);
+	this->ownedLeadProgressLayout = layout;
+	created = true;
+	// Диф-кэш — состояние ПРЕДЫДУЩЕЙ сущности: сбрасываем в момент реального создания, иначе
+	// свежая копия не получит ни одного класса (кэш решит, что всё уже выставлено).
+	this->layoutElements[(i32)LayoutElement::LeadProgress] = LayoutElementState();
+	return layout;
+}
+
+void KZHUDService::DestroyOwnedLeadProgressLayout()
+{
+	if (!this->ownedLeadProgressLayout.IsValid())
+	{
+		// Ранний выход обязателен: метод зовётся каждый тик у всех, у кого элемент выключен
+		// (то есть почти у всех), а LayoutElementState несёт std::string.
+		return;
+	}
+	if (CBaseEntity *ent = this->ownedLeadProgressLayout.Get())
+	{
+		g_pKZUtils->RemoveEntity(ent);
+	}
+	this->ownedLeadProgressLayout = nullptr;
+	this->layoutElements[(i32)LayoutElement::LeadProgress] = LayoutElementState();
+}
+
+void KZHUDService::UpdateLeadProgressElement(KZPlayer *source)
+{
+	// Тумблер — из ЭФФЕКТИВНОГО набора (как у остальных элементов: при mhudMimicSpec это
+	// набор наблюдаемого), данные — у наблюдаемого (source->leadService): процент показываем
+	// ЕГО, по его же маршруту.
+	const bool enabled = this->IsLayoutElementEnabled(LayoutElement::LeadProgress);
+	const i32 percent = (enabled && source->leadService) ? source->leadService->GetProgressPercent() : -1;
+	if (percent < 0)
+	{
+		// Пути нет (нет AWR-реплея на карте, идёт загрузка, путь не сошёлся) либо элемент
+		// выключен — сущность не нужна. Прочерка и сообщений в чат тут нет намеренно: элемент
+		// просто скрыт (решение дизайна).
+		this->DestroyOwnedLeadProgressLayout();
+		return;
+	}
+	bool created = false;
+	CCSCustomHudLayout *layout = this->EnsureLeadProgressLayout(created);
+	if (!layout)
+	{
+		// Отказ обязан быть виден (канон проекта), но ровно один раз на серию: элемент
+		// обновляется каждый тик — см. leadProgressFailLogged.
+		if (!this->leadProgressFailLogged)
+		{
+			this->leadProgressFailLogged = true;
+			KZ_LOG_ERROR(LogChannel::General, "[cyb] panorama_hud_unavailable reason=leadprogress_entity_failed slot=%i\n",
+						 this->player->GetPlayerSlot().Get());
+		}
+		return;
+	}
+	this->leadProgressFailLogged = false;
+	const char *language = this->player->languageService->GetLanguage();
+	const std::string text = KZLanguageService::PrepareMessageWithLang(language, "Lead - Hud Progress", percent);
+	// Своего цвета у элемента нет (в дизайне его не просили) — базовый белый, как у скорости
+	// и чекпоинта по умолчанию.
+	this->UpdateLayoutElement(layout, LayoutElement::LeadProgress, true, text.c_str(), MHUD_DEF_BASE_COLOR, created);
+}
+
 bool KZHUDService::UpdateHudLayout(KZPlayer *source)
 {
 	bool created = false;
@@ -394,5 +489,8 @@ bool KZHUDService::UpdateHudLayout(KZPlayer *source)
 	this->UpdatePrespeedElement(layout, info, force);
 	this->UpdateKeysElement(layout, source, force);
 	this->UpdateCheckpointElement(layout, source, force);
+	// «Прогресс» — на СВОЕЙ сущности (см. выше), поэтому ни layout, ни force ему не передаём:
+	// он сам решает, создавать копию страницы или гасить её.
+	this->UpdateLeadProgressElement(source);
 	return true;
 }

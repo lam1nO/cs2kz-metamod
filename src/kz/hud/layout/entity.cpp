@@ -25,11 +25,19 @@ void LogHudInternFailure(KZPlayer *player, const char *panelId, const char *clas
 // clang-format off
 extern const LayoutElementDef LAYOUT_ELEMENTS[(i32)LayoutElement::Count] =
 {
-	{"mhud_timer",      "timer",      "hudTimer",      "mhudTimerX",      "mhudTimerY",      "mhudTimerSize",      "mhudTimerFont",      "mhudTimerOutline",      "mhudTimerOpacity",      LAYOUT_DEF_TIMER_X,      LAYOUT_DEF_TIMER_Y,      LAYOUT_DEF_TIMER_SIZE},
-	{"mhud_speed",      "speed",      "hudSpeed",      "mhudSpeedX",      "mhudSpeedY",      "mhudSpeedSize",      "mhudSpeedFont",      "mhudSpeedOutline",      "mhudSpeedOpacity",      LAYOUT_DEF_SPEED_X,      LAYOUT_DEF_SPEED_Y,      LAYOUT_DEF_SPEED_SIZE},
-	{"mhud_prespeed",   "prespeed",   "hudPrespeed",   "mhudPrespeedX",   "mhudPrespeedY",   "mhudPrespeedSize",   "mhudPrespeedFont",   "mhudPrespeedOutline",   "mhudPrespeedOpacity",   LAYOUT_DEF_PRESPEED_X,   LAYOUT_DEF_PRESPEED_Y,   LAYOUT_DEF_PRESPEED_SIZE},
-	{"mhud_keys",       "keys",       "hudKeys",       "mhudKeysX",       "mhudKeysY",       "mhudKeysSize",       "mhudKeysFont",       "mhudKeysOutline",       "mhudKeysOpacity",       LAYOUT_DEF_KEYS_X,       LAYOUT_DEF_KEYS_Y,       LAYOUT_DEF_KEYS_SIZE},
-	{"mhud_checkpoint", "checkpoint", "hudCpTp",       "mhudCheckpointX", "mhudCheckpointY", "mhudCheckpointSize", "mhudCheckpointFont", "mhudCheckpointOutline", "mhudCheckpointOpacity", LAYOUT_DEF_CHECKPOINT_X, LAYOUT_DEF_CHECKPOINT_Y, LAYOUT_DEF_CHECKPOINT_SIZE},
+	{"mhud_timer",      "timer",      "hudTimer",      "mhudTimerX",      "mhudTimerY",      "mhudTimerSize",      "mhudTimerFont",      "mhudTimerOutline",      "mhudTimerOpacity",      LAYOUT_DEF_TIMER_X,      LAYOUT_DEF_TIMER_Y,      LAYOUT_DEF_TIMER_SIZE,      true},
+	{"mhud_speed",      "speed",      "hudSpeed",      "mhudSpeedX",      "mhudSpeedY",      "mhudSpeedSize",      "mhudSpeedFont",      "mhudSpeedOutline",      "mhudSpeedOpacity",      LAYOUT_DEF_SPEED_X,      LAYOUT_DEF_SPEED_Y,      LAYOUT_DEF_SPEED_SIZE,      true},
+	{"mhud_prespeed",   "prespeed",   "hudPrespeed",   "mhudPrespeedX",   "mhudPrespeedY",   "mhudPrespeedSize",   "mhudPrespeedFont",   "mhudPrespeedOutline",   "mhudPrespeedOpacity",   LAYOUT_DEF_PRESPEED_X,   LAYOUT_DEF_PRESPEED_Y,   LAYOUT_DEF_PRESPEED_SIZE,   true},
+	{"mhud_keys",       "keys",       "hudKeys",       "mhudKeysX",       "mhudKeysY",       "mhudKeysSize",       "mhudKeysFont",       "mhudKeysOutline",       "mhudKeysOpacity",       LAYOUT_DEF_KEYS_X,       LAYOUT_DEF_KEYS_Y,       LAYOUT_DEF_KEYS_SIZE,       true},
+	{"mhud_checkpoint", "checkpoint", "hudCpTp",       "mhudCheckpointX", "mhudCheckpointY", "mhudCheckpointSize", "mhudCheckpointFont", "mhudCheckpointOutline", "mhudCheckpointOpacity", LAYOUT_DEF_CHECKPOINT_X, LAYOUT_DEF_CHECKPOINT_Y, LAYOUT_DEF_CHECKPOINT_SIZE, true},
+	// panelId/varName здесь — ЛЕЙБЛ ТАЙМЕРА, и это не опечатка: панели `mhud_leadprogress` в
+	// чужой разметке mhud.vxml_c не существует (текстовых лейблов там четыре, все заняты).
+	// Элемент пишется в ДРУГУЮ сущность — свою копию той же страницы
+	// (KZHUDService::EnsureLeadProgressLayout), где лейбл таймера свободен; диф-кэши у
+	// элементов разные (layoutElements[] по индексу), так что с настоящим таймером он не
+	// конфликтует. Ключи префов при этом СВОИ (mhudLeadProgress*) — настройка отдельная.
+	// Дефолт тумблера false: элемент новый, включают его явно.
+	{"mhud_timer",      "timer",      "mhudLeadProgress", "mhudLeadProgressX", "mhudLeadProgressY", "mhudLeadProgressSize", "mhudLeadProgressFont", "mhudLeadProgressOutline", "mhudLeadProgressOpacity", LAYOUT_DEF_LEADPROGRESS_X, LAYOUT_DEF_LEADPROGRESS_Y, LAYOUT_DEF_LEADPROGRESS_SIZE, false},
 };
 // clang-format on
 
@@ -285,6 +293,10 @@ void KZHUDService::DestroyOwnedLayout()
 	// ЭТОЙ сущности (что на ней уже выставлено), а не абстрактные значения игрока — оставить
 	// их живыми означало бы отдать следующему владельцу слота (реконнект/новый игрок) чужой
 	// кэш, из-за которого UpdateLayoutElement решит, что менять уже нечего.
+	// Цикл проходит и по LeadProgress, чья сущность ОТДЕЛЬНАЯ (ownedLeadProgressLayout): его
+	// кэш здесь сбрасывается зря, но безвредно — на следующем тике элемент просто перешлёт
+	// свои классы заново (новых интерн-строк это не создаёт, они уже в таблице сущности).
+	// Обратная ошибка была бы настоящим багом, поэтому лишний сброс предпочтительнее.
 	for (i32 i = 0; i < (i32)LayoutElement::Count; i++)
 	{
 		this->layoutElements[i] = LayoutElementState();
@@ -319,6 +331,8 @@ void KZHUDService::LayoutCleanup()
 			player->hudService->DestroyOwnedMenuLayout();
 			// Меню реплея (layout/rpmenu.cpp) — третья персональная сущность, та же причина.
 			player->hudService->DestroyOwnedReplayLayout();
+			// Копия страницы под элемент «Прогресс» (layout/mhud.cpp) — четвёртая.
+			player->hudService->DestroyOwnedLeadProgressLayout();
 		}
 	}
 }
@@ -326,12 +340,14 @@ void KZHUDService::LayoutCleanup()
 bool KZHUDService::OwnsLayoutEntity(CEntityHandle handle)
 {
 	// Своих сущностей несколько: сам худ (ownedLayout), отдельное меню настроек (ownedMenuLayout,
-	// Task 11) и копии под меню реплея спектатора (ownedReplayLayouts, RPMENU_ENTITIES штук,
+	// Task 11), копия под элемент «Прогресс» (ownedLeadProgressLayout) и копии под меню реплея
+	// спектатора (ownedReplayLayouts, RPMENU_ENTITIES штук,
 	// layout/rpmenu.cpp) — транзит
 	// (KZ::quiet) гасит всё, чего нет в этом списке, и без проверки каждой сущность игроку не
 	// долетала бы вовсе (пустые/невалидные хэндлы по-прежнему false).
 	if ((this->ownedLayout.IsValid() && this->ownedLayout.ToInt() == handle.ToInt())
-		|| (this->ownedMenuLayout.IsValid() && this->ownedMenuLayout.ToInt() == handle.ToInt()))
+		|| (this->ownedMenuLayout.IsValid() && this->ownedMenuLayout.ToInt() == handle.ToInt())
+		|| (this->ownedLeadProgressLayout.IsValid() && this->ownedLeadProgressLayout.ToInt() == handle.ToInt()))
 	{
 		return true;
 	}

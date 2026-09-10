@@ -3,7 +3,10 @@
 #include "cs2kz.h"
 #include "kz/language/kz_language.h"
 #include "kz/mode/kz_mode.h"
+// GetCyberCourseNumber/GetCourse — ключ курса, под который построен путь (см. OnPathLoaded).
+#include "kz/mappingapi/kz_mappingapi.h"
 #include "kz/option/kz_option.h"
+#include "kz/timer/kz_timer.h"
 #include "kz/replays/awr_cut.h"
 #include "kz/replays/data.h"
 #include "kz/replays/playback.h"
@@ -30,6 +33,12 @@
 // Дальше этого от ближайшей вершины считаем, что игрок сошёл с маршрута, и ищем заново
 // по всему пути (телепорт мимо хука, спавн, падение в другую часть карты).
 #define KZ_LEAD_RESEARCH_DIST 300.0f
+// Сколько вершин вперёд от прошлой ближайшей сканировать в UpdateNearest. СВОЯ граница, а не
+// окно луча: при выключенном луче (включён только процент в худе) окно не строится вовсе, и
+// скан выродился бы в одну вершину — ближайшая замирала бы до порога полного ресинка, а
+// процент прыгал бы сотнями юнитов. За 32 тика по маршруту столько вершин не проходят даже в
+// плотной петле; цена — 512 LengthSqr дважды в секунду.
+#define KZ_LEAD_FORWARD_SCAN 512u
 // Допуск упрощения пути (юниты). Меньше — лишние сущности на прямых, больше — срезанные углы.
 #define KZ_LEAD_RDP_TOLERANCE 2.0f
 // Верхняя граница потолка отрезков: защита от опечатки в конфиге (лимит сущностей движка).
@@ -303,6 +312,10 @@ void KZLeadService::Reset()
 {
 	// Дисконнект и late load: мир жив, сущности обязаны уйти.
 	this->ResetState(false);
+	// Преф прогресса — НАСТРОЙКА игрока, а не состояние карты: слот реально освобождается, и
+	// новый владелец не должен унаследовать включённый процент прошлого (тот же класс улики,
+	// что layoutPrefs в KZHUDService::Reset). Своё значение ему принесёт RefreshLayoutPrefs.
+	this->progress = false;
 }
 
 void KZLeadService::OnMapChanged()
@@ -325,19 +338,35 @@ void KZLeadService::OnMapChanged()
 void KZLeadService::ResetState(bool keepEntities)
 {
 	this->ClearSegments(keepEntities);
+	this->beam = false;
+	this->ReleasePath();
+	// Смена карты/режима — новый ключ резолва: прошлый отказ о новом ничего не говорит.
+	this->loadFailed = false;
+	// Преф прогресса здесь НЕ трогаем: OnMapChanged зовёт этот метод на смене карты, а
+	// настройка игрока карту переживает — иначе элемент худа молча умирал бы до следующего
+	// захода в меню. Гасит его только Reset() (дисконнект, слот освободился).
+}
+
+void KZLeadService::ReleasePath()
+{
 	this->path.clear();
 	this->path.shrink_to_fit();
-	this->enabled = false;
+	this->cumLen.clear();
+	this->cumLen.shrink_to_fit();
+	this->totalLen = 0.0f;
+	this->progressPct = -1;
 	this->loading = false;
 	// Незавершённая загрузка протухает: её результат отбросит проверка поколения.
 	this->generation++;
 	this->pending.reset();
+	this->beamOnLoad = false;
 	this->windowFrom = 0;
 	this->windowTo = 0;
 	this->nearest = 0;
 	this->resync = true;
 	this->ticksSinceUpdate = 0;
 	this->modeName[0] = '\0';
+	this->pathCourse = -1;
 }
 
 void KZLeadService::ClearSegments(bool keepEntities)
@@ -370,15 +399,24 @@ bool KZLeadService::OwnsParticle(const CEntityHandle &handle) const
 
 void KZLeadService::Disable(const char *reason)
 {
-	if (!this->enabled && !this->loading && !this->pending)
+	if (!this->beam && !this->loading && !this->pending)
 	{
-		// `!lead off` при выключенном луче: «выключен» было бы неправдой.
+		// `!lead off` при выключенном луче: «выключен» было бы неправдой. Включённый процент
+		// в худе лучом не является и этой командой не выключается (он живёт в меню настроек).
 		this->player->languageService->PrintChat(true, false, "Lead - Not Enabled");
 		return;
 	}
 	KZ_LOG_DEBUG(LogChannel::Replays, "[lead] disable reason=%s steam_id=%llu\n", reason,
 				 (unsigned long long)this->player->GetSteamId64());
-	this->Reset();
+	this->beam = false;
+	this->beamOnLoad = false;
+	this->ClearSegments(false);
+	// Путь освобождаем ТОЛЬКО когда его больше некому держать: при включённом проценте он
+	// остаётся, и повторный `!lead` поднимет луч по тем же вершинам, без резолва и докачки.
+	if (!this->progress)
+	{
+		this->ReleasePath();
+	}
 	// Все пути Disable — от игрока (!lead off, повторный !lead, смена режима), поэтому
 	// подтверждение в чат безусловно.
 	this->player->languageService->PrintChat(true, false, "Lead - Disabled");
@@ -386,22 +424,43 @@ void KZLeadService::Disable(const char *reason)
 
 void KZLeadService::Toggle(CybReplayDownload::Kind kind)
 {
-	if (this->enabled)
+	if (this->beam)
 	{
 		this->Disable("toggle");
+		return;
+	}
+	// Явная команда игрока — повод сходить в сеть заново даже после отказа молчаливой загрузки.
+	this->loadFailed = false;
+	if (!this->path.empty())
+	{
+		// Путь уже жив (его держит элемент «Прогресс» худа) — луч поднимается по тем же
+		// вершинам, без резолва и докачки.
+		this->beam = true;
+		this->resync = true;
+		// Окно строится на ближайшем же тике, а не через полсекунды.
+		this->ticksSinceUpdate = KZ_LEAD_UPDATE_TICKS;
+		this->player->languageService->PrintChat(true, false, "Lead - Enabled", (int)this->path.size());
 		return;
 	}
 	if (this->loading || this->pending)
 	{
 		// Загрузка уже идёт (сеть или разбор) — второй запрос ничего не ускорит, но завёл бы
-		// ещё один резолв, ещё одну докачку и ещё один поток.
+		// ещё один резолв, ещё одну докачку и ещё один поток. Если её начал процент (молча),
+		// метим результат как ожидаемый ИГРОКОМ: придёт путь — поднимем луч и отчитаемся.
+		this->beamOnLoad = true;
 		this->player->languageService->PrintChat(true, false, "Lead - Loading");
 		return;
 	}
 
-	this->loading = true;
-	const u32 gen = ++this->generation;
 	this->player->languageService->PrintChat(true, false, "Lead - Loading");
+	this->RequestPath(kind, true);
+}
+
+void KZLeadService::RequestPath(CybReplayDownload::Kind kind, bool fromPlayer)
+{
+	this->loading = true;
+	this->beamOnLoad = fromPlayer;
+	const u32 gen = ++this->generation;
 	CybReplayDownload::RequestFile(this->player, kind, this->player->GetSteamId64(),
 								   [gen](CPlayerUserId userID, std::string filePath)
 								   {
@@ -412,6 +471,70 @@ void KZLeadService::Toggle(CybReplayDownload::Kind kind)
 									   }
 									   player->leadService->OnFileReady(gen, std::move(filePath));
 								   });
+}
+
+void KZLeadService::ArmProgressPath()
+{
+	if (!this->progress || this->loading || this->pending || this->loadFailed)
+	{
+		return;
+	}
+	// AWR — тот же вид записи, что у `!lead` по умолчанию: процент считается по ТОМУ ЖЕ
+	// маршруту, который показывает луч. Молча (fromPlayer=false): элемент худа в чат не пишет.
+	this->RequestPath(CybReplayDownload::Kind::AWR, false);
+}
+
+void KZLeadService::SetProgressWanted(bool wanted)
+{
+	if (this->progress == wanted)
+	{
+		return;
+	}
+	this->progress = wanted;
+	if (wanted)
+	{
+		// Саму загрузку начинает дросселированная ветка OnPhysicsSimulatePost (≤0.5 с): там у
+		// игрока уже есть пешка и курс, а этот метод зовётся и с загрузки префов (коннект),
+		// где курса ещё нет — запрос ушёл бы под чужой ключ. Здесь только снимаем защёлку.
+		this->loadFailed = false;
+		return;
+	}
+	// Процент выключили: своих сущностей у него нет, снимать нечего. Путь держит только луч —
+	// без него он больше никому не нужен.
+	this->progressPct = -1;
+	if (!this->beam)
+	{
+		this->ReleasePath();
+	}
+}
+
+void KZLeadService::BuildCumulativeLengths()
+{
+	// Почему по НАКОПЛЕННОЙ ДЛИНЕ, а не по номеру вершины: после упрощения RDP вершины стоят
+	// неравномерно (на прямой — две на сотни юнитов, в петле — десятки на метр), и «вершина
+	// 500 из 1000» серединой маршрута не является. По времени тоже нельзя: это был бы процент
+	// времени ЧУЖОГО рана, а не доля пройденного игроком пути.
+	// Один проход на загрузку (главный поток, PollPending) — в тике не считается ничего.
+	const size_t count = this->path.size();
+	this->cumLen.assign(count, 0.0f);
+	f32 sum = 0.0f;
+	for (size_t i = 1; i < count; i++)
+	{
+		sum += (this->path[i].pos - this->path[i - 1].pos).Length();
+		this->cumLen[i] = sum;
+	}
+	this->totalLen = sum;
+}
+
+void KZLeadService::UpdateProgress()
+{
+	if (this->totalLen <= 0.0f || this->nearest >= this->cumLen.size())
+	{
+		this->progressPct = -1;
+		return;
+	}
+	const i32 pct = (i32)(this->cumLen[this->nearest] / this->totalLen * 100.0f + 0.5f);
+	this->progressPct = pct < 0 ? 0 : (pct > 100 ? 100 : pct);
 }
 
 void KZLeadService::OnFileReady(u32 gen, std::string &&filePath)
@@ -425,7 +548,7 @@ void KZLeadService::OnFileReady(u32 gen, std::string &&filePath)
 	if (filePath.empty())
 	{
 		this->loading = false;
-		this->player->languageService->PrintChat(true, false, "Lead - No Replay");
+		this->OnLoadFailed();
 		return;
 	}
 	this->pending = std::make_shared<PendingLoad>();
@@ -433,6 +556,21 @@ void KZLeadService::OnFileReady(u32 gen, std::string &&filePath)
 	// Дальше гейтом служит сам pending — сетевая фаза кончилась.
 	this->loading = false;
 	std::thread(BuildPathWorker, std::move(filePath), this->pending).detach();
+}
+
+void KZLeadService::OnLoadFailed()
+{
+	// Защёлка — ВСЕГДА, кто бы ни просил: путь под этим ключом (карта+режим+курс) не
+	// построить, и проверка курса раз в 32 тика иначе ходила бы в сеть до конца карты.
+	this->loadFailed = true;
+	if (!this->beamOnLoad)
+	{
+		// Молчаливая загрузка под элемент худа: ни строки в чат (решение дизайна — элемент
+		// просто остаётся скрытым, без прочерка и без спама). Причина уже в логе.
+		return;
+	}
+	this->beamOnLoad = false;
+	this->player->languageService->PrintChat(true, false, "Lead - No Replay");
 }
 
 void KZLeadService::PollPending()
@@ -462,7 +600,7 @@ void KZLeadService::PollPending()
 	{
 		KZ_LOG_WARN(LogChannel::Replays, "[lead] lead_load_failed reason=%s steam_id=%llu\n", failReason,
 					(unsigned long long)this->player->GetSteamId64());
-		this->player->languageService->PrintChat(true, false, "Lead - No Replay");
+		this->OnLoadFailed();
 		return;
 	}
 	if (cutWarn && cutWarn[0])
@@ -477,15 +615,27 @@ void KZLeadService::OnPathLoaded(std::vector<Vertex> &&newPath)
 {
 	this->ClearSegments(false);
 	this->path = std::move(newPath);
-	this->enabled = true;
+	// Кумулятивные длины — сразу и один раз: по ним считается процент (см. UpdateProgress).
+	this->BuildCumulativeLengths();
 	this->resync = true;
 	this->nearest = 0;
 	this->windowFrom = 0;
 	this->windowTo = 0;
+	this->progressPct = -1; // посчитается на первом же UpdateNearest
 	// Окно строится на ближайшем же тике, а не через полсекунды.
 	this->ticksSinceUpdate = KZ_LEAD_UPDATE_TICKS;
 	const char *mode = this->player->modeService ? this->player->modeService->GetModeName() : "";
 	V_strncpy(this->modeName, mode ? mode : "", sizeof(this->modeName));
+	// Ключ курса фиксируем В МОМЕНТ построения пути: по нему тик и заметит, что игрок ушёл на
+	// другой курс и путь стал чужим (тот же номер, которым реплей резолвился).
+	this->pathCourse = KZ::course::GetCyberCourseNumber(this->player->timerService->GetCourse());
+	if (!this->beamOnLoad)
+	{
+		// Путь просил элемент худа — луч не поднимаем и в чат не пишем.
+		return;
+	}
+	this->beamOnLoad = false;
+	this->beam = true;
 	this->player->languageService->PrintChat(true, false, "Lead - Enabled", (int)this->path.size());
 }
 
@@ -495,7 +645,9 @@ void KZLeadService::OnPhysicsSimulatePost()
 	{
 		this->PollPending();
 	}
-	if (!this->enabled || this->path.empty())
+	// Путь нужен, если включён ЛУЧ или процент в худе — оба потребителя ведут одну и ту же
+	// ближайшую вершину, поэтому и дросселирование у них общее.
+	if (!this->beam && !this->progress)
 	{
 		return;
 	}
@@ -505,22 +657,84 @@ void KZLeadService::OnPhysicsSimulatePost()
 	}
 	this->ticksSinceUpdate = 0;
 
-	// Путь режим-зависим: в другом режиме он врал бы про траекторию. Отдельного хука на
-	// смену режима у игрока нет, поэтому сверяем имя здесь — раз в 32 тика и без аллокаций
-	// (GetModeName отдаёт литерал сервиса, а не собранную строку).
-	const char *mode = this->player->modeService ? this->player->modeService->GetModeName() : "";
-	if (!mode || !KZ_STREQI(this->modeName, mode))
+	// Путь режим-зависим: в другом режиме он врал бы и про траекторию, и про процент.
+	// Отдельного хука на смену режима у игрока нет, поэтому сверяем имя здесь — раз в 32 тика
+	// и без аллокаций (GetModeName отдаёт литерал сервиса, а не собранную строку). Только при
+	// живом пути: без него modeName пуст, и сверка срабатывала бы вечно.
+	if (!this->path.empty())
 	{
-		this->Disable("mode_changed");
-		return;
+		const char *mode = this->player->modeService ? this->player->modeService->GetModeName() : "";
+		if (!mode || !KZ_STREQI(this->modeName, mode))
+		{
+			if (this->beam)
+			{
+				// Луч гасим с сообщением: его включал сам игрок.
+				this->Disable("mode_changed");
+			}
+			// Путь чужого режима не годится НИ ЛУЧУ, НИ ПРОЦЕНТУ, поэтому освобождаем его
+			// всегда: Disable выше оставил бы его жить ради включённого процента, и процент
+			// считался бы по маршруту прошлого режима. Под новый режим путь перезапросит
+			// ветка path.empty() ниже (на следующем проходе).
+			this->ReleasePath();
+			this->loadFailed = false;
+			return;
+		}
 	}
 
 	if (!this->player->GetPlayerPawn())
 	{
-		// Нет пешки (мёртв, спектейт) — окно не двигаем, но и не снимаем: вернётся сам.
+		// Нет пешки (мёртв, спектейт) — окно и процент не двигаем, но и не снимаем: вернётся сам.
 		return;
 	}
-	this->UpdateWindow();
+
+	if (this->path.empty())
+	{
+		// Путь нужен проценту, но его нет (первый заход, смена карты/режима/курса) — здесь
+		// только СТАРТ запроса, чтение файла живёт на рабочем потоке, как и у `!lead`.
+		this->ArmProgressPath();
+		return;
+	}
+
+	Vector origin = vec3_invalid;
+	this->player->GetOrigin(&origin);
+	if (origin == vec3_invalid)
+	{
+		return;
+	}
+	// Ближайшая вершина — общий вход для обоих потребителей.
+	this->UpdateNearest(origin);
+
+	// Путь КУРС-зависим — ключ тот же, которым резолвился реплей (см. OnPathLoaded). Проверка
+	// касается только ПРОЦЕНТА: луч смену курса переживал и до этой задачи, и менять поведение
+	// `!lead` в ней не просили.
+	if (KZ::course::GetCyberCourseNumber(this->player->timerService->GetCourse()) == this->pathCourse)
+	{
+		// Процент считается сразу готовым числом (худ его только читает).
+		this->UpdateProgress();
+	}
+	else
+	{
+		// Игрок ушёл на другой курс: доля пройденного по ЧУЖОМУ маршруту смысла не имеет —
+		// процент гасим, элемент худа скроется сам (см. GetProgressPercent).
+		this->progressPct = -1;
+		if (!this->beam)
+		{
+			// Луч путь не держит — освобождаем и перезапрашиваем под новый курс.
+			this->ReleasePath();
+			// Новый ключ — прошлый отказ о нём ничего не говорит.
+			this->loadFailed = false;
+			return;
+		}
+		// Луч включён: он и остаётся хозяином пути (игрок просил ИМЕННО этот маршрут), а
+		// процент вернётся, когда игрок уйдёт с луча (`!lead off`) — тогда путь перезапросится
+		// под текущий курс.
+	}
+
+	if (this->beam)
+	{
+		// Сущности отрезков создаются ТОЛЬКО под включённый луч: у процента их нет вовсе.
+		this->UpdateWindow();
+	}
 }
 
 void KZLeadService::UpdateNearest(const Vector &origin)
@@ -531,9 +745,12 @@ void KZLeadService::UpdateNearest(const Vector &origin)
 
 	if (!this->resync)
 	{
-		// Вперёд от прошлой ближайшей до конца окна: игрок идёт по маршруту, полный скан
-		// пути (десятки тысяч вершин) каждые полсекунды не нужен.
-		const u32 to = this->windowTo > this->nearest ? this->windowTo : this->nearest;
+		// Вперёд от прошлой ближайшей: игрок идёт по маршруту, полный скан пути (десятки
+		// тысяч вершин) каждые полсекунды не нужен. Граница — СВОЯ (KZ_LEAD_FORWARD_SCAN), а
+		// не конец окна луча: без луча окно не строится и скан выродился бы в одну вершину.
+		// Окно всё равно учитываем: при включённом луче оно может уйти дальше этой границы.
+		const u32 scanTo = this->nearest + KZ_LEAD_FORWARD_SCAN;
+		const u32 to = this->windowTo > scanTo ? this->windowTo : scanTo;
 		for (u32 i = bestIdx; i <= to && i < count; i++)
 		{
 			const f32 d = (this->path[i].pos - origin).LengthSqr();
@@ -566,15 +783,8 @@ void KZLeadService::UpdateNearest(const Vector &origin)
 
 void KZLeadService::UpdateWindow()
 {
-	Vector origin = vec3_invalid;
-	this->player->GetOrigin(&origin);
-	if (origin == vec3_invalid)
-	{
-		return;
-	}
-
-	this->UpdateNearest(origin);
-
+	// Ближайшая вершина уже пересчитана вызывающим (OnPhysicsSimulatePost): её ведёт и
+	// процент в худе, у которого этой функции нет вовсе.
 	const u32 count = (u32)this->path.size();
 	const u32 anchorTick = this->path[this->nearest].tickIdx;
 	u32 from = this->nearest;

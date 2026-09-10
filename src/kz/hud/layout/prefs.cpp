@@ -3,6 +3,7 @@
 // символа сломало бы линковку, она уже определена в entity.cpp и объявлена extern в kz_hud.h.
 #include "kz/hud/layout/layout.h"
 #include "kz/hud/layout/panorama_tables.h"
+#include "kz/lead/kz_lead.h" // SetProgressWanted — преф элемента «Прогресс» держит путь маршрута
 #include "kz/option/kz_option.h"
 #include "kz/spec/kz_spec.h" // GetSpectatedPlayer — цель мимикрии (mhudMimicSpec)
 
@@ -90,7 +91,9 @@ void KZHUDService::RefreshLayoutPrefs()
 	{
 		const LayoutElementDef &def = LAYOUT_ELEMENTS[e];
 		MHUDLayoutPrefs::Element &element = this->layoutPrefs.elements[e];
-		element.enabled = opts->GetPreferenceBool(def.enabledKey, true);
+		// Дефолт тумблера — ПОЭЛЕМЕНТНЫЙ (def.enabledDefault): «Прогресс» по умолчанию выключен,
+		// остальные пять включены. Тот же ответ обязан давать пункт меню (AddHudElementItems).
+		element.enabled = opts->GetPreferenceBool(def.enabledKey, def.enabledDefault);
 		element.x = panorama::SnapToStep((i32)opts->GetPreferenceFloat(def.xKey, (f32)def.xDefault), -100, 100);
 		element.y = panorama::SnapToStep((i32)opts->GetPreferenceFloat(def.yKey, (f32)def.yDefault), -100, 100);
 		element.size = panorama::SnapToStep((i32)opts->GetPreferenceFloat(def.sizeKey, (f32)def.sizeDefault), LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX);
@@ -167,6 +170,20 @@ void KZHUDService::RefreshLayoutPrefs()
 	// Последней строкой: набор целиком заполнен, мимикрия (GetLayoutPrefs) может его брать.
 	// Аналог апстримного `prefsDirty = false` в конце RefreshPrefs.
 	this->layoutPrefs.loaded = true;
+
+	// Элемент «Прогресс» — единственная настройка худа, которой нужны ДАННЫЕ извне: маршрут
+	// `!lead` (kz/lead). Поэтому преф сам инициирует загрузку и освобождение пути, а этот
+	// метод — единственное место, где он вообще меняется: его зовут и на загрузке префов
+	// игрока, и после каждой правки в меню (layout/menu.cpp), и после применения чужого
+	// набора (hud/share). Гейт по типу худа обязателен: на Standard/Off элемента нет вовсе, и
+	// докачивать реплей ради невидимого процента значило бы жечь сеть и память впустую.
+	// Своё, НЕ мимикрированное значение: путь грузится игроку, а не его цели наблюдения.
+	if (this->player->leadService)
+	{
+		const bool progressWanted =
+			this->layoutPrefs.elements[(i32)LayoutElement::LeadProgress].enabled && this->GetHudType() == KZHUDService::HUD_TYPE_PANORAMA;
+		this->player->leadService->SetProgressWanted(progressWanted);
+	}
 }
 
 bool KZHUDService::IsLayoutElementEnabled(LayoutElement element)

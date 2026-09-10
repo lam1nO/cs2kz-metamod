@@ -24,6 +24,14 @@
 #define LAYOUT_DEF_CHECKPOINT_Y    30
 #define LAYOUT_DEF_CHECKPOINT_SIZE 20
 
+// «Прогресс: N%» по маршруту `!lead` — «в поле таймера, но настраивается отдельно» (решение
+// пользователя): X как у таймера, Y на шесть процентов ниже, кегль мельче. Элемент по
+// умолчанию ВЫКЛЮЧЕН (LayoutElementDef::enabledDefault), поэтому этой раскладки никто не
+// увидит, пока сам не включит пункт в меню.
+#define LAYOUT_DEF_LEADPROGRESS_X    LAYOUT_DEF_TIMER_X
+#define LAYOUT_DEF_LEADPROGRESS_Y    (LAYOUT_DEF_TIMER_Y + 6)
+#define LAYOUT_DEF_LEADPROGRESS_SIZE 18
+
 #define LAYOUT_SIZE_MIN 8
 #define LAYOUT_SIZE_MAX 100
 

@@ -427,6 +427,12 @@
 		"chi"		"检查点"
 		"ua"		"Чекпоінт"
 	}
+	// Страница элемента «Прогресс: N%» по маршруту `!lead` (hud/prefs/hud_prefs.cpp).
+	"HUD - Menu Cat LeadProgress"
+	{
+		"en"		"Route progress"
+		"ru"		"Прогресс маршрута"
+	}
 	"HUD - Menu Cat Crosshair"
 	{
 		"en"		"Crosshair"

@@ -35,4 +35,16 @@
 		"en"		"{grey}Building the route lead..."
 		"ru"		"{grey}Строю луч маршрута..."
 	}
+	// Элемент panorama-худа «Прогресс» (hud/layout/mhud.cpp:UpdateLeadProgressElement):
+	// доля ПРОЙДЕННОЙ ДЛИНЫ маршрута под текущий курс. Без цветовых тегов: текст уезжает в
+	// dialog-переменную лейбла, цвет там задают классы, а теги приехали бы как есть.
+	// Знак процента — "%%", ДВА, а не четыре как в чат-фразах (cs2kz-jumpstats): проходов
+	// форматирования здесь один (PrepareMessageWithLang → tinyformat, где "%%" = литерал "%"),
+	// второго printf-прохода PrintChat на этом пути нет — текст идёт прямо в лейбл.
+	"Lead - Hud Progress"
+	{
+		"#format"	"percent:d"
+		"en"		"Progress: {percent}%%"
+		"ru"		"Прогресс: {percent}%%"
+	}
 }

@@ -60,15 +60,18 @@ void KZHUDService::ApplyHudDefaults()
 		opts->SetPreferenceInt("hudType", HUD_TYPE_PANORAMA);
 		written++;
 
-		// Пять элементов × 7 ключей: тумблер, позиция (X/Y, проценты), размер, шрифт,
-		// обводка, прозрачность. Ключи и значения — из LAYOUT_ELEMENTS (layout/entity.cpp) и
+		// Все элементы LAYOUT_ELEMENTS × 7 ключей: тумблер, позиция (X/Y, проценты), размер,
+		// шрифт, обводка, прозрачность. Ключи и значения — из LAYOUT_ELEMENTS (layout/entity.cpp) и
 		// LAYOUT_DEF_*/LAYOUT_DEFAULT_FONT (layout/layout.h), то есть ровно те дефолты, что
 		// читает RefreshLayoutPrefs. Тип записи обязан совпадать с типом чтения: X/Y/размер
 		// читаются Float, прозрачность — Int (см. layout/prefs.cpp).
 		for (i32 e = 0; e < (i32)LayoutElement::Count; e++)
 		{
 			const LayoutElementDef &def = LAYOUT_ELEMENTS[e];
-			opts->SetPreferenceBool(def.enabledKey, true);
+			// Дефолт тумблера — поэлементный: «Прогресс» по умолчанию выключен, и одноразовая
+			// перезапись оформления не имеет права включить его игроку (тот же ответ дают
+			// RefreshLayoutPrefs и пункт меню).
+			opts->SetPreferenceBool(def.enabledKey, def.enabledDefault);
 			opts->SetPreferenceFloat(def.xKey, (f64)def.xDefault);
 			opts->SetPreferenceFloat(def.yKey, (f64)def.yDefault);
 			opts->SetPreferenceFloat(def.sizeKey, (f64)def.sizeDefault);
