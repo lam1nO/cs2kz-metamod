@@ -214,18 +214,20 @@ bool KZPistolService::NeedWeaponStripping()
 // skins-spawn-regive-server-crash). Плюс масштаб: на старте карты это N игроков ×
 // (RemoveAllItems + 2×GiveNamedItem) в одном кадре, чего в дереве не было никогда. На
 // KZ-профиле штатный спавн за CT уже даёт нож и mp_ct_default_secondary
-// (weapon_usp_silencer), то есть ровно то, что выдали бы мы, — значит подавляющее
-// большинство спавнов перестаёт трогать сущности вовсе, а чинятся только реально
-// сломанные руки, ради которых правка и делалась.
+// (weapon_usp_silencer), то есть ровно то, что выдали бы мы, — значит спавн за CT
+// перестаёт трогать сущности вовсе, а чинятся только реально сломанные руки, ради которых
+// правка и делалась. За T гейт пока НЕ срабатывает: профиль ставит тот же
+// mp_t_default_secondary weapon_usp_silencer, а дефолт за T теперь Glock — это чинится
+// правкой профиля (gameops/profiles/kz), не здесь.
 //
-// ПИСТОЛЕТ сверяем по classname: cyber-skins подменяет его сущность на ствол С ТЕМ ЖЕ
-// designer name, имя стабильно. НОЖ по classname сверять нельзя — живая смена скина ножа
-// меняет и classname (weapon_knife → weapon_bayonet и т.п.), и точная сверка гоняла бы
-// страйп на каждом спавне у всех, кто поставил скин ножа, то есть возвращала бы ровно ту
-// гонку, от которой мы уходим. Поэтому мелее опознаём ОТРИЦАНИЕМ: то, чего нет ни в
-// каталоге команд выдачи (kz_weapon.cpp), ни в таблице пистолетов, — на KZ это нож любой
-// модели. Нож нам и не надо перевыдавать: движок даёт его на каждом спавне, а потерянный
-// на G возвращает !knife.
+// Сверка обоих стволов — точная, по classname. Опознавать нож «отрицанием» (чего нет ни в
+// одном каталоге) НЕЛЬЗЯ, хотя соблазн есть: тогда за нож сошли бы weapon_taser (он вне
+// каталога команд сознательно), weapon_c4 и healthshot, и «в руках тазер, ножа нет»
+// читалось бы как «всё в порядке». Скин ножа classname НЕ меняет: cyber-skins подменяет
+// только CEconItemView в хуке GiveNamedItem, а RegiveKnife выдаёт явные
+// weapon_knife/weapon_knife_t — weapon_knife_karambit в GiveNamedItem не приходит никогда.
+// Косвенное доказательство прямо в этом файле: NeedWeaponStripping и !knife сверяют нож по
+// classname давно, и будь это неверно, они были бы сломаны задолго до этой правки.
 bool KZPistolService::HasExpectedLoadout()
 {
 	auto pawn = this->player->GetPlayerPawn();
@@ -235,11 +237,20 @@ bool KZPistolService::HasExpectedLoadout()
 		return false;
 	}
 	const i16 pistolIndex = this->ResolvePreferred();
-	// preferredPistol == 0 — игрок ЯВНО попросил «без пистолета»; тогда ожидаемый набор это
-	// один только мелее, и сверять нечего.
-	const char *pistolClass = pistolIndex == 0 ? nullptr : pistols[pistolIndex].className;
-	bool hasPistol = pistolClass == nullptr;
-	bool hasMelee = false;
+	if (pistolIndex == 0)
+	{
+		// Игрок ЯВНО попросил «без пистолета». Ожидаемые руки — один только нож, и ровно
+		// этот вопрос задаёт NeedWeaponStripping: всё, что не нож, — повод раздеть.
+		// Безусловное «пистолет на месте» здесь было бы инверсным дефектом: движок на
+		// спавне выдаёт mp_*_default_secondary, и выключивший пистолет игрок оставался бы
+		// с ним после mp_restartgame/форс-пика/смены карты, а ветка снятия в UpdatePistol
+		// не получала бы управления вовсе.
+		return !this->NeedWeaponStripping();
+	}
+	const char *pistolClass = pistols[pistolIndex].className;
+	const char *knifeClass = KZWeaponService::KnifeClassNameForTeam(this->GetTeam());
+	bool hasPistol = false;
+	bool hasKnife = false;
 	auto weapons = weaponServices->m_hMyWeapons();
 	FOR_EACH_VEC(*weapons, i)
 	{
@@ -249,17 +260,16 @@ bool KZPistolService::HasExpectedLoadout()
 			continue;
 		}
 		const char *className = weapon->GetClassname();
-		if (pistolClass && KZ_STREQI(className, pistolClass))
+		if (KZ_STREQI(className, knifeClass))
+		{
+			hasKnife = true;
+		}
+		else if (KZ_STREQI(className, pistolClass))
 		{
 			hasPistol = true;
-			continue;
-		}
-		// > 0, а не != PISTOL_UNKNOWN: нулевая строка таблицы — это сам weapon_knife, и по
-		// ней нож считался бы «пистолетом из таблицы», а не мелее.
-		if (!KZWeaponService::FindByClassName(className) && KZPistolService::GetPistolIndexByName(className) <= 0)
-		{
-			hasMelee = true;
 		}
 	}
-	return hasPistol && hasMelee;
+	// Лишнее в руках (выданное !ak, подобранное) гейт не волнует: оно не делает руки
+	// «сломанными», а страйп ради него — та самая лишняя подмена сущностей.
+	return hasKnife && hasPistol;
 }
