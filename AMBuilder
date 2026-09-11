@@ -102,6 +102,7 @@ def configure_main(sdk_target, sdk, cxx):
     os.path.join(builder.sourcePath, 'src', 'kz', 'checkpoint', 'commands.cpp'),
     
     os.path.join(builder.sourcePath, 'src', 'kz', 'db', 'kz_db.cpp'),
+    os.path.join(builder.sourcePath, 'src', 'kz', 'db', 'cyb_db_status.cpp'), # [cyb]
     os.path.join(builder.sourcePath, 'src', 'kz', 'db', 'delete_savedrun.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'db', 'find_courses.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'db', 'find_pb.cpp'),
