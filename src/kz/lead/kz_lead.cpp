@@ -115,7 +115,7 @@ static_function void LeadLookChanged()
 }
 
 // Отказ по индексу печатаем ЗДЕСЬ, в колбэке конвара (один раз на правку), а не в
-// CreateLeadSegment: тот зовётся на каждый отрезок, и вышел бы залп до 192 строк за тик.
+// CreateLeadSegment: тот зовётся на каждый отрезок, и вышел бы залп до 384 строк за тик.
 static_function void LeadCpIndexChanged(i32 index)
 {
 	if (index != -1 && !LeadCpIndexUsable(index))
@@ -188,7 +188,7 @@ CConVar<i32> cyb_lead_max_segments("cyb_lead_max_segments", FCVAR_NONE,
 // срезанные углы. Дефолт 0.25 — выбран пользователем живым перебором на канарейке 11.09 (по
 // картинке: 2.0 → 1.0 → 0.25). На стоимость допуск не влияет: замер 64.00 тика на всех
 // значениях от 2 до 0.01, разброс загрузки внутри одного значения больше, чем между ними
-// (таблица в CYBER.md). Платим мы потолком отрезков — вместе с этим дефолтом он поднят до 192,
+// (таблица в CYBER.md). Платим мы потолком отрезков — вместе с этим дефолтом он поднят до 384,
 // иначе более густые вершины укоротили бы луч вперёд. Применяется при СБОРКЕ пути, но правка
 // конвара сама пересобирает живые пути из кэшированного файла (см. колбэк), то есть действует
 // без команд игрока.
@@ -722,7 +722,7 @@ void KZLeadService::RebuildOwnedIndex()
 bool KZLeadService::OwnsParticle(const CEntityHandle &handle) const
 {
 	// Горячий путь CheckTransmit: на каждую помеченную частицу, на каждого получателя.
-	// Отсюда двоичный поиск (до 192 отрезков × десятки частиц × число игроков линейным
+	// Отсюда двоичный поиск (до 384 отрезков × десятки частиц × число игроков линейным
 	// сканом — десятки тысяч сравнений за тик).
 	return std::binary_search(this->ownedSorted.begin(), this->ownedSorted.end(), handle,
 							  [](const CEntityHandle &a, const CEntityHandle &b) { return a < b; });
@@ -1384,7 +1384,7 @@ void KZLeadService::UpdateWindow()
 	// Не `override`: слово контекстно-ключевое, и держать его именем переменной — напрашиваться
 	// на путаницу при чтении.
 	const i32 capOverride = cyb_lead_max_segments.Get();
-	i64 configured = capOverride >= 1 ? (i64)capOverride : KZOptionService::GetOptionInt("cybLeadMaxSegments", 192);
+	i64 configured = capOverride >= 1 ? (i64)capOverride : KZOptionService::GetOptionInt("cybLeadMaxSegments", 384);
 	if (configured < 1)
 	{
 		configured = 1;

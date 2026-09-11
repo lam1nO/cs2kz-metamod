@@ -116,10 +116,11 @@
 	"cybAwrBackfillIntervalSec"	"60"
 	// !lead: max route segments in the sliding window per player (network entities).
 	// Cost of CheckTransmit grows as segments x receivers - raise only after measuring.
-	// 192 since 11.09: the RDP tolerance default dropped to 0.25 (denser vertices), and the
-	// previous 128 would have shortened the beam ahead. Measured on canary: the tolerance
+	// 384 since 11.09: the RDP tolerance default dropped to 0.25 (denser vertices), and the
+	// previous 128 (and the intermediate 192) would have shortened the beam
+	// ahead. Measured on canary: the tolerance
 	// itself costs nothing, the cap does - see CYBER.md. Keep this in sync with the code
 	// default in kz_lead.cpp (UpdateWindow). Live override without a reload:
 	// cyb_lead_max_segments.
-	"cybLeadMaxSegments"	"192"
+	"cybLeadMaxSegments"	"384"
 }
