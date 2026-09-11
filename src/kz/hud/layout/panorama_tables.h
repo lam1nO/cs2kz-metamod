@@ -19,7 +19,13 @@ namespace panorama
 	// Обход таблицы шрифтов по индексу — попап списка «Шрифт» в меню настроек (layout/menu.cpp).
 	i32 GetFontCount();
 	const char *GetFontSlugAt(i32 index);
-	const char *GetFontDisplayNameAt(i32 index);
+	// Таблица упорядочена по семействам, и попап шрифтов листается ИМЕННО семействами
+	// (layout/menu.cpp): family — заголовок страницы, variant — подпись строки, className —
+	// начертание, которым строка нарисована. Звёздочка в имени семейства («Lato*») означает
+	// «шрифт берётся из системных шрифтов игрока» — сноска попапа объясняет её.
+	const char *GetFontFamilyAt(i32 index);
+	const char *GetFontVariantAt(i32 index);
+	const char *GetFontClassAt(i32 index);
 	// Позиции: шаг 1 внутри +-100, шаг 5 до +-500. Размеры: шаг 1 до 100, дальше 5.
 	i32 SnapToStep(i32 value, i32 lo, i32 hi);
 	i32 GetColorEntryCount();

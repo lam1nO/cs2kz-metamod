@@ -504,6 +504,11 @@
 		"chi"		"字体"
 		"ua"		"Шрифт"
 	}
+	"HUD - Menu Font Note"
+	{
+		"en"		"* not a game font - taken from the fonts installed on your PC"
+		"ru"		"* такого шрифта в игре нет - берётся из шрифтов, установленных на вашем ПК"
+	}
 	"HUD - Menu Label Outline"
 	{
 		"en"		"Outline"

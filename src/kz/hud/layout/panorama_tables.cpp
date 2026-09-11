@@ -470,9 +470,19 @@ const char *panorama::GetFontSlugAt(i32 index)
 	return (index >= 0 && index < PANORAMA_FONT_COUNT) ? PANORAMA_FONTS[index].slug : PANORAMA_FONTS[0].slug;
 }
 
-const char *panorama::GetFontDisplayNameAt(i32 index)
+const char *panorama::GetFontFamilyAt(i32 index)
 {
-	return (index >= 0 && index < PANORAMA_FONT_COUNT) ? PANORAMA_FONTS[index].displayName : PANORAMA_FONTS[0].displayName;
+	return (index >= 0 && index < PANORAMA_FONT_COUNT) ? PANORAMA_FONTS[index].family : PANORAMA_FONTS[0].family;
+}
+
+const char *panorama::GetFontVariantAt(i32 index)
+{
+	return (index >= 0 && index < PANORAMA_FONT_COUNT) ? PANORAMA_FONTS[index].variant : PANORAMA_FONTS[0].variant;
+}
+
+const char *panorama::GetFontClassAt(i32 index)
+{
+	return (index >= 0 && index < PANORAMA_FONT_COUNT) ? PANORAMA_FONTS[index].className : PANORAMA_FONTS[0].className;
 }
 
 const char *panorama::GetFontDisplayName(const char *name, const char *fallback)

@@ -8,7 +8,9 @@
 //     по-прежнему НЕ переносим — не нужен: своей подсистемы экспорта настроек у нас нет.
 //   - list_popup/li%i — попап списка: Choice наполняет его getChoices, а Font (с 10.09, решение
 //     пользователя: «выбор из списка вместо переключалки по кругу») — всей таблицей PANORAMA_FONTS
-//     (BuildListChoices). Прежний Cycle-перебор по курированному MENU_FONTS удалён.
+//     (BuildListChoices). Прежний Cycle-перебор по курированному MENU_FONTS удалён. Листается
+//     попап шрифтов по СЕМЕЙСТВАМ и открывается на семействе текущего шрифта — как у апстрима
+//     (GetListPopupSlice/FindListPopupPage ниже).
 //   - Позиция/размер/прозрачность используют ПОПАП-СТЕППЕР (+-1/+-5), как у апстрима, —
 //     без него эти пункты были бы нередактируемы, а спека прямо требует «для каждого элемента
 //     — позиция X/Y, размер, шрифт, прозрачность».
@@ -177,7 +179,11 @@ static_function void BuildListChoices(KZPlayer *player, const KZOptItem &it, std
 		const char *slug = panorama::ResolveFontSlug(player->optionService->GetPreferenceStr(it.prefKey, fallback), fallback);
 		for (i32 i = 0; i < panorama::GetFontCount(); i++)
 		{
-			choices.push_back({panorama::GetFontDisplayNameAt(i), (i64)i});
+			// Подпись строки — ВАРИАНТ («Bold Italic»), а не полное имя: семейство вынесено в
+			// заголовок страницы (страница попапа = семейство, см. GetListPopupSlice), и
+			// дублировать его в каждой из 29 строк Stratum2 незачем. Полное имя по-прежнему
+			// стоит в самой строке пункта меню (RenderMenuItems, GetFontDisplayName).
+			choices.push_back({panorama::GetFontVariantAt(i), (i64)i});
 			if (V_strcmp(slug, panorama::GetFontSlugAt(i)) == 0)
 			{
 				current = i;
@@ -190,6 +196,74 @@ static_function void BuildListChoices(KZPlayer *player, const KZOptItem &it, std
 		it.getChoices(player, it.tag, choices);
 	}
 	current = it.getCurrent ? it.getCurrent(player, it.tag) : (choices.empty() ? 0 : choices[0].id);
+}
+
+// Страницы попапа ШРИФТОВ — по СЕМЕЙСТВАМ (порт апстримного RenderListPopup/OpenPopup,
+// origin/master src/kz/option/menu/kz_menu.cpp:488-520 и :711-748). Таблица panorama упорядочена
+// по семействам, самое длинное (Stratum2, 29 начертаний) укладывается в KZ_MENU_LIST = 32 строки
+// разметки, так что страница никогда не показывает смесь двух семейств и никогда не обрезает
+// семейство посередине. До этого список резался «по 32 подряд»: страница 1/3 — Stratum2 вперемешку
+// с началом Noto, страница 3/3 — четыре строки Lato, и снаружи это читалось как «список неполный».
+static_function bool IsFontFamilyStart(i32 index)
+{
+	return index == 0 || V_strcmp(panorama::GetFontFamilyAt(index - 1), panorama::GetFontFamilyAt(index)) != 0;
+}
+
+static_function i32 FontFamilyPageCount()
+{
+	i32 pages = 0;
+	for (i32 i = 0; i < panorama::GetFontCount(); i++)
+	{
+		pages += IsFontFamilyStart(i) ? 1 : 0;
+	}
+	return MAX(1, pages);
+}
+
+// Границы страницы-семейства. Индекс строки в choices у Font-пункта равен индексу в таблице
+// шрифтов (BuildListChoices кладёт всю таблицу по порядку, id = индекс), поэтому границы таблицы
+// прикладываются к choices напрямую.
+static_function void FontFamilyPageRange(i32 page, i32 &first, i32 &count)
+{
+	first = 0;
+	count = 0;
+	i32 p = -1;
+	for (i32 i = 0; i < panorama::GetFontCount(); i++)
+	{
+		if (IsFontFamilyStart(i))
+		{
+			p++;
+			if (p == page)
+			{
+				first = i;
+			}
+			else if (p > page)
+			{
+				break;
+			}
+		}
+		count += p == page ? 1 : 0;
+	}
+}
+
+// Срез страницы попапа списка — ОДИН расчёт для рендера, листания и клика: у шрифтов страница =
+// семейство, у обычного Choice — KZ_MENU_LIST строк подряд. page клампится здесь же, поэтому
+// вызывающему не нужно знать про число страниц.
+static_function void GetListPopupSlice(const KZOptItem &it, i32 total, i32 &page, i32 &first, i32 &count, i32 &pages)
+{
+	const bool isFont = it.type == KZOptItemType::Font;
+	pages = isFont ? FontFamilyPageCount() : MAX(1, (total + KZ_MENU_LIST - 1) / KZ_MENU_LIST);
+	page = Clamp(page, 0, pages - 1);
+	if (isFont)
+	{
+		FontFamilyPageRange(page, first, count);
+	}
+	else
+	{
+		first = page * KZ_MENU_LIST;
+		count = total - first;
+	}
+	count = MIN(count, total - first);
+	count = Clamp(count, 0, KZ_MENU_LIST);
 }
 
 // .type-toggle/.type-color — единственные подтверждённые strings-ом классы с реальным CSS-эффектом
@@ -840,28 +914,49 @@ void KZHUDService::RenderMenuListPopup(CCSCustomHudLayout *layout)
 	std::vector<KZChoice> choices;
 	i64 current = 0;
 	BuildListChoices(this->player, *it, choices, current);
-	const i32 total = (i32)choices.size();
-	const i32 pages = MAX(1, (total + KZ_MENU_LIST - 1) / KZ_MENU_LIST);
-	this->menuPopupPage = Clamp(this->menuPopupPage, 0, pages - 1);
+	const bool isFont = it->type == KZOptItemType::Font;
+	i32 first = 0;
+	i32 count = 0;
+	i32 pages = 1;
+	GetListPopupSlice(*it, (i32)choices.size(), this->menuPopupPage, first, count, pages);
 
 	for (i32 i = 0; i < KZ_MENU_LIST; i++)
 	{
-		const i32 idx = this->menuPopupPage * KZ_MENU_LIST + i;
-		const bool used = idx < total;
+		const bool used = i < count;
 		if (used)
 		{
-			this->SetMenuVar(layout, LiLbl(i), LiLblVar(i), choices[idx].label.c_str());
-			const bool selected = choices[idx].selected || choices[idx].id == current;
-			this->SetMenuBoolClass(layout, LiPanel(i), "selected", this->menuApplied.liSelected[i], selected);
+			const KZChoice &c = choices[first + i];
+			this->SetMenuVar(layout, LiLbl(i), LiLblVar(i), c.label.c_str());
+			this->SetMenuBoolClass(layout, LiPanel(i), "selected", this->menuApplied.liSelected[i], c.selected || c.id == current);
+			// Строка шрифта нарисована СВОИМ начертанием (порт апстрима): выбирать шрифт по
+			// одному названию — гадание. У обычного Choice класса нет, строка наследует шрифт
+			// меню. Классы приходят из той же fonts.css аддона, что и шрифт худа.
+			this->SetMenuSwapClass(layout, LiLbl(i), this->menuApplied.liFont[i], isFont ? panorama::GetFontClassAt((i32)c.id) : NULL);
 		}
 		this->SetMenuBoolClass(layout, LiPanel(i), "hidden", this->menuApplied.liHidden[i], !used);
 	}
 	const char *lang = this->player->languageService->GetLanguage();
-	const std::string lpTitle = KZLanguageService::PrepareMessageWithLang(lang, it->phraseKey);
-	this->SetMenuVar(layout, "lp_title", "lptitle", lpTitle.c_str());
+	if (isFont && count > 0)
+	{
+		// Заголовок попапа шрифтов — имя листаемого СЕМЕЙСТВА (страница = семейство); какой пункт
+		// правим, видно по подсвеченной строке под курсором в средней колонке.
+		this->SetMenuVar(layout, "lp_title", "lptitle", panorama::GetFontFamilyAt((i32)choices[first].id));
+	}
+	else
+	{
+		const std::string lpTitle = KZLanguageService::PrepareMessageWithLang(lang, it->phraseKey);
+		this->SetMenuVar(layout, "lp_title", "lptitle", lpTitle.c_str());
+	}
 	char page[16];
 	V_snprintf(page, sizeof(page), "%i/%i", this->menuPopupPage + 1, pages);
 	this->SetMenuVar(layout, "lp_page", "lppage", page);
+	// Сноска про «*» у семейств, которых нет в игре (берутся из системных шрифтов игрока) —
+	// только у списка шрифтов: в остальных списках звёздочки нет и объяснять нечего.
+	this->SetMenuBoolClass(layout, "lp_note", "hidden", this->menuApplied.noteHidden, !isFont);
+	if (isFont)
+	{
+		this->SetMenuVar(layout, "lp_note", "lpnote", KZLanguageService::PrepareMessageWithLang(lang, "HUD - Menu Font Note").c_str());
+	}
 }
 
 // === Взаимодействие ==========================================================================
@@ -974,6 +1069,44 @@ void KZHUDService::ActivateMenuItem(i32 slot)
 	}
 }
 
+// Страница попапа списка, на которой стоит ТЕКУЩЕЕ значение пункта. Правило «какая строка
+// текущая» повторяет рендер (RenderMenuListPopup): сперва choices[i].selected, иначе совпадение
+// id с current. Список строим тем же BuildListChoices — третьего источника правды не заводим.
+// Ветка для НЕ-шрифтов (idx / KZ_MENU_LIST) сегодня всегда возвращает 0: самый длинный Choice —
+// Language, 13 строк, ни один не переваливает за KZ_MENU_LIST. То есть она написана на вырост и
+// живьём не проверена; апстрим для не-Font так и оставляет страницу 0.
+static_function i32 FindListPopupPage(KZPlayer *player, const KZOptItem &it)
+{
+	std::vector<KZChoice> choices;
+	i64 current = 0;
+	BuildListChoices(player, it, choices, current);
+	i32 idx = -1;
+	for (i32 i = 0; i < (i32)choices.size(); i++)
+	{
+		if (choices[i].selected || choices[i].id == current)
+		{
+			idx = i;
+			break;
+		}
+	}
+	if (idx < 0)
+	{
+		return 0;
+	}
+	if (it.type != KZOptItemType::Font)
+	{
+		return idx / KZ_MENU_LIST;
+	}
+	// Шрифты листаются семействами: страница = сколько границ семейств пройдено до текущей
+	// строки включительно (индекс в choices = индекс в таблице, см. BuildListChoices).
+	i32 page = -1;
+	for (i32 i = 0; i <= idx && i < panorama::GetFontCount(); i++)
+	{
+		page += IsFontFamilyStart(i) ? 1 : 0;
+	}
+	return MAX(0, page);
+}
+
 void KZHUDService::OpenMenuPopup(MenuPopup kind, i32 itemIndex)
 {
 	const KZOptItem *it = GetMenuItem(this->menuCategory, this->menuSub, itemIndex);
@@ -983,7 +1116,12 @@ void KZHUDService::OpenMenuPopup(MenuPopup kind, i32 itemIndex)
 	}
 	this->menuPopup = kind;
 	this->menuPopupItem = itemIndex;
-	this->menuPopupPage = 0;
+	// Список открывается на СТРАНИЦЕ ТЕКУЩЕГО значения, а не всегда на первой: у шрифтов это
+	// страница-семейство выбранного начертания. С нулевой страницы игрок с дефолтным "lato-bold"
+	// (66-я строка таблицы, семейство Lato* — 14-е из 15) видел только Stratum2 и ни одной
+	// подсветки, то есть ровно «в списке нет моего шрифта». Страницы листались и раньше
+	// (lp_prev/lp_next), но об этом надо было догадаться. Цвет/степпер не трогаем — там своя ёмкость.
+	this->menuPopupPage = kind == MenuPopup::List ? FindListPopupPage(this->player, *it) : 0;
 	// onEdit(begin=true/false) — контракт модели (model.h): пункт узнаёт, что его правят.
 	// Единственный сегодняшний потребитель (beamOffset, misc_prefs.cpp) досинкивает кэш
 	// сервиса на закрытии, поэтому важнее второй вызов, но апстрим (kz_menu.cpp:758-761,
@@ -1035,8 +1173,14 @@ void KZHUDService::MenuPopupPageStep(i32 delta)
 		std::vector<KZChoice> choices;
 		i64 current = 0;
 		BuildListChoices(this->player, *it, choices, current);
-		const i32 pages = MAX(1, ((i32)choices.size() + KZ_MENU_LIST - 1) / KZ_MENU_LIST);
-		this->menuPopupPage = Clamp(this->menuPopupPage + delta, 0, pages - 1);
+		// Число страниц считает тот же GetListPopupSlice, что и рендер (у шрифтов оно = числу
+		// семейств, а не размеру списка); сам срез здесь не нужен.
+		i32 first = 0;
+		i32 count = 0;
+		i32 pages = 1;
+		i32 page = this->menuPopupPage + delta;
+		GetListPopupSlice(*it, (i32)choices.size(), page, first, count, pages);
+		this->menuPopupPage = page;
 		this->RenderMenu();
 	}
 	// Степпер (+-1/+-5) — не постраничный попап; страницы есть только у цвета и списка.
@@ -1078,11 +1222,19 @@ void KZHUDService::MenuListPick(i32 slot)
 	std::vector<KZChoice> choices;
 	i64 current = 0;
 	BuildListChoices(this->player, *it, choices, current);
-	const i32 idx = this->menuPopupPage * KZ_MENU_LIST + slot;
-	if (idx < 0 || idx >= (i32)choices.size())
+	// Слот -> строка ровно тем же срезом, что нарисован (GetListPopupSlice). Прежняя формула
+	// «страница * 32 + слот» была ВЕРНА: она совпадала с прежним рендером бит в бит, живого
+	// дефекта тут не было. Пересчёт — обязательное следствие семейных страниц: на странице из
+	// одной строки (Arial) старая арифметика записала бы чужой слаг.
+	i32 first = 0;
+	i32 count = 0;
+	i32 pages = 1;
+	GetListPopupSlice(*it, (i32)choices.size(), this->menuPopupPage, first, count, pages);
+	if (slot < 0 || slot >= count)
 	{
 		return;
 	}
+	const i32 idx = first + slot;
 	if (it->type == KZOptItemType::Font)
 	{
 		// id = индекс в таблице шрифтов (BuildListChoices); пишем слаг напрямую — у Font-пункта

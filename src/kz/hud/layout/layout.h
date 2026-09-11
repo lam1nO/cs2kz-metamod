@@ -53,6 +53,10 @@
 // строится добивкой NBSP до одной длины в кодовых точках, что точно только в моно; метрик глифов
 // у сервера нет (файлов шрифтов на ноде нет), так что выровнять пропорциональный шрифт нечем.
 // Таблица — в layout/prefs.cpp; преф rpmenuFont, не попавший в неё, читается как RPMENU_DEF_FONT.
+// Список НЕ урезан вручную: в таблице panorama (68 начертаний, panorama_tables.cpp) моноширинных
+// ровно четыре — три Stratum2 Mono и Noto Mono; «...-monodigit» моноширинны только по цифрам, а в
+// карточке есть буквы. Проверка при добавлении шрифтов в аддон: grep '"[a-z0-9-]*mono' по
+// panorama_tables.cpp — всё, что оттуда, кроме monodigit, обязано быть здесь.
 extern const char *const RPMENU_MONO_FONTS[];
 extern const i32 RPMENU_MONO_FONT_COUNT;
 const char *ResolveReplayMenuFontSlug(const char *slug);
