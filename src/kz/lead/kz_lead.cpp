@@ -73,12 +73,6 @@
 #define KZ_LEAD_BEAM_WIDTH_DEFAULT 2.0f
 #define KZ_LEAD_BEAM_WIDTH_MIN     0.1f
 #define KZ_LEAD_BEAM_WIDTH_MAX     64.0f
-// Пауза между одинаковыми жалобами в лог (секунды). Все отказы этого файла сидят в путях,
-// которые зовутся до 384 раз за перерисовку и дважды в секунду, поэтому «строка на каждый
-// отказ» здесь означала бы залп. Дросселируем по времени, а не «один раз на процесс»: инвариант
-// логирования требует reason на КАЖДЫЙ отказ, а защёлка на весь запуск съедала бы квоту первым
-// же случаем и молчала бы про все следующие — другой природы и на другой карте.
-#define KZ_LEAD_WARN_THROTTLE_SEC 60.0
 // Сколько ПЕРЕСБОРОК пути (повторных разборов файла под новый допуск) разрешено вести
 // одновременно на весь сервер. У первичных загрузок такого потолка нет и не нужно: их разносит
 // сама сеть (резолв + докачка на каждого), а пересборка идёт с диска и стартует у всех от
@@ -318,7 +312,11 @@ namespace
 		{"m_flFrameRate",     true,  0.0f, 0},
 		{"m_flHDRColorScale", true,  1.0f, 0},
 		{"m_flFadeLength",    true,  0.0f, 0},
-		{"m_nBeamType",       false, 0.0f, 1}, // BEAM_POINTS в нумерации Source 1
+		// Значение 1 — РОВНО то, что писала проба, и менять его нельзя: доказанный вид получен
+		// с ним. По нумерации Source 1 это BEAM_ENTPOINT («от сущности к точке»), а нужен нам
+		// по смыслу BEAM_POINTS = 0 («точка-точка»); совпадает ли нумерация CS2 с Source 1 —
+		// НЕ проверено. Проверять живьём: поставить 0 и посмотреть, изменится ли картинка.
+		{"m_nBeamType",       false, 0.0f, 1},
 		{"m_nBeamFlags",      false, 0.0f, 0},
 		{"m_nNumBeamEnts",    false, 0.0f, 0},
 		{"m_nHaloIndex",      false, 0.0f, 0},
@@ -345,14 +343,26 @@ namespace
 	// энтити у них один и тот же (KZ_LEAD_BEAM_CLASSNAME), значит и цепочка классов одна.
 	void ResolveLeadBeamExtras(CBaseEntity *ent)
 	{
-		g_leadBeamExtrasResolved = true;
-		if (!ent->m_pEntity || !ent->m_pEntity->m_pClass)
+		// Защёлка ставится ТОЛЬКО после удавшегося разбора. Иначе один неудачный первый отрезок
+		// (нет цепочки классов, схема ещё не отвечает) молча перевёл бы весь запуск на
+		// недоказанный набор полей: мы думали бы, что рецепт применён, а его не было.
+		if (!ent->m_pEntity || !ent->m_pEntity->m_pClass || !ent->m_pEntity->m_pClass->m_pClassInfo)
 		{
+			// Дроссель обязателен: раз защёлки нет, эта ветка повторится на КАЖДОМ отрезке окна.
+			static f64 lastWarn = -1.0e9;
+			if (LeadWarnDue(lastWarn))
+			{
+				KZ_LOG_WARN(LogChannel::Replays, "[lead] beam_extra_resolve_failed reason=no_class_chain note=retry_on_next_segment\n");
+			}
 			return;
 		}
 		// Буфер статический: 512 записей на стеке ради разовой сверки не нужны, а зовётся эта
-		// функция единственный раз и только с главного потока.
+		// функция один раз за удавшийся разбор и только с главного потока.
 		static schema::FieldDesc fields[512];
+		// Ответила ли схема хоть по одному классу цепочки. GetClassFields отдаёт -1 и когда
+		// класса нет, и когда энтити-системы ещё нет — во втором случае разбор надо повторить,
+		// а не защёлкивать пустой результат.
+		bool schemaAnswered = false;
 		for (CEntityClassInfo *info = ent->m_pEntity->m_pClass->m_pClassInfo; info; info = info->m_pBaseClassInfo)
 		{
 			const char *className = info->m_pszCPPClassname;
@@ -361,6 +371,10 @@ namespace
 				break;
 			}
 			const int count = schema::GetClassFields(className, fields, (int)KZ_ARRAYSIZE(fields));
+			if (count >= 0)
+			{
+				schemaAnswered = true;
+			}
 			for (int i = 0; i < count; i++)
 			{
 				if (!fields[i].name)
@@ -395,11 +409,37 @@ namespace
 				}
 			}
 		}
+		if (!schemaAnswered)
+		{
+			// Схема не ответила ни по одному классу цепочки — разбор не состоялся. Обнуляем
+			// найденное и НЕ защёлкиваем: следующий отрезок попробует снова.
+			for (u32 w = 0; w < KZ_ARRAYSIZE(g_leadBeamExtras); w++)
+			{
+				g_leadBeamExtraFields[w] = LeadBeamExtraResolved {};
+			}
+			// Тот же дроссель и по той же причине: без защёлки ветка повторится на каждом отрезке.
+			static f64 lastWarn = -1.0e9;
+			if (LeadWarnDue(lastWarn))
+			{
+				KZ_LOG_WARN(LogChannel::Replays, "[lead] beam_extra_resolve_failed reason=schema_unavailable note=retry_on_next_segment\n");
+			}
+			return;
+		}
+		g_leadBeamExtrasResolved = true;
+		u32 resolved = 0;
 		for (u32 w = 0; w < KZ_ARRAYSIZE(g_leadBeamExtras); w++)
 		{
+			resolved += g_leadBeamExtraFields[w].size > 0 ? 1 : 0;
 			KZ_LOG_INFO(LogChannel::Replays, "[lead] beam_extra name=%s resolved=%i offset=0x%X size=%i networked=%i\n", g_leadBeamExtras[w].name,
 						g_leadBeamExtraFields[w].size > 0 ? 1 : 0, g_leadBeamExtraFields[w].offset, g_leadBeamExtraFields[w].size,
 						g_leadBeamExtraFields[w].networked ? 1 : 0);
+		}
+		if (resolved == 0)
+		{
+			// Схема ответила, но ни одного поля рецепта в ней нет. Это не отказ разбора (повторять
+			// нечего), но и не норма: вид луча тогда держится только на пяти доказанных полях.
+			KZ_LOG_WARN(LogChannel::Replays, "[lead] beam_extra_none reason=no_recipe_fields_in_schema wanted=%u\n",
+						(u32)KZ_ARRAYSIZE(g_leadBeamExtras));
 		}
 	}
 
@@ -554,22 +594,19 @@ namespace
 		{
 			return CEntityHandle();
 		}
-		// Позиция ещё раз после спавна — так делал пробник (спавн мог её сбросить).
+		// ПОСЛЕ спавна пробник делал ровно две вещи — позицию и конец луча. Больше здесь ничего
+		// из рецепта не повторяется НАМЕРЕННО: дописать сюда ширину, цвет, амплитуду или второй
+		// проход доп. полей значило бы уехать от доказанного в другую сторону (например,
+		// m_nBeamType, которое спавн мог поставить по-своему, получило бы нашу единицу уже
+		// после его работы — а такого состояния на пробе никто не видел).
 		beam->Teleport(&start, nullptr, &vec3_origin);
-		// И поля ещё раз: спавн читает свои keyvalue (width, spawnflags, rendercolor) и мог
-		// переписать ими то, что мы поставили. Это не «на всякий случай» — это проверенный
-		// порядок.
 		beam->m_vecEndPos(end);
-		beam->m_fWidth(width);
-		beam->m_fEndWidth(width);
-		beam->m_fAmplitude(0.0f);
-		beam->m_bTurnedOff(false);
-		beam->m_clrRender(color);
-		ApplyLeadBeamExtras(beam);
-		// Метку команды повторяем ПОСЛЕ спавна обязательно, и это не дубль ради симметрии: на
-		// ней держится личная видимость луча. Сбрось её спавн (чем бы он ни выставлял команду) —
-		// фильтр передачи перестал бы узнавать наши лучи; страховкой служит сверка targetname в
-		// самом фильтре, но полагаться на страховку вместо метки нельзя.
+		// ЕДИНСТВЕННАЯ наша добавка к пост-спавн рецепту, и она не про ВИД: на метке команды
+		// держится личная видимость луча. Сбрось её спавн (чем бы он ни выставлял команду) —
+		// фильтр передачи перестал бы узнавать наши лучи по первому ключу. Второй ключ
+		// (targetname) это подстрахует, но полагаться на страховку вместо метки нельзя.
+		// Поле сетевое, но команда энтити на отрисовку луча у клиента не влияет, поэтому от
+		// доказанного ВИДА эта строка не уводит — она про то, кому луч уйдёт.
 		beam->m_iTeamNum(KZ_LEAD_SEGMENT_TEAM);
 		return handle;
 	}

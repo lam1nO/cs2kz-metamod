@@ -375,7 +375,9 @@ static_global bool SpawnProbeBeam(const char *classname, const Vector &start, co
 		ProbeSetTyped<float>(ent, classname, chain, chainCount, "m_flFrameRate", 0.0f);
 		ProbeSetTyped<float>(ent, classname, chain, chainCount, "m_flHDRColorScale", 1.0f);
 		ProbeSetTyped<float>(ent, classname, chain, chainCount, "m_flFadeLength", 0.0f);
-		ProbeSetInt(ent, classname, chain, chainCount, "m_nBeamType", 1); // BEAM_POINTS в нумерации Source 1
+		// 1 = BEAM_ENTPOINT в нумерации Source 1 («от сущности к точке»); BEAM_POINTS там 0.
+		// Значение оставлено как было: им снят единственный живой результат пробы.
+		ProbeSetInt(ent, classname, chain, chainCount, "m_nBeamType", 1);
 		ProbeSetInt(ent, classname, chain, chainCount, "m_nBeamFlags", 0);
 		ProbeSetInt(ent, classname, chain, chainCount, "m_nNumBeamEnts", 0);
 		ProbeSetInt(ent, classname, chain, chainCount, "m_nHaloIndex", 0);
