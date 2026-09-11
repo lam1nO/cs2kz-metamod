@@ -12,8 +12,13 @@ static_global class : public KZOptionServiceEventListener
 {
 	void OnPlayerPreferencesLoaded(KZPlayer *player) override
 	{
-		player->pistolService->preferredPistol =
-			KZPistolService::GetPistolIndexByName(player->optionService->GetPreferenceStr("preferredPistol", "weapon_usp_silencer"));
+		// Дефолт ПУСТАЯ строка, а не "weapon_usp_silencer": иначе игрок, ни разу не трогавший
+		// настройку, получал бы USP и за T, а владелец просил там Glock. Пустую и любую
+		// неопознанную строку ResolvePreference превращает в дефолт команды — раньше она
+		// молча означала «нож, пистолета нет» (GetPistolIndexByName возвращал 0).
+		const char *pref = player->optionService->GetPreferenceStr("preferredPistol", "");
+		i16 index = (i16)KZPistolService::GetPistolIndexByName(pref);
+		player->pistolService->preferredPistol = index;
 		player->pistolService->UpdatePistol();
 	}
 } optionEventListener;
@@ -32,8 +37,8 @@ SCMD(kz_pistol, SCFL_PREFERENCE | SCFL_MISC | SCFL_PLAYER)
 		return MRES_SUPERCEDE;
 	}
 	const char *weapon = args->ArgS();
-	i16 pistolIndex = KZPistolService::GetPistolIndexByName(weapon);
-	if (pistolIndex == -1)
+	i16 pistolIndex = (i16)KZPistolService::GetPistolIndexByName(weapon);
+	if (pistolIndex == KZPistolService::PISTOL_UNKNOWN)
 	{
 		player->languageService->PrintChat(true, false, "Pistol Unknown", weapon);
 		return MRES_SUPERCEDE;
@@ -67,7 +72,10 @@ void KZPistolService::UpdatePistol(bool force)
 	// выбрасываем из списка то, чего в руках уже нет (игрок выкинул на G), — иначе
 	// перевыдача вернула бы выброшенное обратно и дроп выглядел бы сломанным.
 	this->player->weaponService->SyncFromHeld();
-	if (preferredPistol == 0)
+	// Явный выбор игрока либо дефолт его команды — резолвим ОДИН раз на вызов: ниже пешку
+	// временно переставляют в чужую команду, и повторный резолв взял бы чужой дефолт.
+	const i16 pistolIndex = this->ResolvePreferred();
+	if (pistolIndex == 0)
 	{
 		if (this->NeedWeaponStripping())
 		{
@@ -83,7 +91,7 @@ void KZPistolService::UpdatePistol(bool force)
 	// just force remove everything and always regive weapons
 	this->player->GetPlayerPawn()->m_pItemServices()->RemoveAllItems(false);
 
-	const PistolInfo_t &pistol = pistols[preferredPistol];
+	const PistolInfo_t &pistol = pistols[pistolIndex];
 	i32 originalTeam = player->GetController()->m_iTeamNum();
 	i32 otherTeam = originalTeam == CS_TEAM_CT ? CS_TEAM_T : CS_TEAM_CT;
 	bool switchTeam = false;
@@ -123,7 +131,7 @@ void KZPistolService::UpdatePistol(bool force)
 		}
 	}
 	auto knife = this->player->GetPlayerPawn()->m_pItemServices()->GiveNamedItem(
-		this->player->GetController()->m_iTeamNum == CS_TEAM_CT ? "weapon_knife" : "weapon_knife_t");
+		this->player->GetController()->m_iTeamNum() == CS_TEAM_CT ? "weapon_knife" : "weapon_knife_t");
 	if (switchTeam)
 	{
 		player->GetPlayerPawn()->m_iTeamNum(otherTeam);
@@ -136,6 +144,15 @@ void KZPistolService::UpdatePistol(bool force)
 	}
 
 	this->player->weaponService->RegiveGiven();
+}
+
+i32 KZPistolService::GetTeam()
+{
+	auto controller = this->player->GetController();
+	// Без контроллера (ещё не в игре) команды нет — дефолт считаем как для CT: на KZ вход
+	// идёт в CT (KZ::misc::JoinTeam(..., CS_TEAM_CT)), и это же значение вернёт GetTeam
+	// сразу после появления контроллера.
+	return controller ? (i32)controller->m_iTeamNum() : (i32)CS_TEAM_CT;
 }
 
 bool KZPistolService::NeedWeaponStripping()

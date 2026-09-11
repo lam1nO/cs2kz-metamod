@@ -158,7 +158,11 @@ namespace
 	// -------------------------------------------------------------- Pistol (Choice) ----
 	void PistolGetChoices(KZPlayer *player, i64 tag, std::vector<KZChoice> &out)
 	{
-		i16 current = KZPistolService::GetPistolIndexByName(player->optionService->GetPreferenceStr("preferredPistol", "weapon_usp_silencer"));
+		// ResolvePreference, а не GetPistolIndexByName: пустая/неопознанная настройка — это
+		// дефолт КОМАНДЫ (USP-S за CT, Glock-18 за T), а не нулевая строка таблицы «Knife».
+		// Иначе меню показывало бы галочку на «нож» игроку, который просто ничего не выбирал.
+		i16 current = KZPistolService::ResolvePreference(player->optionService->GetPreferenceStr("preferredPistol", ""),
+														player->pistolService->GetTeam());
 		for (i16 i = 0; i < (i16)KZPistolService::pistols.size(); i++)
 		{
 			out.push_back({std::string(KZPistolService::pistols[i].name), i, nullptr, i == current});
@@ -167,7 +171,7 @@ namespace
 
 	i64 PistolGetCurrent(KZPlayer *player, i64 tag)
 	{
-		return KZPistolService::GetPistolIndexByName(player->optionService->GetPreferenceStr("preferredPistol", "weapon_usp_silencer"));
+		return KZPistolService::ResolvePreference(player->optionService->GetPreferenceStr("preferredPistol", ""), player->pistolService->GetTeam());
 	}
 
 	void PistolOnPick(KZPlayer *player, i64 tag, i64 id)

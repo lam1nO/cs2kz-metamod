@@ -516,6 +516,18 @@ void KZ::misc::JoinTeam(KZPlayer *player, int newTeam, bool restorePos, bool sav
 		{
 			player->timerService->TimerStop(true, "pause_denied");
 		}
+		// Раздеваем ПЕРЕД уходом в наблюдатели — ровно по той же причине, по которой ветка
+		// входа в команду ниже раздевает перед суицидом. ChangeTeam(SPECTATOR) уничтожает
+		// пешку, а с mp_death_drop_gun 1 (профиль kz, cfg/cs2kz.cfg) движок роняет её
+		// оружие под ноги: репорт владельца «переходишь в наблюдатели, и с тебя выпадает
+		// пистолет». Наш RemoveAllItems движковым дропом не является и на cvar не смотрит
+		// (замерено 28.08 на канарейке), поэтому сносит и нож, и пистолет начисто.
+		// Перевыдавать нечего: возврат в команду идёт через ветку ниже, где
+		// OnPlayerJoinTeam → UpdatePistol(force) выдаёт нож и пистолет заново.
+		if (player->GetPlayerPawn() && player->GetPlayerPawn()->m_pItemServices())
+		{
+			player->GetPlayerPawn()->m_pItemServices()->RemoveAllItems(false);
+		}
 		player->GetController()->ChangeTeam(CS_TEAM_SPECTATOR);
 		// Невидимку в CS_TEAM_NONE уводит сторож следующим кадром, а НЕ мы здесь: наш
 		// вызывающий (SpectatePlayer) сразу после этой функции читает observer pawn и

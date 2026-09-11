@@ -28,11 +28,19 @@ public:
 		{64, CS_TEAM_NONE, "R8 Revolver", "weapon_revolver", {"r8 revolver", "r8revolver", "revolver", "r8", "r8_revolver"}}};
 	// clang-format on
 
+	// Индекс НЕИЗВЕСТНОГО/пустого имени. Раньше здесь возвращался 0 — а нулевая строка
+	// таблицы это "Knife", то есть «пистолет выключен». Из-за этого любая мусорная строка в
+	// настройке preferredPistol (пустое значение из БД префов, старый формат, опечатка в
+	// !pistol) МОЛЧА оставляла игрока без пистолета навсегда, и единственная проверка на
+	// такой случай — `pistolIndex == -1` в SCMD(kz_pistol) — не срабатывала никогда.
+	// Отдельное значение «не выбран» нужно ещё и дефолту по команде (см. ResolvePreference).
+	static constexpr i16 PISTOL_UNKNOWN = -1;
+
 	static int GetPistolIndexByName(const char *name)
 	{
-		if (!name)
+		if (!name || !name[0])
 		{
-			return 0;
+			return PISTOL_UNKNOWN;
 		}
 		for (i16 i = 0; i < pistols.size(); i++)
 		{
@@ -48,7 +56,25 @@ public:
 				}
 			}
 		}
-		return 0;
+		return PISTOL_UNKNOWN;
+	}
+
+	// Дефолт по команде: USP-S за CT, Glock-18 за T (запрос владельца 10.09 — «usp за кт и
+	// glock за т должны быть дефолтными»). Раньше дефолт был один на всех (индекс 8, USP-S),
+	// и за T он выдавался через подмену m_iTeamNum пешки вокруг GiveNamedItem (UpdatePistol).
+	// С правильным дефолтом эта живая подмена команды на обычном игроке не нужна вовсе —
+	// она остаётся только для того, кто ЯВНО выбрал ствол чужой команды.
+	// Ищем по className, а не по индексу: индексы таблицы сдвинутся при первой же правке.
+	static i16 GetDefaultPistolIndexForTeam(i32 team)
+	{
+		return (i16)GetPistolIndexByName(team == CS_TEAM_T ? "weapon_glock" : "weapon_usp_silencer");
+	}
+
+	// Строка настройки → индекс. Неизвестная/пустая — НЕ «нож», а дефолт команды.
+	static i16 ResolvePreference(const char *pref, i32 team)
+	{
+		const i16 index = (i16)GetPistolIndexByName(pref);
+		return index == PISTOL_UNKNOWN ? GetDefaultPistolIndexForTeam(team) : index;
 	}
 
 	static int GetPistolIndexByItemDef(i16 itemDef)
@@ -69,7 +95,21 @@ public:
 
 	virtual void Reset() override
 	{
-		this->preferredPistol = 8; // Default to USP-S
+		this->preferredPistol = PISTOL_UNKNOWN; // «не выбран» — берём дефолт команды
+	}
+
+	// Команда, по которой считается дефолт. Контроллер, а не пешка: пешку UpdatePistol сам
+	// временно переставляет в чужую команду ради GiveNamedItem.
+	i32 GetTeam();
+
+	// Что выдавать прямо сейчас: явный выбор игрока или дефолт его команды.
+	i16 ResolvePreferred()
+	{
+		if (this->preferredPistol >= 0 && this->preferredPistol < (i16)pistols.size())
+		{
+			return this->preferredPistol;
+		}
+		return GetDefaultPistolIndexForTeam(this->GetTeam());
 	}
 
 	void OnPlayerJoinTeam()
@@ -80,5 +120,6 @@ public:
 	void UpdatePistol(bool force = false);
 	// Return true if the player has a weapon that isn't a knife.
 	bool NeedWeaponStripping();
-	i16 preferredPistol = 8; // Default to USP-S
+	// PISTOL_UNKNOWN = «игрок не выбирал» → дефолт команды (USP-S за CT, Glock-18 за T).
+	i16 preferredPistol = PISTOL_UNKNOWN;
 };

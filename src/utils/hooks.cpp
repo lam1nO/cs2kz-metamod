@@ -643,6 +643,14 @@ static_function void Hook_ClientDisconnect(CPlayerSlot slot, ENetworkDisconnecti
 	// Сериализация читает только сервисные поля, пешку не трогает (kz_savedrun.cpp) — здесь
 	// состояние заведомо целее, чем после тирдауна.
 	player->timerService->OnClientDisconnect();
+	// Раздеваем ПЕРЕД тирдауном: SwitchTeam(0) уничтожает пешку, а с mp_death_drop_gun 1
+	// движок роняет её оружие на пол. Уборщик (kz_weapon_ground_cleanup) его подберёт, но
+	// только через период, и до тех пор ствол лежит у всех на виду — а реконнекты это
+	// множат. Дешевле не мусорить вовсе. Порядок важен: после SwitchTeam(0) пешки уже нет.
+	if (player->GetPlayerPawn() && player->GetPlayerPawn()->m_pItemServices())
+	{
+		player->GetPlayerPawn()->m_pItemServices()->RemoveAllItems(false);
+	}
 	// Immediately remove the player off the list. We don't need to keep them around.
 	if (player->GetController())
 	{
@@ -803,6 +811,27 @@ static_function bool Hook_FireEvent(IGameEvent *event, bool bDontBroadcast)
 				if (player)
 				{
 					player->timerService->OnPlayerSpawn();
+					// Дефолтный ствол — на КАЖДОМ спавне. До этого UpdatePistol звался только
+					// из KZ::misc::JoinTeam (обёртка команды jointeam), а мимо неё пешка
+					// поднимается штатно и часто: движковый форс-пик команды по
+					// mp_force_pick_time, админ-форс, mp_restartgame/сторож пустой карты,
+					// changelevel. В таких спавнах игрок оставался с тем, что дал движок по
+					// mp_ct_default_secondary — то есть без ножа/пистолета, если карта или
+					// плагин их не выдали. Отсюда репорт «зашёл на сервер — пистолета нет».
+					// Гейты:
+					//  - только играющая команда: у спектатора выдавать нечему и некому;
+					//  - не в середине смены команды: там JoinTeam сам зовёт
+					//    OnPlayerJoinTeam → UpdatePistol(force) после Respawn, и второй
+					//    RemoveAllItems+GiveNamedItem в том же кадре был бы лишней живой
+					//    подменой оружия (класс, на котором 09.09 падал сервер).
+					//  - не бот: реплей-бот одевается своим кодом (kz/replays), и трогать его
+					//    руки этой правкой мы не подписывались.
+					auto controller = player->GetController();
+					if (controller && !player->IsFakeClient() && controller->m_iTeamNum() >= CS_TEAM_T
+						&& !player->timerService->IsChangingTeam())
+					{
+						player->pistolService->UpdatePistol(true);
+					}
 				}
 			}
 		}
