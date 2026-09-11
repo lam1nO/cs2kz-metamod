@@ -14,6 +14,10 @@
 #include "sdk/entity/cparticlesystem.h"
 #include "sdk/entity/cbeam.h"
 #include "entitykeyvalues.h"
+// Цепочка C++-классов созданной сущности (m_pClassInfo) — по ней ищутся ДОПОЛНИТЕЛЬНЫЕ поля
+// луча из рецепта пробника, см. ResolveLeadBeamExtras.
+#include "entity2/entityclass.h"
+#include "utils/schema.h"
 
 #include "utils/logging.h"
 #include "utils/simplecmds.h"
@@ -69,6 +73,12 @@
 #define KZ_LEAD_BEAM_WIDTH_DEFAULT 2.0f
 #define KZ_LEAD_BEAM_WIDTH_MIN     0.1f
 #define KZ_LEAD_BEAM_WIDTH_MAX     64.0f
+// Пауза между одинаковыми жалобами в лог (секунды). Все отказы этого файла сидят в путях,
+// которые зовутся до 384 раз за перерисовку и дважды в секунду, поэтому «строка на каждый
+// отказ» здесь означала бы залп. Дросселируем по времени, а не «один раз на процесс»: инвариант
+// логирования требует reason на КАЖДЫЙ отказ, а защёлка на весь запуск съедала бы квоту первым
+// же случаем и молчала бы про все следующие — другой природы и на другой карте.
+#define KZ_LEAD_WARN_THROTTLE_SEC 60.0
 // Сколько ПЕРЕСБОРОК пути (повторных разборов файла под новый допуск) разрешено вести
 // одновременно на весь сервер. У первичных загрузок такого потолка нет и не нужно: их разносит
 // сама сеть (резолв + докачка на каждого), а пересборка идёт с диска и стартует у всех от
@@ -267,6 +277,185 @@ namespace
 		return line->GetRefEHandle();
 	}
 
+	// Дроссель жалоб в лог: true — пора печатать. Часы движка на смене карты ОБНУЛЯЮТСЯ
+	// (известная грабля форка с persistent-таймерами), поэтому отметку «из будущего» трактуем
+	// как рестарт часов и разрешаем печать сразу — иначе после смены карты канал молчал бы.
+	bool LeadWarnDue(f64 &last)
+	{
+		const f64 now = g_pKZUtils->GetServerGlobals() ? g_pKZUtils->GetServerGlobals()->realtime : 0.0;
+		if (now < last)
+		{
+			last = -1.0e9;
+		}
+		if (now - last < KZ_LEAD_WARN_THROTTLE_SEC)
+		{
+			return false;
+		}
+		last = now;
+		return true;
+	}
+
+	// === Доп. поля луча из рецепта ПРОБНИКА =====================================================
+	// «Луч виден игроку» доказано на канарейке для СУПЕРМНОЖЕСТВА полей, которое писал пробник, а
+	// не для нашей пятёрки, и сырого лога той пробы у нас нет — выписать «что отдало set=ok»
+	// нечем. Поэтому здесь повторяется не список, а сам МЕХАНИЗМ пробника: поле пишется, только
+	// если оно есть в живой схеме реального класса этой сущности И его ширина совпала с тем, что
+	// мы пишем; нет поля — тихо пропускаем, ровно как set=missing у пробника. Значения — те же,
+	// что писала проба.
+	//
+	// Объявить их через SCHEMA_FIELD нельзя: на отсутствующем поле макрос даёт офсет 0, то есть
+	// запись в голову объекта. Именно поэтому в cbeam.h лежат только доказанные пять.
+	struct LeadBeamExtra
+	{
+		const char *name;
+		bool isFloat;
+		f32 floatValue;
+		i64 intValue;
+	};
+
+	// clang-format off
+	const LeadBeamExtra g_leadBeamExtras[] = {
+		{"m_flFrameRate",     true,  0.0f, 0},
+		{"m_flHDRColorScale", true,  1.0f, 0},
+		{"m_flFadeLength",    true,  0.0f, 0},
+		{"m_nBeamType",       false, 0.0f, 1}, // BEAM_POINTS в нумерации Source 1
+		{"m_nBeamFlags",      false, 0.0f, 0},
+		{"m_nNumBeamEnts",    false, 0.0f, 0},
+		{"m_nHaloIndex",      false, 0.0f, 0},
+	};
+	// clang-format on
+
+	struct LeadBeamExtraResolved
+	{
+		u32 offset;
+		int size;
+		i16 chain;
+		bool networked;
+		bool found;
+	};
+
+	// Состояние разбора схемы. Глобальное и изменяемое, но ТОЛЬКО главного потока: пишется в
+	// создании отрезка (тик/колбэк конвара), читается там же; в хуках движения не участвует.
+	LeadBeamExtraResolved g_leadBeamExtraFields[KZ_ARRAYSIZE(g_leadBeamExtras)] {};
+	bool g_leadBeamExtrasResolved = false;
+
+	// Спрашиваем схему ОДИН раз, на первом созданном луче, — то есть ИЗ ИГРЫ, а не из
+	// KZPlugin::Load: сверка схемы на загрузке отравляет кэш (networked=false у всего класса,
+	// память schema-cache-poisoned-at-plugin-load). Кэш общий на все отрезки законно: класс
+	// энтити у них один и тот же (KZ_LEAD_BEAM_CLASSNAME), значит и цепочка классов одна.
+	void ResolveLeadBeamExtras(CBaseEntity *ent)
+	{
+		g_leadBeamExtrasResolved = true;
+		if (!ent->m_pEntity || !ent->m_pEntity->m_pClass)
+		{
+			return;
+		}
+		// Буфер статический: 512 записей на стеке ради разовой сверки не нужны, а зовётся эта
+		// функция единственный раз и только с главного потока.
+		static schema::FieldDesc fields[512];
+		for (CEntityClassInfo *info = ent->m_pEntity->m_pClass->m_pClassInfo; info; info = info->m_pBaseClassInfo)
+		{
+			const char *className = info->m_pszCPPClassname;
+			if (!className)
+			{
+				break;
+			}
+			const int count = schema::GetClassFields(className, fields, (int)KZ_ARRAYSIZE(fields));
+			for (int i = 0; i < count; i++)
+			{
+				if (!fields[i].name)
+				{
+					continue;
+				}
+				for (u32 w = 0; w < KZ_ARRAYSIZE(g_leadBeamExtras); w++)
+				{
+					if (g_leadBeamExtraFields[w].found || V_stricmp(fields[i].name, g_leadBeamExtras[w].name) != 0)
+					{
+						continue;
+					}
+					// Ширину не угадываем: запись 4 байт в однобайтовое поле затёрла бы соседей.
+					// Целые пишем по ОБЪЯВЛЕННОЙ ширине (у Valve m_n* бывают однобайтовыми),
+					// вещественные — только при точном совпадении, как делал пробник.
+					const int size = fields[i].size;
+					const bool sizeOk = g_leadBeamExtras[w].isFloat ? (size == (int)sizeof(f32)) : (size == 1 || size == 2 || size == 4 || size == 8);
+					if (!sizeOk)
+					{
+						KZ_LOG_WARN(LogChannel::Replays, "[lead] beam_extra_skipped name=%s reason=size_mismatch declared_in=%s size=%i\n",
+									g_leadBeamExtras[w].name, className, size);
+						g_leadBeamExtraFields[w].found = true; // больше не искать: поле найдено, но негодное
+						g_leadBeamExtraFields[w].size = 0;
+						break;
+					}
+					g_leadBeamExtraFields[w].offset = fields[i].offset;
+					g_leadBeamExtraFields[w].size = size;
+					g_leadBeamExtraFields[w].networked = fields[i].networked;
+					g_leadBeamExtraFields[w].chain = schema::FindChainOffset(className, hash_32_fnv1a_const(className));
+					g_leadBeamExtraFields[w].found = true;
+					break;
+				}
+			}
+		}
+		for (u32 w = 0; w < KZ_ARRAYSIZE(g_leadBeamExtras); w++)
+		{
+			KZ_LOG_INFO(LogChannel::Replays, "[lead] beam_extra name=%s resolved=%i offset=0x%X size=%i networked=%i\n", g_leadBeamExtras[w].name,
+						g_leadBeamExtraFields[w].size > 0 ? 1 : 0, g_leadBeamExtraFields[w].offset, g_leadBeamExtraFields[w].size,
+						g_leadBeamExtraFields[w].networked ? 1 : 0);
+		}
+	}
+
+	// Ровно то, что делает Set() в SCHEMA_FIELD: сначала цепочка, иначе сама сущность.
+	void ApplyLeadBeamExtras(CBaseEntity *ent)
+	{
+		if (!g_leadBeamExtrasResolved)
+		{
+			ResolveLeadBeamExtras(ent);
+		}
+		for (u32 w = 0; w < KZ_ARRAYSIZE(g_leadBeamExtras); w++)
+		{
+			const LeadBeamExtraResolved &f = g_leadBeamExtraFields[w];
+			if (f.size <= 0)
+			{
+				continue;
+			}
+			const uintptr_t addr = reinterpret_cast<uintptr_t>(ent) + f.offset;
+			if (g_leadBeamExtras[w].isFloat)
+			{
+				*reinterpret_cast<f32 *>(addr) = g_leadBeamExtras[w].floatValue;
+			}
+			else
+			{
+				const i64 value = g_leadBeamExtras[w].intValue;
+				switch (f.size)
+				{
+					case 1:
+						*reinterpret_cast<i8 *>(addr) = (i8)value;
+						break;
+					case 2:
+						*reinterpret_cast<i16 *>(addr) = (i16)value;
+						break;
+					case 4:
+						*reinterpret_cast<i32 *>(addr) = (i32)value;
+						break;
+					default:
+						*reinterpret_cast<i64 *>(addr) = value;
+						break;
+				}
+			}
+			if (!f.networked)
+			{
+				continue;
+			}
+			if (f.chain != 0)
+			{
+				ChainNetworkStateChanged(reinterpret_cast<uintptr_t>(ent) + f.chain, f.offset);
+			}
+			else
+			{
+				EntityNetworkStateChanged(reinterpret_cast<uintptr_t>(ent), f.offset);
+			}
+		}
+	}
+
 	// Ширина луча из конвара, с клампом. Отрицательное, ноль и NaN — это опечатка оператора, а
 	// не «луч без ширины»: такой отрезок был бы невидим, и игрок решил бы, что сломан !lead.
 	// Сравнение написано как `!(want >= MIN)` намеренно: NaN проваливает ЛЮБОЕ сравнение,
@@ -274,11 +463,31 @@ namespace
 	f32 LeadBeamWidth()
 	{
 		const f32 want = cyb_lead_beam_width.Get();
+		f32 use = want;
+		const char *reason = nullptr;
 		if (!(want >= KZ_LEAD_BEAM_WIDTH_MIN))
 		{
-			return KZ_LEAD_BEAM_WIDTH_DEFAULT;
+			use = KZ_LEAD_BEAM_WIDTH_DEFAULT;
+			reason = "below_min_or_nan";
 		}
-		return want > KZ_LEAD_BEAM_WIDTH_MAX ? KZ_LEAD_BEAM_WIDTH_MAX : want;
+		else if (want > KZ_LEAD_BEAM_WIDTH_MAX)
+		{
+			use = KZ_LEAD_BEAM_WIDTH_MAX;
+			reason = "above_max";
+		}
+		if (reason)
+		{
+			// Кламп — это отказ ОПЕРАТОРУ: в конваре он видит своё значение, а луч получает
+			// другое. Значит машинная причина обязана быть в логе. Дроссель по времени: функция
+			// зовётся на каждый отрезок, до 384 раз за перерисовку.
+			static f64 lastWarn = -1.0e9;
+			if (LeadWarnDue(lastWarn))
+			{
+				KZ_LOG_WARN(LogChannel::Replays, "[lead] beam_width_clamped value=%.3f used=%.3f reason=%s range=%.1f..%.1f\n", want, use, reason,
+							KZ_LEAD_BEAM_WIDTH_MIN, KZ_LEAD_BEAM_WIDTH_MAX);
+			}
+		}
+		return use;
 	}
 
 	// НОВЫЙ путь (дефолт): отрезок — штатная сущность-луч. Доказано живьём пробником
@@ -290,21 +499,22 @@ namespace
 		if (!beam)
 		{
 			// Отказ фабрики — это «луча нет вообще», и молча его оставлять нельзя: игрок увидит
-			// пустоту и решит, что сломан !lead. Строка ОДНА на запуск: зовётся эта функция до
-			// 384 раз за перерисовку, и залп в лог был бы хуже отсутствия строки.
-			static bool warned = false;
-			if (!warned)
+			// пустоту и решит, что сломан !lead. Дроссель по ВРЕМЕНИ, а не защёлка на запуск:
+			// функция зовётся до 384 раз за перерисовку (залп недопустим), но и отказ через час
+			// работы, на другой карте и другой природы обязан попасть в лог.
+			static f64 lastWarn = -1.0e9;
+			if (LeadWarnDue(lastWarn))
 			{
-				warned = true;
 				KZ_LOG_WARN(LogChannel::Replays, "[lead] beam_create_failed class=%s note=falling_back_is_manual_set_cyb_lead_beam_entity_0\n",
 							KZ_LEAD_BEAM_CLASSNAME);
 			}
 			return CEntityHandle();
 		}
 		const f32 width = LeadBeamWidth();
-		// Поля пишем ДО спавна: в Source 1 CBeam::Spawn считает по концам габариты (RelinkBeam),
-		// и луч, которому конец дописали потом, мог бы отвалиться по PVS. Порядок «до + после»
-		// взят у пробника ровно потому, что в этом порядке луч на канарейке был виден.
+		// Ниже — РЕЦЕПТ ПРОБНИКА, повторённый целиком: порядок «поля до спавна → keyvalues →
+		// DispatchSpawn → Teleport → поля ещё раз». Видимость луча на канарейке доказана именно
+		// для него, и урезать его до «нужного нам минимума» нельзя: дефолты свежесозданной beam
+		// нам неизвестны, а другого живого доказательства у нас нет.
 		beam->m_vecEndPos(end);
 		beam->m_fWidth(width);
 		beam->m_fEndWidth(width);
@@ -317,12 +527,25 @@ namespace
 		// Метка «наша энтити» — дешёвый признак для фильтра передачи (kz_quiet.cpp): движку на
 		// не-частице она ничего не значит, зато читается одним полем, без вызова в движок.
 		beam->m_iTeamNum(KZ_LEAD_SEGMENT_TEAM);
+		// Остальные поля рецепта — те, что есть в живой схеме (см. ApplyLeadBeamExtras).
+		ApplyLeadBeamExtras(beam);
 
 		CEntityKeyValues *pKeyValues = new CEntityKeyValues();
 		pKeyValues->SetVector("origin", start);
 		pKeyValues->SetString("targetname", KZ_LEAD_TARGETNAME);
 		pKeyValues->SetFloat("width", width);
-		pKeyValues->SetInt("spawnflags", 1); // «start on»
+		// Остальные ключи — из того же рецепта пробника. Незнакомый ключ энтити просто
+		// игнорирует, поэтому цена их присутствия нулевая, а отсутствия — неизвестна.
+		// Материал (texture/material/BeamTexture) НЕ задаём намеренно: живая проба показала луч
+		// именно с material=- («без него рисуется»).
+		pKeyValues->SetFloat("BoltWidth", width);
+		pKeyValues->SetFloat("life", 0.0f);  // 0 = луч не гаснет сам, снимаем его мы
+		pKeyValues->SetInt("spawnflags", 1); // «start on» у env_beam в Source 1
+		pKeyValues->SetBool("start_active", true);
+		char renderColor[32];
+		V_snprintf(renderColor, sizeof(renderColor), "%d %d %d", (int)color.r(), (int)color.g(), (int)color.b());
+		pKeyValues->SetString("rendercolor", renderColor);
+		pKeyValues->SetInt("renderamt", (int)color.a());
 		// Хендл берём ДО спавна: класс может умереть прямо в DispatchSpawn, и тогда трогать
 		// указатель уже нельзя (пробник ловил это же условие).
 		const CEntityHandle handle = beam->GetRefEHandle();
@@ -331,17 +554,22 @@ namespace
 		{
 			return CEntityHandle();
 		}
-		// Ещё раз ПОСЛЕ спавна: спавн читает свои keyvalue (width, spawnflags) и мог переписать
-		// поля своими значениями. Это не «на всякий случай» — это порядок, проверенный пробой.
+		// Позиция ещё раз после спавна — так делал пробник (спавн мог её сбросить).
+		beam->Teleport(&start, nullptr, &vec3_origin);
+		// И поля ещё раз: спавн читает свои keyvalue (width, spawnflags, rendercolor) и мог
+		// переписать ими то, что мы поставили. Это не «на всякий случай» — это проверенный
+		// порядок.
 		beam->m_vecEndPos(end);
 		beam->m_fWidth(width);
 		beam->m_fEndWidth(width);
+		beam->m_fAmplitude(0.0f);
 		beam->m_bTurnedOff(false);
 		beam->m_clrRender(color);
+		ApplyLeadBeamExtras(beam);
 		// Метку команды повторяем ПОСЛЕ спавна обязательно, и это не дубль ради симметрии: на
 		// ней держится личная видимость луча. Сбрось её спавн (чем бы он ни выставлял команду) —
-		// фильтр передачи перестал бы узнавать наши лучи и они ушли бы ВСЕМ, а такой отказ
-		// заметен только живьём и только чужими глазами.
+		// фильтр передачи перестал бы узнавать наши лучи; страховкой служит сверка targetname в
+		// самом фильтре, но полагаться на страховку вместо метки нельзя.
 		beam->m_iTeamNum(KZ_LEAD_SEGMENT_TEAM);
 		return handle;
 	}

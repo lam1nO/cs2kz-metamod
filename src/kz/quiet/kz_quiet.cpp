@@ -20,6 +20,7 @@
 
 #include "utils/utils.h"
 #include "utils/simplecmds.h"
+#include "utils/logging.h"
 
 static_global class KZOptionServiceEventListener_Quiet : public KZOptionServiceEventListener
 {
@@ -28,6 +29,27 @@ static_global class KZOptionServiceEventListener_Quiet : public KZOptionServiceE
 		player->quietService->OnPlayerPreferencesLoaded();
 	}
 } optionEventListener;
+
+// Отрезок !lead с нашим targetname, но БЕЗ метки команды: один из двух ключей владения потерян.
+// Сам луч при этом остаётся личным (второй ключ отработал), но причина обязана быть в логе —
+// такой отказ иначе не виден никак. Дроссель по времени: место горячее (CheckTransmit на каждого
+// получателя), а часы движка на смене карты обнуляются, поэтому отметка «из будущего» = рестарт.
+static_function void LeadBeamMarkerLost(int team)
+{
+	static f64 lastWarn = -1.0e9;
+	const f64 now = g_pKZUtils->GetServerGlobals() ? g_pKZUtils->GetServerGlobals()->realtime : 0.0;
+	if (now < lastWarn)
+	{
+		lastWarn = -1.0e9;
+	}
+	if (now - lastWarn < 60.0)
+	{
+		return;
+	}
+	lastWarn = now;
+	KZ_LOG_WARN(LogChannel::Replays, "[lead] beam_marker_lost team=%i want=%i note=identified_by_targetname_visibility_still_private\n", team,
+				(int)KZ_LEAD_SEGMENT_TEAM);
+}
 
 void KZ::quiet::OnCheckTransmit(CCheckTransmitInfo **pInfo, int infoCount)
 {
@@ -119,12 +141,19 @@ void KZ::quiet::OnCheckTransmit(CCheckTransmitInfo **pInfo, int infoCount)
 		// луча на всех быть не должно), поэтому здесь логика ОБРАТНАЯ белому списку частиц:
 		// гасим наши лучи всем, КРОМЕ владельца.
 		//
-		// Порядок проверок — от самой дешёвой: метка команды (одно поле, без вызова в движок)
-		// отсеивает лучи САМОЙ КАРТЫ, если она их ставит, — их мы не трогаем ни для кого. Только
-		// после неё идёт двоичный поиск по своим отрезкам. NameMatches (targetname) здесь не
-		// нужен и намеренно не зовётся: это вызов в движок на каждую пару «энтити × получатель»,
-		// а сверка хендлов и так точна — хендл несёт серийный номер, поэтому переиспользованный
-		// индекс энтити даёт ДРУГОЙ хендл и в ownedSorted не найдётся.
+		// «Наш ли это отрезок» решают ДВА независимых ключа, и это не перестраховка, а выбор
+		// НАПРАВЛЕНИЯ ОТКАЗА. Если бы ключ был один (метка команды), то его потеря — спавном,
+		// чужим кодом, будущей правкой — означала бы `continue`, то есть луч уходит ВСЕМ: ровно
+		// тот исход, который владелец серверов запретил дословно, и невидимый со стороны сервера
+		// (в логах пусто, узнаём от игроков). Поэтому: метка не совпала — добиваем сверкой
+		// targetname, и только совпадение ОБОИХ «не наш» оставляет энтити в покое.
+		//
+		// Цена нулевая: NameMatches (вызов в движок) достаётся ТОЛЬКО лучам с чужой меткой, а на
+		// KZ-картах лучей класса `beam` не бывает вовсе — карты ставят env_beam, другой classname,
+		// и эта петля их не видит. Штатный путь остаётся «одно сравнение int + двоичный поиск».
+		//
+		// Расхождение ключей — это уже отказ, и он обязан попасть в лог с машинной причиной:
+		// иначе мы узнаем о нём тем самым способом, которого избегаем.
 		//
 		// Спектатор владельца луча его НЕ видит — как и на прежнем пути: отдельной ветки под
 		// наблюдение у !lead нет ни там, ни здесь, поведение совпадает намеренно.
@@ -132,7 +161,13 @@ void KZ::quiet::OnCheckTransmit(CCheckTransmitInfo **pInfo, int infoCount)
 		for (CBaseEntity *beamEnt = static_cast<CBaseEntity *>(iterLeadBeam.First()); beamEnt;
 			 beamEnt = static_cast<CBaseEntity *>(iterLeadBeam.Next()))
 		{
-			if (beamEnt->m_iTeamNum() != KZ_LEAD_SEGMENT_TEAM)
+			bool ours = beamEnt->m_iTeamNum() == KZ_LEAD_SEGMENT_TEAM;
+			if (!ours && beamEnt->m_pEntity && beamEnt->m_pEntity->NameMatches(KZ_LEAD_TARGETNAME))
+			{
+				ours = true;
+				LeadBeamMarkerLost(beamEnt->m_iTeamNum());
+			}
+			if (!ours)
 			{
 				continue; // луч карты, не наш — не трогаем
 			}
