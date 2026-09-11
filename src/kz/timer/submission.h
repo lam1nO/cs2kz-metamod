@@ -164,8 +164,9 @@ struct RunSubmission
 			// Явно вычисляется в SubmitLocal() в момент разбора Top-2 PB-запроса
 			// (save_time.cpp/queries/save_time.h): true, если этот ран стал новым
 			// личным рекордом (firstTime ИЛИ время совпало с текущим топ-PB).
-			// Используется только для overall — центральные реплеи не различают
-			// pro/overall (см. cyb_replay_upload.cpp).
+			// Аплоад центральных реплеев смотрит только на overall (pro/overall там
+			// не различаются, см. cyb_replay_upload.cpp); pro-копия нужна объявлению
+			// рекорда сети в AnnounceLocal() — ранг сам по себе рекорда не означает.
 			bool isNewPB {};
 		} overall, pro;
 	} localResponse;

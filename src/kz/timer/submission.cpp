@@ -23,6 +23,24 @@ CConVar<bool> kz_debug_announce_global("kz_debug_announce_global", FCVAR_NONE, "
 // Helpers
 // ---------------------------------------------------------------------------
 
+// Допуск при опознании собственного рана в топ-PB, пришедшем из БД. Точное
+// сравнение (fabs(pb - time) < EPSILON) тут не работает: RunTime приезжает через
+// ISQLResult::GetFloat, то есть f32, а время рана — f64, и относительная ошибка
+// f32 (~6e-8) перебивает EPSILON = 1e-6 уже примерно на 15 секундах рана. Из-за
+// этого «ран стал новым PB» молча не опознавалось на любом сколько-нибудь длинном
+// ране: центральный реплей не уезжал (TryUploadCentralReplay), а рекорд сети не
+// объявлялся. Строка этого рана в Times уже вставлена (sql_times_insert идёт первым
+// в той же транзакции, save_time.cpp), поэтому топ-PB не может быть лучше него
+// больше, чем на эту ошибку — сравниваем в одну сторону с допуском.
+// Допуск относительный: он растёт ровно так же, как ошибка f32, и держит от неё
+// постоянный запас (~16x), оставаясь на порядки уже реального зазора между ранами
+// (0.1 мс на ране в 100 с против тика 7.8 мс). Абсолютная миллисекунда была бы
+// шире физики субтика: ран, хуже своего же PB на полмиллисекунды, считался бы новым.
+static inline f64 PBMatchTolerance(f64 runTime)
+{
+	return MAX(1e-6, runTime * 1e-6);
+}
+
 static void BuildReplayPath(char *buf, int bufLen, const UUID_t &uuid)
 {
 	V_snprintf(buf, bufLen, "%s/%s.replay", KZ_REPLAY_PATH, uuid.ToString().c_str());
@@ -561,7 +579,7 @@ void RunSubmission::SubmitLocal(const char *uuid)
 		{
 			result->FetchRow();
 			f32 pb = result->GetFloat(0);
-			if (fabs(pb - sub->time) < EPSILON)
+			if (sub->time - pb < PBMatchTolerance(sub->time))
 			{
 				// Текущий топ-PB совпал с временем этого рана — значит именно
 				// этот ран и есть (новый) личный рекорд.
@@ -588,12 +606,15 @@ void RunSubmission::SubmitLocal(const char *uuid)
 		{
 			result = queries[4]->GetResultSet();
 			sub->localResponse.pro.firstTime = result->GetRowCount() == 1;
+			// Симметрично overall: первый pro-ран — сразу новый личный рекорд.
+			sub->localResponse.pro.isNewPB = sub->localResponse.pro.firstTime;
 			if (!sub->localResponse.pro.firstTime)
 			{
 				result->FetchRow();
 				f32 pb = result->GetFloat(0);
-				if (fabs(pb - sub->time) < EPSILON)
+				if (sub->time - pb < PBMatchTolerance(sub->time))
 				{
+					sub->localResponse.pro.isNewPB = true;
 					result->FetchRow();
 					f32 oldPB = result->GetFloat(0);
 					sub->localResponse.pro.pbDiff = sub->time - oldPB;
@@ -842,6 +863,14 @@ void RunSubmission::AnnounceRun()
 
 void RunSubmission::AnnounceLocal()
 {
+	// Рекорд сети (наши серверы non-global, истина по рекордам — общая база флота).
+	// Одного rank == 1 мало: sql_getmaprank считает место ЛУЧШЕГО времени игрока, и
+	// у действующего рекордсмена он равен единице на КАЖДОМ ране, включая медленные.
+	// Поэтому гейт — «ран стал новым личным рекордом И этот PB встал первым».
+	const bool serverWR = this->localResponse.overall.isNewPB && this->localResponse.overall.rank == 1;
+	// Pro-ветку БД заполняет только для ранов без телепортов (см. SubmitLocal).
+	const bool serverWRPro = this->teleports == 0 && this->localResponse.pro.isNewPB && this->localResponse.pro.rank == 1;
+
 	for (u32 i = 0; i < MAXPLAYERS + 1; i++)
 	{
 		KZPlayer *player = g_pKZPlayerManager->ToPlayer(i);
@@ -877,6 +906,38 @@ void RunSubmission::AnnounceLocal()
 			player->languageService->PrintChat(true, false, "Beat Course Info - Local (PRO)", this->localResponse.overall.rank,
 											   this->localResponse.overall.maxRank, diffText.c_str(), this->localResponse.pro.rank,
 											   this->localResponse.pro.maxRank, diffTextPro.c_str());
+		}
+
+		if (serverWR)
+		{
+			player->languageService->PrintChat(true, false, "Beat Course Info - New Server Record", this->player.name.c_str(),
+											   this->mode.name.c_str());
+		}
+		if (serverWRPro)
+		{
+			player->languageService->PrintChat(true, false, "Beat Course Info - New Server Record (PRO)", this->player.name.c_str(),
+											   this->mode.name.c_str());
+		}
+	}
+
+	// Звук — один раз на весь сервер (nub и pro одновременно дают один «holy shit»),
+	// отдельным проходом: внутри цикла объявления он бы сыграл каждому N раз.
+	// Саундивент kz.holyshit живёт в базовом workshop-аддоне cs2kz; PlaySoundToClient
+	// сам молчит, если аддон не смонтирован. Громкость — преф recordVolume (!options,
+	// 0 = выключить).
+	// Гейт `!this->global`: на global-серверах тот же звук играет AnnounceGlobal() в
+	// этом же тике, и без гейта global-WR звучал бы дважды. Наши серверы non-global,
+	// так что сейчас это защита на случай включения global, а не живая ветка.
+	if ((serverWR || serverWRPro) && !this->global)
+	{
+		for (u32 i = 0; i < MAXPLAYERS + 1; i++)
+		{
+			KZPlayer *player = g_pKZPlayerManager->ToPlayer(i);
+			if (!player->IsInGame() || player->IsFakeClient() || player->IsCSTV())
+			{
+				continue;
+			}
+			utils::PlaySoundToClient(player->GetPlayerSlot(), "kz.holyshit", player->optionService->GetPreferenceFloat("recordVolume", 1.0f));
 		}
 	}
 }
