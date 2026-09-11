@@ -12,6 +12,7 @@
 #include "kz/replays/playback.h"
 
 #include "sdk/entity/cparticlesystem.h"
+#include "sdk/entity/cbeam.h"
 #include "entitykeyvalues.h"
 
 #include "utils/logging.h"
@@ -58,11 +59,16 @@
 #define KZ_LEAD_BACK_BUDGET_DIV 4
 
 #define KZ_LEAD_PARTICLE "particles/ui/annotation/ui_annotation_line_segment.vpcf"
-// Свой targetname обязателен: по нему снятие отличает НАШИ отрезки от чужих энтити с
-// переиспользованным индексом (хендл может разрешиться в постороннюю сущность). Через
-// classname их не различить — NameMatches сверяет m_name, а не класс. Идиома от
-// KZ::zones::RemoveBoxEdges.
-#define KZ_LEAD_TARGETNAME "cyb_lead_seg"
+// KZ_LEAD_TARGETNAME (имя отрезка), KZ_LEAD_BEAM_CLASSNAME (энтити-класс луча) и
+// KZ_LEAD_SEGMENT_TEAM (метка «наша энтити») переехали в kz_lead.h: их читает ещё и фильтр
+// передачи (kz_quiet.cpp).
+//
+// Ширина луча по умолчанию. 2 — значение владельца серверов по итогам живого перебора 11.09.
+// Верхняя граница конвара — защита от опечатки: луч шириной в сотни юнитов закрыл бы игроку
+// пол-экрана. Нижняя (в LeadBeamWidth) — от нуля и NaN, при которых луч невидим.
+#define KZ_LEAD_BEAM_WIDTH_DEFAULT 2.0f
+#define KZ_LEAD_BEAM_WIDTH_MIN     0.1f
+#define KZ_LEAD_BEAM_WIDTH_MAX     64.0f
 // Сколько ПЕРЕСБОРОК пути (повторных разборов файла под новый допуск) разрешено вести
 // одновременно на весь сервер. У первичных загрузок такого потолка нет и не нужно: их разносит
 // сама сеть (резолв + докачка на каждого), а пересборка идёт с диска и стартует у всех от
@@ -198,10 +204,29 @@ CConVar<f32> cyb_lead_rdp("cyb_lead_rdp", FCVAR_NONE,
 						  0.25f,
 						  [](CConVar<f32> *, CSplitScreenSlot, const f32 *newValue, const f32 *) { LeadRdpChanged(newValue ? *newValue : 0.0f); });
 
+// Примитив отрезка. Дефолт — ШТАТНАЯ сущность-луч (`beam`, CBeam): решение владельца серверов
+// по итогам живой пробы 11.09. Ноль возвращает прежний путь на info_particle_system —
+// дорога назад одной командой, без пересборки, если в бою луч окажется хуже частиц.
+// Смешанных окон не бывает: колбэк перерисовывает отрезки, а RefreshSegments обнуляет окно,
+// из-за чего ApplyWindow не находит пересечения и снимает ВСЕ прежние сущности разом.
+CConVar<bool> cyb_lead_beam_entity("cyb_lead_beam_entity", FCVAR_NONE,
+								   "Draw !lead segments with the native beam entity (default) instead of info_particle_system.", true,
+								   [](CConVar<bool> *, CSplitScreenSlot, const bool *, const bool *) { LeadLookChanged(); });
+
+// Ширина отрезка-луча в юнитах (m_fWidth/m_fEndWidth). Только для сущности-луча: у частицы
+// толщину задаёт сам ассет, и этот конвар на неё не влияет. Применяется к СЛЕДУЮЩЕЙ
+// перерисовке, но колбэк перерисовывает отрезки сразу всем, у кого луч включён, — то есть
+// правка по RCON видна живьём, как у cyb_lead_particle.
+CConVar<f32> cyb_lead_beam_width("cyb_lead_beam_width", FCVAR_NONE,
+								 "Lead beam segment width in units (beam entity only): 0.1..64, default 2. Applied to the next segment "
+								 "rebuild, which the change callback triggers right away.",
+								 KZ_LEAD_BEAM_WIDTH_DEFAULT, [](CConVar<f32> *, CSplitScreenSlot, const f32 *, const f32 *) { LeadLookChanged(); });
+
 namespace
 {
 	// Копия CreateMeasureBeam (kz_measure.cpp): тот же примитив, свой цвет на отрезок.
-	CEntityHandle CreateLeadSegment(const Vector &start, const Vector &end, const Color &color)
+	// ПРЕЖНИЙ путь: живёт под cyb_lead_beam_entity 0 как дорога назад (см. конвар).
+	CEntityHandle CreateLeadParticleSegment(const Vector &start, const Vector &end, const Color &color)
 	{
 		CParticleSystem *line = utils::CreateEntityByName<CParticleSystem>("info_particle_system");
 		if (!line)
@@ -242,8 +267,93 @@ namespace
 		return line->GetRefEHandle();
 	}
 
-	// Снятие одного отрезка. Хендл сам по себе ничего не гарантирует: индекс энтити
-	// переиспользуется, и без сверки targetname мы могли бы снести чужую сущность.
+	// Ширина луча из конвара, с клампом. Отрицательное, ноль и NaN — это опечатка оператора, а
+	// не «луч без ширины»: такой отрезок был бы невидим, и игрок решил бы, что сломан !lead.
+	// Сравнение написано как `!(want >= MIN)` намеренно: NaN проваливает ЛЮБОЕ сравнение,
+	// поэтому только такая форма его ловит.
+	f32 LeadBeamWidth()
+	{
+		const f32 want = cyb_lead_beam_width.Get();
+		if (!(want >= KZ_LEAD_BEAM_WIDTH_MIN))
+		{
+			return KZ_LEAD_BEAM_WIDTH_DEFAULT;
+		}
+		return want > KZ_LEAD_BEAM_WIDTH_MAX ? KZ_LEAD_BEAM_WIDTH_MAX : want;
+	}
+
+	// НОВЫЙ путь (дефолт): отрезок — штатная сущность-луч. Доказано живьём пробником
+	// kz_beam_probe на канарейке 11.09: класс CBeam существует, поля сетевые, луч виден игроку
+	// и БЕЗ заданного материала.
+	CEntityHandle CreateLeadBeamSegment(const Vector &start, const Vector &end, const Color &color)
+	{
+		CBeam *beam = utils::CreateEntityByName<CBeam>(KZ_LEAD_BEAM_CLASSNAME);
+		if (!beam)
+		{
+			// Отказ фабрики — это «луча нет вообще», и молча его оставлять нельзя: игрок увидит
+			// пустоту и решит, что сломан !lead. Строка ОДНА на запуск: зовётся эта функция до
+			// 384 раз за перерисовку, и залп в лог был бы хуже отсутствия строки.
+			static bool warned = false;
+			if (!warned)
+			{
+				warned = true;
+				KZ_LOG_WARN(LogChannel::Replays, "[lead] beam_create_failed class=%s note=falling_back_is_manual_set_cyb_lead_beam_entity_0\n",
+							KZ_LEAD_BEAM_CLASSNAME);
+			}
+			return CEntityHandle();
+		}
+		const f32 width = LeadBeamWidth();
+		// Поля пишем ДО спавна: в Source 1 CBeam::Spawn считает по концам габариты (RelinkBeam),
+		// и луч, которому конец дописали потом, мог бы отвалиться по PVS. Порядок «до + после»
+		// взят у пробника ровно потому, что в этом порядке луч на канарейке был виден.
+		beam->m_vecEndPos(end);
+		beam->m_fWidth(width);
+		beam->m_fEndWidth(width);
+		// 0 — прямая линия. Ненулевая амплитуда дала бы «волну», которая врёт о маршруте.
+		beam->m_fAmplitude(0.0f);
+		beam->m_bTurnedOff(false);
+		// Альфу держим 255: осмысленность полупрозрачности зависит от m_nRenderMode, который мы
+		// не задаём вовсе, — а «наполовину прозрачный луч» непроверен и на канарейке не нужен.
+		beam->m_clrRender(color);
+		// Метка «наша энтити» — дешёвый признак для фильтра передачи (kz_quiet.cpp): движку на
+		// не-частице она ничего не значит, зато читается одним полем, без вызова в движок.
+		beam->m_iTeamNum(KZ_LEAD_SEGMENT_TEAM);
+
+		CEntityKeyValues *pKeyValues = new CEntityKeyValues();
+		pKeyValues->SetVector("origin", start);
+		pKeyValues->SetString("targetname", KZ_LEAD_TARGETNAME);
+		pKeyValues->SetFloat("width", width);
+		pKeyValues->SetInt("spawnflags", 1); // «start on»
+		// Хендл берём ДО спавна: класс может умереть прямо в DispatchSpawn, и тогда трогать
+		// указатель уже нельзя (пробник ловил это же условие).
+		const CEntityHandle handle = beam->GetRefEHandle();
+		beam->DispatchSpawn(pKeyValues);
+		if (!handle.Get())
+		{
+			return CEntityHandle();
+		}
+		// Ещё раз ПОСЛЕ спавна: спавн читает свои keyvalue (width, spawnflags) и мог переписать
+		// поля своими значениями. Это не «на всякий случай» — это порядок, проверенный пробой.
+		beam->m_vecEndPos(end);
+		beam->m_fWidth(width);
+		beam->m_fEndWidth(width);
+		beam->m_bTurnedOff(false);
+		beam->m_clrRender(color);
+		// Метку команды повторяем ПОСЛЕ спавна обязательно, и это не дубль ради симметрии: на
+		// ней держится личная видимость луча. Сбрось её спавн (чем бы он ни выставлял команду) —
+		// фильтр передачи перестал бы узнавать наши лучи и они ушли бы ВСЕМ, а такой отказ
+		// заметен только живьём и только чужими глазами.
+		beam->m_iTeamNum(KZ_LEAD_SEGMENT_TEAM);
+		return handle;
+	}
+
+	CEntityHandle CreateLeadSegment(const Vector &start, const Vector &end, const Color &color)
+	{
+		return cyb_lead_beam_entity.Get() ? CreateLeadBeamSegment(start, end, color) : CreateLeadParticleSegment(start, end, color);
+	}
+
+	// Снятие одного отрезка — ОБОИХ примитивов: сверка идёт по targetname, а он у частицы и у
+	// луча один. Хендл сам по себе ничего не гарантирует: индекс энтити переиспользуется, и без
+	// сверки targetname мы могли бы снести чужую сущность.
 	void RemoveLeadSegment(const CEntityHandle &handle)
 	{
 		CEntityInstance *inst = GameEntitySystem() ? GameEntitySystem()->GetEntityInstance(handle) : nullptr;
@@ -719,10 +829,10 @@ void KZLeadService::RebuildOwnedIndex()
 	std::sort(this->ownedSorted.begin(), this->ownedSorted.end(), [](const CEntityHandle &a, const CEntityHandle &b) { return a < b; });
 }
 
-bool KZLeadService::OwnsParticle(const CEntityHandle &handle) const
+bool KZLeadService::OwnsSegmentEntity(const CEntityHandle &handle) const
 {
-	// Горячий путь CheckTransmit: на каждую помеченную частицу, на каждого получателя.
-	// Отсюда двоичный поиск (до 384 отрезков × десятки частиц × число игроков линейным
+	// Горячий путь CheckTransmit: на каждую помеченную энтити, на каждого получателя.
+	// Отсюда двоичный поиск (до 384 отрезков × десятки помеченных энтити × число игроков линейным
 	// сканом — десятки тысяч сравнений за тик).
 	return std::binary_search(this->ownedSorted.begin(), this->ownedSorted.end(), handle,
 							  [](const CEntityHandle &a, const CEntityHandle &b) { return a < b; });

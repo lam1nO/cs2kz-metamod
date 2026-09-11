@@ -100,15 +100,48 @@ void KZ::quiet::OnCheckTransmit(CCheckTransmitInfo **pInfo, int infoCount)
 			{
 				continue;
 			}
-			// Отрезки луча !lead — ровно по той же причине: метка CUSTOM_PARTICLE_SYSTEM_TEAM
-			// означает «не видит никто», и владельцу его собственный луч возвращает эта ветка.
-			// HasOwnedParticles() первым: у игрока без луча сравнений быть не должно.
-			if (targetPlayer->leadService && targetPlayer->leadService->HasOwnedParticles()
-				&& targetPlayer->leadService->OwnsParticle(particleSystem->GetRefEHandle()))
+			// Отрезки луча !lead на ПРЕЖНЕМ примитиве (cyb_lead_beam_entity 0) — ровно по той же
+			// причине: метка CUSTOM_PARTICLE_SYSTEM_TEAM означает «не видит никто», и владельцу
+			// его собственный луч возвращает эта ветка.
+			// HasOwnedSegments() первым: у игрока без луча сравнений быть не должно.
+			if (targetPlayer->leadService && targetPlayer->leadService->HasOwnedSegments()
+				&& targetPlayer->leadService->OwnsSegmentEntity(particleSystem->GetRefEHandle()))
 			{
 				continue;
 			}
 			pTransmitInfo->m_pTransmitEdict->Clear(particleSystem->GetEntityIndex().Get());
+		}
+
+		// Отрезки луча !lead на ШТАТНОЙ сущности-луче (дефолт, cyb_lead_beam_entity 1). Петля
+		// выше их не видит вовсе — она перебирает только info_particle_system, и проба пробником
+		// показала quiet_filtered=0, то есть сущность-луч уходит ВСЕМ по общим правилам. Луч
+		// обязан оставаться ЛИЧНЫМ (требование владельца серверов: у каждого свой !lead, общего
+		// луча на всех быть не должно), поэтому здесь логика ОБРАТНАЯ белому списку частиц:
+		// гасим наши лучи всем, КРОМЕ владельца.
+		//
+		// Порядок проверок — от самой дешёвой: метка команды (одно поле, без вызова в движок)
+		// отсеивает лучи САМОЙ КАРТЫ, если она их ставит, — их мы не трогаем ни для кого. Только
+		// после неё идёт двоичный поиск по своим отрезкам. NameMatches (targetname) здесь не
+		// нужен и намеренно не зовётся: это вызов в движок на каждую пару «энтити × получатель»,
+		// а сверка хендлов и так точна — хендл несёт серийный номер, поэтому переиспользованный
+		// индекс энтити даёт ДРУГОЙ хендл и в ownedSorted не найдётся.
+		//
+		// Спектатор владельца луча его НЕ видит — как и на прежнем пути: отдельной ветки под
+		// наблюдение у !lead нет ни там, ни здесь, поведение совпадает намеренно.
+		EntityInstanceByClassIter_t iterLeadBeam(NULL, KZ_LEAD_BEAM_CLASSNAME);
+		for (CBaseEntity *beamEnt = static_cast<CBaseEntity *>(iterLeadBeam.First()); beamEnt;
+			 beamEnt = static_cast<CBaseEntity *>(iterLeadBeam.Next()))
+		{
+			if (beamEnt->m_iTeamNum() != KZ_LEAD_SEGMENT_TEAM)
+			{
+				continue; // луч карты, не наш — не трогаем
+			}
+			if (targetPlayer->leadService && targetPlayer->leadService->HasOwnedSegments()
+				&& targetPlayer->leadService->OwnsSegmentEntity(beamEnt->GetRefEHandle()))
+			{
+				continue; // свой луч владельцу
+			}
+			pTransmitInfo->m_pTransmitEdict->Clear(beamEnt->GetEntityIndex().Get());
 		}
 
 		// Сущности panorama-худа: каждому получателю оставляем ТОЛЬКО его собственную.

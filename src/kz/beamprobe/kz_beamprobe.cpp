@@ -43,9 +43,33 @@
 // Имена ЭНТИТИ-классов (для CreateEntityByName). Порядок важен только для читаемости вывода.
 // info_particle_system в конце — контроль: он заведомо создаётся, и если не создался он,
 // сломан сам пробник, а не гипотеза про лучи.
+//
+// ЗАПРЕЩЁННЫЙ КАНДИДАТ: `env_laser`. Спавн его 11.09 ПОВЕСИЛ ГЛАВНЫЙ ПОТОК сервера —
+// канарейку пришлось пересоздавать. В список не возвращать ни при каких условиях; если
+// когда-нибудь понадобится лазер, сперва выясняется, почему он вешает поток, и только на
+// отдельном стенде, а не на канарейке с игроками.
 static_global const char *g_probeEntityClasses[] = {
-	"beam", "env_beam", "env_laser", "env_sprite", "beam_spotlight", "env_beam_spotlight", "path_particle_rope", "info_particle_system",
+	"beam", "env_beam", "env_sprite", "beam_spotlight", "env_beam_spotlight", "path_particle_rope", "info_particle_system",
 };
+
+// Классы, которые пробник не создаёт НИКОГДА, чем бы их ни попросили. Список отдельный от
+// списка кандидатов намеренно: убрать имя из кандидатов мало — его можно назвать руками
+// аргументом команды, а цена ошибки здесь уже заплачена (вис главного потока).
+static_global const char *g_probeBannedClasses[] = {
+	"env_laser",
+};
+
+static_global bool IsProbeClassBanned(const char *classname)
+{
+	for (u32 i = 0; i < KZ_ARRAYSIZE(g_probeBannedClasses); i++)
+	{
+		if (KZ_STREQI(classname, g_probeBannedClasses[i]))
+		{
+			return true;
+		}
+	}
+	return false;
+}
 
 // Имена классов ЖИВОЙ СХЕМЫ сервера (для schema::GetClassFields). CParticleSystem и
 // CBaseModelEntity — контроль: они точно есть, и found=1 у них доказывает, что запрос рабочий.
@@ -53,6 +77,8 @@ static_global const char *g_probeSchemaClasses[] = {
 	"CBeam",      "CEnvBeam",          "CEnvLaser",       "CBeamSpotlight",  "CSprite",
 	"CEnvSprite", "CPathParticleRope", "CEnvLaserTarget", "CParticleSystem", "CBaseModelEntity",
 };
+// CEnvLaser выше остаётся ТОЛЬКО в списке схемы: schema-ветка ничего не создаёт, она лишь
+// читает описание класса. Спавнить его запрещено — см. g_probeBannedClasses.
 
 // Поля ищем ТОЛЬКО по настоящей цепочке C++-классов созданной сущности (её отдаёт движок,
 // см. CollectClassChain). Список «правдоподобных» классов тут был бы миной: офсет поля CBeam,
@@ -456,6 +482,11 @@ CON_COMMAND_F(kz_beam_probe,
 	}
 
 	const char *wantClass = args.ArgC() >= 3 ? args.Arg(2) : "all";
+	if (IsProbeClassBanned(wantClass))
+	{
+		Msg("beamprobe denied reason=class_banned class=%s note=hangs_main_thread\n", wantClass);
+		return;
+	}
 	f32 lifetime = args.ArgC() >= 4 ? (f32)utils::StringToFloat(args.Arg(3)) : KZ_BEAMPROBE_DEF_LIFE;
 	f32 width = args.ArgC() >= 5 ? (f32)utils::StringToFloat(args.Arg(4)) : KZ_BEAMPROBE_DEF_WIDTH;
 	const char *material = args.ArgC() >= 6 ? args.Arg(5) : "";
@@ -501,6 +532,12 @@ CON_COMMAND_F(kz_beam_probe,
 		const char *classname = g_probeEntityClasses[i];
 		if (!KZ_STREQI(wantClass, "all") && !KZ_STREQI(wantClass, classname))
 		{
+			continue;
+		}
+		// Вторая застава на случай, если запрещённое имя когда-нибудь вернут в кандидаты.
+		if (IsProbeClassBanned(classname))
+		{
+			Msg("beamprobe skip class=%s reason=banned note=hangs_main_thread\n", classname);
 			continue;
 		}
 		// Каждый кандидат — свой вертикальный столб со сдвигом вбок, чтобы по месту было

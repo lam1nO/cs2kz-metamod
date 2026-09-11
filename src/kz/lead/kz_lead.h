@@ -3,13 +3,22 @@
  * вызвавшему игроку, в скользящем окне вокруг него.
  *
  * Почему окно, а не весь путь: в CS2 у серверных плагинов нет temp-entity лучей, каждый
- * отрезок — сетевая сущность (info_particle_system с ui_annotation_line_segment.vpcf, тот
- * же примитив, что у !measure и рёбер зон). Весь маршрут — это тысячи сущностей, окно —
- * десятки (потолок `cybLeadMaxSegments`, дефолт 384).
+ * отрезок — сетевая сущность. Весь маршрут — это тысячи сущностей, окно — десятки (потолок
+ * `cybLeadMaxSegments`, дефолт 384).
  *
- * Видимость только владельцу держится на KZ::quiet::OnCheckTransmit: метка
- * CUSTOM_PARTICLE_SYSTEM_TEAM означает «не видит никто», и обратно в белый список луч
- * возвращает именно OwnsParticle отсюда.
+ * Примитив отрезка — ШТАТНАЯ сущность-луч `beam` (CBeam, sdk/entity/cbeam.h): решение
+ * владельца серверов по итогам живой пробы 11.09, дефолт конвара cyb_lead_beam_entity.
+ * Прежний путь на info_particle_system с ui_annotation_line_segment.vpcf оставлен под тем же
+ * конваром (значение 0) как дорога назад, если в бою луч окажется хуже частиц.
+ *
+ * Видимость только владельцу держится на KZ::quiet::OnCheckTransmit, и у двух примитивов она
+ * устроена ЗЕРКАЛЬНО, но с разных сторон:
+ *   * частица помечена CUSTOM_PARTICLE_SYSTEM_TEAM, что для info_particle_system значит «не
+ *     видит никто», и владельцу её возвращает белый список (OwnsSegmentEntity отсюда);
+ *   * сущность-луч фильтр не гасит вовсе (проба дала quiet_filtered=0), поэтому для неё
+ *     логика ОБРАТНАЯ: своя ветка фильтра гасит луч всем, КРОМЕ владельца.
+ * Метка команды на луче — та же (KZ_LEAD_SEGMENT_TEAM): на не-частице она движку ничего не
+ * значит и служит только дешёвым признаком «эта энтити наша» в горячем CheckTransmit.
  *
  * Путь режим-зависим (спека §5.1): смена режима или карты гасит луч.
  */
@@ -17,12 +26,28 @@
 
 #include "../kz.h"
 #include "kz/replays/cyb_replay_download.h"
+// CUSTOM_PARTICLE_SYSTEM_TEAM: значение метки «энтити создана плагином» (см. KZ_LEAD_SEGMENT_TEAM).
+#include "sdk/entity/cparticlesystem.h"
 
 #include <atomic>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
+
+// Свой targetname обязателен: по нему снятие отличает НАШИ отрезки от чужих энтити с
+// переиспользованным индексом (хендл может разрешиться в постороннюю сущность). Через
+// classname их не различить — NameMatches сверяет m_name, а не класс. Идиома от
+// KZ::zones::RemoveBoxEdges. Он ОДИН на оба примитива: классы у них разные, и перепутать
+// отрезки нельзя, а снятие (RemoveLeadSegment) работает одинаково для обоих.
+#define KZ_LEAD_TARGETNAME "cyb_lead_seg"
+// Энтити-класс отрезка на сущности-луче. Базовый `beam`, а НЕ `env_beam`: выбор владельца
+// серверов — логика карты (входы/выходы env_beam) нам не нужна.
+#define KZ_LEAD_BEAM_CLASSNAME "beam"
+// Метка «эта энтити создана плагином» в m_iTeamNum. Значение то же, что у частиц
+// (CUSTOM_PARTICLE_SYSTEM_TEAM, sdk/entity/cparticlesystem.h) — своё имя здесь только чтобы
+// в фильтре было видно, что на луче это НЕ «частица», а дешёвый признак владения.
+#define KZ_LEAD_SEGMENT_TEAM CUSTOM_PARTICLE_SYSTEM_TEAM
 
 class KZLeadService : public KZBaseService
 {
@@ -115,9 +140,11 @@ public:
 		this->resync = true;
 	}
 
-	bool OwnsParticle(const CEntityHandle &handle) const;
+	// Владеет ли игрок этой энтити-отрезком. Имя без «particle»: примитивов теперь два
+	// (сущность-луч по умолчанию, частица под конваром), а вопрос у фильтра один и тот же.
+	bool OwnsSegmentEntity(const CEntityHandle &handle) const;
 
-	bool HasOwnedParticles() const
+	bool HasOwnedSegments() const
 	{
 		return !this->segments.empty();
 	}
@@ -178,7 +205,7 @@ private:
 	f32 totalLen = 0.0f;
 	// Окно: segments[i] — отрезок path[windowFrom + i] → path[windowFrom + i + 1].
 	std::vector<CEntityHandle> segments;
-	// Те же хендлы, отсортированные, — для двоичного поиска в OwnsParticle (горячий путь
+	// Те же хендлы, отсортированные, — для двоичного поиска в OwnsSegmentEntity (горячий путь
 	// CheckTransmit: на каждую помеченную частицу, на каждого получателя). Идиома взята у
 	// KZZonesService::showBeams по той же причине.
 	std::vector<CEntityHandle> ownedSorted;
