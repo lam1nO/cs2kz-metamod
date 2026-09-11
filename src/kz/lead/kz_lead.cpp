@@ -63,8 +63,20 @@
 // classname их не различить — NameMatches сверяет m_name, а не класс. Идиома от
 // KZ::zones::RemoveBoxEdges.
 #define KZ_LEAD_TARGETNAME "cyb_lead_seg"
+// Сколько ПЕРЕСБОРОК пути (повторных разборов файла под новый допуск) разрешено вести
+// одновременно на весь сервер. У первичных загрузок такого потолка нет и не нужно: их разносит
+// сама сеть (резолв + докачка на каждого), а пересборка идёт с диска и стартует у всех от
+// ОДНОЙ правки конвара. Каждый разбор держит в памяти файл целиком (до 32 МБ) плюс
+// распакованные кадры, поэтому потолок жёсткий; кому не хватило места — подождёт своего
+// прохода, метка пересборки с него не снимается.
+#define KZ_LEAD_REBUILD_BUDGET 2
 
 using namespace KZ::replaysystem;
+
+// Занятые места бюджета выше. Инкремент — на главном потоке перед стартом потока, декремент —
+// САМИМ рабочим потоком в конце разбора: только так место освобождается и тогда, когда игрок
+// ушёл, а сервис с его pending давно удалён.
+static std::atomic<i32> g_leadRebuildsInFlight {0};
 
 // === Живая настройка вида луча (конвары, а НЕ cybLead* из серверного cfg) ===================
 // Серверный cfg (KZOptionService::GetOptionInt/Float) читается ОДИН раз в KZPlugin::Load — по
@@ -116,11 +128,16 @@ static_function void LeadCpIndexChanged(i32 index)
 	LeadLookChanged();
 }
 
-// Допуск живьём не применить: он работает на СБОРКЕ пути (рабочий поток разбора файла), а не
-// на отрисовке. Честно говорим это в лог, чтобы на канарейке не ждали мгновенного эффекта.
+// Допуск работает на СБОРКЕ пути (рабочий поток разбора файла), а не на отрисовке, — одной
+// перерисовкой отрезков его не применить. Поэтому правка конвара сама помечает живые пути под
+// пересборку: файл уже в кэше downloads/, повторный разбор идёт на рабочем потоке, игрок
+// ничего не набирает. Прежний совет «!lead off + !lead» был вдобавок неверен: при включённом
+// элементе худа «Прогресс» путь держится постоянно, Disable его не освобождает, и повторный
+// !lead поднимал луч по ТЕМ ЖЕ вершинам.
 static_function void LeadRdpChanged(f32 value)
 {
-	KZ_LOG_INFO(LogChannel::Replays, "[lead] rdp_tolerance_changed value=%.2f note=applies_on_next_path_build_use_lead_off_then_lead\n", value);
+	KZ_LOG_INFO(LogChannel::Replays, "[lead] rdp_tolerance_changed value=%.2f note=live_paths_rebuilt_from_cached_replay\n", value);
+	KZLeadService::RebuildAllPaths("cvar_rdp");
 }
 
 // Ассет отрезка. Дефолт — стоковая линия-аннотация (тот же примитив у !measure и рёбер зон).
@@ -167,11 +184,12 @@ CConVar<i32> cyb_lead_max_segments("cyb_lead_max_segments", FCVAR_NONE,
 
 // Допуск упрощения пути (юниты): меньше — вершины ГУЩЕ (и сущностей больше), больше —
 // срезанные углы. Дефолт 1.0 вместо прежних 2.0 — «в два раза больше точек» (просьба
-// пользователя 10.09). Применяется при СБОРКЕ пути, то есть с ближайшей загрузки: живая правка
-// этого конвара сама луч не перерисует, нужен `!lead off` + `!lead` (файл уже в кэше
-// downloads/, сети это не стоит) — см. колбэк.
+// пользователя 10.09). Применяется при СБОРКЕ пути, но правка конвара сама пересобирает живые
+// пути из кэшированного файла (см. колбэк), то есть действует без команд игрока.
 CConVar<f32> cyb_lead_rdp("cyb_lead_rdp", FCVAR_NONE,
-						  "Path simplification tolerance in units; lower = denser vertices. Applies on the next path build.", 1.0f,
+						  "Path simplification tolerance in units; lower = denser vertices. Live paths are rebuilt from the cached "
+						  "replay file when this changes.",
+						  1.0f,
 						  [](CConVar<f32> *, CSplitScreenSlot, const f32 *newValue, const f32 *) { LeadRdpChanged(newValue ? *newValue : 0.0f); });
 
 namespace
@@ -447,6 +465,12 @@ namespace
 			pending->failReason = failReason;
 			pending->cutWarn = cutWarn;
 		}
+		if (pending->rebuildBudget)
+		{
+			// Место в бюджете освобождаем ДО метки готовности: к моменту, когда главный поток
+			// увидит done, оно уже свободно, и очередь на пересборку не простаивает лишний проход.
+			g_leadRebuildsInFlight--;
+		}
 		pending->done = true;
 	}
 } // namespace
@@ -518,6 +542,13 @@ void KZLeadService::ReleasePath()
 	this->ticksSinceUpdate = 0;
 	this->modeName[0] = '\0';
 	this->pathCourse = -1;
+	// Пересобирать больше нечего: файл пути отпущен вместе с ним.
+	this->pathFile.clear();
+	this->pathFile.shrink_to_fit();
+	this->pathRdp = -1.0f;
+	this->rebuildPending = false;
+	this->rebuildDelay = 0;
+	this->pendingIsRebuild = false;
 }
 
 void KZLeadService::ClearSegments(bool keepEntities)
@@ -584,6 +615,98 @@ void KZLeadService::RefreshAllSegments(const char *reason)
 	}
 }
 
+void KZLeadService::RebuildAllPaths(const char *reason)
+{
+	// Те же две проверки, что у RefreshAllSegments: колбэк конвара срабатывает и на загрузке
+	// конфигов (менеджера игроков ещё нет), и на выгрузке плагина.
+	if (g_KZPlugin.unloading || !g_pKZPlayerManager)
+	{
+		return;
+	}
+	// Граница строго `i < MAXPLAYERS` — та же, что в OnMapChanged (разбор там же).
+	for (i32 i = 0; i < MAXPLAYERS; i++)
+	{
+		KZPlayer *player = g_pKZPlayerManager->ToPlayer(CPlayerSlot(i));
+		if (player && player->leadService)
+		{
+			player->leadService->ArmPathRebuild(reason);
+		}
+	}
+}
+
+void KZLeadService::ArmPathRebuild(const char *reason)
+{
+	if (this->pathFile.empty() || this->path.empty())
+	{
+		// Пути нет (или он не от файла) — пересобирать нечего: новый допуск снимется снимком
+		// в OnFileReady при ближайшей штатной загрузке.
+		return;
+	}
+	if (!this->beam && !this->progress)
+	{
+		// Путь никому не нужен — тратить на него разбор незачем. Такого состояния быть не
+		// должно (последний потребитель освобождает путь), но проверка дешевле допущения.
+		return;
+	}
+	this->rebuildPending = true;
+	// Разброс по слоту — В ПРОХОДАХ дросселированной ветки, как armCooldown в ResetState, а НЕ
+	// в тиках, как в RefreshSegments. Там разброс на 32 тика оправдан: перерисовка отрезков
+	// стоит главному потоку создания сущностей, и растягивать её на секунды незачем. Здесь
+	// цена другая — чтение файла до 32 МБ и распакованные кадры в памяти на КАЖДЫЙ разбор, и
+	// сетевой фазы, которая разносит первичные загрузки сама, у пересборки нет вовсе. Поэтому
+	// единица та же, что у пауз загрузки: до KZ_LEAD_ARM_COOLDOWN_CYCLES проходов (≈4 с).
+	// Фазу ticksSinceUpdate при этом НЕ трогаем: сдвигать проценту его шаг ради пересборки
+	// незачем, а разброс даёт rebuildDelay.
+	this->rebuildDelay = this->player->GetPlayerSlot().Get() % KZ_LEAD_ARM_COOLDOWN_CYCLES;
+	KZ_LOG_DEBUG(LogChannel::Replays, "[lead] path_rebuild_armed reason=%s steam_id=%llu\n", reason,
+				 (unsigned long long)this->player->GetSteamId64());
+}
+
+void KZLeadService::StartPathRebuild()
+{
+	if (this->loading || this->pending)
+	{
+		// Загрузка уже идёт: её снимок допуска либо свежий (снимается в OnFileReady, то есть
+		// уже с новым значением), либо устареет — и тогда эта же ветка переспросит пересборку
+		// следующим проходом. Флаг держим.
+		return;
+	}
+	if (this->pathFile.empty() || this->path.empty())
+	{
+		this->rebuildPending = false;
+		return;
+	}
+	const f32 tol = cyb_lead_rdp.Get();
+	if (tol == this->pathRdp)
+	{
+		// Значение вернули к тому, которым путь и построен (или путь уже пересобран под него).
+		this->rebuildPending = false;
+		return;
+	}
+	if (g_leadRebuildsInFlight.load() >= KZ_LEAD_REBUILD_BUDGET)
+	{
+		// Мест нет — ждём своего прохода. Метку НЕ снимаем: пересборка обязана состояться,
+		// просто позже. Разброс по слоту делает очередь детерминированной, а не гонкой.
+		return;
+	}
+	this->rebuildPending = false;
+	// Поколение НЕ увеличиваем: путь остаётся тем же и живым, а результат пересборки обязан
+	// пройти тот же гейт поколения — ReleasePath (смена курса/режима/карты) его отбросит.
+	this->pending = std::make_shared<PendingLoad>();
+	this->pending->generation = this->generation;
+	// Снимок допуска — здесь, на главном потоке (см. PendingLoad::rdpTolerance).
+	this->pending->rdpTolerance = tol;
+	// Место в бюджете занимает САМ разбор, а не наш pending: освободит его рабочий поток, даже
+	// если к тому времени и pending, и сервис уже мертвы.
+	this->pending->rebuildBudget = true;
+	g_leadRebuildsInFlight++;
+	this->pendingIsRebuild = true;
+	KZ_LOG_DEBUG(LogChannel::Replays, "[lead] path_rebuild_start rdp=%.2f course=%i mode=%s steam_id=%llu\n", tol, this->pathCourse, this->modeName,
+				 (unsigned long long)this->player->GetSteamId64());
+	// Копия пути к файлу, а не move: он нужен и следующим пересборкам.
+	std::thread(BuildPathWorker, this->pathFile, this->pending).detach();
+}
+
 void KZLeadService::RebuildOwnedIndex()
 {
 	this->ownedSorted = this->segments;
@@ -601,7 +724,9 @@ bool KZLeadService::OwnsParticle(const CEntityHandle &handle) const
 
 void KZLeadService::Disable(const char *reason)
 {
-	if (!this->beam && !this->loading && !this->pending)
+	// Пересборка (pendingIsRebuild) в счёт не идёт: её заказывал не игрок, а правка конвара, и
+	// «выключено» про включённый только процент было бы неправдой.
+	if (!this->beam && !this->loading && !(this->pending && !this->pendingIsRebuild))
 	{
 		// `!lead off` при выключенном луче: «выключен» было бы неправдой. Включённый процент
 		// в худе лучом не является и этой командой не выключается (он живёт в меню настроек).
@@ -832,6 +957,10 @@ void KZLeadService::OnFileReady(u32 gen, std::string &&filePath)
 	this->pending->generation = gen;
 	// Снимок допуска — ЗДЕСЬ, на главном потоке: дальше значение уедет в рабочий поток.
 	this->pending->rdpTolerance = cyb_lead_rdp.Get();
+	this->pendingIsRebuild = false;
+	// Путь к файлу оставляем себе: из него же пойдёт пересборка под новый допуск, без сети и
+	// без повторного резолва (а значит и без риска подхватить файл ДРУГОГО курса).
+	this->pathFile = filePath;
 	// Дальше гейтом служит сам pending — сетевая фаза кончилась.
 	this->loading = false;
 	std::thread(BuildPathWorker, std::move(filePath), this->pending).detach();
@@ -878,6 +1007,8 @@ void KZLeadService::PollPending()
 	}
 	std::shared_ptr<PendingLoad> load = this->pending;
 	this->pending.reset();
+	const bool isRebuild = this->pendingIsRebuild;
+	this->pendingIsRebuild = false;
 	if (load->generation != this->generation)
 	{
 		return;
@@ -895,6 +1026,16 @@ void KZLeadService::PollPending()
 
 	if (failReason)
 	{
+		if (isRebuild)
+		{
+			// Пересборка не сошлась (файл успели удалить из кэша, битый разбор) — СТАРЫЙ путь
+			// остаётся жить как есть. Защёлку отказа здесь ставить нельзя: под этим ключом путь
+			// ЕСТЬ, и она погасила бы процент на ровном месте; в чат тоже не пишем — игрок
+			// ничего не просил, он правил конвар.
+			KZ_LOG_WARN(LogChannel::Replays, "[lead] path_rebuild_failed reason=%s steam_id=%llu\n", failReason,
+						(unsigned long long)this->player->GetSteamId64());
+			return;
+		}
 		KZ_LOG_WARN(LogChannel::Replays, "[lead] lead_load_failed reason=%s steam_id=%llu\n", failReason,
 					(unsigned long long)this->player->GetSteamId64());
 		// Файл скачан, но путь из него не построился — причина в САМОМ файле (битый, обрезанный,
@@ -907,7 +1048,25 @@ void KZLeadService::PollPending()
 		KZ_LOG_WARN(LogChannel::Replays, "[lead] lead_load_failed reason=cut_failed detail=%s steam_id=%llu\n", cutWarn,
 					(unsigned long long)this->player->GetSteamId64());
 	}
-	this->OnPathLoaded(std::move(loaded));
+	if (isRebuild)
+	{
+		this->OnPathRebuilt(std::move(loaded), load->rdpTolerance);
+	}
+	else
+	{
+		this->pathRdp = load->rdpTolerance;
+		this->OnPathLoaded(std::move(loaded));
+	}
+	// Допуск могли сменить, пока шли докачка и разбор: снимок брался в OnFileReady, а колбэк
+	// конвара в тот момент видел ПУСТОЙ путь и пометить его не мог (ArmPathRebuild выходит
+	// сразу). Без этой догоняющей проверки такой путь остался бы построенным по устаревшему
+	// значению до конца карты. Разброс по слоту здесь не нужен: приземления загрузок и так
+	// разнесены по тикам (у каждого своя сеть и свой поток), а лишней пересборки не будет —
+	// StartPathRebuild сверяет значения ещё раз.
+	if (!this->path.empty() && this->pathRdp != cyb_lead_rdp.Get())
+	{
+		this->rebuildPending = true;
+	}
 }
 
 void KZLeadService::OnPathLoaded(std::vector<Vertex> &&newPath)
@@ -924,6 +1083,9 @@ void KZLeadService::OnPathLoaded(std::vector<Vertex> &&newPath)
 		// Пауза перед следующей попыткой: без неё мигающий ключ давал бы резолв и докачку
 		// каждые 32 тика (путь приходит — ключ снова другой — путь снова в мусор).
 		this->armCooldown = KZ_LEAD_ARM_COOLDOWN_CYCLES;
+		// Файл отброшенного пути пересобирать нечего и незачем: живого пути за ним нет.
+		this->pathFile.clear();
+		this->pathRdp = -1.0f;
 		return;
 	}
 	this->ClearSegments(false);
@@ -960,6 +1122,42 @@ void KZLeadService::OnPathLoaded(std::vector<Vertex> &&newPath)
 	this->beamOnLoad = false;
 	this->beam = true;
 	this->player->languageService->PrintChat(true, false, "Lead - Enabled", (int)this->path.size());
+}
+
+void KZLeadService::OnPathRebuilt(std::vector<Vertex> &&newPath, f32 builtRdp)
+{
+	if (newPath.size() < 2)
+	{
+		// Быть не должно (короткий путь приходит как failReason=path_too_short), но менять
+		// живой путь на вырожденный нельзя ни при каких обстоятельствах. Допуск при этом
+		// помечаем как применённый, хотя путь и остался прежним: иначе догоняющая проверка в
+		// PollPending увидела бы расхождение и заказала ТОТ ЖЕ разбор с тем же исходом —
+		// вечный цикл на 32 МБ каждые 32 тика.
+		this->pathRdp = builtRdp;
+		return;
+	}
+	// Ключ (pathCourse/modeName) НЕ трогаем: пересборка шла из ТОГО ЖЕ файла, под который
+	// резолвился путь, значит курс и режим у вершин прежние. Ровно поэтому здесь не может
+	// подхватиться чужой курс, даже если игрок сменил его, пока шёл разбор: ни резолва, ни
+	// requestCourse/requestMode пересборка не касается вовсе.
+	KZ_LOG_DEBUG(LogChannel::Replays, "[lead] path_rebuilt rdp=%.2f verts=%i course=%i mode=%s steam_id=%llu\n", builtRdp, (int)newPath.size(),
+				 this->pathCourse, this->modeName, (unsigned long long)this->player->GetSteamId64());
+	// Отрезки построены по СТАРЫМ вершинам — снимаем: индексы окна к новому пути не относятся.
+	this->ClearSegments(false);
+	this->path = std::move(newPath);
+	this->BuildCumulativeLengths();
+	this->pathRdp = builtRdp;
+	this->resync = true;
+	this->nearest = 0;
+	this->windowFrom = 0;
+	this->windowTo = 0;
+	// Процент НЕ гасим и не пересчитываем здесь: до готовности нового пути он всё это время
+	// шёл по старому (тот же маршрут, другая густота вершин), а новое значение посчитает
+	// UpdateProgress ПОСЛЕ UpdateNearest — на этом же тике, см. строку ниже. Прочерка в худе
+	// не мигнёт, а мусорного числа (nearest == 0 при живом маршруте) никто не увидит.
+	this->ticksSinceUpdate = KZ_LEAD_UPDATE_TICKS;
+	// Луч не включаем и не гасим: его состояние пересборкой не меняется, а в чат не пишем —
+	// игрок ничего не набирал.
 }
 
 void KZLeadService::OnPhysicsSimulatePost()
@@ -1006,6 +1204,22 @@ void KZLeadService::OnPhysicsSimulatePost()
 			// ветка path.empty() ниже (на следующем проходе).
 			this->ReleasePath();
 			return;
+		}
+	}
+
+	if (this->rebuildPending)
+	{
+		// Пересборка пути под новый допуск (правка cyb_lead_rdp). Стоит ЗДЕСЬ, до проверки
+		// пешки: путь живёт и у мёртвого/спектатора, и его густота обязана догнать конвар.
+		// Чтение файла и разбор уходят на рабочий поток — в тике только старт.
+		if (this->rebuildDelay > 0)
+		{
+			// Разброс по слоту, в проходах этой же ветки (см. ArmPathRebuild).
+			this->rebuildDelay--;
+		}
+		else
+		{
+			this->StartPathRebuild();
 		}
 	}
 
