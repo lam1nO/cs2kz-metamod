@@ -97,6 +97,8 @@ public:
 	using KZBaseService::KZBaseService;
 
 	static void Init();
+	// Агрегированная строка статистики гейта спавна за прошедшую карту + сброс её счётчиков.
+	static void OnActivateServer();
 
 	virtual void Reset() override
 	{
@@ -127,6 +129,10 @@ public:
 	{
 		this->UpdatePistol(true);
 	}
+
+	// Спавн живого игрока в играющей команде (гейты «есть контроллер», «не бот»,
+	// «команда >= CS_TEAM_T» — на вызывающей стороне, hooks.cpp).
+	void OnPlayerSpawn(bool changingTeam);
 
 	void UpdatePistol(bool force = false);
 	// Return true if the player has a weapon that isn't a knife.

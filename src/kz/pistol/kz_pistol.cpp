@@ -5,8 +5,35 @@
 #include "kz/language/kz_language.h"
 
 #include "utils/simplecmds.h"
+#include "utils/utils.h"
 #include "icvar.h"
 #include "sdk/cskeletoninstance.h"
+
+// Наблюдаемость гейта спавна (HasExpectedLoadout). Нужна потому, что ГЛАЗАМИ отличить
+// живой гейт от мёртвого нельзя: наш GiveNamedItem идёт через тот же pre-хук cyber-skins,
+// что и движковый GiveDefaultItems, и весь страйп укладывается в один кадр — ствол приедет
+// клиенту со скином в обоих случаях. Без счётчика «гейт работает» осталось бы верой.
+//
+// Считаем ТОЛЬКО спавны, на которых выдача вообще положена: гейты «есть контроллер»,
+// «не бот» и «команда >= CS_TEAM_T» стоят в hooks.cpp ДО вызова OnPlayerSpawn, поэтому
+// спавны реплей-ботов и спавны в наблюдателях/CS_TEAM_NONE в числа не попадают вовсе и
+// картину не разбавляют. Спавн внутри смены команды считается отдельной строкой
+// (jointeam): трогает сущности там KZ::misc::JoinTeam, а не мы, и молча складывать его
+// со striped значило бы приписывать себе чужие подмены.
+//
+// Разбивка по командам обязательна: профиль ставит mp_t_default_secondary
+// weapon_usp_silencer, а дефолт за T теперь Glock — значит за T гейт заведомо ложен, и без
+// разбивки «мало no-op» из-за состава игроков было бы неотличимо от «гейт мёртв».
+static_global i32 g_mapSkippedCT = 0;
+static_global i32 g_mapStripedCT = 0;
+static_global i32 g_mapSkippedT = 0;
+static_global i32 g_mapStripedT = 0;
+static_global i32 g_mapJoinTeam = 0;
+static_global i32 g_mapHidden = 0;
+static_global i32 g_totalSkipped = 0;
+static_global i32 g_totalStriped = 0;
+static_global i32 g_totalJoinTeam = 0;
+static_global i32 g_totalHidden = 0;
 
 static_global class : public KZOptionServiceEventListener
 {
@@ -165,6 +192,101 @@ void KZPistolService::UpdatePistol(bool force)
 	}
 
 	this->player->weaponService->RegiveGiven();
+}
+
+// Граница агрегации — СМЕНА КАРТЫ, а не спавн: строка на каждый спавн шла бы в игровом
+// такте и на полный слот (CLAUDE.md это прямо запрещает), а карта — ровно тот рубеж, на
+// котором случается массовый спавн, то есть самое интересное для этой правки событие.
+// Строка описывает карту, которая ТОЛЬКО ЧТО закончилась. Живой снимок без ожидания
+// смены карты берётся командой kz_pistol_spawn_stats ниже.
+void KZPistolService::OnActivateServer()
+{
+	if (g_mapSkippedCT || g_mapStripedCT || g_mapSkippedT || g_mapStripedT || g_mapJoinTeam || g_mapHidden)
+	{
+		KZ_LOG_INFO(LogChannel::Misc,
+					"[cyb] pistol_spawn_stats scope=map skipped_ct=%i striped_ct=%i skipped_t=%i striped_t=%i jointeam=%i hidden=%i "
+					"total_skipped=%i total_striped=%i\n",
+					g_mapSkippedCT, g_mapStripedCT, g_mapSkippedT, g_mapStripedT, g_mapJoinTeam, g_mapHidden, g_totalSkipped, g_totalStriped);
+	}
+	g_mapSkippedCT = 0;
+	g_mapStripedCT = 0;
+	g_mapSkippedT = 0;
+	g_mapStripedT = 0;
+	g_mapJoinTeam = 0;
+	g_mapHidden = 0;
+}
+
+// Спавн живого игрока в играющей команде. Вся развилка здесь, а не в hooks.cpp: гейт и
+// счётчик обязаны стоять рядом, иначе они разъедутся при первой же правке одного из них.
+void KZPistolService::OnPlayerSpawn(bool changingTeam)
+{
+	// Ни одного счётчика: UpdatePistol на таком игроке вышел бы сразу, и записать это
+	// «страйпом» значило бы соврать измерению, ради которого счётчики и заведены.
+	if (!this->player->IsAlive() || !this->player->IsInGame())
+	{
+		return;
+	}
+	if (changingTeam)
+	{
+		// Выдачу сделает KZ::misc::JoinTeam в конце своей работы (OnPlayerJoinTeam →
+		// UpdatePistol(force)); второй страйп в том же кадре был бы лишней подменой.
+		g_mapJoinTeam++;
+		g_totalJoinTeam++;
+		return;
+	}
+	const bool ct = this->GetTeam() == CS_TEAM_CT;
+	if (this->HasExpectedLoadout())
+	{
+		if (ct)
+		{
+			g_mapSkippedCT++;
+		}
+		else
+		{
+			g_mapSkippedT++;
+		}
+		g_totalSkipped++;
+		return;
+	}
+	// Отдельным числом, а не в striped: UpdatePistol без force на таком игроке выходит по
+	// гейту !hideweapon, сущностей не трогает, и считать его страйпом — исказить измерение.
+	// И не в skipped: там «гейт спас», а здесь руки как раз неправильные, просто чинить их
+	// нечем — прятание сделано фильтром трансмита, сущности на месте.
+	if (this->player->quietService->ShouldHideWeapon())
+	{
+		g_mapHidden++;
+		g_totalHidden++;
+		return;
+	}
+	if (ct)
+	{
+		g_mapStripedCT++;
+	}
+	else
+	{
+		g_mapStripedT++;
+	}
+	g_totalStriped++;
+	this->UpdatePistol();
+}
+
+// Живой снимок для канарейки: по RCON, без перезапуска. Отдельная команда, а не довесок к
+// kz_weapons_orphan_count: та про сущности в мире и её читает инвариант осиротевшего
+// оружия, а эта про поведение гейта на спавне — смешивать два разных предмета в одной
+// строке значило бы сломать разбор существующего инварианта.
+CON_COMMAND_F(kz_pistol_spawn_stats, "Print how often the spawn loadout gate skipped the weapon stripe.", FCVAR_NONE)
+{
+	// Только серверная консоль/RCON, как и прочие настоящие ConCommand форка
+	// (канон — kz_invisible.cpp, kz_weapons_orphan_count).
+	if (utils::GetController(context.GetPlayerSlot()))
+	{
+		KZ_LOG_WARN(LogChannel::Misc, "[cyb] pistol_spawn_stats_denied reason=not_server slot=%d\n", context.GetPlayerSlot().Get());
+		return;
+	}
+	Msg("pistol_spawns map_skipped_ct=%i map_striped_ct=%i map_skipped_t=%i map_striped_t=%i map_jointeam=%i map_hidden=%i total_skipped=%i "
+		"total_striped=%i total_jointeam=%i total_hidden=%i\n",
+		g_mapSkippedCT, g_mapStripedCT, g_mapSkippedT, g_mapStripedT, g_mapJoinTeam, g_mapHidden, g_totalSkipped, g_totalStriped, g_totalJoinTeam,
+		g_totalHidden);
 }
 
 i32 KZPistolService::GetTeam()

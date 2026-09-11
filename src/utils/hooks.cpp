@@ -818,24 +818,19 @@ static_function bool Hook_FireEvent(IGameEvent *event, bool bDontBroadcast)
 					// changelevel. В таких спавнах игрок оставался с тем, что дал движок по
 					// mp_ct_default_secondary — то есть без ножа/пистолета, если карта или
 					// плагин их не выдали. Отсюда репорт «зашёл на сервер — пистолета нет».
-					// Гейты (порядок — от самого дешёвого к самому дорогому):
-					//  - только играющая команда: у спектатора выдавать нечему и некому;
-					//  - не бот: реплей-бот одевается своим кодом (kz/replays), и трогать его
-					//    руки этой правкой мы не подписывались;
-					//  - не в середине смены команды: там JoinTeam сам зовёт
-					//    OnPlayerJoinTeam → UpdatePistol(force) после Respawn;
-					//  - руки уже правильные → НИЧЕГО НЕ ДЕЛАЕМ. Это главный гейт: он и есть
-					//    защита от гонки с cyber-skins в кадре спавна, разбор — в шапке
-					//    KZPistolService::HasExpectedLoadout.
-					// force НЕ ставим: гейт !hideweapon (kz_pistol.cpp) поставлен осознанно, а
-					// прятание оружия сделано фильтром трансмита, а не отсутствием сущности —
-					// перевыдача такому игроку ничего не даёт, только лишняя подмена
-					// сущностей. force=true остаётся за OnPlayerJoinTeam.
+					// Здесь — только гейты «выдача этому спавну вообще положена»: есть
+					// контроллер, не бот (реплей-бот одевается своим кодом, kz/replays) и
+					// играющая команда (у спектатора выдавать нечему и некому). Они же
+					// определяют, какие спавны попадают в счётчики гейта, поэтому боты и
+					// наблюдатели картину не разбавляют.
+					// Дальше развилка целиком в KZPistolService::OnPlayerSpawn: смена
+					// команды (там выдаёт JoinTeam), уже правильные руки (не трогаем
+					// сущности — защита от гонки с cyber-skins) и собственно страйп.
+					// Гейт и его счётчик держим рядом с UpdatePistol, а не здесь: разъедутся.
 					auto controller = player->GetController();
-					if (controller && !player->IsFakeClient() && controller->m_iTeamNum() >= CS_TEAM_T
-						&& !player->timerService->IsChangingTeam() && !player->pistolService->HasExpectedLoadout())
+					if (controller && !player->IsFakeClient() && controller->m_iTeamNum() >= CS_TEAM_T)
 					{
-						player->pistolService->UpdatePistol();
+						player->pistolService->OnPlayerSpawn(player->timerService->IsChangingTeam());
 					}
 				}
 			}
@@ -903,6 +898,7 @@ static_function bool Hook_ActivateServer()
 
 	RunSubmission::Clear();
 	KZ::misc::OnActivateServer();
+	KZPistolService::OnActivateServer();
 	KZInvisibleService::OnActivateServer();
 	KZDatabaseService::SetupMap();
 	KZRecordingService::OnActivateServer();
