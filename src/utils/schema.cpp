@@ -204,6 +204,39 @@ SchemaCollectionManipulatorFn_t schema::GetCollectionManipulator(const char *cla
 	return NULL;
 }
 
+// [СПАЙК beam-probe] см. schema.h. Размер и имя типа берём у самой схемы, а не угадываем:
+// писать в поле, не зная его ширины, значит затирать соседей.
+int schema::GetClassFields(const char *className, schema::FieldDesc *out, int maxFields)
+{
+	if (!out || maxFields <= 0 || !GameEntitySystem())
+	{
+		return -1;
+	}
+	SchemaClassInfoData_t *pClassInfo = FindClassInfo(className);
+	if (!pClassInfo)
+	{
+		return -1;
+	}
+	int count = 0;
+	for (int i = 0; i < pClassInfo->m_nFieldCount && count < maxFields; ++i)
+	{
+		SchemaClassFieldData_t &field = pClassInfo->m_pFields[i];
+		int fieldSize = 0;
+		uint8 alignment = 0;
+		if (field.m_pType)
+		{
+			field.m_pType->GetSizeAndAlignment(fieldSize, alignment);
+		}
+		out[count].name = field.m_pszName;
+		out[count].typeName = field.m_pType ? field.m_pType->m_sTypeName.Get() : "?";
+		out[count].offset = (uint32_t)field.m_nSingleInheritanceOffset;
+		out[count].size = fieldSize;
+		out[count].networked = IsFieldNetworked(pClassInfo->m_pszName, field);
+		count++;
+	}
+	return count;
+}
+
 bool schema::GetClassLayout(const char *className, int &size, int &fieldCount)
 {
 	size = 0;

@@ -40,6 +40,23 @@ namespace schema
 	SchemaKey GetOffset(const char *className, uint32_t classKey, const char *memberName, uint32_t memberKey);
 	// Manipulator for a CUtlVector/CNetworkUtlVectorBase field, NULL if the field is not a collection.
 	SchemaCollectionManipulatorFn_t GetCollectionManipulator(const char *className, const char *fieldName);
+
+	// [СПАЙК beam-probe] Описание одного поля живой схемы. Строки принадлежат схеме и живут
+	// до выгрузки модуля — копировать их не нужно.
+	struct FieldDesc
+	{
+		const char *name;
+		const char *typeName;
+		uint32_t offset;
+		int size;
+		bool networked;
+	};
+
+	// [СПАЙК beam-probe] Перечислить СОБСТВЕННЫЕ поля класса живой схемы (без унаследованных —
+	// они лежат в своих объявляющих классах, как и в SCHEMA_FIELD). Возвращает число записанных
+	// в out, -1 если класса в схеме нет или энтити-системы ещё нет (тогда networked врал бы).
+	int GetClassFields(const char *className, FieldDesc *out, int maxFields);
+
 	// Размер класса по живой схеме сервера (m_nSize) и число его полей; 0/0 — класс не найден.
 	// Нужно тому, кто пишет в движковые контейнеры сырыми структурами: одних офсетов полей мало,
 	// поле, добавленное Valve в хвост, офсетов не сдвинет, а шаг элемента в векторе изменит.
