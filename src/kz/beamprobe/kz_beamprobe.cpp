@@ -180,7 +180,10 @@ static_global bool ProbeSetInt(CBaseEntity *ent, const char *tag, const char *co
 }
 
 // Убирает пробные сущности: force — все, иначе только те, чей срок вышел.
-// Невалидные хендлы (смена карты) просто выпадают из списка.
+// Хендл сам по себе ничего не гарантирует: список переживает смену карты (обработчика у него
+// нет), а индексы энтити переиспользуются — поэтому перед сносом сверяем targetname, как
+// RemoveLeadSegment (src/kz/lead/kz_lead.cpp:247). Не прошедшая сверку запись — не наша,
+// её просто выбрасываем из списка, ничего не трогая.
 static_global int SweepProbeEnts(bool force)
 {
 	f64 now = g_pKZUtils->GetServerGlobals()->realtime;
@@ -188,8 +191,8 @@ static_global int SweepProbeEnts(bool force)
 	int kept = 0;
 	for (int i = 0; i < g_probeEntCount; i++)
 	{
-		CEntityInstance *ent = g_probeEnts[i].handle.Get();
-		if (!ent)
+		CEntityInstance *ent = GameEntitySystem() ? GameEntitySystem()->GetEntityInstance(g_probeEnts[i].handle) : nullptr;
+		if (!ent || !ent->m_pEntity || !ent->m_pEntity->NameMatches(KZ_BEAMPROBE_TARGETNAME))
 		{
 			continue;
 		}
@@ -220,12 +223,14 @@ static_global f64 BeamProbeSweepTimer()
 	return 0.0;
 }
 
-static_global void TrackProbeEnt(CBaseEntity *ent, f32 lifetime)
+// false — взять сущность под уборку не вышло; звать её надо так, чтобы сущность тут же ушла:
+// не взятая под уборку проба не снимается ни сроком, ни clear и живёт до смены карты.
+static_global bool TrackProbeEnt(CBaseEntity *ent, f32 lifetime)
 {
 	if (g_probeEntCount >= KZ_BEAMPROBE_MAX_ENTS)
 	{
 		Msg("beamprobe track result=full max=%i\n", KZ_BEAMPROBE_MAX_ENTS);
-		return;
+		return false;
 	}
 	g_probeEnts[g_probeEntCount].handle = ent->GetRefEHandle();
 	g_probeEnts[g_probeEntCount].deadlineRealtime = g_pKZUtils->GetServerGlobals()->realtime + lifetime;
@@ -237,6 +242,7 @@ static_global void TrackProbeEnt(CBaseEntity *ent, f32 lifetime)
 		StartTimer(BeamProbeSweepTimer, 1.0, false, true);
 		g_sweepTimerRunning = true;
 	}
+	return true;
 }
 
 // Живой игрок, рядом с которым ставим пробу (slot < 0 — первый подходящий).
@@ -400,7 +406,13 @@ static_global bool SpawnProbeBeam(const char *classname, const Vector &start, co
 	Msg("beamprobe visibility class=%s quiet_filtered=0 team=%i effects=0x%X targetname=%s\n", classname, (int)ent->m_iTeamNum(),
 		(unsigned)ent->m_fEffects(), KZ_BEAMPROBE_TARGETNAME);
 
-	TrackProbeEnt(ent, lifetime);
+	if (!TrackProbeEnt(ent, lifetime))
+	{
+		// Под уборку не взяли — сносим сами, иначе проба останется в мире до смены карты.
+		g_pKZUtils->RemoveEntity(ent);
+		Msg("beamprobe untracked class=%s removed=1 reason=tracker_full\n", classname);
+		return false;
+	}
 	return true;
 }
 
@@ -463,7 +475,15 @@ CON_COMMAND_F(kz_beam_probe,
 		Msg("beamprobe denied reason=no_player slot=%i\n", slot);
 		return;
 	}
-	Vector base;
+	// Инициализация и проверка пешки локальные: MovementPlayer::GetOrigin (mv_player.cpp:71)
+	// при отсутствии пешки в origin не пишет вовсе, а гарантия из FindProbeTarget живёт в
+	// другой функции и переживёт не всякую правку.
+	if (!target->GetPlayerPawn())
+	{
+		Msg("beamprobe denied reason=no_pawn slot=%i\n", target->GetPlayerSlot().Get());
+		return;
+	}
+	Vector base = vec3_origin;
 	target->GetOrigin(&base);
 
 	// Чистим протухшее до спавна: так же снимается флаг таймера, если его убила смена карты.
