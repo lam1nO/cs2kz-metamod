@@ -5,7 +5,7 @@
  * Почему окно, а не весь путь: в CS2 у серверных плагинов нет temp-entity лучей, каждый
  * отрезок — сетевая сущность (info_particle_system с ui_annotation_line_segment.vpcf, тот
  * же примитив, что у !measure и рёбер зон). Весь маршрут — это тысячи сущностей, окно —
- * десятки (потолок `cybLeadMaxSegments`, дефолт 64).
+ * десятки (потолок `cybLeadMaxSegments`, дефолт 192).
  *
  * Видимость только владельцу держится на KZ::quiet::OnCheckTransmit: метка
  * CUSTOM_PARTICLE_SYSTEM_TEAM означает «не видит никто», и обратно в белый список луч
@@ -56,7 +56,7 @@ public:
 		// Допуск упрощения (юниты), СНЯТЫЙ на главном потоке в момент старта разбора: конвар
 		// cyb_lead_rdp правится живьём, и читать его из рабочего потока значило бы читать
 		// значение, которое в этот момент меняют. Здесь оно уже зафиксировано.
-		f32 rdpTolerance = 1.0f;
+		f32 rdpTolerance = 0.25f;
 		std::vector<Vertex> path;
 		const char *failReason = nullptr; // != nullptr — путь не построен
 		const char *cutWarn = nullptr;    // разрез не сошёлся, путь без вырезки

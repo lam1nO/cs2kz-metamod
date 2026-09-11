@@ -115,7 +115,7 @@ static_function void LeadLookChanged()
 }
 
 // Отказ по индексу печатаем ЗДЕСЬ, в колбэке конвара (один раз на правку), а не в
-// CreateLeadSegment: тот зовётся на каждый отрезок, и вышел бы залп до 128 строк за тик.
+// CreateLeadSegment: тот зовётся на каждый отрезок, и вышел бы залп до 192 строк за тик.
 static_function void LeadCpIndexChanged(i32 index)
 {
 	if (index != -1 && !LeadCpIndexUsable(index))
@@ -178,18 +178,24 @@ CConVar<Vector> cyb_lead_cp2_value("cyb_lead_cp2_value", FCVAR_NONE, "Value writ
 // Живое переопределение потолка отрезков. cybLeadMaxSegments из серверного cfg живьём не
 // правится (см. шапку блока), а перебирать густоту без потолка бессмысленно: вдвое более
 // частые вершины при прежнем потолке дают луч ВДВОЕ КОРОЧЕ. -1 — брать значение из cfg.
+// Замер на канарейке (11.09) показал, что платим мы именно ПОТОЛКОМ, а не допуском: сам допуск
+// на тик-тайм не влияет вовсе, а число сущностей ограничено этим числом — см. CYBER.md.
 CConVar<i32> cyb_lead_max_segments("cyb_lead_max_segments", FCVAR_NONE,
 								   "Override cybLeadMaxSegments from the server cfg (-1 = use cfg value; hard cap 512).", -1,
 								   [](CConVar<i32> *, CSplitScreenSlot, const i32 *, const i32 *) { LeadLookChanged(); });
 
 // Допуск упрощения пути (юниты): меньше — вершины ГУЩЕ (и сущностей больше), больше —
-// срезанные углы. Дефолт 1.0 вместо прежних 2.0 — «в два раза больше точек» (просьба
-// пользователя 10.09). Применяется при СБОРКЕ пути, но правка конвара сама пересобирает живые
-// пути из кэшированного файла (см. колбэк), то есть действует без команд игрока.
+// срезанные углы. Дефолт 0.25 — выбран пользователем живым перебором на канарейке 11.09 (по
+// картинке: 2.0 → 1.0 → 0.25). На стоимость допуск не влияет: замер 64.00 тика на всех
+// значениях от 2 до 0.01, разброс загрузки внутри одного значения больше, чем между ними
+// (таблица в CYBER.md). Платим мы потолком отрезков — вместе с этим дефолтом он поднят до 192,
+// иначе более густые вершины укоротили бы луч вперёд. Применяется при СБОРКЕ пути, но правка
+// конвара сама пересобирает живые пути из кэшированного файла (см. колбэк), то есть действует
+// без команд игрока.
 CConVar<f32> cyb_lead_rdp("cyb_lead_rdp", FCVAR_NONE,
 						  "Path simplification tolerance in units; lower = denser vertices. Live paths are rebuilt from the cached "
 						  "replay file when this changes.",
-						  1.0f,
+						  0.25f,
 						  [](CConVar<f32> *, CSplitScreenSlot, const f32 *newValue, const f32 *) { LeadRdpChanged(newValue ? *newValue : 0.0f); });
 
 namespace
@@ -582,7 +588,7 @@ void KZLeadService::RefreshSegments(const char *reason)
 	this->windowTo = 0;
 	// Разброс по слоту — та же идиома, что у armCooldown в ResetState: колбэк конвара зовёт
 	// этот метод сразу ВСЕМ, и без разброса при четырёх включённых лучах в ОДИН тик пришлось
-	// бы до 512 снятий и столько же созданий сущностей. Слот 0 перестроится на ближайшем
+	// бы до 768 снятий и столько же созданий сущностей. Слот 0 перестроится на ближайшем
 	// тике, слот 31 — через 32 (≤0.5 с, штатный шаг пересчёта окна), слоты 32+ делят фазу с
 	// первыми — на глаз это незаметно, а пик размазан. Минус единица обязательна: проход идёт
 	// при `++ticksSinceUpdate >= KZ_LEAD_UPDATE_TICKS`, поэтому без неё слоты 0 и 1 попали бы
@@ -716,7 +722,7 @@ void KZLeadService::RebuildOwnedIndex()
 bool KZLeadService::OwnsParticle(const CEntityHandle &handle) const
 {
 	// Горячий путь CheckTransmit: на каждую помеченную частицу, на каждого получателя.
-	// Отсюда двоичный поиск (до 64 отрезков × десятки частиц × число игроков линейным
+	// Отсюда двоичный поиск (до 192 отрезков × десятки частиц × число игроков линейным
 	// сканом — десятки тысяч сравнений за тик).
 	return std::binary_search(this->ownedSorted.begin(), this->ownedSorted.end(), handle,
 							  [](const CEntityHandle &a, const CEntityHandle &b) { return a < b; });
@@ -1378,7 +1384,7 @@ void KZLeadService::UpdateWindow()
 	// Не `override`: слово контекстно-ключевое, и держать его именем переменной — напрашиваться
 	// на путаницу при чтении.
 	const i32 capOverride = cyb_lead_max_segments.Get();
-	i64 configured = capOverride >= 1 ? (i64)capOverride : KZOptionService::GetOptionInt("cybLeadMaxSegments", 128);
+	i64 configured = capOverride >= 1 ? (i64)capOverride : KZOptionService::GetOptionInt("cybLeadMaxSegments", 192);
 	if (configured < 1)
 	{
 		configured = 1;
