@@ -148,6 +148,12 @@ void KZPlayer::Reset()
 	this->ztopwatchService->Reset();
 	this->savedRunService->Reset();
 	this->weaponService->Reset();
+	// KZPlayer живёт по слоту и переиспользуется следующим игроком, а Reset пистолета до сих
+	// пор не звался ниоткуда — то есть работал только как инициализатор поля, и явный выбор
+	// ствола переносился от прошлого владельца слота. Обычно это лечит перезапись из
+	// OnPlayerPreferencesLoaded, но ровно в сценарии «БД префов недоступна» (инцидент
+	// 09-10.09) новый игрок наследовал бы чужой выбор.
+	this->pistolService->Reset();
 
 	g_pKZModeManager->SwitchToMode(this, KZOptionService::GetOptionStr("defaultMode", KZ_DEFAULT_MODE), true, true, false);
 	g_pKZStyleManager->ClearStyles(this, true, false);

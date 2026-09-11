@@ -77,6 +77,11 @@ public:
 		return index == PISTOL_UNKNOWN ? GetDefaultPistolIndexForTeam(team) : index;
 	}
 
+	// ВНИМАНИЕ на расхождение с GetPistolIndexByName выше: та на неизвестном имени отдаёт
+	// PISTOL_UNKNOWN, а эта — 0 («Knife», пистолет выключен). Контракт этой функции не
+	// менялся сознательно: вызывающих у неё в дереве нет вовсе, и менять его вслепую значило
+	// бы трогать мёртвый код. Появится вызывающий — сперва решить, что для него значит
+	// «неизвестный itemDef».
 	static int GetPistolIndexByItemDef(i16 itemDef)
 	{
 		for (i16 i = 0; i < pistols.size(); i++)
@@ -103,14 +108,19 @@ public:
 	i32 GetTeam();
 
 	// Что выдавать прямо сейчас: явный выбор игрока или дефолт его команды.
+	// Результат ВСЕГДА валидный индекс таблицы: им индексируется pistols[] в UpdatePistol,
+	// а GetDefaultPistolIndexForTeam ищет по литералу className и вернёт PISTOL_UNKNOWN,
+	// если строку в таблице когда-нибудь переименуют. Тихое чтение pistols[-1] дороже, чем
+	// «пистолета нет»: 0 — это штатное состояние «нож без пистолета», оно видно игроку
+	// сразу и чинится одной командой !pistol.
 	i16 ResolvePreferred()
 	{
-		if (this->preferredPistol >= 0 && this->preferredPistol < (i16)pistols.size())
-		{
-			return this->preferredPistol;
-		}
-		return GetDefaultPistolIndexForTeam(this->GetTeam());
+		const i16 index = (this->preferredPistol >= 0) ? this->preferredPistol : GetDefaultPistolIndexForTeam(this->GetTeam());
+		return (index >= 0 && index < (i16)pistols.size()) ? index : (i16)0;
 	}
+
+	// Нужен ли спавну наш страйп вообще: в руках уже есть резолвнутый пистолет и мелее.
+	bool HasExpectedLoadout();
 
 	void OnPlayerJoinTeam()
 	{
