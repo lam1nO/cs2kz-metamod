@@ -225,7 +225,14 @@ SCMD(kz_awr, SCFL_RECORD | SCFL_HELP)
 			if (awrInfo.status != 404)
 			{
 				// Один резолв всё решил: либо нашли, либо наша сторона не смогла спросить.
-				PrintOutcome(userID, header, CybAwrInfo::Classify(awrInfo.status, awrInfo.awrMs > 0, 0), awrInfo.awrMs, awrInfo.steamId64);
+				//
+				// Отдельно отбиваем «2xx, но тело нечитаемо»: времени в таком ответе нет, а
+				// Classify по нулевому awrMs сказал бы «ещё не посчитан» — то есть выдал бы наш
+				// отказ за состояние платформы. Сам отказ уже в логе (info_resolve_failed).
+				const bool trustworthy = awrInfo.status < 200 || awrInfo.status >= 300 || awrInfo.bodyUsable;
+				const CybAwrInfo::Outcome outcome =
+					trustworthy ? CybAwrInfo::Classify(awrInfo.status, awrInfo.awrMs > 0, 0) : CybAwrInfo::Outcome::Unavailable;
+				PrintOutcome(userID, header, outcome, awrInfo.awrMs, awrInfo.steamId64);
 				return;
 			}
 
@@ -238,6 +245,11 @@ SCMD(kz_awr, SCFL_RECORD | SCFL_HELP)
 			CybReplayDownload::RequestInfo(asker, CybReplayDownload::Kind::WR, 0,
 										   [header](CPlayerUserId uid, CybReplayDownload::Info wrInfo)
 										   {
+											   // Смотрим ТОЛЬКО статус: вопрос к этому запросу
+											   // один — «есть ли на ключе хоть один файл». Тело
+											   // (держатель, awrMs) относится к чужой записи и
+											   // на ответ игроку не влияет.
+											   //
 											   // Второй резолв мог не состояться по построению
 											   // (-1) — тогда «записей нет» утверждать нечем,
 											   // и Classify отдаст Unavailable.

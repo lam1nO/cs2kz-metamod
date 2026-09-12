@@ -354,17 +354,24 @@ namespace
 	u32 g_leadBeamExtraAttempts = 0;
 	bool g_leadBeamExtrasGaveUp = false;
 
-	// Снять защёлку «сдались» — ручной рычаг оператора (kz_lead_refresh). Удавшийся разбор она
-	// не трогает: пересверять схему на каждую перерисовку незачем, класс сущности тот же.
-	void ResetLeadBeamExtrasGiveUp()
+	// Вернуть попытки разбора: обнулить счётчик и снять защёлку «сдались». Зовётся на смене
+	// карты и ручным рычагом оператора (kz_lead_refresh). Удавшийся разбор НЕ трогает:
+	// пересверять схему незачем, класс сущности у отрезков один и тот же весь запуск.
+	//
+	// Смена карты обязательна здесь потому, что иначе одно неудачное окно («энтити-система ещё
+	// не поднялась») гасило бы доборные поля луча до перезапуска ПРОЦЕССА: карта не заладилась —
+	// и все следующие карты рисуют луч неполным набором, хотя схема давно отвечает.
+	void ResetLeadBeamExtraRetries(const char *reason)
 	{
-		if (!g_leadBeamExtrasGaveUp)
-		{
-			return;
-		}
+		const bool wasGivenUp = g_leadBeamExtrasGaveUp;
 		g_leadBeamExtrasGaveUp = false;
 		g_leadBeamExtraAttempts = 0;
-		KZ_LOG_INFO(LogChannel::Replays, "[lead] beam_extra_retry_armed reason=manual_refresh\n");
+		// Печатаем ТОЛЬКО когда защёлка реально была: на смене карты этот вызов происходит
+		// всегда, и строка «попытки возвращены» без отказа перед ней была бы шумом.
+		if (wasGivenUp)
+		{
+			KZ_LOG_INFO(LogChannel::Replays, "[lead] beam_extra_retry_armed reason=%s\n", reason);
+		}
 	}
 
 	// Учесть неудачный разбор и, исчерпав попытки, защёлкнуть отказ. Строка отказа — одна на
@@ -924,6 +931,11 @@ void KZLeadService::Reset()
 
 void KZLeadService::OnMapChanged()
 {
+	// Разбор схемы доп. полей луча — состояние ПРОЦЕССА, а не игрока, поэтому оно здесь, вне
+	// цикла по слотам: карта, на которой разбор не удался восемь раз подряд, не имеет права
+	// оставить луч неполным до перезапуска сервера.
+	ResetLeadBeamExtraRetries("map_changed");
+
 	// Граница строго `i < MAXPLAYERS`: ToPlayer(CPlayerSlot) внутри берёт slot.Get() + 1 по
 	// массиву players[MAXPLAYERS + 1]. Подробный разбор границы и второго оверлоада —
 	// в KZ::zones::ResetEditors, откуда взят этот обход.
@@ -1921,10 +1933,10 @@ CON_COMMAND_F(kz_lead_refresh, "Rebuild !lead beam segments for everyone (applie
 		KZ_LOG_WARN(LogChannel::Replays, "[lead] refresh_denied reason=not_server slot=%d\n", context.GetPlayerSlot().Get());
 		return;
 	}
-	// Заодно снимаем защёлку «сдались» с разбора схемы доп. полей луча: команда — единственный
-	// рычаг вернуть попытки, если разбор отказал по временной причине (энтити-система ещё не
-	// поднялась на момент первых отрезков).
-	ResetLeadBeamExtrasGiveUp();
+	// Заодно снимаем защёлку «сдались» с разбора схемы доп. полей луча: это рычаг вернуть
+	// попытки, не дожидаясь смены карты (её OnMapChanged снимает сам), если разбор отказал по
+	// временной причине — энтити-система ещё не поднялась на момент первых отрезков.
+	ResetLeadBeamExtraRetries("manual_refresh");
 	KZLeadService::RefreshAllSegments("command");
 }
 

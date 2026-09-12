@@ -486,38 +486,67 @@ void CybReplayDownload::RequestInfo(KZPlayer *player, Kind kind, u64 targetSteam
 	HTTP::Request req(HTTP::Method::GET, fullUrl);
 	ApplyResolveQuery(req, kind, key, targetSteamId64, token);
 
+	// Актор строки лога. Снимается ЗДЕСЬ, а не в колбэке: к моменту ответа игрок мог уйти, и
+	// тогда об отказе не осталось бы даже того, кому отказали. Аргумент false — по той же
+	// причине: актор нужен и у неаутентифицированного игрока (канон форка).
+	const u64 askerSteamId64 = player->GetSteamId64(false);
+	const char *typeArg = ResolveTypeArg(kind);
+
 	// clang-format off
 	req.Send(
-		[userID, onDone](HTTP::Response resp)
+		[userID, askerSteamId64, typeArg, onDone](HTTP::Response resp)
 		{
 			Info info;
+			// Статус НЕ понижается ни на одной ветке ниже: вызывающий может спрашивать только
+			// его (уточняющий запрос `!awr` по wr), и подмена статуса из-за неожиданного тела
+			// увела бы его в «не удалось» вместо верного ответа. Про тело говорит bodyUsable.
 			info.status = (int)resp.status;
 			if (resp.status < 200 || resp.status >= 300)
 			{
 				// 404 — штатное «такой записи нет»: что это значит, решает вызывающий (см. !awr),
-				// и в лог оно не идёт — это не отказ нашей стороны.
+				// и в лог оно не идёт — это не отказ нашей стороны. Всё остальное — отказ,
+				// который увидит игрок, значит warn с машинной причиной и актором.
 				if (resp.status != 404)
 				{
-					KZ_LOG_INFO(LogChannel::Replays, "[cyb_replay] info resolve HTTP %u\n", (unsigned)resp.status);
+					KZ_LOG_WARN(LogChannel::Replays, "[cyb_replay] info_resolve_failed reason=http_status status=%u type=%s steam_id=%llu\n",
+								(unsigned)resp.status, typeArg, (unsigned long long)askerSteamId64);
 				}
 				onDone(userID, info);
 				return;
 			}
 
 			std::optional<std::string> bodyStr = resp.Body();
-			Json json(bodyStr.has_value() ? *bodyStr : std::string());
-			std::string steamIdStr;
-			// steamId64 api отдаёт СТРОКОЙ (u64 не влезает в число JSON без потерь) и кладёт его
-			// в КАЖДЫЙ успешный ответ resolve. Нет поля — ответ не наш: сообщать «запись есть»
-			// по такому телу нельзя, поэтому переводим в «наша сторона не смогла» (status 0).
-			if (!bodyStr.has_value() || !json.IsValid() || !json.Get("steamId64", steamIdStr))
+			if (!bodyStr.has_value())
 			{
-				KZ_LOG_WARN(LogChannel::Replays, "[cyb_replay] info resolve returned unusable JSON\n");
-				info.status = 0;
+				KZ_LOG_WARN(LogChannel::Replays, "[cyb_replay] info_resolve_failed reason=empty_body type=%s steam_id=%llu\n", typeArg,
+							(unsigned long long)askerSteamId64);
 				onDone(userID, info);
 				return;
 			}
-			info.steamId64 = strtoull(steamIdStr.c_str(), nullptr, 10);
+			Json json(*bodyStr);
+			if (!json.IsValid())
+			{
+				KZ_LOG_WARN(LogChannel::Replays, "[cyb_replay] info_resolve_failed reason=invalid_json type=%s steam_id=%llu\n", typeArg,
+							(unsigned long long)askerSteamId64);
+				onDone(userID, info);
+				return;
+			}
+			info.bodyUsable = true;
+
+			// steamId64 api отдаёт СТРОКОЙ (u64 не влезает в число JSON без потерь) и кладёт его
+			// в КАЖДЫЙ успешный ответ resolve. Отсутствие — расхождение с контрактом, но НЕ повод
+			// объявлять весь ответ негодным: статус (и, если есть, awrMs) в нём по-прежнему
+			// настоящие. Вызывающий сам решает, обязателен ли ему держатель.
+			std::string steamIdStr;
+			if (json.Get("steamId64", steamIdStr))
+			{
+				info.steamId64 = strtoull(steamIdStr.c_str(), nullptr, 10);
+			}
+			else
+			{
+				KZ_LOG_WARN(LogChannel::Replays, "[cyb_replay] info_resolve_partial reason=no_steam_id type=%s steam_id=%llu\n", typeArg,
+							(unsigned long long)askerSteamId64);
+			}
 
 			// `awrMs: null` — штатный ответ (разрез ещё не считали), поэтому ключ проверяем ТИХО:
 			// Get на null пишет WARN, а тревожиться тут не о чем.
@@ -529,10 +558,13 @@ void CybReplayDownload::RequestInfo(KZPlayer *player, Kind kind, u64 targetSteam
 			}
 			onDone(userID, info);
 		},
-		[userID, onDone]()
+		[userID, askerSteamId64, typeArg, onDone]()
 		{
-			KZ_LOG_INFO(LogChannel::Replays, "[cyb_replay] info resolve network error\n");
+			KZ_LOG_WARN(LogChannel::Replays, "[cyb_replay] info_resolve_failed reason=network type=%s steam_id=%llu\n", typeArg,
+						(unsigned long long)askerSteamId64);
 			Info info;
+			// Ответа не было вовсе — это и есть ноль (см. заголовок): отличается от «пришёл 2xx
+			// с нечитаемым телом», где статус настоящий, а негодно только тело.
 			info.status = 0;
 			onDone(userID, info);
 		});
