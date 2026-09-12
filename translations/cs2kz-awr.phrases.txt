@@ -1,0 +1,53 @@
+"Phrases"
+{
+	"Command Description - kz_awr"
+	{
+		"en"		"Show the AWR time and who set it"
+		"ru"		"Показать время AWR и его автора"
+	}
+	// Шапка ответа — та же форма, что у !pb/!wr ("PB Header"/"WR Header"): карта, курс, режим.
+	// Курс и режим здесь не «текущие у игрока», а РАЗОБРАННЫЕ ОБРАТНО из ключа резолва, под
+	// которым время и найдено, — иначе строка врала бы о том, к чему относится время.
+	"AWR Header"
+	{
+		// AWR on kz_map (Main) [KZT]
+		"#format"	"map_name:s,course_name:s,mode_name:s"
+		"en"		"{grey}AWR on {default}{map_name}{grey} ({default}{course_name}{grey}) [{purple}{mode_name}{grey}]"
+		"ru"		"{grey}AWR на {default}{map_name}{grey} ({default}{course_name}{grey}) [{purple}{mode_name}{grey}]"
+	}
+	// Сама строка времени. Телепортов у AWR не бывает по определению (петли вырезаны), поэтому
+	// счётчика ТП здесь нет — в отличие от "Top Record - Overall", с которого списана форма.
+	"AWR Time"
+	{
+		// AWR: 01:23.456 by Bill
+		"#format"	"time:s,player_name:s"
+		"en"		"{gold}AWR{grey}: {default}{time}{grey} by {lime}{player_name}{grey}"
+		"ru"		"{gold}AWR{grey}: {default}{time}{grey} от {lime}{player_name}{grey}"
+	}
+	// Файлы на ключе есть, но разрез телепорт-петель по ним ещё не считали (воркер бэкфилла
+	// доберётся). Отдельная фраза от «записей нет»: игроку это разные новости — в первом случае
+	// надо просто подождать.
+	"AWR - Not Computed"
+	{
+		"en"		"{grey}AWR for this course/mode hasn't been computed yet — the replay is still queued."
+		"ru"		"{grey}AWR для этого курса/режима ещё не посчитан — реплей в очереди на обработку."
+	}
+	"AWR - No Replays"
+	{
+		"en"		"{grey}No replays on this course/mode yet, so there is no AWR."
+		"ru"		"{grey}На этом курсе/режиме ещё нет реплеев, поэтому нет и AWR."
+	}
+	// Отказ НАШЕЙ стороны: сеть, 5xx, мусор в ответе. Не «нет записи» — записи мы не видели.
+	"AWR - Request Failed"
+	{
+		"en"		"{darkred}Failed to fetch the AWR."
+		"ru"		"{darkred}Не удалось получить AWR."
+	}
+	// Спросить негде по построению: центральные реплеи на сервере выключены либо карта/режим не
+	// ложатся в ключ резолва. Тот же случай, на котором !replay печатает «Central Not Found».
+	"AWR - Unavailable Here"
+	{
+		"en"		"{darkred}AWR is not available on this server for this map/mode."
+		"ru"		"{darkred}AWR недоступен на этом сервере для этой карты/режима."
+	}
+}

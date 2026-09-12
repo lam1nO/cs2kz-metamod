@@ -58,6 +58,10 @@
 #define KZ_LEAD_FAIL_RETRIES 2
 // Верхняя граница потолка отрезков: защита от опечатки в конфиге (лимит сущностей движка).
 #define KZ_LEAD_MAX_SEGMENTS_CAP 512
+// Сколько раз подряд пробовать разобрать схему доп. полей луча, прежде чем сдаться
+// (см. ResolveLeadBeamExtras). Восемь — с запасом на «энтити-система ещё не поднялась» на первых
+// отрезках и сильно меньше одной перерисовки (до 384 отрезков), ради которой потолок и заведён.
+#define KZ_LEAD_BEAM_EXTRA_MAX_ATTEMPTS 8
 // Какая доля потолка отрезков может уйти на хвост ПОЗАДИ ближайшей вершины (1/4).
 // Остальное резервируется под подсказку впереди.
 #define KZ_LEAD_BACK_BUDGET_DIV 4
@@ -67,10 +71,11 @@
 // KZ_LEAD_SEGMENT_TEAM (метка «наша энтити») переехали в kz_lead.h: их читает ещё и фильтр
 // передачи (kz_quiet.cpp).
 //
-// Ширина луча по умолчанию. 2 — значение владельца серверов по итогам живого перебора 11.09.
+// Ширина луча по умолчанию. 1 — значение владельца серверов по итогам живого просмотра 12.09
+// (до этого дефолт был 2, перебор 11.09; единица выбрана глазами на канарейке, не расчётом).
 // Верхняя граница конвара — защита от опечатки: луч шириной в сотни юнитов закрыл бы игроку
 // пол-экрана. Нижняя (в LeadBeamWidth) — от нуля и NaN, при которых луч невидим.
-#define KZ_LEAD_BEAM_WIDTH_DEFAULT 2.0f
+#define KZ_LEAD_BEAM_WIDTH_DEFAULT 1.0f
 #define KZ_LEAD_BEAM_WIDTH_MIN     0.1f
 #define KZ_LEAD_BEAM_WIDTH_MAX     64.0f
 // Сколько ПЕРЕСБОРОК пути (повторных разборов файла под новый допуск) разрешено вести
@@ -222,7 +227,7 @@ CConVar<bool> cyb_lead_beam_entity("cyb_lead_beam_entity", FCVAR_NONE,
 // перерисовке, но колбэк перерисовывает отрезки сразу всем, у кого луч включён, — то есть
 // правка по RCON видна живьём, как у cyb_lead_particle.
 CConVar<f32> cyb_lead_beam_width("cyb_lead_beam_width", FCVAR_NONE,
-								 "Lead beam segment width in units (beam entity only): 0.1..64, default 2. Applied to the next segment "
+								 "Lead beam segment width in units (beam entity only): 0.1..64, default 1. Applied to the next segment "
 								 "rebuild, which the change callback triggers right away.",
 								 KZ_LEAD_BEAM_WIDTH_DEFAULT, [](CConVar<f32> *, CSplitScreenSlot, const f32 *, const f32 *) { LeadLookChanged(); });
 
@@ -268,6 +273,11 @@ namespace
 		{
 			line->SetControlPointValue(cp2, cyb_lead_cp2_value.Get());
 		}
+		// Метка «наша энтити» ПОВТОРНО, уже после спавна — как на пути сущности-луча. На ней
+		// держится вся приватность этого пути: фильтр передачи (kz_quiet.cpp) прячет частицу
+		// только по m_iTeamNum, второго ключа там нет (см. CYBER.md, раздел !lead). Сбрось метку
+		// спавн — отрезки ушли бы ВСЕМ, и увидели бы мы это от игроков, а не из логов.
+		line->m_iTeamNum(CUSTOM_PARTICLE_SYSTEM_TEAM);
 		return line->GetRefEHandle();
 	}
 
@@ -336,6 +346,44 @@ namespace
 	// создании отрезка (тик/колбэк конвара), читается там же; в хуках движения не участвует.
 	LeadBeamExtraResolved g_leadBeamExtraFields[KZ_ARRAYSIZE(g_leadBeamExtras)] {};
 	bool g_leadBeamExtrasResolved = false;
+	// Неудачных разборов подряд и защёлка «больше не пробуем». Без потолка неудачный разбор
+	// повторялся бы на КАЖДОМ отрезке: до 384 обходов цепочки классов со сверкой схемы за одну
+	// перерисовку, и так на каждой перерисовке до конца карты. Дроссель гасил только ЛОГ, работу
+	// он не отменял. Потолок считается по попыткам, а не по времени: разбор детерминирован —
+	// если схема не ответила восемь раз подряд, она не ответит и на девятый.
+	u32 g_leadBeamExtraAttempts = 0;
+	bool g_leadBeamExtrasGaveUp = false;
+
+	// Снять защёлку «сдались» — ручной рычаг оператора (kz_lead_refresh). Удавшийся разбор она
+	// не трогает: пересверять схему на каждую перерисовку незачем, класс сущности тот же.
+	void ResetLeadBeamExtrasGiveUp()
+	{
+		if (!g_leadBeamExtrasGaveUp)
+		{
+			return;
+		}
+		g_leadBeamExtrasGaveUp = false;
+		g_leadBeamExtraAttempts = 0;
+		KZ_LOG_INFO(LogChannel::Replays, "[lead] beam_extra_retry_armed reason=manual_refresh\n");
+	}
+
+	// Учесть неудачный разбор и, исчерпав попытки, защёлкнуть отказ. Строка отказа — одна на
+	// защёлку и БЕЗ дросселя: это конец повторов, а не очередная жалоба, и потеряться она не
+	// имеет права. reason=giving_up + причина последней неудачи: без второй половины непонятно,
+	// чего именно мы не дождались.
+	void NoteLeadBeamExtraFailure(const char *reason)
+	{
+		if (g_leadBeamExtrasGaveUp || ++g_leadBeamExtraAttempts < KZ_LEAD_BEAM_EXTRA_MAX_ATTEMPTS)
+		{
+			return;
+		}
+		g_leadBeamExtrasGaveUp = true;
+		// Луч при этом не пропадает: он держится на ПЯТИ доказанных полях (cbeam.h), которые
+		// пишутся напрямую, мимо схемы. Теряется только доборная часть рецепта пробы.
+		KZ_LOG_WARN(LogChannel::Replays,
+					"[lead] beam_extra_resolve_failed reason=giving_up last=%s attempts=%u note=proven_fields_applied_retry_is_kz_lead_refresh\n",
+					reason, g_leadBeamExtraAttempts);
+	}
 
 	// Спрашиваем схему ОДИН раз, на первом созданном луче, — то есть ИЗ ИГРЫ, а не из
 	// KZPlugin::Load: сверка схемы на загрузке отравляет кэш (networked=false у всего класса,
@@ -348,12 +396,13 @@ namespace
 		// недоказанный набор полей: мы думали бы, что рецепт применён, а его не было.
 		if (!ent->m_pEntity || !ent->m_pEntity->m_pClass || !ent->m_pEntity->m_pClass->m_pClassInfo)
 		{
-			// Дроссель обязателен: раз защёлки нет, эта ветка повторится на КАЖДОМ отрезке окна.
+			// Дроссель обязателен: пока попытки не исчерпаны, ветка повторяется на КАЖДОМ отрезке.
 			static f64 lastWarn = -1.0e9;
 			if (LeadWarnDue(lastWarn))
 			{
 				KZ_LOG_WARN(LogChannel::Replays, "[lead] beam_extra_resolve_failed reason=no_class_chain note=retry_on_next_segment\n");
 			}
+			NoteLeadBeamExtraFailure("no_class_chain");
 			return;
 		}
 		// Буфер статический: 512 записей на стеке ради разовой сверки не нужны, а зовётся эта
@@ -417,15 +466,18 @@ namespace
 			{
 				g_leadBeamExtraFields[w] = LeadBeamExtraResolved {};
 			}
-			// Тот же дроссель и по той же причине: без защёлки ветка повторится на каждом отрезке.
+			// Тот же дроссель и по той же причине: пока попытки не исчерпаны, ветка повторяется
+			// на каждом отрезке.
 			static f64 lastWarn = -1.0e9;
 			if (LeadWarnDue(lastWarn))
 			{
 				KZ_LOG_WARN(LogChannel::Replays, "[lead] beam_extra_resolve_failed reason=schema_unavailable note=retry_on_next_segment\n");
 			}
+			NoteLeadBeamExtraFailure("schema_unavailable");
 			return;
 		}
 		g_leadBeamExtrasResolved = true;
+		g_leadBeamExtraAttempts = 0;
 		u32 resolved = 0;
 		for (u32 w = 0; w < KZ_ARRAYSIZE(g_leadBeamExtras); w++)
 		{
@@ -446,7 +498,9 @@ namespace
 	// Ровно то, что делает Set() в SCHEMA_FIELD: сначала цепочка, иначе сама сущность.
 	void ApplyLeadBeamExtras(CBaseEntity *ent)
 	{
-		if (!g_leadBeamExtrasResolved)
+		// После защёлки «сдались» разбор не зовём вовсе: цена повтора — обход всей цепочки
+		// классов на каждый отрезок, а результат уже известен.
+		if (!g_leadBeamExtrasResolved && !g_leadBeamExtrasGaveUp)
 		{
 			ResolveLeadBeamExtras(ent);
 		}
@@ -552,8 +606,10 @@ namespace
 		}
 		const f32 width = LeadBeamWidth();
 		// Ниже — РЕЦЕПТ ПРОБНИКА, повторённый целиком: порядок «поля до спавна → keyvalues →
-		// DispatchSpawn → Teleport → поля ещё раз». Видимость луча на канарейке доказана именно
-		// для него, и урезать его до «нужного нам минимума» нельзя: дефолты свежесозданной beam
+		// DispatchSpawn → Teleport(start) → m_vecEndPos ещё раз». Повторной записи ВСЕХ полей
+		// после спавна в рецепте нет и не было — см. пост-спавн блок ниже, где сказано, почему
+		// дописывать её туда нельзя. Видимость луча на канарейке доказана именно для этого
+		// порядка, и урезать его до «нужного нам минимума» нельзя: дефолты свежесозданной beam
 		// нам неизвестны, а другого живого доказательства у нас нет.
 		beam->m_vecEndPos(end);
 		beam->m_fWidth(width);
@@ -1865,6 +1921,10 @@ CON_COMMAND_F(kz_lead_refresh, "Rebuild !lead beam segments for everyone (applie
 		KZ_LOG_WARN(LogChannel::Replays, "[lead] refresh_denied reason=not_server slot=%d\n", context.GetPlayerSlot().Get());
 		return;
 	}
+	// Заодно снимаем защёлку «сдались» с разбора схемы доп. полей луча: команда — единственный
+	// рычаг вернуть попытки, если разбор отказал по временной причине (энтити-система ещё не
+	// поднялась на момент первых отрезков).
+	ResetLeadBeamExtrasGiveUp();
 	KZLeadService::RefreshAllSegments("command");
 }
 

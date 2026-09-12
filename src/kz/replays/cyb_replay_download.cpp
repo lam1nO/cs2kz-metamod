@@ -16,6 +16,7 @@
 #include "utils/uuid.h"
 #include "utils/logging.h"
 
+#include <cstdlib> // strtoull: steamId64 приезжает строкой (u64 не влезает в число JSON)
 #include <string>
 
 // Ожидание AWR-режима (см. заголовок): ставится перед докачкой, снимается первым же
@@ -114,6 +115,25 @@ namespace
 		const char *token = KZOptionService::GetOptionStr("cybEmitToken", "");
 		outToken = token ? token : "";
 		return true;
+	}
+
+	// Query-часть запроса резолва: ключ + вид записи + авторизация. Одна на все три входа
+	// (плейбек, файл для !lead, метаданные для !awr) — расхождение здесь означало бы, что одна
+	// из команд ходит не по тому ключу, и заметили бы мы это не сразу.
+	void ApplyResolveQuery(HTTP::Request &req, CybReplayDownload::Kind kind, const ResolveKey &key, u64 targetSteamId64, const std::string &token)
+	{
+		req.SetQuery("map", key.map);
+		req.SetQuery("course", std::to_string(key.course));
+		req.SetQuery("mode", key.mode);
+		req.SetQuery("type", ResolveTypeArg(kind));
+		if (kind == CybReplayDownload::Kind::PB || kind == CybReplayDownload::Kind::PBPro)
+		{
+			req.SetQuery("steamId64", std::to_string(targetSteamId64));
+		}
+		if (!token.empty())
+		{
+			req.SetHeader("Authorization", std::string("Bearer ") + token);
+		}
 	}
 
 	// Файл реплея: кэш downloads/ или реальная докачка по публичному URL (selstorage, без
@@ -355,18 +375,7 @@ void CybReplayDownload::RequestAndPlay(KZPlayer *player, Kind kind, u64 targetSt
 	}
 
 	HTTP::Request req(HTTP::Method::GET, fullUrl);
-	req.SetQuery("map", key.map);
-	req.SetQuery("course", std::to_string(key.course));
-	req.SetQuery("mode", key.mode);
-	req.SetQuery("type", ResolveTypeArg(kind));
-	if (kind == Kind::PB || kind == Kind::PBPro)
-	{
-		req.SetQuery("steamId64", std::to_string(targetSteamId64));
-	}
-	if (!token.empty())
-	{
-		req.SetHeader("Authorization", std::string("Bearer ") + token);
-	}
+	ApplyResolveQuery(req, kind, key, targetSteamId64, token);
 
 	CPlayerUserId userID = player->GetClient()->GetUserID();
 	// Фолбэк на локальный pro-PB возможен только для СВОЕГО реплея (см. OnResolveResponse).
@@ -402,18 +411,7 @@ void CybReplayDownload::RequestFile(KZPlayer *player, Kind kind, u64 targetSteam
 	}
 
 	HTTP::Request req(HTTP::Method::GET, fullUrl);
-	req.SetQuery("map", key.map);
-	req.SetQuery("course", std::to_string(key.course));
-	req.SetQuery("mode", key.mode);
-	req.SetQuery("type", ResolveTypeArg(kind));
-	if (kind == Kind::PB || kind == Kind::PBPro)
-	{
-		req.SetQuery("steamId64", std::to_string(targetSteamId64));
-	}
-	if (!token.empty())
-	{
-		req.SetHeader("Authorization", std::string("Bearer ") + token);
-	}
+	ApplyResolveQuery(req, kind, key, targetSteamId64, token);
 
 	// clang-format off
 	req.Send(
@@ -460,6 +458,83 @@ void CybReplayDownload::RequestFile(KZPlayer *player, Kind kind, u64 targetSteam
 		{
 			KZ_LOG_INFO(LogChannel::Replays, "[cyb_replay] file resolve network error\n");
 			onReady(userID, "");
+		});
+	// clang-format on
+}
+
+void CybReplayDownload::RequestInfo(KZPlayer *player, Kind kind, u64 targetSteamId64, std::function<void(CPlayerUserId, Info)> onDone)
+{
+	if (!player || !onDone)
+	{
+		return;
+	}
+
+	CPlayerUserId userID = player->GetClient()->GetUserID();
+
+	std::string fullUrl, token;
+	ResolveKey key;
+	if (!PrepareResolve(player, fullUrl, token, key))
+	{
+		// Сети не было: центральные реплеи выключены либо режим/карта не поддержаны ключом.
+		// Отличать это от сетевого отказа обязан вызывающий — фраза игроку тут другая.
+		Info info;
+		info.status = -1;
+		onDone(userID, info);
+		return;
+	}
+
+	HTTP::Request req(HTTP::Method::GET, fullUrl);
+	ApplyResolveQuery(req, kind, key, targetSteamId64, token);
+
+	// clang-format off
+	req.Send(
+		[userID, onDone](HTTP::Response resp)
+		{
+			Info info;
+			info.status = (int)resp.status;
+			if (resp.status < 200 || resp.status >= 300)
+			{
+				// 404 — штатное «такой записи нет»: что это значит, решает вызывающий (см. !awr),
+				// и в лог оно не идёт — это не отказ нашей стороны.
+				if (resp.status != 404)
+				{
+					KZ_LOG_INFO(LogChannel::Replays, "[cyb_replay] info resolve HTTP %u\n", (unsigned)resp.status);
+				}
+				onDone(userID, info);
+				return;
+			}
+
+			std::optional<std::string> bodyStr = resp.Body();
+			Json json(bodyStr.has_value() ? *bodyStr : std::string());
+			std::string steamIdStr;
+			// steamId64 api отдаёт СТРОКОЙ (u64 не влезает в число JSON без потерь) и кладёт его
+			// в КАЖДЫЙ успешный ответ resolve. Нет поля — ответ не наш: сообщать «запись есть»
+			// по такому телу нельзя, поэтому переводим в «наша сторона не смогла» (status 0).
+			if (!bodyStr.has_value() || !json.IsValid() || !json.Get("steamId64", steamIdStr))
+			{
+				KZ_LOG_WARN(LogChannel::Replays, "[cyb_replay] info resolve returned unusable JSON\n");
+				info.status = 0;
+				onDone(userID, info);
+				return;
+			}
+			info.steamId64 = strtoull(steamIdStr.c_str(), nullptr, 10);
+
+			// `awrMs: null` — штатный ответ (разрез ещё не считали), поэтому ключ проверяем ТИХО:
+			// Get на null пишет WARN, а тревожиться тут не о чем.
+			if (json.HasValue("awrMs"))
+			{
+				f64 awrMs = 0.0;
+				json.Get("awrMs", awrMs);
+				info.awrMs = awrMs > 0.0 ? (u64)awrMs : 0;
+			}
+			onDone(userID, info);
+		},
+		[userID, onDone]()
+		{
+			KZ_LOG_INFO(LogChannel::Replays, "[cyb_replay] info resolve network error\n");
+			Info info;
+			info.status = 0;
+			onDone(userID, info);
 		});
 	// clang-format on
 }

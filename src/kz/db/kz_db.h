@@ -124,6 +124,10 @@ private:
 
 public:
 	static void FindPlayerByAlias(CUtlString playerName, TransactionSuccessCallbackFunc onSuccess, TransactionFailureCallbackFunc onFailure);
+	// Обратное к FindPlayerByAlias: ник по SteamID64 (`!awr` — держатель AWR приезжает числом).
+	// Вызов no-op при неготовой БД, поэтому вызывающий обязан сам проверить IsReady(), если ему
+	// нужен гарантированный ответ. queries[0]: одна колонка Alias, ноль строк = имени нет.
+	static void FindAliasBySteamID64(u64 steamID64, TransactionSuccessCallbackFunc onSuccess, TransactionFailureCallbackFunc onFailure);
 
 	// Mode
 	static void UpdateModeIDs();
