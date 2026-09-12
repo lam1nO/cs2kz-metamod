@@ -204,20 +204,23 @@
 
 	"Beat Course Info - New Server Record"
 	{
-		// cyb: рекорд сети (наши серверы non-global; истина — общая база флота).
-		// Bill set a new SERVER RECORD [Mode]
+		// cyb: рекорд нашей сети (серверы non-global; истина — общая база флота).
+		// Показываем его как WORLD RECORD: для игрока это привычная формулировка,
+		// а другого «мира», кроме нашей сети, на этих серверах и нет. Ключ оставлен
+		// своим, апстримный «GLOBAL RECORD» не трогаем — иначе конфликт на каждом мерже.
+		// Bill set a new WORLD RECORD [Mode]
 		"#format"	"player_name:s,mode:s"
-		"en"		"{lime}{player_name}{grey} set a new {red}SERVER RECORD {grey}[{purple}{mode}{grey}]"
-		"ru"		"{lime}{player_name}{grey} поставил новый {red}РЕКОРД СЕТИ {grey}[{purple}{mode}{grey}]"
-		"ua"		"{lime}{player_name}{grey} встановив новий {red}РЕКОРД МЕРЕЖІ {grey}[{purple}{mode}{grey}]"
+		"en"		"{lime}{player_name}{grey} set a new {red}WORLD RECORD {grey}[{purple}{mode}{grey}]"
+		"ru"		"{lime}{player_name}{grey} поставил новый {red}WORLD RECORD {grey}[{purple}{mode}{grey}]"
+		"ua"		"{lime}{player_name}{grey} встановив новий {red}WORLD RECORD {grey}[{purple}{mode}{grey}]"
 	}
 	"Beat Course Info - New Server Record (PRO)"
 	{
-		// Bill set a new SERVER PRO RECORD [Mode]
+		// Bill set a new WORLD PRO RECORD [Mode]
 		"#format"	"player_name:s,mode:s"
-		"en"		"{lime}{player_name}{grey} set a new {darkred}SERVER PRO RECORD {grey}[{purple}{mode}{grey}]"
-		"ru"		"{lime}{player_name}{grey} поставил новый {darkred}РЕКОРД СЕТИ PRO {grey}[{purple}{mode}{grey}]"
-		"ua"		"{lime}{player_name}{grey} встановив новий {darkred}РЕКОРД МЕРЕЖІ PRO {grey}[{purple}{mode}{grey}]"
+		"en"		"{lime}{player_name}{grey} set a new {darkred}WORLD PRO RECORD {grey}[{purple}{mode}{grey}]"
+		"ru"		"{lime}{player_name}{grey} поставил новый {darkred}WORLD PRO RECORD {grey}[{purple}{mode}{grey}]"
+		"ua"		"{lime}{player_name}{grey} встановив новий {darkred}WORLD PRO RECORD {grey}[{purple}{mode}{grey}]"
 	}
 
 	"Can't Pause (Generic)"

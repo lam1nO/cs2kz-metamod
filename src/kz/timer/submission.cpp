@@ -41,6 +41,21 @@ static inline f64 PBMatchTolerance(f64 runTime)
 	return MAX(1e-6, runTime * 1e-6);
 }
 
+// До какого места включительно ран озвучивается как «заехал высоко» (kz.wickedsick).
+// Первое место формально тоже проходит — его отсекает не этот порог, а приоритет
+// звуков в AnnounceLocal (у рекорда свой kz.holyshit).
+static constexpr u32 KZ_TOP_RANK_SOUND = 20;
+
+// Заполненность курса сознательно НЕ проверяется (решение владельца проекта): на
+// свежей карте или бонусе, где времён единицы, в «топ-20» попадает любой финиш — и
+// пусть звучит. Нижняя граница нужна не для этого: rank приходит из sql_getmaprank
+// как COUNT(...) + 1, то есть штатно >= 1, а ноль означает «ряд не получен», и без
+// неё деградация БД звучала бы на весь сервер.
+static inline bool IsTopRank(u32 rank)
+{
+	return rank >= 1 && rank <= KZ_TOP_RANK_SOUND;
+}
+
 static void BuildReplayPath(char *buf, int bufLen, const UUID_t &uuid)
 {
 	V_snprintf(buf, bufLen, "%s/%s.replay", KZ_REPLAY_PATH, uuid.ToString().c_str());
@@ -870,6 +885,10 @@ void RunSubmission::AnnounceLocal()
 	const bool serverWR = this->localResponse.overall.isNewPB && this->localResponse.overall.rank == 1;
 	// Pro-ветку БД заполняет только для ранов без телепортов (см. SubmitLocal).
 	const bool serverWRPro = this->teleports == 0 && this->localResponse.pro.isNewPB && this->localResponse.pro.rank == 1;
+	// Первая двадцатка курса — тот же гейт «новый PB И место», порог другой. Рекорд
+	// под это условие тоже подходит; разводит их приоритет звуков ниже, а не гейт.
+	const bool top20 = (this->localResponse.overall.isNewPB && IsTopRank(this->localResponse.overall.rank))
+					   || (this->teleports == 0 && this->localResponse.pro.isNewPB && IsTopRank(this->localResponse.pro.rank));
 
 	for (u32 i = 0; i < MAXPLAYERS + 1; i++)
 	{
@@ -920,15 +939,29 @@ void RunSubmission::AnnounceLocal()
 		}
 	}
 
-	// Звук — один раз на весь сервер (nub и pro одновременно дают один «holy shit»),
+	// Звук — один раз на весь сервер (nub и pro одновременно дают один звук),
 	// отдельным проходом: внутри цикла объявления он бы сыграл каждому N раз.
-	// Саундивент kz.holyshit живёт в базовом workshop-аддоне cs2kz; PlaySoundToClient
-	// сам молчит, если аддон не смонтирован. Громкость — преф recordVolume (!options,
-	// 0 = выключить).
+	// Рекорд перебивает топ-20: у рекордсмена оба условия истинны, звук нужен один.
+	// Саундивенты kz.holyshit и kz.wickedsick живут в базовом workshop-аддоне cs2kz;
+	// PlaySoundToClient сам молчит, если аддон не смонтирован. Громкость — преф
+	// recordVolume (!options, 0 = выключить): для игрока это одно и то же событие
+	// «кто-то заехал высоко», разделять регуляторы незачем.
 	// Гейт `!this->global`: на global-серверах тот же звук играет AnnounceGlobal() в
 	// этом же тике, и без гейта global-WR звучал бы дважды. Наши серверы non-global,
-	// так что сейчас это защита на случай включения global, а не живая ветка.
-	if ((serverWR || serverWRPro) && !this->global)
+	// так что сейчас это защита на случай включения global, а не живая ветка. Про
+	// топ-20 AnnounceGlobal ничего не знает — на global-сервере wickedsick замолчит
+	// целиком; чинить это стоит там же, где будут включать global.
+	const char *recordSound = nullptr;
+	if (serverWR || serverWRPro)
+	{
+		recordSound = "kz.holyshit";
+	}
+	else if (top20)
+	{
+		recordSound = "kz.wickedsick";
+	}
+
+	if (recordSound && !this->global)
 	{
 		for (u32 i = 0; i < MAXPLAYERS + 1; i++)
 		{
@@ -937,7 +970,7 @@ void RunSubmission::AnnounceLocal()
 			{
 				continue;
 			}
-			utils::PlaySoundToClient(player->GetPlayerSlot(), "kz.holyshit", player->optionService->GetPreferenceFloat("recordVolume", 1.0f));
+			utils::PlaySoundToClient(player->GetPlayerSlot(), recordSound, player->optionService->GetPreferenceFloat("recordVolume", 1.0f));
 		}
 	}
 }
