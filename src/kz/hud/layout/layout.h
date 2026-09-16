@@ -52,7 +52,9 @@ const char *ResolveReplayMenuFontSlug(const char *slug);
 // Дефолт синхронизирован с текущими настройками игрока (задача hud-defaults): было
 // stratum2-bold-monodigit, стало lato-bold (слаг panorama_tables.cpp, "Lato Bold*").
 #define LAYOUT_DEFAULT_FONT "lato-bold"
-// Разметка живёт в чужом аддоне 3469155349; путь совпадает с апстримным.
+// Разметка живёт в нашем аддоне (GYMSTRIKE-KZ, см. KZ_WORKSHOP_ADDON_ID); путь
+// намеренно совпадает с апстримным — аддон собран из тех же исходников апстрима,
+// и при откате на чужой айтем код менять не придётся.
 #define KZ_MHUD_LAYOUT "panorama/layout/custom_game/cs2kz/mhud.vxml_c"
 
 // Отказ SetHasClass/SetDialogVariableString по упору в HUD_LAYOUT_MAX_INTERNED_STRINGS —

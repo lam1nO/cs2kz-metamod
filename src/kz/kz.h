@@ -15,7 +15,12 @@ enum KzModeCvars : int; // defined in mode/kz_mode.h
 #define KZ_SND_DO_TP     "UIPanorama.round_report_odds_none"
 #define KZ_SND_RESET_CPS "UIPanorama.round_report_odds_dn"
 
-#define KZ_WORKSHOP_ADDON_ID            "3469155349"
+// Свой воркшоп-айтем GYMSTRIKE-KZ (опубликован 16.09.2026) вместо чужого 3469155349
+// (KZGlobalTeam): 08.09 апстрим молча вычистил из своего айтема particles и погасил
+// MHUD на три дня, а тем же айтемом к нам едет panorama-разметка худа, меню и крестика.
+// Это лишь ФОЛБЭК: рабочее значение берётся из translations/menu-addons.txt (ключ
+// "default"), и менять надо ОБА — GetBaseAddon() читает файл, а не эту константу.
+#define KZ_WORKSHOP_ADDON_ID            "3802626932"
 #define KZ_WORKSHOP_ADDON_SNDEVENT_FILE "soundevents/soundevents_cs2kz.vsndevts"
 
 // Бренд «Качалка»/GYMSTRIKE. Циана в чате CS2 не существует: ConvertColorStringToByte

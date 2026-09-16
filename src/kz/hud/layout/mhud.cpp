@@ -108,7 +108,7 @@ void KZHUDService::UpdatePrespeedElement(CCSCustomHudLayout *layout, const Speed
 	this->UpdateLayoutElement(layout, LayoutElement::Prespeed, show, text, color, force);
 }
 
-// Порядок соответствует кнопкам в mhud.vxml (чужой аддон 3469155349, путь общий с апстримом
+// Порядок соответствует кнопкам в mhud.vxml (наш аддон, путь общий с апстримом
 // — см. KZ_MHUD_LAYOUT): верхний ряд C W J, нижний A S D.
 static_global const char *KEY_PANELS[] = {"mhud_key_c", "mhud_key_w", "mhud_key_j", "mhud_key_a", "mhud_key_s", "mhud_key_d"};
 

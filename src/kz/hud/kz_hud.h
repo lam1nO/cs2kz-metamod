@@ -363,7 +363,7 @@ public:
 		// Значение не переиспользуем — GetHudType() читает сохранённую 1 как HUD_TYPE_PANORAMA
 		// и перезаписывает её, чтобы не оставить игрока с недействительным типом (пустой экран).
 		HUD_TYPE_OFF      = 2, // ничего не рисуется
-		HUD_TYPE_PANORAMA = 3, // custom_hud_layout: разметка mhud.vxml из аддона 3469155349
+		HUD_TYPE_PANORAMA = 3, // custom_hud_layout: разметка mhud.vxml из нашего аддона
 	};
 	int GetHudType();
 	void SetHudType(int type);
