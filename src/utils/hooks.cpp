@@ -972,6 +972,13 @@ static_function void Hook_BuildGameSessionManifest(const EventBuildGameSessionMa
 	// прекешируется и не нарисуется вовсе.
 	pResourceManifest->AddResource(KZ_LEAD_PARTICLE);
 	pResourceManifest->AddResource(KZ_LEAD_PARTICLE_STOCK);
+	// Варианты луча под подбор живьём (17.09.2026, борьба с пунктиром). Содержимое аддона
+	// нельзя проверить локально, поэтому спорные правки едут отдельными ассетами и
+	// переключаются cyb_lead_particle — но переключать можно только то, что прекешировано.
+	// Когда вариант выбран, лишние убрать вместе с ассетами из аддона.
+	pResourceManifest->AddResource(KZ_LEAD_PARTICLE_VAR_ALIVE);
+	pResourceManifest->AddResource(KZ_LEAD_PARTICLE_VAR_SOLID);
+	pResourceManifest->AddResource(KZ_LEAD_PARTICLE_VAR_FULL);
 }
 
 static_function ILoadingSpawnGroup *Hook_OnCreateLoadingSpawnGroupHook(SpawnGroupHandle_t hSpawnGroup, bool bSynchronouslySpawnEntities,
