@@ -223,13 +223,20 @@ namespace
 
 	// Один класс на панель БЕЗ кэша — зовётся только в момент смены состояния (что уже
 	// выставлено, помнит ReplayMenuPageState). Лог — на отказе добавить класс, как в entity.cpp.
-	void ApplyClass(KZPlayer *player, CCSCustomHudLayout *layout, const char *panelId, const char *className, bool on)
+	// Возвращает true, если класс реально переключили: вызывающий копит этот признак и один
+	// раз за рендер метит слой на полный пересчёт (см. MarkFullChanged ниже).
+	bool ApplyClass(KZPlayer *player, CCSCustomHudLayout *layout, const char *panelId, const char *className, bool on)
 	{
 		const EHudPanelClassStatus_t status = on ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass;
-		if (!layout->SetHasClass(panelId, className, status) && on)
+		if (!layout->SetHasClass(panelId, className, status))
 		{
-			LogHudInternFailure(player, panelId, className);
+			if (on)
+			{
+				LogHudInternFailure(player, panelId, className);
+			}
+			return false;
 		}
+		return true;
 	}
 
 	// Классы позиции/ширины шкалы: step — те же 0.25 %, что и в сгенерированном листе позиций.
@@ -630,7 +637,7 @@ void KZHUDService::RenderReplayMenu(CCSCustomHudLayout *layout, bool force)
 	if (force || state.paused != (i32)status.paused)
 	{
 		state.paused = (i32)status.paused;
-		ApplyClass(this->player, layout, "state_pill", "paused", status.paused);
+		state.classDirty |= ApplyClass(this->player, layout, "state_pill", "paused", status.paused);
 	}
 
 	// Шкала: заполнение и ручка одним шагом (0.25 %) — класс снимается у прошлого значения и
@@ -664,22 +671,40 @@ void KZHUDService::RenderReplayMenu(CCSCustomHudLayout *layout, bool force)
 		if (!force && state.selectedRow >= 0)
 		{
 			const RPMenuRowDef &prev = RPMENU_ROWS[state.selectedRow];
-			ApplyClass(this->player, layout, prev.panelId, "selected", false);
+			state.classDirty |= ApplyClass(this->player, layout, prev.panelId, "selected", false);
 			if (prev.chipDec)
 			{
-				ApplyClass(this->player, layout, prev.chipDec, "focused", false);
-				ApplyClass(this->player, layout, prev.chipInc, "focused", false);
+				state.classDirty |= ApplyClass(this->player, layout, prev.chipDec, "focused", false);
+				state.classDirty |= ApplyClass(this->player, layout, prev.chipInc, "focused", false);
 			}
 		}
 		state.selectedRow = this->replayMenuRow;
 		const RPMenuRowDef &cur = RPMENU_ROWS[state.selectedRow];
-		ApplyClass(this->player, layout, cur.panelId, "selected", true);
+		state.classDirty |= ApplyClass(this->player, layout, cur.panelId, "selected", true);
 		if (cur.chipDec)
 		{
-			ApplyClass(this->player, layout, cur.chipDec, "focused", true);
-			ApplyClass(this->player, layout, cur.chipInc, "focused", true);
+			state.classDirty |= ApplyClass(this->player, layout, cur.chipDec, "focused", true);
+			state.classDirty |= ApplyClass(this->player, layout, cur.chipInc, "focused", true);
 		}
 	}
 	const ReplayMenuLine selectedLine = RPMENU_ROWS[this->replayMenuRow].line;
 	this->SetReplayMenuVar(layout, (i32)RPVar::Hint, KZ::replaysystem::menu::GetReplayMenuHintText(this->player, selectedLine).c_str(), force);
+
+	// Движковый баг (sdk/entity/ccscustomhudlayout.h:179-181): SetHasClass не доезжает до
+	// ДЕТЕЙ панели, а вид строки и пилюли задан именно потомками (.row.selected .row-mark,
+	// .row.selected .row-label, .chip.focused .chip-key, .state-pill.paused .state-glyph).
+	// Первое появление НОВОЙ пары (панель,класс) метит слой на полный пересчёт само, поэтому
+	// первый проход выглядит верно, а повторное переключение уже интернированной пары — нет:
+	// подсветка залипала бы на прошлой строке. Меню настроек обходит это тем же вызовом
+	// (menu.cpp), но БЕЗУСЛОВНО на каждый рендер; здесь так нельзя — карточка рисуется каждый
+	// тик плейбека, и это было бы 64 полных ресенда сущности в секунду. Поэтому метим только
+	// когда класс реально переключили — на плейбеке это редкие кадры (шаг W/S, пауза).
+	// Классы шкалы (w-p--/x-p--) сюда НЕ попадают намеренно: .seek-fill и .seek-cursor
+	// красят сами себя, потомков у них нет. Сама пометка ни строк, ни классов не заводит,
+	// лимита HUD_LAYOUT_MAX_INTERNED_STRINGS не касается.
+	if (state.classDirty)
+	{
+		state.classDirty = false;
+		layout->GetGlobalLayoutState()->MarkFullChanged();
+	}
 }
