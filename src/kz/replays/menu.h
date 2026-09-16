@@ -1,7 +1,7 @@
 #ifndef KZ_REPLAYMENU_H
 #define KZ_REPLAYMENU_H
 
-#include "sdk/datatypes.h" // u64 в SearchHit
+#include "sdk/datatypes.h" // u64 в SearchHit, f64 в ReplayMenuStatus
 
 #include <string>
 #include <vector>
@@ -30,10 +30,11 @@ namespace KZ::replaysystem::menu
 	// Меню управления реплеем живёт ТОЛЬКО на panorama (hud/layout/rpmenu.cpp) и всегда открыто,
 	// пока игрок наблюдает реплей-бота; команды открытия нет, `!rpmenu` лишь напоминает об этом.
 	// Старое cs2menus-меню удалено 09.09 (решение пользователя). Здесь — словарь пунктов, их
-	// семантика и тексты строк карточки; ввод и рендер — в rpmenu.cpp.
-	// Пункты меню реплея. Порядок = порядок строк карточки. Бинды в подписях НЕ пишутся — их
-	// показывает контекстная подсказка под списком (GetReplayMenuHintText); регулируемые
-	// строки обрамляются «< >» в рендере, когда выбраны (IsReplayMenuLineAdjustable).
+	// семантика и тексты слотов карточки; ввод и запись страницы — в rpmenu.cpp.
+	// Пункты меню реплея. Порядок ЗДЕСЬ — только словарь семантики: на карточке строки идут в
+	// своём порядке (таблица RPMENU_ROWS в rpmenu.cpp), по нему же ходят W/S. Бинды в подписях
+	// НЕ пишутся — их показывает контекстная подсказка под списком (GetReplayMenuHintText), а у
+	// регулируемой строки ещё и подсвеченные чипы A/D (класс focused, IsReplayMenuLineAdjustable).
 	enum class ReplayMenuLine
 	{
 		Pause,   // E — пауза/продолжить
@@ -45,7 +46,8 @@ namespace KZ::replaysystem::menu
 		Count
 	};
 
-	inline bool IsReplayMenuLineAdjustable(ReplayMenuLine line)
+	// constexpr — таблица строк карточки (RPMENU_ROWS) проверяет себя static_assert'ом.
+	constexpr bool IsReplayMenuLineAdjustable(ReplayMenuLine line)
 	{
 		return line == ReplayMenuLine::Step || line == ReplayMenuLine::Seek || line == ReplayMenuLine::Speed;
 	}
@@ -57,21 +59,44 @@ namespace KZ::replaysystem::menu
 		Inc     // D
 	};
 
-	// Применить ввод к строке. Семантика одна на оба бэкенда, здесь же живут пресеты
-	// скорости (см. RPMENU_SPEEDS в menu.cpp). Сообщения игроку — как у чат-команд
-	// (пауза/продолжить объявляются, шаг и скорость — нет: значение видно в строке).
+	// Применить ввод к строке; здесь же живут пресеты скорости (см. RPMENU_SPEEDS в menu.cpp).
+	// Сообщения игроку — как у чат-команд (пауза/продолжить объявляются, шаг и скорость — нет:
+	// значение и так видно на карточке).
 	void ApplyReplayMenuInput(KZPlayer *player, ReplayMenuLine line, ReplayMenuInput input);
 
 	// Текст строки panorama-меню на языке игрока, с живыми значениями (пауза/скорость), без
-	// биндов и без обрамления — их добавляет рендер.
+	// биндов: их показывают чипы строки и подсказка.
 	std::string GetReplayMenuLineText(KZPlayer *player, ReplayMenuLine line);
-	// Заголовок карточки: «РЕПЛЕЙ · <ник автора рана>».
-	std::string GetReplayMenuTitleText(KZPlayer *player);
-	// Строка состояния: «<скорость>x · <время> / <длительность>[ · пауза]» — живая.
-	std::string GetReplayMenuStatusText(KZPlayer *player);
-	// Самый длинный вариант строки состояния для этого реплея (скорость «0.25x», обе метки времени =
-	// длительность, суффикс паузы) — для постоянной ширины блока в рендере.
-	std::string GetReplayMenuStatusMaxText(KZPlayer *player);
+
+	// Живое состояние плейбека для карточки: позиция и длительность в ОДНОЙ шкале (см.
+	// ReplayMenuPositionTime/ReplayMenuTotalTime в menu.cpp), текст скорости и пауза. Собранной
+	// строки состояния больше нет: своя страница раскладывает эти значения по разным слотам
+	// (время, длительность, скорость и пилюля состояния — четыре независимых слота).
+	// Скорость и пауза общие на сервер — игрок здесь не нужен.
+	struct ReplayMenuStatus
+	{
+		f64 position {};
+		f64 total {}; // 0 — длительность неизвестна (реплей не играет)
+		bool paused {};
+		char speed[16] {};
+	};
+
+	void GetReplayMenuStatus(ReplayMenuStatus &out);
+	// Идёт ли реплей в режиме AWR (телепорты вырезаны) — бейдж на карточке.
+	bool IsReplayMenuAwr();
+	// Реплей рана (есть заголовок run с временем) против записи без таймера (джамп/ручной):
+	// от этого зависит подпись большого поля времени — «время рана» или «позиция в записи».
+	bool IsReplayMenuRunReplay();
+	// Ник автора записи для шапки карточки; пусто — в заголовке нет игрока.
+	std::string GetReplayMenuAuthorName();
+	// Подстрочник шапки: «карта · курс · режим» из заголовка записи. Разделители и порядок —
+	// спека (§4, слот meta); перевода здесь нет, это имена из файла реплея. Пусто — данных нет.
+	std::string GetReplayMenuMetaText();
+
+	// Шаг перемотки строки Seek в секундах — подпись чипов A/D на карточке берётся отсюда,
+	// чтобы не разъехаться с самой перемоткой (RPMENU_SEEK_STEP_10 в menu.cpp).
+	int GetReplayMenuSeekStepSeconds();
+
 	// Контекстная подсказка биндов под списком — для ВЫБРАННОЙ строки.
 	std::string GetReplayMenuHintText(KZPlayer *player, ReplayMenuLine line);
 

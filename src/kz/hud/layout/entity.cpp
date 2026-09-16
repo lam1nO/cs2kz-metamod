@@ -334,7 +334,7 @@ void KZHUDService::LayoutCleanup()
 			// игрок остался бы так и после выгрузки плагина (сущность и захват на ней —
 			// не наши больше, но клиент их не увидит снятыми, пока кто-то не уберёт entity).
 			player->hudService->DestroyOwnedMenuLayout();
-			// Меню реплея (layout/rpmenu.cpp) — третья персональная сущность, та же причина.
+			// Страница меню реплея (layout/rpmenu.cpp) — третья персональная сущность, та же причина.
 			player->hudService->DestroyOwnedReplayLayout();
 			// Копия страницы под элемент «Прогресс» (layout/mhud.cpp) — четвёртая.
 			player->hudService->DestroyOwnedLeadProgressLayout();
@@ -344,24 +344,13 @@ void KZHUDService::LayoutCleanup()
 
 bool KZHUDService::OwnsLayoutEntity(CEntityHandle handle)
 {
-	// Своих сущностей несколько: сам худ (ownedLayout), отдельное меню настроек (ownedMenuLayout,
-	// Task 11), копия под элемент «Прогресс» (ownedLeadProgressLayout) и копии под меню реплея
-	// спектатора (ownedReplayLayouts, RPMENU_ENTITIES штук,
-	// layout/rpmenu.cpp) — транзит
-	// (KZ::quiet) гасит всё, чего нет в этом списке, и без проверки каждой сущность игроку не
-	// долетала бы вовсе (пустые/невалидные хэндлы по-прежнему false).
-	if ((this->ownedLayout.IsValid() && this->ownedLayout.ToInt() == handle.ToInt())
-		|| (this->ownedMenuLayout.IsValid() && this->ownedMenuLayout.ToInt() == handle.ToInt())
-		|| (this->ownedLeadProgressLayout.IsValid() && this->ownedLeadProgressLayout.ToInt() == handle.ToInt()))
-	{
-		return true;
-	}
-	for (const CHandle<CBaseEntity> &h : this->ownedReplayLayouts)
-	{
-		if (h.IsValid() && h.ToInt() == handle.ToInt())
-		{
-			return true;
-		}
-	}
-	return false;
+	// Своих сущностей четыре: сам худ (ownedLayout), отдельное меню настроек (ownedMenuLayout,
+	// Task 11), копия под элемент «Прогресс» (ownedLeadProgressLayout) и страница меню реплея
+	// спектатора (ownedReplayLayout, layout/rpmenu.cpp) — транзит (KZ::quiet) гасит всё, чего
+	// нет в этом списке, и без проверки каждой сущность игроку не долетала бы вовсе
+	// (пустые/невалидные хэндлы по-прежнему false).
+	return (this->ownedLayout.IsValid() && this->ownedLayout.ToInt() == handle.ToInt())
+		   || (this->ownedMenuLayout.IsValid() && this->ownedMenuLayout.ToInt() == handle.ToInt())
+		   || (this->ownedLeadProgressLayout.IsValid() && this->ownedLeadProgressLayout.ToInt() == handle.ToInt())
+		   || (this->ownedReplayLayout.IsValid() && this->ownedReplayLayout.ToInt() == handle.ToInt());
 }

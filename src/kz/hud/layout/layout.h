@@ -37,8 +37,13 @@
 
 // Меню реплея спектатора (layout/rpmenu.cpp): дефолты префов rpmenuX/Y/Size/Step/Font —
 // пункт «Меню реплея» в настройках (hud/prefs/hud_prefs.cpp). X/Y — проценты от центра,
-// size — пиксели, step — шаг строк в процентах. Значения подбирает пользователь на канарейке.
-// Дефолты = настройки пользователя с канарейки 09.09 (rpmenuX/Size/Step/Font/Background из его префов).
+// size — пиксели, step — шаг строк в процентах.
+//
+// ВНИМАНИЕ: с переездом меню на СВОЮ страницу (KZ_RPMENU_LAYOUT) рендер эти префы больше НЕ
+// читает — вся геометрия, шрифты и фон карточки заданы её vcss (карточка фиксированного
+// размера, спека 2026-09-11-replay-player-panorama). Ключи, пункт настроек и запись в
+// GetOwnLayoutPrefs оставлены намеренно: у игроков уже лежат сохранённые значения, а ключи
+// входят в белый список обмена худом — их удаление отдельное решение, не часть переезда.
 #define RPMENU_DEF_X    -34
 #define RPMENU_DEF_Y    -8
 #define RPMENU_DEF_SIZE 20
@@ -48,15 +53,12 @@
 #define RPMENU_STEP_MAX 12
 #define RPMENU_DEF_BACKGROUND 30 // непрозрачность подложки, %
 
-// Шрифты меню реплея — ТОЛЬКО моноширинные (решение 09.09 после канарейки cyb.169: в
-// пропорциональном шрифте строки «в разнобой» и скачут при смене выбора). Левый край карточки
-// строится добивкой NBSP до одной длины в кодовых точках, что точно только в моно; метрик глифов
-// у сервера нет (файлов шрифтов на ноде нет), так что выровнять пропорциональный шрифт нечем.
-// Таблица — в layout/prefs.cpp; преф rpmenuFont, не попавший в неё, читается как RPMENU_DEF_FONT.
-// Список НЕ урезан вручную: в таблице panorama (68 начертаний, panorama_tables.cpp) моноширинных
-// ровно четыре — три Stratum2 Mono и Noto Mono; «...-monodigit» моноширинны только по цифрам, а в
-// карточке есть буквы. Проверка при добавлении шрифтов в аддон: grep '"[a-z0-9-]*mono' по
-// panorama_tables.cpp — всё, что оттуда, кроме monodigit, обязано быть здесь.
+// Шрифты меню реплея — таблица выбора в пункте настроек (реализация в layout/prefs.cpp);
+// преф rpmenuFont, не попавший в неё, читается как RPMENU_DEF_FONT.
+// Ограничение «только моноширинные» осталось от старой карточки на разметке ХУДА: там строки
+// добивались NBSP до одной длины в кодовых точках, и это точно работает только в моно. Своя
+// страница берёт шрифты из своего vcss и rpmenuFont не применяет вовсе, так что ни расширять,
+// ни урезать таблицу сейчас незачем — см. комментарий у дефолтов выше.
 extern const char *const RPMENU_MONO_FONTS[];
 extern const i32 RPMENU_MONO_FONT_COUNT;
 const char *ResolveReplayMenuFontSlug(const char *slug);
@@ -64,8 +66,15 @@ const char *ResolveReplayMenuFontSlug(const char *slug);
 // Дефолт синхронизирован с текущими настройками игрока (задача hud-defaults): было
 // stratum2-bold-monodigit, стало lato-bold (слаг panorama_tables.cpp, "Lato Bold*").
 #define LAYOUT_DEFAULT_FONT "lato-bold"
-// Разметка живёт в чужом аддоне 3469155349; путь совпадает с апстримным.
+// Разметка живёт в нашем аддоне GYMSTRIKE-KZ (см. KZ_WORKSHOP_ADDON_ID); путь намеренно
+// совпадает с апстримным — аддон собран из тех же исходников, и при откате на чужой
+// айтем код менять не придётся.
 #define KZ_MHUD_LAYOUT "panorama/layout/custom_game/cs2kz/mhud.vxml_c"
+// Своя страница меню реплея спектатора (layout/rpmenu.cpp): карточка плеера целиком — шапка,
+// время, шкала перемотки, шесть пунктов и подсказка. Живёт ТОЛЬКО в нашем аддоне (custom_game/
+// cyber/…), апстримного аналога у неё нет; исходники разметки — gymstrike-kz/content/panorama
+// (rpmenu.xml + rpmenu.css + rpmenu-positions.css), спека 2026-09-11-replay-player-panorama.
+#define KZ_RPMENU_LAYOUT "panorama/layout/custom_game/cyber/rpmenu.vxml_c"
 
 // Отказ SetHasClass/SetDialogVariableString по упору в HUD_LAYOUT_MAX_INTERNED_STRINGS —
 // общий лог для entity.cpp и rpmenu.cpp (реализация в entity.cpp).

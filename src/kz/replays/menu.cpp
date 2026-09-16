@@ -1,4 +1,4 @@
-// Меню реплея: словарь пунктов, их семантика и тексты карточки panorama-меню
+// Меню реплея: словарь пунктов, их семантика и данные карточки нашей panorama-страницы
 // (hud/layout/rpmenu.cpp) + cs2menus-меню выбора реплея по нику (OpenReplaySearchMenu).
 // Старое cs2menus-!rpmenu удалено 09.09; сама команда !rpmenu лишь напоминает, что меню
 // открывается само при просмотре реплей-бота.
@@ -146,19 +146,54 @@ std::string KZ::replaysystem::menu::GetReplayMenuLineText(KZPlayer *player, Repl
 	}
 }
 
-std::string KZ::replaysystem::menu::GetReplayMenuTitleText(KZPlayer *player)
+std::string KZ::replaysystem::menu::GetReplayMenuAuthorName()
 {
 	using namespace KZ::replaysystem;
-	const char *lang = player->languageService->GetLanguage();
-	const char *name = "";
+	// Голый ник, без обрамления «РЕПЛЕЙ · …»: это слот `nick` шапки карточки, и что перед нами
+	// плеер реплея, теперь говорит сама карточка. Обрезку длинного ника делает vcss (ellipsis).
 	if (data::IsReplayPlaying() && data::GetCurrentReplay()->header.has_player())
 	{
-		name = data::GetCurrentReplay()->header.player().name().c_str();
+		return data::GetCurrentReplay()->header.player().name();
 	}
-	return KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Title", name);
+	return "";
 }
 
-// Числитель и знаменатель строки состояния — В ОДНОЙ шкале:
+std::string KZ::replaysystem::menu::GetReplayMenuMetaText()
+{
+	using namespace KZ::replaysystem;
+	if (!data::IsReplayPlaying())
+	{
+		return "";
+	}
+	const auto &header = data::GetCurrentReplay()->header;
+	std::string meta;
+	const auto append = [&meta](const std::string &part)
+	{
+		if (part.empty())
+		{
+			return;
+		}
+		if (!meta.empty())
+		{
+			meta += " \xC2\xB7 "; // «·» U+00B7 в UTF-8 — разделитель из спеки
+		}
+		meta += part;
+	};
+	if (header.has_map())
+	{
+		append(header.map().name());
+	}
+	// Курс и режим есть только у реплея рана: у джамп-реплея свой набор полей (jump()), и
+	// смешивать их в одну строку нечем — спека для него описывает другой подстрочник.
+	if (header.has_run())
+	{
+		append(header.run().course_name());
+		append(header.run().mode().short_name());
+	}
+	return meta;
+}
+
+// Позиция и длительность (ReplayMenuStatus.position/total) — В ОДНОЙ шкале:
 //  - реплей рана (header.run() с временем): таймер рана бота (KZ::replaysystem::GetTime — тот же
 //    источник, что у худа: без предстартовых секунд записи и без записанных пауз; позиция плейбека
 //    по тикам расходилась с худом — замечание пользователя 09.09) / итоговое время из заголовка.
@@ -167,7 +202,7 @@ std::string KZ::replaysystem::menu::GetReplayMenuTitleText(KZPlayer *player)
 //    GetEndTime(): тот гасится через 3 с после стоп-тика.
 //  - иначе (джамп-реплей, у него TIMER_START нет и GetTime() всегда 0): эффективная позиция и
 //    длительность записи без пауз (playback.h).
-static_function bool ReplayMenuIsRunReplay()
+bool KZ::replaysystem::menu::IsReplayMenuRunReplay()
 {
 	using namespace KZ::replaysystem;
 	const auto *replay = data::GetCurrentReplay();
@@ -181,7 +216,7 @@ static_function f64 ReplayMenuTotalTime()
 	{
 		return 0.0;
 	}
-	if (ReplayMenuIsRunReplay())
+	if (KZ::replaysystem::menu::IsReplayMenuRunReplay())
 	{
 		const auto *replay = data::GetCurrentReplay();
 		// AWR: знаменатель — время БЕЗ вырезанных петель, иначе числитель (позиция в
@@ -204,56 +239,33 @@ static_function f64 ReplayMenuPositionTime()
 		return 0.0;
 	}
 	const auto *replay = data::GetCurrentReplay();
-	if (ReplayMenuIsRunReplay())
+	if (KZ::replaysystem::menu::IsReplayMenuRunReplay())
 	{
 		return replay->endTime > 0.0f ? (f64)replay->endTime : (f64)GetTime();
 	}
 	return (f64)playback::RawTickToEffective(replay->currentTick) * ENGINE_FIXED_TICK_INTERVAL;
 }
 
-std::string KZ::replaysystem::menu::GetReplayMenuStatusText(KZPlayer *player)
+void KZ::replaysystem::menu::GetReplayMenuStatus(ReplayMenuStatus &out)
 {
 	using namespace KZ::replaysystem;
-	const char *lang = player->languageService->GetLanguage();
-	char speedText[16];
-	commands::FormatReplaySpeed(commands::GetReplaySpeed(), speedText, sizeof(speedText));
-	// Время — до десятых: строка живая, сотые не читаются. «пауза» — и записанная пауза рана
-	// (GetPaused), и пауза плейбека зрителем (replayPaused): в обоих случаях время стоит.
-	char time[32], end[32];
-	utils::FormatTime(ReplayMenuPositionTime(), time, sizeof(time), false);
-	utils::FormatTime(ReplayMenuTotalTime(), end, sizeof(end), false);
-	const bool paused = data::IsReplayPlaying() && (GetPaused() || data::GetCurrentReplay()->replayPaused);
-	std::string status =
-		KZLanguageService::PrepareMessageWithLang(lang, paused ? "Replay Panel - Status Paused" : "Replay Panel - Status", speedText, time, end);
-	// Метка AWR — КОРОТКАЯ и в начале: карточка постоянной ширины считается по самым длинным
-	// текстам (ReplayMenuWidth), и полная чатовая фраза «AWR … (телепорты вырезаны)» раздула бы
-	// весь блок. Само время уже показано знаменателем (ReplayMenuTotalTime).
-	if (data::IsReplayPlaying() && data::GetCurrentReplay()->awrMode)
-	{
-		status = KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - AWR Mark") + status;
-	}
-	return status;
+	out.position = ReplayMenuPositionTime();
+	out.total = ReplayMenuTotalTime();
+	// «Пауза» — и записанная пауза рана (GetPaused), и пауза плейбека зрителем (replayPaused):
+	// в обоих случаях время стоит.
+	out.paused = data::IsReplayPlaying() && (GetPaused() || data::GetCurrentReplay()->replayPaused);
+	commands::FormatReplaySpeed(commands::GetReplaySpeed(), out.speed, sizeof(out.speed));
 }
 
-std::string KZ::replaysystem::menu::GetReplayMenuStatusMaxText(KZPlayer *player)
+int KZ::replaysystem::menu::GetReplayMenuSeekStepSeconds()
+{
+	return (int)RPMENU_SEEK_STEP_10;
+}
+
+bool KZ::replaysystem::menu::IsReplayMenuAwr()
 {
 	using namespace KZ::replaysystem;
-	const char *lang = player->languageService->GetLanguage();
-	char end[32];
-	utils::FormatTime(ReplayMenuTotalTime(), end, sizeof(end), false);
-	// «0.25» — самый длинный из пресетов RPMENU_SPEEDS; но !rpspeed принимает произвольное число
-	// («0.125»), поэтому берём длиннее из пресета и текущего значения.
-	char current[16];
-	commands::FormatReplaySpeed(commands::GetReplaySpeed(), current, sizeof(current));
-	const char *speed = V_strlen(current) > 4 ? current : "0.25";
-	std::string status = KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Status Paused", speed, end, end);
-	// Метка AWR входит в бюджет ширины ровно тогда, когда она реально показывается
-	// (GetReplayMenuStatusText): ширина считается по текущему реплею, не по худшему случаю.
-	if (data::IsReplayPlaying() && data::GetCurrentReplay()->awrMode)
-	{
-		status = KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - AWR Mark") + status;
-	}
-	return status;
+	return data::IsReplayPlaying() && data::GetCurrentReplay()->awrMode;
 }
 
 std::string KZ::replaysystem::menu::GetReplayMenuHintText(KZPlayer *player, ReplayMenuLine line)

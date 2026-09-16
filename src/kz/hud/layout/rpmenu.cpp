@@ -1,31 +1,33 @@
-// Меню управления реплеем спектатора на panorama (см. kz_hud.h, раздел «Меню управления
-// реплеем»). Семантика пунктов и тексты — KZ::replaysystem::menu (replays/menu.cpp), здесь —
-// сущности, чтение клавиш и рендер карточки.
+// Меню управления реплеем спектатора на СВОЕЙ panorama-странице (KZ_RPMENU_LAYOUT, аддон
+// GYMSTRIKE-KZ; исходники разметки — gymstrike-kz/content/panorama: rpmenu.xml, rpmenu.css,
+// rpmenu-positions.css; спека — docs/design/2026-09-11-replay-player-panorama). Семантика
+// пунктов и данные — KZ::replaysystem::menu (replays/menu.cpp), здесь — сущность, чтение
+// клавиш и запись страницы.
 //
-// Почему сущности с разметкой ХУДА, а не страница меню настроек: в чужом аддоне 3469155349
-// стили живут по-файлово, и menu.vcss не подключает positions.vcss — список оттуда к левому
-// краю не сдвинуть (только #menu_root.shift на −125px). У mhud.vxml четыре текстовых лейбла с
-// позицией/цветом/кеглем/прозрачностью/шрифтом/фоном классами — из них и собрана карточка. Строк
-// девять (заголовок, состояние, 6 пунктов, подсказка), у каждой текст и подложка — по две строки
-// на копию, копий ПЯТЬ (RPMENU_ENTITIES): клиент держит копии одной страницы раздельно (cyb.166).
+// Всю карточку (шапка, время, шкала, шесть строк, подсказка) рисует сама страница: размеры,
+// шрифты, цвета и фон живут в её vcss. Сервер умеет над ней ровно две операции —
+// SetDialogVariableString (текст слота) и SetHasClass (класс панели). Отсюда всё устройство
+// файла: ОДНА сущность на игрока (одна страница — один custom_hud_layout), таблица слотов
+// RPMENU_VARS и таблица строк RPMENU_ROWS. Костылей старой карточки на разметке ХУДА (добивка
+// строк NBSP до одной длины, только моноширинные шрифты, константная ширина блока по самым
+// длинным текстам, пять копий mhud.vxml_c) здесь больше нет и быть не должно: край строк
+// задаёт CSS, а ширина карточки фиксированная и от текста не зависит.
 //
-// Левый край (решение пользователя 09.09): .element центрирует лейбл, поэтому все строки
-// добиваются NBSP до одной длины в кодовых точках и рисуются ОДНИМ шрифтом и ОДНИМ кеглем.
-// Точно это работает только в моноширинном шрифте — поэтому шрифт меню ограничен таблицей
-// RPMENU_MONO_FONTS (layout.h; пропорциональный давал «буквы в разнобой» и скачки при смене
-// выбора, канарейка cyb.169). Выбор — только цвет и прозрачность (рост кегля сдвигал бы край);
-// «< »/« >» на выбранной регулируемой строке, у остальных на их месте NBSP той же ширины —
-// ширина блока — константа: считается по САМЫМ ДЛИННЫМ вариантам всех строк (все подсказки, все
-// пункты со скобками, состояние с самой длинной скоростью), а не по текущему тексту, иначе смена
-// подсказки меняла бы ширину и центрированный блок ездил бы влево-вправо (канарейка cyb.170).
-// Заголовок отличается акцентным цветом и капсом, не шрифтом. Подложка — чёрный pal-bg с
-// прозрачностью rpmenuBackground (палитра аддона непрозрачная, а opacity гасит и текст — поэтому
-// отдельный лейбл). Геометрия/шрифт/обводка/фон — префы rpmenu*.
+// Произвольное ЧИСЛО в CSS сервером не поставить, поэтому переменная геометрия шкалы выражена
+// классами с шагом 0.25 %: .w-p--N — ширина заполнения, .x-p--N — позиция ручки
+// (rpmenu-positions.vcss). Про бюджет интерн-таблицы см. RPMENU_PROGRESS_STEPS ниже.
+//
+// Порядок строк на СТРАНИЦЕ (play, frame, seek, speed, restart, exit) не совпадает с порядком
+// ReplayMenuLine: W/S ходят по странице (RPMENU_ROWS), иначе выбор прыгал бы по карточке
+// вверх-вниз. Семантика каждой строки при этом прежняя — её задаёт поле line.
+//
+// Мышиный режим спеки (наведение, клики, перетаскивание шкалы) НЕ реализован: курсорного
+// захвата у меню нет, ввод читается с наблюдательской пешки. Классы .hovered/.grabbed/.active
+// и отметки чекпоинтов/телепортов/прыжков страница просто не получает и не показывает.
 //
 // Меню ВСЕГДА открыто, пока игрок наблюдает реплей-бота с идущим плейбеком: UpdateReplayMenu
 // (тик из DrawPanels) сам открывает и закрывает его; команды нет, cs2menus-меню удалено.
 #include "kz/hud/layout/layout.h"
-#include "kz/hud/layout/panorama_tables.h"
 #include "kz/language/kz_language.h"
 #include "kz/spec/kz_spec.h"
 #include "kz/replays/kz_replaysystem.h"
@@ -46,6 +48,7 @@
 
 using KZ::replaysystem::menu::ReplayMenuInput;
 using KZ::replaysystem::menu::ReplayMenuLine;
+using KZ::replaysystem::menu::ReplayMenuStatus;
 
 // Меню-движок cs2menus (определён в cs2kz.cpp); nullptr, если плагин не загружен.
 extern ICS2Menus *g_pMenus;
@@ -57,55 +60,158 @@ static CConVar<int> kz_rpmenu_repeat_ticks("kz_rpmenu_repeat_ticks", FCVAR_NONE,
 
 namespace
 {
-	// Раскладка копии страницы: две строки на копию. У строки два лейбла — ПОДЛОЖКА (NBSP с фоном,
-	// слот, который в mhud.vxml идёт РАНЬШЕ) и ТЕКСТ (слот позже): в panorama поздний ребёнок
-	// рисуется поверх раннего, так текст гарантированно над фоном без z-index. Строка i →
-	// сущность i / 2, пара слотов i % 2. Keys не используется.
-	constexpr LayoutElement RPMENU_PLATE_SLOTS[] = {LayoutElement::Timer, LayoutElement::Speed};
-	constexpr LayoutElement RPMENU_TEXT_SLOTS[] = {LayoutElement::Prespeed, LayoutElement::Checkpoint};
-	constexpr i32 RPMENU_LINES_PER_ENTITY = (i32)KZ_ARRAYSIZE(RPMENU_TEXT_SLOTS);
-	constexpr i32 RPMENU_ITEMS = (i32)ReplayMenuLine::Count;
-
-	// Строки карточки: заголовок, состояние, пункты, подсказка. Ряд (в шагах step от y0) —
-	// с «воздухом» в один шаг после состояния и перед подсказкой (LineRow).
-	constexpr i32 RPMENU_LINE_TITLE = 0;
-	constexpr i32 RPMENU_LINE_STATUS = 1;
-	constexpr i32 RPMENU_LINE_ITEM0 = 2;
-	constexpr i32 RPMENU_LINE_HINT = RPMENU_LINE_ITEM0 + RPMENU_ITEMS;
-	constexpr i32 RPMENU_LINES = RPMENU_LINE_HINT + 1;
-	static_assert(RPMENU_LINES <= KZHUDService::RPMENU_ENTITIES * RPMENU_LINES_PER_ENTITY,
-				  "копий страницы должно хватать на заголовок, состояние, пункты и подсказку (по две строки на копию)");
-
-	i32 LineRow(i32 line)
+	// Текстовые слоты страницы. panelId — панель с текстом, varName — имя dialog-переменной в
+	// её text="{s:...}" (в rpmenu.xml они совпадают не везде: текст строки лежит на панели
+	// row_*_label, а переменная зовётся row_*).
+	enum class RPVar : i32
 	{
-		i32 row = line;
-		if (line >= RPMENU_LINE_ITEM0)
+		Nick,
+		Meta,
+		Badge,
+		TimeCaption,
+		TimeCurrent,
+		TimeFinal,
+		StateGlyph,
+		StateText,
+		PosTime,
+		DurTime,
+		TickLine,
+		SeekPreview,
+		RowPlay,
+		RowFrame,
+		RowSeek,
+		RowSpeed,
+		RowRestart,
+		RowExit,
+		ChipKeyPlay,
+		ChipKeyRestart,
+		ChipKeyExit,
+		ChipFramePrev,
+		ChipFrameNext,
+		ChipSeekBack,
+		ChipSeekFwd,
+		ChipSpeedDec,
+		ChipSpeedVal,
+		ChipSpeedInc,
+		Hint,
+		Count
+	};
+
+	struct RPMenuVarDef
+	{
+		const char *panelId;
+		const char *varName;
+	};
+
+	// clang-format off
+	constexpr RPMenuVarDef RPMENU_VARS[] =
+	{
+		{"nick",               "nick"},
+		{"meta",               "meta"},
+		{"badge_type",         "badge"},
+		{"time_caption",       "time_caption"},
+		{"time_current",       "time_current"},
+		{"time_final",         "time_final"},
+		{"state_glyph",        "state_glyph"},
+		{"state_text",         "state_text"},
+		{"pos_time",           "pos_time"},
+		{"dur_time",           "dur_time"},
+		{"tick_line",          "tick_line"},
+		{"seek_preview",       "seek_preview"},
+		{"row_play_label",     "row_play"},
+		{"row_frame_label",    "row_frame"},
+		{"row_seek_label",     "row_seek"},
+		{"row_speed_label",    "row_speed"},
+		{"row_restart_label",  "row_restart"},
+		{"row_exit_label",     "row_exit"},
+		{"chip_key_e_play",    "chip_key_e_play"},
+		{"chip_key_e_restart", "chip_key_e_restart"},
+		{"chip_key_e_exit",    "chip_key_e_exit"},
+		{"chip_frame_prev",    "chip_frame_prev"},
+		{"chip_frame_next",    "chip_frame_next"},
+		{"chip_seek_back",     "chip_seek_back"},
+		{"chip_seek_fwd",      "chip_seek_fwd"},
+		{"chip_speed_dec",     "chip_speed_dec"},
+		{"chip_speed_val",     "chip_speed_val"},
+		{"chip_speed_inc",     "chip_speed_inc"},
+		{"hint_text",          "hint"},
+	};
+	// clang-format on
+	static_assert(KZ_ARRAYSIZE(RPMENU_VARS) == (size_t)RPVar::Count, "таблица слотов должна совпадать с RPVar");
+
+	// Строка карточки: панель (на неё вешается selected), слот текста, семантика пункта и пара
+	// чипов регулировки. chipDec/chipInc заданы РОВНО у регулируемых строк
+	// (IsReplayMenuLineAdjustable) — на выбранной такой строке они подсвечиваются классом
+	// focused: это и есть сигнал «сейчас работают A/D» (раньше его рисовали «< >» вокруг строки).
+	struct RPMenuRowDef
+	{
+		const char *panelId;
+		RPVar label;
+		ReplayMenuLine line;
+		const char *chipDec;
+		const char *chipInc;
+	};
+
+	// clang-format off
+	constexpr RPMenuRowDef RPMENU_ROWS[] =
+	{
+		{"row_play",    RPVar::RowPlay,    ReplayMenuLine::Pause,   NULL,               NULL},
+		{"row_frame",   RPVar::RowFrame,   ReplayMenuLine::Step,    "chip_frame_prev",  "chip_frame_next"},
+		{"row_seek",    RPVar::RowSeek,    ReplayMenuLine::Seek,    "chip_seek_back",   "chip_seek_fwd"},
+		{"row_speed",   RPVar::RowSpeed,   ReplayMenuLine::Speed,   "chip_speed_dec",   "chip_speed_inc"},
+		{"row_restart", RPVar::RowRestart, ReplayMenuLine::Restart, NULL,               NULL},
+		{"row_exit",    RPVar::RowExit,    ReplayMenuLine::End,     NULL,               NULL},
+	};
+	// clang-format on
+	constexpr i32 RPMENU_ROW_COUNT = (i32)KZ_ARRAYSIZE(RPMENU_ROWS);
+	static_assert(RPMENU_ROW_COUNT == (i32)ReplayMenuLine::Count, "каждому пункту меню нужна своя строка на странице");
+
+	// Чипы регулировки заполняются ПАРАМИ и ровно у регулируемых строк: рендер снимает и
+	// ставит focused по chipDec/chipInc вместе, а проверяет только chipDec. Забытая половина
+	// пары или чипы у нерегулируемой строки дали бы застрявшую подсветку — ловим сборкой,
+	// а не глазами.
+	constexpr bool RpMenuRowChipsConsistent()
+	{
+		for (size_t i = 0; i < KZ_ARRAYSIZE(RPMENU_ROWS); i++)
 		{
-			row++; // зазор после строки состояния
+			const bool hasDec = RPMENU_ROWS[i].chipDec != NULL;
+			const bool hasInc = RPMENU_ROWS[i].chipInc != NULL;
+			if (hasDec != hasInc || hasDec != KZ::replaysystem::menu::IsReplayMenuLineAdjustable(RPMENU_ROWS[i].line))
+			{
+				return false;
+			}
 		}
-		if (line >= RPMENU_LINE_HINT)
-		{
-			row++; // зазор перед подсказкой
-		}
-		return row;
+		return true;
 	}
 
-	// Палитра (решение пользователя 10.09): весь текст НЕПРОЗРАЧНЫЙ — прозрачность делала строки
-	// «еле видными» рядом с чёткими цифрами худа; акцент — циан #00aaff (есть в палитре аддона
-	// точно; CS2-чат «{blue}» у бренда — ближайший к нему из 16 цветов чата) на заголовке, выбранном
-	// пункте и подсказке; остальные пункты и состояние — белые.
-	const Color RPMENU_COLOR_ACCENT(0x00, 0xAA, 0xFF, 255);
-	const Color RPMENU_COLOR_TEXT(255, 255, 255, 255);
-	constexpr i32 RPMENU_OPACITY_IDLE = 100;
-	constexpr i32 RPMENU_OPACITY_STATUS = 100;
-	constexpr i32 RPMENU_OPACITY_HINT = 100;
+	static_assert(RpMenuRowChipsConsistent(), "chipDec и chipInc задаются парой и ровно у регулируемых строк");
+
+	// Шкала: шаг классов .w-p--N/.x-p--N — 0.25 % (rpmenu-positions.vcss), то есть 401 значение
+	// на каждый из двух префиксов.
+	//
+	// БЮДЖЕТ ИНТЕРНОВ. HUD_LAYOUT_MAX_INTERNED_STRINGS = 1024 действует на КАЖДЫЙ вектор имён
+	// сущности отдельно, и узкое место здесь — вектор ИМЁН КЛАССОВ: 401 + 401 на шкалу плюс
+	// статические классы карточки (RPMENU_STATIC_CLASSES). Запас считает static_assert ниже.
+	// УМЕНЬШАТЬ ШАГ ШКАЛЫ ИЛИ ДОБАВЛЯТЬ ЕЩЁ ОДИН per-value НАБОР КЛАССОВ НЕЛЬЗЯ: при переполнении
+	// InternString возвращает -1, SetHasClass молча вернёт false, и на панели НАКОПЯТСЯ оба
+	// класса — старый снять уже не выйдет, шкала замрёт с двумя ширинами сразу.
+	constexpr i32 RPMENU_PROGRESS_STEPS = 400;
+	// Имена классов, которые ставит этот файл помимо шкалы: rp-live, hidden, paused, selected,
+	// focused. Ровно они и перечислены в коде ниже — при добавлении нового обновить число.
+	constexpr i32 RPMENU_STATIC_CLASSES = 5;
+	static_assert(2 * (RPMENU_PROGRESS_STEPS + 1) + RPMENU_STATIC_CLASSES <= HUD_LAYOUT_MAX_INTERNED_STRINGS,
+				  "имена классов шкалы не помещаются в интерн-таблицу сущности: уменьшите число шагов");
 
 	constexpr i32 RPMENU_REPEAT_DELAY_TICKS = 22;
 
-	// Повтор создания сущностей после отказа — раз в секунду, не каждый тик: меню теперь
-	// живёт весь просмотр, и отказ (схема разъехалась после апдейта CS2) иначе давал бы 64
-	// KZ_LOG_ERROR в секунду на каждого спектатора. Логируется только первый отказ.
+	// Повтор создания сущности после отказа — раз в секунду, не каждый тик: меню живёт весь
+	// просмотр, и отказ (схема разъехалась после апдейта CS2) иначе давал бы 64 KZ_LOG_ERROR в
+	// секунду на каждого спектатора. Логируется только первый отказ.
 	constexpr i32 RPMENU_RETRY_TICKS = 64;
+
+	// «Нет данных» для слотов времени — формат из спеки (§4): та же ширина в моно, что и у
+	// настоящего времени, поэтому карточка не дёргается.
+	const char *const RPMENU_TIME_UNKNOWN = "--:--.---";
 
 	// Открыто ли у слота любое cs2menus-меню (например, выбор реплея по нику): оно читает те же
 	// W/S/E/A/D, и пока оно на экране, карточка ввод не трогает — иначе E из поиска реплея
@@ -115,44 +221,27 @@ namespace
 		return g_pMenus != nullptr && g_pMenus->GetActiveMenu(player->GetPlayerSlot().Get()) != kInvalidMenuHandle;
 	}
 
-	// Обрамление выбранной регулируемой строки — сигнал «сейчас можно A/D»; у остальных строк
-	// на этих местах NBSP той же ширины, чтобы текст начинался в одной колонке.
-	const char *const RPMENU_ADJ_OPEN = "<\xC2\xA0";  // <NBSP
-	const char *const RPMENU_ADJ_CLOSE = "\xC2\xA0>"; // NBSP>
-	const char *const RPMENU_PLAIN_PAD = "\xC2\xA0\xC2\xA0";
-	const char *const RPMENU_PAD = "\xC2\xA0";
-
-	// Длина в кодовых точках UTF-8 — добивка строк до одной ширины.
-	size_t Utf8Length(const std::string &s)
+	// Один класс на панель БЕЗ кэша — зовётся только в момент смены состояния (что уже
+	// выставлено, помнит ReplayMenuPageState). Лог — на отказе добавить класс, как в entity.cpp.
+	void ApplyClass(KZPlayer *player, CCSCustomHudLayout *layout, const char *panelId, const char *className, bool on)
 	{
-		size_t n = 0;
-		for (unsigned char c : s)
+		const EHudPanelClassStatus_t status = on ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass;
+		if (!layout->SetHasClass(panelId, className, status) && on)
 		{
-			if ((c & 0xC0) != 0x80)
-			{
-				n++;
-			}
+			LogHudInternFailure(player, panelId, className);
 		}
-		return n;
 	}
 
-	// Обрезка до limit кодовых точек: ширина блока — инвариант, а не ожидание. Строка длиннее
-	// расчётной (произвольная !rpspeed, длинный ник) режется, а не сдвигает карточку.
-	void Utf8Truncate(std::string &s, size_t limit)
+	// Классы позиции/ширины шкалы: step — те же 0.25 %, что и в сгенерированном листе позиций.
+	void ApplyProgressClass(KZPlayer *player, CCSCustomHudLayout *layout, const char *panelId, const char *prefix, i32 step, bool on)
 	{
-		size_t n = 0;
-		for (size_t i = 0; i < s.size(); i++)
+		if (step < 0)
 		{
-			if (((unsigned char)s[i] & 0xC0) != 0x80)
-			{
-				if (n == limit)
-				{
-					s.resize(i);
-					return;
-				}
-				n++;
-			}
+			return;
 		}
+		char className[16];
+		V_snprintf(className, sizeof(className), "%s-p--%i", prefix, step);
+		ApplyClass(player, layout, panelId, className, on);
 	}
 
 	// Удержанные кнопки наблюдательской пешки. GetPlayerPawn() у спектатора — игровая пешка
@@ -170,8 +259,6 @@ namespace
 		return ms->m_nButtons().m_pButtonStates[0];
 	}
 } // namespace
-
-static_function size_t ReplayMenuWidth(KZPlayer *player);
 
 // === Доступность ============================================================================
 
@@ -197,16 +284,16 @@ const char *KZHUDService::ReplayMenuUnavailableReason()
 	return NULL;
 }
 
-// === Сущности ==============================================================================
+// === Сущность ===============================================================================
 
-CCSCustomHudLayout *KZHUDService::EnsureReplayLayout(i32 index, bool &created)
+CCSCustomHudLayout *KZHUDService::EnsureReplayLayout(bool &created)
 {
 	created = false;
-	if (g_KZPlugin.unloading || !KZHUDService::IsMHUDAvailable() || index < 0 || index >= RPMENU_ENTITIES)
+	if (g_KZPlugin.unloading || !KZHUDService::IsMHUDAvailable())
 	{
 		return NULL;
 	}
-	if (CBaseEntity *cached = this->ownedReplayLayouts[index].Get())
+	if (CBaseEntity *cached = this->ownedReplayLayout.Get())
 	{
 		return (CCSCustomHudLayout *)cached;
 	}
@@ -216,41 +303,31 @@ CCSCustomHudLayout *KZHUDService::EnsureReplayLayout(i32 index, bool &created)
 		return NULL;
 	}
 	CEntityKeyValues *pKeyValues = new CEntityKeyValues();
-	// Та же разметка, что у худа (см. шапку файла) — очередная копия страницы у одного клиента.
-	pKeyValues->SetString("layout", KZ_MHUD_LAYOUT);
+	pKeyValues->SetString("layout", KZ_RPMENU_LAYOUT);
 	char name[32];
-	V_snprintf(name, sizeof(name), "kzrpmenu%i_%i", this->player->GetPlayerSlot().Get(), index);
+	V_snprintf(name, sizeof(name), "kzrpmenu%i", this->player->GetPlayerSlot().Get());
 	pKeyValues->SetString("targetname", name);
 	layout->DispatchSpawn(pKeyValues);
-	this->ownedReplayLayouts[index] = layout;
+	this->ownedReplayLayout = layout;
 	created = true;
 	// Диф-кэш — состояние ПРЕДЫДУЩЕЙ сущности, сбрасываем в момент реального создания
 	// (тот же урок, что у EnsureMenuLayout).
-	for (i32 i = 0; i < (i32)LayoutElement::Count; i++)
-	{
-		this->replayLines[index][i] = LayoutElementState();
-	}
+	this->replayPage = ReplayMenuPageState();
 	return layout;
 }
 
 void KZHUDService::DestroyOwnedReplayLayout()
 {
-	for (i32 index = 0; index < RPMENU_ENTITIES; index++)
+	if (!this->ownedReplayLayout.IsValid())
 	{
-		if (!this->ownedReplayLayouts[index].IsValid())
-		{
-			continue;
-		}
-		if (CBaseEntity *ent = this->ownedReplayLayouts[index].Get())
-		{
-			g_pKZUtils->RemoveEntity(ent);
-		}
-		this->ownedReplayLayouts[index] = nullptr;
-		for (i32 i = 0; i < (i32)LayoutElement::Count; i++)
-		{
-			this->replayLines[index][i] = LayoutElementState();
-		}
+		return;
 	}
+	if (CBaseEntity *ent = this->ownedReplayLayout.Get())
+	{
+		g_pKZUtils->RemoveEntity(ent);
+	}
+	this->ownedReplayLayout = nullptr;
+	this->replayPage = ReplayMenuPageState();
 }
 
 // === Открытие / закрытие ====================================================================
@@ -261,26 +338,20 @@ bool KZHUDService::OpenReplayMenu()
 	{
 		return true;
 	}
-	CCSCustomHudLayout *layouts[RPMENU_ENTITIES] {};
-	bool created[RPMENU_ENTITIES] {};
-	for (i32 i = 0; i < RPMENU_ENTITIES; i++)
+	bool created = false;
+	CCSCustomHudLayout *layout = this->EnsureReplayLayout(created);
+	if (!layout)
 	{
-		layouts[i] = this->EnsureReplayLayout(i, created[i]);
-		if (!layouts[i])
+		// Отказ, не выбор: сущность не создалась (схема разъехалась после апдейта CS2 /
+		// MultiAddonManager нет). Лог — один раз на серию отказов (см. RPMENU_RETRY_TICKS).
+		if (!this->replayMenuFailLogged)
 		{
-			// Отказ, не выбор: сущность не создалась (схема разъехалась после апдейта CS2 /
-			// MultiAddonManager нет). Лог — один раз на серию отказов (см. RPMENU_RETRY_TICKS),
-			// уже созданные копии не оставляем висеть.
-			if (!this->replayMenuFailLogged)
-			{
-				KZ_LOG_ERROR(LogChannel::General, "[cyb] replay_menu_unavailable reason=layout_entity_failed index=%i slot=%i\n", i,
-							 this->player->GetPlayerSlot().Get());
-				this->replayMenuFailLogged = true;
-			}
-			this->replayMenuRetryTick = g_pKZUtils->GetServerGlobals()->tickcount;
-			this->DestroyOwnedReplayLayout();
-			return false;
+			KZ_LOG_ERROR(LogChannel::General, "[cyb] replay_menu_unavailable reason=layout_entity_failed slot=%i\n",
+						 this->player->GetPlayerSlot().Get());
+			this->replayMenuFailLogged = true;
 		}
+		this->replayMenuRetryTick = g_pKZUtils->GetServerGlobals()->tickcount;
+		return false;
 	}
 	if (this->replayMenuFailLogged)
 	{
@@ -288,21 +359,13 @@ bool KZHUDService::OpenReplayMenu()
 		this->replayMenuFailLogged = false;
 	}
 	this->replayMenuOpen = true;
-	this->replayMenuLine = 0;
+	this->replayMenuRow = 0;
 	// Стартовая маска = то, что уже удержано: иначе зажатая при открытии клавиша (например,
 	// W из движения перед спектейтом) сработала бы как нажатие на первом же тике.
 	this->replayMenuHeld = HeldButtons(this->player);
 	this->replayMenuHoldTicks = 0;
-	// Ширина блока — один раз на открытие (язык и реплей за просмотр не меняются; смена языка
-	// подхватится следующим открытием), а не ~14 форматирований на тик.
-	this->replayMenuWidth = ReplayMenuWidth(this->player);
 	KZ_LOG_INFO(LogChannel::General, "[cyb] replay_menu_open slot=%i\n", this->player->GetPlayerSlot().Get());
-	bool forceAll[RPMENU_ENTITIES];
-	for (i32 i = 0; i < RPMENU_ENTITIES; i++)
-	{
-		forceAll[i] = true;
-	}
-	this->RenderReplayMenu(layouts, forceAll);
+	this->RenderReplayMenu(layout, true);
 	return true;
 }
 
@@ -349,16 +412,12 @@ void KZHUDService::UpdateReplayMenu(KZPlayer *source)
 			return; // причина уже в логе (первый отказ серии)
 		}
 	}
-	CCSCustomHudLayout *layouts[RPMENU_ENTITIES] {};
-	bool created[RPMENU_ENTITIES] {};
-	for (i32 i = 0; i < RPMENU_ENTITIES; i++)
+	bool created = false;
+	CCSCustomHudLayout *layout = this->EnsureReplayLayout(created);
+	if (!layout)
 	{
-		layouts[i] = this->EnsureReplayLayout(i, created[i]);
-		if (!layouts[i])
-		{
-			this->CloseReplayMenu("layout_entity_failed");
-			return;
-		}
+		this->CloseReplayMenu("layout_entity_failed");
+		return;
 	}
 
 	if (HasForeignMenu(this->player))
@@ -372,7 +431,7 @@ void KZHUDService::UpdateReplayMenu(KZPlayer *source)
 	{
 		this->ReadReplayMenuInput();
 	}
-	// Ввод мог остановить реплей («Завершить») — тогда меню уже закрыто и сущностей нет.
+	// Ввод мог остановить реплей («Завершить») — тогда меню уже закрыто и сущности нет.
 	if (!this->replayMenuOpen)
 	{
 		return;
@@ -382,7 +441,7 @@ void KZHUDService::UpdateReplayMenu(KZPlayer *source)
 		this->CloseReplayMenu("replay_stopped");
 		return;
 	}
-	this->RenderReplayMenu(layouts, created);
+	this->RenderReplayMenu(layout, created);
 }
 
 void KZHUDService::ReadReplayMenuInput()
@@ -393,14 +452,14 @@ void KZHUDService::ReadReplayMenuInput()
 
 	if (pressed & IN_FORWARD)
 	{
-		this->replayMenuLine = (this->replayMenuLine + RPMENU_ITEMS - 1) % RPMENU_ITEMS;
+		this->replayMenuRow = (this->replayMenuRow + RPMENU_ROW_COUNT - 1) % RPMENU_ROW_COUNT;
 	}
 	if (pressed & IN_BACK)
 	{
-		this->replayMenuLine = (this->replayMenuLine + 1) % RPMENU_ITEMS;
+		this->replayMenuRow = (this->replayMenuRow + 1) % RPMENU_ROW_COUNT;
 	}
 
-	const ReplayMenuLine line = (ReplayMenuLine)this->replayMenuLine;
+	const ReplayMenuLine line = RPMENU_ROWS[this->replayMenuRow].line;
 	if (pressed & IN_USE)
 	{
 		KZ::replaysystem::menu::ApplyReplayMenuInput(this->player, line, ReplayMenuInput::Select);
@@ -430,109 +489,197 @@ void KZHUDService::ReadReplayMenuInput()
 	}
 }
 
-// Максимальная длина строки карточки в кодовых точках по ВСЕМ вариантам текстов (см. шапку файла):
-// подсказки всех пунктов, пункты со скобками, заголовок, состояние с самой длинной скоростью и
-// суффиксом паузы. Зависит от языка и реплея, но не от выбранного пункта и тика.
-static_function size_t ReplayMenuWidth(KZPlayer *player)
+// === Запись страницы ========================================================================
+
+void KZHUDService::SetReplayMenuVar(CCSCustomHudLayout *layout, i32 var, const char *text, bool force)
 {
-	using namespace KZ::replaysystem::menu;
-	size_t width = Utf8Length(RPMENU_PLAIN_PAD + GetReplayMenuTitleText(player) + RPMENU_PLAIN_PAD);
-	width = (std::max)(width, Utf8Length(RPMENU_PLAIN_PAD + GetReplayMenuStatusMaxText(player) + RPMENU_PLAIN_PAD));
-	for (i32 i = 0; i < RPMENU_ITEMS; i++)
+	std::string &cached = this->replayPage.vars[(size_t)var];
+	if (!force && cached == text)
 	{
-		const ReplayMenuLine line = (ReplayMenuLine)i;
-		width = (std::max)(width, Utf8Length(RPMENU_ADJ_OPEN + GetReplayMenuLineText(player, line) + RPMENU_ADJ_CLOSE));
-		width = (std::max)(width, Utf8Length(RPMENU_PLAIN_PAD + GetReplayMenuHintText(player, line) + RPMENU_PLAIN_PAD));
+		return;
 	}
-	return width;
+	const RPMenuVarDef &def = RPMENU_VARS[var];
+	if (!layout->SetDialogVariableString(def.panelId, def.varName, text))
+	{
+		// Кэш пишем ТОЛЬКО на успехе: отказ (интерн-таблица сущности переполнена) иначе
+		// защёлкнул бы слот навсегда — следующий кадр решил бы, что там уже нужный текст, и
+		// на странице до конца просмотра висел бы плейсхолдер разметки.
+		LogHudInternFailure(this->player, def.panelId, def.varName);
+		return;
+	}
+	cached = text;
 }
 
-void KZHUDService::RenderReplayMenu(CCSCustomHudLayout *(&layouts)[RPMENU_ENTITIES], const bool (&force)[RPMENU_ENTITIES])
+void KZHUDService::RenderReplayMenu(CCSCustomHudLayout *layout, bool force)
 {
-	// Свои префы, не мимикрия: GetOwnLayoutPrefs (см. MHUDLayoutPrefs::ReplayMenu).
-	const MHUDLayoutPrefs::ReplayMenu &prefs = this->GetOwnLayoutPrefs().replayMenu;
-	const ReplayMenuLine selectedLine = (ReplayMenuLine)this->replayMenuLine;
-	const size_t width = this->replayMenuWidth;
-
-	// Подложка: тот же моно-шрифт, кегль под шаг строк (1 % экрана = 10.8 px panorama-высоты), чтобы
-	// полосы соседних строк смыкались; число NBSP — та же ширина в пикселях, что у текста (моно:
-	// ширина ∝ кеглю), без запаса по краям (решение пользователя 10.09: фон не должен торчать вправо).
-	const i32 plateSize = panorama::SnapToStep((i32)(prefs.step * 10.8f + 0.5f), LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX);
-	const size_t plateChars = (size_t)((f32)width * (f32)prefs.size / (f32)plateSize + 0.5f);
-	std::string plate;
-	for (size_t n = 0; n < plateChars; n++)
+	ReplayMenuPageState &state = this->replayPage;
+	// Свежая сущность: у страницы ещё НЕТ ни одной dialog-переменной, а кэш (пустые строки)
+	// совпал бы с пустым текстом и молча ничего не отправил — первый кадр шлёт всё подряд.
+	// Дальше force пробрасывается в КАЖДУЮ отправку, иначе слот, пустой на старте, не
+	// отправился бы вовсе и остался бы с плейсхолдером из vxml.
+	if (force || state.vars.empty())
 	{
-		plate += RPMENU_PAD;
+		state = ReplayMenuPageState();
+		state.vars.assign((size_t)RPVar::Count, std::string());
+		force = true;
 	}
-	const bool plateShown = prefs.background > 0;
-	const char *const plateBg = panorama::GetColorEntryBgClass(panorama::FindColorEntry(Color(0, 0, 0, 255)));
+	const char *lang = this->player->languageService->GetLanguage();
 
-	for (i32 i = 0; i < RPMENU_LINES; i++)
+	if (force)
 	{
-		const i32 entity = i / RPMENU_LINES_PER_ENTITY;
-		const LayoutElement textSlot = RPMENU_TEXT_SLOTS[i % RPMENU_LINES_PER_ENTITY];
-		const LayoutElement plateSlot = RPMENU_PLATE_SLOTS[i % RPMENU_LINES_PER_ENTITY];
-		const i32 y = panorama::SnapToStep(prefs.y + LineRow(i) * prefs.step, -100, 100);
-
-		std::string body;
-		bool adjustable = false;
-		LayoutLabelStyle style;
-		style.x = prefs.x;
-		style.y = y;
-		style.size = prefs.size;
-		style.fontClass = prefs.fontClass;
-		style.outline = prefs.outline;
-		if (i == RPMENU_LINE_TITLE)
-		{
-			body = KZ::replaysystem::menu::GetReplayMenuTitleText(this->player);
-			style.opacity = 100;
-			style.color = RPMENU_COLOR_ACCENT;
-		}
-		else if (i == RPMENU_LINE_STATUS)
-		{
-			body = KZ::replaysystem::menu::GetReplayMenuStatusText(this->player);
-			style.opacity = RPMENU_OPACITY_STATUS;
-			style.color = RPMENU_COLOR_TEXT;
-		}
-		else if (i == RPMENU_LINE_HINT)
-		{
-			body = KZ::replaysystem::menu::GetReplayMenuHintText(this->player, selectedLine);
-			style.opacity = RPMENU_OPACITY_HINT;
-			style.color = RPMENU_COLOR_ACCENT;
-		}
-		else
-		{
-			const ReplayMenuLine line = (ReplayMenuLine)(i - RPMENU_LINE_ITEM0);
-			const bool selected = line == selectedLine;
-			body = KZ::replaysystem::menu::GetReplayMenuLineText(this->player, line);
-			adjustable = selected && KZ::replaysystem::menu::IsReplayMenuLineAdjustable(line);
-			style.opacity = selected ? 100 : RPMENU_OPACITY_IDLE;
-			style.color = selected ? RPMENU_COLOR_ACCENT : RPMENU_COLOR_TEXT;
-		}
-		std::string text = adjustable ? RPMENU_ADJ_OPEN + body + RPMENU_ADJ_CLOSE : RPMENU_PLAIN_PAD + body + RPMENU_PLAIN_PAD;
-		Utf8Truncate(text, width);
-		for (size_t n = Utf8Length(text); n < width; n++)
-		{
-			text += RPMENU_PAD;
-		}
-
-		// Подложка — ПЕРВОЙ (её слот в разметке раньше, порядок вызова роли не играет, но так
-		// читается): чёрный фон, прозрачность из префа, без обводки.
-		LayoutLabelStyle plateStyle;
-		plateStyle.x = prefs.x;
-		plateStyle.y = y;
-		plateStyle.size = plateSize;
-		plateStyle.fontClass = prefs.fontClass;
-		plateStyle.bgClass = plateBg;
-		plateStyle.opacity = prefs.background;
-		plateStyle.outline = false;
-		plateStyle.color = Color(0, 0, 0, 255);
-		const LayoutElementDef &plateDef = LAYOUT_ELEMENTS[(i32)plateSlot];
-		this->ApplyLayoutLabel(layouts[entity], plateDef.panelId, plateDef.varName, this->replayLines[entity][(i32)plateSlot], plateStyle, plateShown,
-							   plate.c_str(), force[entity]);
-
-		const LayoutElementDef &def = LAYOUT_ELEMENTS[(i32)textSlot];
-		this->ApplyLayoutLabel(layouts[entity], def.panelId, def.varName, this->replayLines[entity][(i32)textSlot], style, true, text.c_str(),
-							   force[entity]);
+		// Заполнение шкалы идёт за плейбеком каждый тик — без сглаживания, иначе оно вечно
+		// догоняет позицию (.seek-fill.rp-live). Класс один на сущность, кэша у ApplyClass нет,
+		// поэтому ставим его ровно на создании: слать SetHasClass каждый тик — лишний сетевой
+		// апдейт ради значения, которое не меняется.
+		ApplyClass(this->player, layout, "seek_fill", "rp-live", true);
 	}
+
+	// Слоты с НЕИЗМЕННЫМ текстом. Идут через тот же диф-кэш, а не разово под force: отправка
+	// может не удаться (интерн-таблица сущности переполнена), и разовая попытка оставила бы
+	// слот с плейсхолдером «{s:...}» навсегда — кэш же пишется только на успехе и заставит
+	// повторить на следующем кадре. Цена — десяток сравнений строк на тик, без сети.
+	// Чипы у нас индикаторы, а не кнопки (мыши нет): показывают клавишу, которой строка
+	// управляется. Знаки минуса/плюса — ASCII: типографские «−»/«±» из спеки в игровом
+	// шрифте не гарантированы.
+	this->SetReplayMenuVar(layout, (i32)RPVar::ChipKeyPlay, "E", force);
+	this->SetReplayMenuVar(layout, (i32)RPVar::ChipKeyRestart, "E", force);
+	this->SetReplayMenuVar(layout, (i32)RPVar::ChipKeyExit, "E", force);
+	this->SetReplayMenuVar(layout, (i32)RPVar::ChipFramePrev, "A", force);
+	this->SetReplayMenuVar(layout, (i32)RPVar::ChipFrameNext, "D", force);
+	const int seekStep = KZ::replaysystem::menu::GetReplayMenuSeekStepSeconds();
+	char seekBack[16], seekFwd[16];
+	V_snprintf(seekBack, sizeof(seekBack), "-%is", seekStep);
+	V_snprintf(seekFwd, sizeof(seekFwd), "+%is", seekStep);
+	this->SetReplayMenuVar(layout, (i32)RPVar::ChipSeekBack, seekBack, force);
+	this->SetReplayMenuVar(layout, (i32)RPVar::ChipSeekFwd, seekFwd, force);
+	this->SetReplayMenuVar(layout, (i32)RPVar::ChipSpeedDec, "-", force);
+	this->SetReplayMenuVar(layout, (i32)RPVar::ChipSpeedInc, "+", force);
+	// Слоты, которых сервер пока не наполняет: строка тиков и превью времени под курсором
+	// (мышиного режима нет). Переменная обязана СУЩЕСТВОВАТЬ, иначе на странице останется её
+	// плейсхолдер; пустая строка тиков — штатный вариант спеки (§1.1, высота строки
+	// сохраняется). Именно здесь и нужен проброс force: на первом кадре кэш пуст, и без него
+	// пустой текст «совпал» бы с кэшем и не ушёл бы вовсе.
+	this->SetReplayMenuVar(layout, (i32)RPVar::TickLine, "", force);
+	this->SetReplayMenuVar(layout, (i32)RPVar::SeekPreview, "", force);
+
+	// Шапка: ник автора записи, подстрочник «карта · курс · режим» и бейдж AWR — в старой
+	// карточке метка AWR стояла в начале строки состояния.
+	this->SetReplayMenuVar(layout, (i32)RPVar::Nick, KZ::replaysystem::menu::GetReplayMenuAuthorName().c_str(), force);
+	std::string meta = KZ::replaysystem::menu::GetReplayMenuMetaText();
+	// «—» — вариант «нет данных» из спеки (§4): панель meta высоту держит в любом случае.
+	this->SetReplayMenuVar(layout, (i32)RPVar::Meta, meta.empty() ? "\xE2\x80\x94" : meta.c_str(), force);
+	const bool awr = KZ::replaysystem::menu::IsReplayMenuAwr();
+	std::string badge;
+	if (awr)
+	{
+		badge = KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - AWR Mark");
+		while (!badge.empty() && badge.back() == ' ')
+		{
+			badge.pop_back(); // фраза чатовая, с хвостовым пробелом-разделителем — бейджу он не нужен
+		}
+	}
+	this->SetReplayMenuVar(layout, (i32)RPVar::Badge, badge.c_str(), force);
+	if (force || state.awrBadge != (i32)awr)
+	{
+		state.awrBadge = (i32)awr;
+		ApplyClass(this->player, layout, "badge_type", "hidden", !awr);
+	}
+
+	// Время, скорость и состояние плейбека.
+	ReplayMenuStatus status {};
+	KZ::replaysystem::menu::GetReplayMenuStatus(status);
+	// Точность — precise (mm:ss.mmm, с часом h:mm:ss.mmm): так требует спека (§4 и
+	// data-availability §5), под неё же посчитаны ширины полей. Старая карточка на разметке
+	// худа показывала M:SS осознанно — там строка состояния была одной живой строкой мелким
+	// кеглем. Цена решения: миллисекунды меняются каждый тик, поэтому диф-кэш на двух слотах
+	// позиции не срабатывает и они уходят каждый тик (две записи в уже существующие элементы
+	// вектора, полного пересчёта сущности это НЕ вызывает). Длительность при этом кэшируется.
+	char position[32], total[32];
+	utils::FormatTime(status.position, position, sizeof(position));
+	utils::FormatTime(status.total, total, sizeof(total));
+	const bool hasTotal = status.total > 0.0;
+	const char *totalText = hasTotal ? total : RPMENU_TIME_UNKNOWN;
+	// Подпись большого поля: у реплея рана это время рана, у записи без таймера (джамп,
+	// ручная) — позиция в записи.
+	const std::string caption = KZLanguageService::PrepareMessageWithLang(
+		lang, KZ::replaysystem::menu::IsReplayMenuRunReplay() ? "Replay Panel - Time Caption Run" : "Replay Panel - Time Caption Position");
+	this->SetReplayMenuVar(layout, (i32)RPVar::TimeCaption, caption.c_str(), force);
+	this->SetReplayMenuVar(layout, (i32)RPVar::TimeCurrent, position, force);
+	this->SetReplayMenuVar(layout, (i32)RPVar::PosTime, position, force);
+	this->SetReplayMenuVar(layout, (i32)RPVar::DurTime, totalText, force);
+	char finalText[40];
+	V_snprintf(finalText, sizeof(finalText), "/ %s", totalText);
+	this->SetReplayMenuVar(layout, (i32)RPVar::TimeFinal, finalText, force);
+	// Итогового времени нет (длительность неизвестна) — слот прячем, а не показываем прочерк:
+	// прочерк уже стоит справа от шкалы (dur_time), спека §4 велит именно скрыть.
+	if (force || state.finalShown != (i32)hasTotal)
+	{
+		state.finalShown = (i32)hasTotal;
+		ApplyClass(this->player, layout, "time_final", "hidden", !hasTotal);
+	}
+
+	char speedText[24];
+	V_snprintf(speedText, sizeof(speedText), "%sx", status.speed);
+	this->SetReplayMenuVar(layout, (i32)RPVar::ChipSpeedVal, speedText, force);
+	// Пилюля состояния (спека §3.6): на ходу — скорость, на паузе — слово «ПАУЗА». Глиф —
+	// знак воспроизведения/паузы; цвет и пульсацию даёт класс paused.
+	const std::string pausedText =
+		status.paused ? KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - State Paused") : std::string();
+	this->SetReplayMenuVar(layout, (i32)RPVar::StateText, status.paused ? pausedText.c_str() : speedText, force);
+	this->SetReplayMenuVar(layout, (i32)RPVar::StateGlyph, status.paused ? "\xE2\x9D\x99\xE2\x9D\x99" : "\xE2\x96\xB6", force);
+	if (force || state.paused != (i32)status.paused)
+	{
+		state.paused = (i32)status.paused;
+		ApplyClass(this->player, layout, "state_pill", "paused", status.paused);
+	}
+
+	// Шкала: заполнение и ручка одним шагом (0.25 %) — класс снимается у прошлого значения и
+	// ставится новому, иначе на панели копились бы оба.
+	i32 progress = 0;
+	if (hasTotal)
+	{
+		const f64 ratio = status.position / status.total;
+		progress = (i32)((ratio < 0.0 ? 0.0 : (ratio > 1.0 ? 1.0 : ratio)) * RPMENU_PROGRESS_STEPS + 0.5);
+	}
+	if (force || state.progress != progress)
+	{
+		if (!force)
+		{
+			ApplyProgressClass(this->player, layout, "seek_fill", "w", state.progress, false);
+			ApplyProgressClass(this->player, layout, "seek_cursor", "x", state.progress, false);
+		}
+		state.progress = progress;
+		ApplyProgressClass(this->player, layout, "seek_fill", "w", progress, true);
+		ApplyProgressClass(this->player, layout, "seek_cursor", "x", progress, true);
+	}
+
+	// Строки и подсказка.
+	for (i32 i = 0; i < RPMENU_ROW_COUNT; i++)
+	{
+		const RPMenuRowDef &row = RPMENU_ROWS[i];
+		this->SetReplayMenuVar(layout, (i32)row.label, KZ::replaysystem::menu::GetReplayMenuLineText(this->player, row.line).c_str(), force);
+	}
+	if (force || state.selectedRow != this->replayMenuRow)
+	{
+		if (!force && state.selectedRow >= 0)
+		{
+			const RPMenuRowDef &prev = RPMENU_ROWS[state.selectedRow];
+			ApplyClass(this->player, layout, prev.panelId, "selected", false);
+			if (prev.chipDec)
+			{
+				ApplyClass(this->player, layout, prev.chipDec, "focused", false);
+				ApplyClass(this->player, layout, prev.chipInc, "focused", false);
+			}
+		}
+		state.selectedRow = this->replayMenuRow;
+		const RPMenuRowDef &cur = RPMENU_ROWS[state.selectedRow];
+		ApplyClass(this->player, layout, cur.panelId, "selected", true);
+		if (cur.chipDec)
+		{
+			ApplyClass(this->player, layout, cur.chipDec, "focused", true);
+			ApplyClass(this->player, layout, cur.chipInc, "focused", true);
+		}
+	}
+	const ReplayMenuLine selectedLine = RPMENU_ROWS[this->replayMenuRow].line;
+	this->SetReplayMenuVar(layout, (i32)RPVar::Hint, KZ::replaysystem::menu::GetReplayMenuHintText(this->player, selectedLine).c_str(), force);
 }

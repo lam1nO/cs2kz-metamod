@@ -441,7 +441,7 @@ void KZHUDService::Reset()
 	// префах, и по тому же правилу, что и кэши выше — слот реально освобождается, чужой снимок
 	// «как было» (и чужой кулдаун выдачи кода) новому игроку в этом слоте не принадлежат.
 	KZ::hudshare::ClearSlotState(this->player->GetPlayerSlot());
-	// Меню реплея (layout/rpmenu.cpp) — свои сущности, та же причина.
+	// Меню реплея (layout/rpmenu.cpp) — своя сущность, та же причина.
 	this->CloseReplayMenu("disconnect");
 }
 

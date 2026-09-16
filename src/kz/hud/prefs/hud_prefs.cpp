@@ -203,9 +203,11 @@ static_function void ShareTakeOnActivate(KZPlayer *player, i64 tag)
 }
 
 // === Шрифт меню реплея: выбор из моноширинных (layout.h/RPMENU_MONO_FONTS) ====================
-// Не AddFont: тот предлагает все ~70 семейств, а выравнивание карточки по левому краю честно
-// работает только в моно (см. комментарий у RPMENU_MONO_FONTS). Choice со Str-хранением — как
-// preferredMode/preferredPistol в misc_prefs.cpp; id = индекс в таблице.
+// Не AddFont: тот предлагает все ~70 семейств, а выравнивание СТАРОЙ карточки по левому краю
+// честно работало только в моно (см. комментарий у RPMENU_MONO_FONTS). Своя страница шрифты
+// берёт из vcss и этот преф не применяет — таблица осталась, чтобы не менять сохранённые
+// значения и резолвер обмена. Choice со Str-хранением — как preferredMode/preferredPistol
+// в misc_prefs.cpp; id = индекс в таблице.
 static_function void RpMenuFontGetChoices(KZPlayer *player, i64 tag, std::vector<KZChoice> &out)
 {
 	for (i64 i = 0; i < RPMENU_MONO_FONT_COUNT; i++)
@@ -374,10 +376,15 @@ void KZHUDService::InitMenuPrefs()
 	KZ::menu::SetItemPref(crosshair, "mhudCrosshairScale", KZOptStorage::Int, 100);
 	AddResetButton(crosshair, (i32)LayoutElement::Count);
 
-	// Меню реплея спектатора (layout/rpmenu.cpp) — своя страница: позиция/размер/шрифт списка и
-	// шаг строк. Ключи читает layout/prefs.cpp:RefreshLayoutPrefs (rpmenu*), дефолты — RPMENU_DEF_*
-	// (layout/layout.h). Чистые префы без кэша-колбэков — кнопка сброса страницы допустима, и
-	// «Сбросить всё» её тоже накрывает (s_resettableNodes).
+	// Меню реплея спектатора (layout/rpmenu.cpp) — отдельная страница настроек: позиция/размер/
+	// шрифт списка и шаг строк. Ключи читает layout/prefs.cpp:RefreshLayoutPrefs (rpmenu*),
+	// дефолты — RPMENU_DEF_* (layout/layout.h). Чистые префы без кэша-колбэков — кнопка сброса
+	// страницы допустима, и «Сбросить всё» её тоже накрывает (s_resettableNodes).
+	//
+	// ВНИМАНИЕ: меню реплея переехало на свою panorama-страницу (KZ_RPMENU_LAYOUT) фиксированной
+	// вёрстки, и ни один из пунктов ниже на неё больше НЕ влияет. Страница оставлена как есть
+	// намеренно: ключи уже сохранены у игроков и входят в белый список обмена худом, их снятие —
+	// отдельное решение (см. layout.h у RPMENU_DEF_*). Пока не снято, пункты вводят в заблуждение.
 	KZOptNode *rpmenu = KZ::menu::AddSub(hud, "HUD - Menu Cat ReplayMenu");
 	KZ::menu::AddPosition(rpmenu, "HUD - Menu Label Position", "rpmenuX", "rpmenuY", RPMENU_DEF_X, RPMENU_DEF_Y);
 	KZ::menu::AddSize(rpmenu, "HUD - Menu Label Size", "rpmenuSize", RPMENU_DEF_SIZE, LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX);

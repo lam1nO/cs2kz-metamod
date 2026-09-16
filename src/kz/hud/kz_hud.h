@@ -4,6 +4,7 @@
 #include "kz/hud/layout/menu.h"
 #include "entityhandle.h"
 #include <unordered_map>
+#include <vector>
 
 #define KZ_HUD_TIMER_STOPPED_GRACE_TIME 3.0f
 #define KZ_HUD_ON_GROUND_THRESHOLD      0.07f
@@ -36,12 +37,13 @@ enum class LayoutElement
 	Keys,
 	Checkpoint,
 	// «Прогресс: N%» по маршруту `!lead` (kz/lead). Живёт на ДОПОЛНИТЕЛЬНОЙ копии сущности
-	// худа (ownedLeadProgressLayout): свободного лейбла в чужой разметке mhud.vxml нет, а
-	// лишняя копия страницы даёт ещё один — приём тот же, что у меню реплея (RPMENU_ENTITIES).
+	// худа (ownedLeadProgressLayout): свободного лейбла в разметке mhud.vxml нет (она общая с
+	// апстримом, четыре текстовых лейбла заняты элементами худа), а лишняя копия страницы даёт
+	// ещё один.
 	// ДОБАВЛЯТЬ НОВЫЕ ТОЛЬКО ПЕРЕД Count: индексом адресуются оперативные массивы
-	// (layoutElements/replayLines/s_resettableNodes), а вставка в середину сдвинула бы
-	// RPMENU_*_SLOTS. Префы элементов хранятся по СТРОКОВЫМ ключам (LayoutElementDef), не по
-	// индексу, — сохранённые настройки игроков от добавления элемента не страдают.
+	// (layoutElements/s_resettableNodes). Префы элементов хранятся по СТРОКОВЫМ ключам
+	// (LayoutElementDef), не по индексу, — сохранённые настройки игроков от добавления
+	// элемента не страдают.
 	LeadProgress,
 	Count
 };
@@ -189,6 +191,9 @@ struct MHUDLayoutPrefs
 	// Меню реплея спектатора (layout/rpmenu.cpp): геометрия и шрифт списка — префы rpmenu*
 	// (пункт «Меню реплея» в настройках). Читаются ТОЛЬКО из своего набора (GetOwnLayoutPrefs):
 	// мимикрировать чужое меню смысла нет.
+	// ВНИМАНИЕ: с переездом меню на свою страницу (KZ_RPMENU_LAYOUT) рендер эти поля НЕ читает —
+	// вся вёрстка карточки живёт в её vcss. Кэш и ключи оставлены намеренно, см. layout.h
+	// у RPMENU_DEF_*.
 	struct ReplayMenu
 	{
 		i32 x {};
@@ -375,7 +380,7 @@ public:
 		// Значение не переиспользуем — GetHudType() читает сохранённую 1 как HUD_TYPE_PANORAMA
 		// и перезаписывает её, чтобы не оставить игрока с недействительным типом (пустой экран).
 		HUD_TYPE_OFF      = 2, // ничего не рисуется
-		HUD_TYPE_PANORAMA = 3, // custom_hud_layout: разметка mhud.vxml из аддона 3469155349
+		HUD_TYPE_PANORAMA = 3, // custom_hud_layout: разметка mhud.vxml из нашего аддона (KZ_MHUD_LAYOUT)
 	};
 	int GetHudType();
 	void SetHudType(int type);
@@ -619,24 +624,20 @@ public:
 	void CheckMenuCaptureInvariant();
 
 	// === Меню управления реплеем спектатора на panorama (layout/rpmenu.cpp) ===========
-	// Персональные сущности custom_hud_layout с ТОЙ ЖЕ разметкой mhud.vxml_c, что и худ: их
-	// лейблы (таймер/скорость/преспид/чекпоинт, 4 на копию) — строки карточки меню. Своей
-	// разметки у нас нет (чужой аддон 3469155349), а страница меню настроек (menu.vxml_c)
-	// прибита к центру — её стили не подключают лист позиций. Пункты и их семантика —
-	// KZ::replaysystem::menu (replays/menu.h: ReplayMenuLine/ApplyReplayMenuInput), здесь
-	// только ввод и рендер. Ввод — W/S по строкам, E выбор, A/D регулировка — читается с
-	// наблюдательской пешки без курсорного захвата.
+	// ОДНА персональная сущность custom_hud_layout с нашей страницей плеера (KZ_RPMENU_LAYOUT):
+	// всю карточку — шапку, время, шкалу перемотки, шесть пунктов и подсказку — рисует сама
+	// страница, сервер только подставляет тексты слотов (SetDialogVariableString) и переключает
+	// классы (SetHasClass). Пункты и их семантика — KZ::replaysystem::menu (replays/menu.h:
+	// ReplayMenuLine/ApplyReplayMenuInput), здесь только ввод и запись страницы. Ввод — W/S по
+	// строкам, E выбор, A/D регулировка — читается с наблюдательской пешки без курсорного
+	// захвата, поэтому мышиный режим спеки (наведение, клики, перетаскивание шкалы) не работает.
 	// Меню ВСЕГДА открыто, пока игрок наблюдает реплей-бота с идущим плейбеком (решение
 	// пользователя 09.09): открывает и закрывает его сам тик UpdateReplayMenu, команды
 	// открытия/закрытия нет, старое cs2menus-!rpmenu удалено.
-	// Копий страницы худа: 9 строк (заголовок, состояние, 6 пунктов, подсказка), на копию — две
-	// строки: у каждой строки текст и ПОДЛОЖКА (лейбл из NBSP с фоном), подложка — в лейбле, который
-	// в разметке раньше текстового, чтобы текст гарантированно рисовался поверх (порядок детей).
-	static constexpr i32 RPMENU_ENTITIES = 5;
 	// Почему меню недоступно: NULL — доступно; иначе машинный reason для лога
 	// (unloading | no_addon | no_replay | not_spectating_bot).
 	const char *ReplayMenuUnavailableReason();
-	// Закрывает и сносит сущности; безопасно без сущностей и без открытого меню. reason — в лог.
+	// Закрывает и сносит сущность; безопасно без сущности и без открытого меню. reason — в лог.
 	void CloseReplayMenu(const char *reason);
 
 	bool IsReplayMenuOpen() const
@@ -749,12 +750,13 @@ private:
 	// Сущность худа ЭТОГО игрока; чужим не транслируется (KZ::quiet::OnCheckTransmit).
 	CHandle<CBaseEntity> ownedLayout {};
 	// ДОПОЛНИТЕЛЬНАЯ копия страницы худа под элемент «Прогресс» (LayoutElement::LeadProgress).
-	// Зачем копия: в чужой разметке mhud.vxml_c текстовых лейблов ровно четыре, и все четыре
-	// заняты элементами худа — своего лейбла для шестого элемента там нет и добавить его
-	// нельзя (аддон 3469155349 не наш). Лишняя копия страницы у того же клиента даёт ещё один
+	// Зачем копия: в разметке mhud.vxml_c текстовых лейблов ровно четыре, и все четыре заняты
+	// элементами худа — своего лейбла для шестого элемента там нет. Своим аддон стал 08.09
+	// (KZ_WORKSHOP_ADDON_ID), но путь и содержимое mhud.vxml намеренно общие с апстримом, так
+	// что лейбл туда не дописывают. Лишняя копия страницы у того же клиента даёт ещё один
 	// свободный лейбл `mhud_timer`, который и становится «Прогрессом» со своими
-	// позицией/кеглем/шрифтом/обводкой/прозрачностью. Тот же приём — у меню реплея
-	// (RPMENU_ENTITIES копий). Создаётся ТОЛЬКО под включённый преф, гасится при выключении.
+	// позицией/кеглем/шрифтом/обводкой/прозрачностью.
+	// Создаётся ТОЛЬКО под включённый преф, гасится при выключении.
 	CHandle<CBaseEntity> ownedLeadProgressLayout {};
 	// Отказ создания копии уже залогирован (сущность не создалась — лимит энтити): элемент
 	// обновляется каждый тик, и без защёлки это было бы 64 KZ_LOG_ERROR в секунду на игрока
@@ -816,25 +818,42 @@ private:
 	void ApplyKeysSizing(CCSCustomHudLayout *layout, LayoutKeysState &state, i32 size, const char *fontClass);
 
 	// === Меню реплея (layout/rpmenu.cpp) — состояние ==================================
-	// Сущности меню реплея ЭТОГО игрока (см. OpenReplayMenu); гасятся вместе с остальными.
-	CHandle<CBaseEntity> ownedReplayLayouts[RPMENU_ENTITIES] {};
+	// Сущность меню реплея ЭТОГО игрока (см. OpenReplayMenu); гасится вместе с остальными.
+	CHandle<CBaseEntity> ownedReplayLayout {};
 	bool replayMenuOpen {};
-	size_t replayMenuWidth {};    // ширина блока в кодовых точках, считается при открытии (ReplayMenuWidth)
-	bool replayMenuFailLogged {}; // серия отказов создания сущностей уже залогирована (см. rpmenu.cpp)
+	bool replayMenuFailLogged {}; // серия отказов создания сущности уже залогирована (см. rpmenu.cpp)
 	i32 replayMenuRetryTick {};   // тик последнего отказа — повтор создания с бэкоффом
-	i32 replayMenuLine {};       // выбранная строка (ReplayMenuLine)
+	i32 replayMenuRow {};        // выбранная строка — индекс в RPMENU_ROWS (порядок СТРАНИЦЫ, не
+								 // ReplayMenuLine: на карточке строки идут в другом порядке)
 	u64 replayMenuHeld {};       // маска удержанных кнопок прошлого тика — фронт нажатия свой,
 								 // а не IsButtonNewlyPressed: тот живёт внутри обработки usercmd
 	i32 replayMenuHoldTicks {};  // тики удержания A/D — автоповтор регулировки, как в cs2menus
-	// Диф-кэш лейблов каждой сущности — живёт ТОЛЬКО с сущностью.
-	LayoutElementState replayLines[RPMENU_ENTITIES][(i32)LayoutElement::Count] {};
 
-	CCSCustomHudLayout *EnsureReplayLayout(i32 index, bool &created);
-	// Открыть (создать сущности, сбросить выбор); false — сущности не создались (reason в логе).
+	// Диф-кэш страницы: что на ЭТУ сущность уже отправлено. Живёт ТОЛЬКО вместе с сущностью
+	// (та же ловушка, что у layoutElements[]): переживший сущность кэш решил бы, что посылать
+	// нечего, и на новой странице навсегда остались бы плейсхолдеры разметки.
+	struct ReplayMenuPageState
+	{
+		// Тексты слотов по индексу таблицы RPMENU_VARS (rpmenu.cpp); пусто — ещё ни одного
+		// кадра, первый проход шлёт ВСЁ (dialog-переменной на странице до этого нет вовсе).
+		std::vector<std::string> vars {};
+		i32 selectedRow {-1}; // строка с классом selected
+		i32 paused {-1};      // класс paused на state_pill (-1 — ещё не выставляли)
+		i32 awrBadge {-1};    // показан ли бейдж AWR (класс hidden снят)
+		i32 finalShown {-1};  // показан ли слот итогового времени (класс hidden снят)
+		i32 progress {-1};    // шаг классов .w-p--N/.x-p--N шкалы (0..400), -1 — не выставляли
+	};
+
+	ReplayMenuPageState replayPage {};
+
+	CCSCustomHudLayout *EnsureReplayLayout(bool &created);
+	// Открыть (создать сущность, сбросить выбор); false — сущность не создалась (reason в логе).
 	bool OpenReplayMenu();
 	void ReadReplayMenuInput();
-	// force — по индексу сущности: пересозданная копия требует полной перезаписи классов.
-	void RenderReplayMenu(CCSCustomHudLayout *(&layouts)[RPMENU_ENTITIES], const bool (&force)[RPMENU_ENTITIES]);
+	// force — сущность только что создана: кэш сброшен и страница переписывается целиком.
+	void RenderReplayMenu(CCSCustomHudLayout *layout, bool force);
+	// Текст одного слота страницы (var — индекс в RPMENU_VARS) с диф-кэшем.
+	void SetReplayMenuVar(CCSCustomHudLayout *layout, i32 var, const char *text, bool force);
 
 	// Кэш класс-суффиксов крестика (Task 10) — та же ловушка, что у layoutElements[]/
 	// layoutKeys: живёт ТОЛЬКО вместе с сущностью, обнулять в DestroyOwnedLayout, иначе
