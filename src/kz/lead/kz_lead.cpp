@@ -66,7 +66,7 @@
 // Остальное резервируется под подсказку впереди.
 #define KZ_LEAD_BACK_BUDGET_DIV 4
 
-#define KZ_LEAD_PARTICLE "particles/ui/annotation/ui_annotation_line_segment.vpcf"
+// Пути ассетов отрезка (KZ_LEAD_PARTICLE*) — в kz_lead.h: их читает и манифест в hooks.cpp.
 // KZ_LEAD_TARGETNAME (имя отрезка), KZ_LEAD_BEAM_CLASSNAME (энтити-класс луча) и
 // KZ_LEAD_SEGMENT_TEAM (метка «наша энтити») переехали в kz_lead.h: их читает ещё и фильтр
 // передачи (kz_quiet.cpp).
@@ -158,25 +158,47 @@ static_function void LeadRdpChanged(f32 value)
 // Ассет отрезка. Дефолт — стоковая линия-аннотация (тот же примитив у !measure и рёбер зон).
 // ВАЖНО: клиент получает только ассеты из манифеста ресурсов (utils/hooks.cpp,
 // Hook_BuildGameSessionManifest). Там зарегистрированы РОВНО ДВА пути:
-//   particles/ui/annotation/ui_annotation_line_segment.vpcf — линия между двумя точками;
+//   particles/gymstrike/lead_segment.vpcf                   — НАША линия (дефолт);
+//   particles/ui/annotation/ui_annotation_line_segment.vpcf — стоковая линия;
 //   particles/ui/hud/ui_map_def_utility_trail.vpcf          — трейл луча игрока (!beam).
 // Любой другой путь, выставленный этим конваром, у клиента не прекешируется и, скорее всего,
 // не нарисуется вовсе — новый ассет требует правки манифеста и пересборки.
 CConVar<CUtlString> cyb_lead_particle("cyb_lead_particle", FCVAR_NONE,
 									  "Lead segment particle asset. Only manifest-registered assets render: "
-									  "particles/ui/annotation/ui_annotation_line_segment.vpcf (default), "
+									  "particles/gymstrike/lead_segment.vpcf (default), "
+									  "particles/ui/annotation/ui_annotation_line_segment.vpcf, "
 									  "particles/ui/hud/ui_map_def_utility_trail.vpcf.",
 									  CUtlString(KZ_LEAD_PARTICLE),
 									  [](CConVar<CUtlString> *, CSplitScreenSlot, const CUtlString *, const CUtlString *) { LeadLookChanged(); });
 
-// Проба control point'ов чужого ассета: индекс и значение. Чем именно управляют CP стоковой
-// ui_annotation_line_segment.vpcf — НЕИЗВЕСТНО (ассет скомпилирован, файлов игры на машине
-// сборки нет, разобрать его нечем), поэтому «толщина» и «скрыть точки на концах» здесь не
-// зашиты, а ищутся живьём: выставить индекс, выставить значение, посмотреть на луч.
+// Проба control point'ов: индекс и значение. Стоковую ui_annotation_line_segment.vpcf_c мы
+// 16.09.2026 РАЗОБРАЛИ (читалка KV3+LZ4: game-addons/gymstrike-kz/tools/decompile_vpcf_c.py,
+// результат — _reference/ui_annotation_line_segment.decompiled.json). Что там на самом деле:
+// C_INIT_CreateSequentialPathV2 раскладывает 2 частицы от CP0 к CP1, рендерера ДВА —
+// C_OP_RenderRopes (сама лента) и C_OP_RenderSprites (m_flRadiusScale 0.5, это и есть «точки
+// на концах», про которые говорит kz_beamprobe.cpp); у нашей частицы второго нет, поэтому
+// точек на вершинах не будет. Блендинг
+// ADD, m_flSelfIllumAmount = 1.0, m_flDiffuseAmount = 0.0 — то есть освещение карты
+// на неё НЕ влияет, и версия «луч тускнеет в темноте» неверна. Других CP, кроме CP0/CP1/CP16,
+// частица не читает, так что пробы ниже для НЕЁ бесполезны; для нашей частицы — тем более.
+// Оставлены как инструмент на случай очередного чужого ассета.
 // Известно только про два CP, которые уже используются (и идут не через эти поля, а через
 // свои keyvalue): data_cp=1 — КОНЕЦ отрезка, tint_cp=16 — цвет.
 // -1 — CP не задавать (дефолт: вид не меняется). Слотов серверных CP у сущности всего четыре
 // (SetControlPointValue, sdk/entity/cparticlesystem.h), поэтому проб здесь две.
+// Режим рендера луча-CBeam. ЭТО ГЛАВНАЯ РУЧКА ПО ЖАЛОБЕ 16.09.2026 («на тёмных картах луч
+// местами не виден», kz_bhop_nothing_go): по умолчанию m_nRenderMode у свежесозданной beam мы
+// не задаём вовсе, а дефолт движка — НЕ аддитивный, поэтому луч смешивается с фоном и на
+// тёмной геометрии тонет. В Source 1 нумерации kRenderTransAdd = 5; совпадает ли нумерация
+// CS2 — НЕ проверено, ровно как с m_nBeamType выше, поэтому значение не зашито, а перебирается
+// живьём: выставить конвар, посмотреть на луч.
+// -1 (дефолт) — поле не трогать. Это сохраняет доказанный на канарейке 11.09 рецепт видимости
+// байт-в-байт: менять его вслепую нельзя, дефолты свежесозданной beam нам неизвестны.
+CConVar<i32> cyb_lead_beam_rendermode("cyb_lead_beam_rendermode", FCVAR_NONE,
+									  "Render mode for the lead beam entity (m_nRenderMode, 0..10; Source 1 numbering: 5 = TransAdd). "
+									  "-1 = leave untouched (default, proven recipe).",
+									  -1, [](CConVar<i32> *, CSplitScreenSlot, const i32 *, const i32 *) { LeadLookChanged(); });
+
 CConVar<i32> cyb_lead_cp1_index("cyb_lead_cp1_index", FCVAR_NONE,
 								"Extra server control point index for the lead segment: 0..63 except 1 (data_cp) and 16 (tint_cp); -1 = unused.", -1,
 								[](CConVar<i32> *, CSplitScreenSlot, const i32 *newValue, const i32 *)
@@ -624,9 +646,18 @@ namespace
 		// 0 — прямая линия. Ненулевая амплитуда дала бы «волну», которая врёт о маршруте.
 		beam->m_fAmplitude(0.0f);
 		beam->m_bTurnedOff(false);
-		// Альфу держим 255: осмысленность полупрозрачности зависит от m_nRenderMode, который мы
-		// не задаём вовсе, — а «наполовину прозрачный луч» непроверен и на канарейке не нужен.
+		// Альфу держим 255: осмысленность полупрозрачности зависит от m_nRenderMode, который по
+		// умолчанию не задаётся (см. cyb_lead_beam_rendermode) — а «наполовину прозрачный луч»
+		// непроверен и на канарейке не нужен.
 		beam->m_clrRender(color);
+		// Режим рендера — единственное поле рецепта, которое мы сознательно оставили
+		// управляемым: см. cyb_lead_beam_rendermode. При -1 ничего не пишем, и рецепт остаётся
+		// тем, что доказан живьём.
+		const i32 renderMode = cyb_lead_beam_rendermode.Get();
+		if (renderMode >= 0 && renderMode <= 255)
+		{
+			beam->m_nRenderMode((uint8)renderMode);
+		}
 		// Метка «наша энтити» — дешёвый признак для фильтра передачи (kz_quiet.cpp): движку на
 		// не-частице она ничего не значит, зато читается одним полем, без вызова в движок.
 		beam->m_iTeamNum(KZ_LEAD_SEGMENT_TEAM);

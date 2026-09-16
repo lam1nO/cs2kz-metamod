@@ -40,6 +40,17 @@
 // classname их не различить — NameMatches сверяет m_name, а не класс. Идиома от
 // KZ::zones::RemoveBoxEdges. Он ОДИН на оба примитива: классы у них разные, и перепутать
 // отрезки нельзя, а снятие (RemoveLeadSegment) работает одинаково для обоих.
+// Ассеты отрезка. Здесь, а не в .cpp: стоковый путь регистрирует в манифесте ресурсов
+// utils/hooks.cpp, и литерал в двух местах разъезжается молча.
+// ВАЖНО: по умолчанию отрезок рисуется НЕ частицей, а сущностью CBeam
+// (cyb_lead_beam_entity = true). Частичный путь — дорога назад, и оба ассета ниже относятся
+// именно к нему.
+#define KZ_LEAD_PARTICLE_STOCK "particles/ui/annotation/ui_annotation_line_segment.vpcf"
+// Наша частица из аддона GYMSTRIKE-KZ (3802626932): отличается m_bDisableZBuffering = true,
+// то есть рисуется сквозь геометрию. У стоковой z-буфер включён, и отрезки за блоками не
+// рисуются вовсе.
+#define KZ_LEAD_PARTICLE "particles/gymstrike/lead_segment.vpcf"
+
 #define KZ_LEAD_TARGETNAME "cyb_lead_seg"
 // Энтити-класс отрезка на сущности-луче. Базовый `beam`, а НЕ `env_beam`: выбор владельца
 // серверов — логика карты (входы/выходы env_beam) нам не нужна.

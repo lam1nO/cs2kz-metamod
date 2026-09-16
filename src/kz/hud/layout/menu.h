@@ -8,7 +8,7 @@
 // обходит KZ::menu::GetTree() и рендерит. prefs_transfer (экспорт/импорт настроек) апстрима
 // по-прежнему не переносим — не требуется этой задачей.
 //
-// Разметка — тот же чужой аддон 3469155349, что и mhud.vxml_c (KZ_MHUD_LAYOUT в layout.h):
+// Разметка — тот же наш аддон, что и mhud.vxml_c (KZ_MHUD_LAYOUT в layout.h):
 // путь по образцу задачи 4/10.
 #define KZ_MENU_LAYOUT "panorama/layout/custom_game/cs2kz/menu.vxml_c"
 

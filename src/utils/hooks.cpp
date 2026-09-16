@@ -967,7 +967,11 @@ static_function void Hook_BuildGameSessionManifest(const EventBuildGameSessionMa
 		// (задача 12): апстрим вычистил particles/* из воркшоп-аддона, прекешировать больше нечего.
 	}
 	pResourceManifest->AddResource("particles/ui/hud/ui_map_def_utility_trail.vpcf");
-	pResourceManifest->AddResource("particles/ui/annotation/ui_annotation_line_segment.vpcf");
+	// Наша частица луча !lead из аддона GYMSTRIKE-KZ и стоковая рядом: cyb_lead_particle
+	// переключает их живьём, а незарегистрированный в манифесте ассет у клиента не
+	// прекешируется и не нарисуется вовсе.
+	pResourceManifest->AddResource("particles/gymstrike/lead_segment.vpcf");
+	pResourceManifest->AddResource(KZ_LEAD_PARTICLE_STOCK);
 }
 
 static_function ILoadingSpawnGroup *Hook_OnCreateLoadingSpawnGroupHook(SpawnGroupHandle_t hSpawnGroup, bool bSynchronouslySpawnEntities,
