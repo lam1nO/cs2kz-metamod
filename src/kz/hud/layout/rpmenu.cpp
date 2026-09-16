@@ -58,6 +58,20 @@ extern ICS2Menus *g_pMenus;
 static CConVar<int> kz_rpmenu_repeat_ticks("kz_rpmenu_repeat_ticks", FCVAR_NONE,
 										   "Replay menu (panorama): auto-repeat period of A/D while held, ticks (after a 22-tick delay).", 8);
 
+// ДИАГНОСТИКА краша клиента при открытии меню реплея (17.09.2026). Клиент умирает молча, в
+// тик создания сущности, не написав в консоль НИ ОДНОЙ панорамной строки: ни ошибки парсинга,
+// ни «Unable to find panel». Разметку страницы проверить локально нельзя — клиент берёт
+// панораму только из смонтированного аддона-VPK (россыпь и csgo_addons/<id> проверены, не
+// работают), то есть каждая проба страницы стоит часового окна Steam. Зато ОБЪЁМ записи —
+// наш, серверный, и переключается на лету:
+//   0 — сущность создаётся, в неё не пишется ничего (падает ⇒ виновата сама страница);
+//   1 — только dialog-переменные (тексты);
+//   2 — + статические классы (rp-live, hidden, selected, focused, paused);
+//   3 — всё, включая шкалу и 32 отметки (штатное поведение).
+// Ручка временная: когда причина найдена, убрать вместе с ветками.
+static CConVar<int> cyb_rpmenu_fill("cyb_rpmenu_fill", FCVAR_NONE,
+									"Replay menu (panorama) DIAGNOSTIC: 0 nothing, 1 vars, 2 +static classes, 3 everything (default).", 3);
+
 namespace
 {
 	// Текстовые слоты страницы. panelId — панель с текстом, varName — имя dialog-переменной в
@@ -227,6 +241,10 @@ namespace
 	// раз за рендер метит слой на полный пересчёт (см. MarkFullChanged ниже).
 	bool ApplyClass(KZPlayer *player, CCSCustomHudLayout *layout, const char *panelId, const char *className, bool on)
 	{
+		if (cyb_rpmenu_fill.Get() < 2)
+		{
+			return false; // диагностика: уровень 1 — только тексты, классы не трогаем
+		}
 		const EHudPanelClassStatus_t status = on ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass;
 		if (!layout->SetHasClass(panelId, className, status))
 		{
@@ -245,6 +263,10 @@ namespace
 		if (step < 0)
 		{
 			return;
+		}
+		if (cyb_rpmenu_fill.Get() < 3)
+		{
+			return; // диагностика: шкала и отметки — самый объёмный набор пар (панель,класс)
 		}
 		char className[16];
 		V_snprintf(className, sizeof(className), "%s-p--%i", prefix, step);
@@ -519,6 +541,11 @@ void KZHUDService::SetReplayMenuVar(CCSCustomHudLayout *layout, i32 var, const c
 
 void KZHUDService::RenderReplayMenu(CCSCustomHudLayout *layout, bool force)
 {
+	const int fill = cyb_rpmenu_fill.Get();
+	if (fill <= 0)
+	{
+		return; // диагностика: сущность есть, страница грузится, данных нет
+	}
 	ReplayMenuPageState &state = this->replayPage;
 	// Свежая сущность: у страницы ещё НЕТ ни одной dialog-переменной, а кэш (пустые строки)
 	// совпал бы с пустым текстом и молча ничего не отправил — первый кадр шлёт всё подряд.
