@@ -155,7 +155,7 @@ static_function void LeadRdpChanged(f32 value)
 	KZLeadService::RebuildAllPaths("cvar_rdp");
 }
 
-// Ассет отрезка. Дефолт — стоковая линия-аннотация (тот же примитив у !measure и рёбер зон).
+// Ассет отрезка. Дефолт — НАША линия из аддона GYMSTRIKE-KZ (тот же примитив у !measure и рёбер зон).
 // ВАЖНО: клиент получает только ассеты из манифеста ресурсов (utils/hooks.cpp,
 // Hook_BuildGameSessionManifest). Там зарегистрированы РОВНО ДВА пути:
 //   particles/gymstrike/lead_segment.vpcf                   — НАША линия (дефолт);
@@ -235,14 +235,20 @@ CConVar<f32> cyb_lead_rdp("cyb_lead_rdp", FCVAR_NONE,
 						  0.25f,
 						  [](CConVar<f32> *, CSplitScreenSlot, const f32 *newValue, const f32 *) { LeadRdpChanged(newValue ? *newValue : 0.0f); });
 
-// Примитив отрезка. Дефолт — ШТАТНАЯ сущность-луч (`beam`, CBeam): решение владельца серверов
-// по итогам живой пробы 11.09. Ноль возвращает прежний путь на info_particle_system —
-// дорога назад одной командой, без пересборки, если в бою луч окажется хуже частиц.
+// Примитив отрезка. Дефолт — НАША ЧАСТИЦА (info_particle_system + particles/gymstrike/
+// lead_segment.vpcf): решение владельца серверов 16.09.2026 после живого сравнения на
+// канарейке. Причина: у CBeam не задаётся m_nRenderMode, дефолт движка не аддитивный, и на
+// тёмных картах луч тонет в фоне («местами не видно», kz_bhop_nothing_go). Наша частица
+// аддитивная, self-illum 1.0 и рисуется сквозь геометрию (m_bDisableZBuffering), то есть
+// видна везде и целиком.
+// Единица возвращает штатную сущность-луч (`beam`, CBeam) — прежний дефолт по пробе 11.09,
+// дорога назад одной командой, вместе с cyb_lead_beam_rendermode для подбора режима.
 // Смешанных окон не бывает: колбэк перерисовывает отрезки, а RefreshSegments обнуляет окно,
 // из-за чего ApplyWindow не находит пересечения и снимает ВСЕ прежние сущности разом.
 CConVar<bool> cyb_lead_beam_entity("cyb_lead_beam_entity", FCVAR_NONE,
-								   "Draw !lead segments with the native beam entity (default) instead of info_particle_system.", true,
-								   [](CConVar<bool> *, CSplitScreenSlot, const bool *, const bool *) { LeadLookChanged(); });
+								   "Draw !lead segments with the native beam entity instead of info_particle_system "
+								   "(default: false - our additive particle, visible on dark maps).",
+								   false, [](CConVar<bool> *, CSplitScreenSlot, const bool *, const bool *) { LeadLookChanged(); });
 
 // Ширина отрезка-луча в юнитах (m_fWidth/m_fEndWidth). Только для сущности-луча: у частицы
 // толщину задаёт сам ассет, и этот конвар на неё не влияет. Применяется к СЛЕДУЮЩЕЙ
@@ -256,7 +262,8 @@ CConVar<f32> cyb_lead_beam_width("cyb_lead_beam_width", FCVAR_NONE,
 namespace
 {
 	// Копия CreateMeasureBeam (kz_measure.cpp): тот же примитив, свой цвет на отрезок.
-	// ПРЕЖНИЙ путь: живёт под cyb_lead_beam_entity 0 как дорога назад (см. конвар).
+	// ДЕФОЛТНЫЙ путь (с 16.09.2026): наша частица. CBeam остался дорогой назад под
+	// cyb_lead_beam_entity 1 (см. конвар).
 	CEntityHandle CreateLeadParticleSegment(const Vector &start, const Vector &end, const Color &color)
 	{
 		CParticleSystem *line = utils::CreateEntityByName<CParticleSystem>("info_particle_system");
@@ -613,7 +620,7 @@ namespace
 		return use;
 	}
 
-	// НОВЫЙ путь (дефолт): отрезок — штатная сущность-луч. Доказано живьём пробником
+	// ПУТЬ ОТКАТА (cyb_lead_beam_entity 1): отрезок — штатная сущность-луч. Доказано живьём пробником
 	// kz_beam_probe на канарейке 11.09: класс CBeam существует, поля сетевые, луч виден игроку
 	// и БЕЗ заданного материала.
 	CEntityHandle CreateLeadBeamSegment(const Vector &start, const Vector &end, const Color &color)

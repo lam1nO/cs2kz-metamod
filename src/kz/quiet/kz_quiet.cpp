@@ -122,7 +122,8 @@ void KZ::quiet::OnCheckTransmit(CCheckTransmitInfo **pInfo, int infoCount)
 			{
 				continue;
 			}
-			// Отрезки луча !lead на ПРЕЖНЕМ примитиве (cyb_lead_beam_entity 0) — ровно по той же
+			// Отрезки луча !lead на ДЕФОЛТНОМ примитиве-частице (cyb_lead_beam_entity 0,
+			// с 16.09.2026 это основной путь) — ровно по той же
 			// причине: метка CUSTOM_PARTICLE_SYSTEM_TEAM означает «не видит никто», и владельцу
 			// его собственный луч возвращает эта ветка.
 			// HasOwnedSegments() первым: у игрока без луча сравнений быть не должно.
@@ -134,7 +135,7 @@ void KZ::quiet::OnCheckTransmit(CCheckTransmitInfo **pInfo, int infoCount)
 			pTransmitInfo->m_pTransmitEdict->Clear(particleSystem->GetEntityIndex().Get());
 		}
 
-		// Отрезки луча !lead на ШТАТНОЙ сущности-луче (дефолт, cyb_lead_beam_entity 1). Петля
+		// Отрезки луча !lead на штатной сущности-луче (ПУТЬ ОТКАТА, cyb_lead_beam_entity 1). Петля
 		// выше их не видит вовсе — она перебирает только info_particle_system, и проба пробником
 		// показала quiet_filtered=0, то есть сущность-луч уходит ВСЕМ по общим правилам. Луч
 		// обязан оставаться ЛИЧНЫМ (требование владельца серверов: у каждого свой !lead, общего

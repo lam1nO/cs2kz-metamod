@@ -970,7 +970,7 @@ static_function void Hook_BuildGameSessionManifest(const EventBuildGameSessionMa
 	// Наша частица луча !lead из аддона GYMSTRIKE-KZ и стоковая рядом: cyb_lead_particle
 	// переключает их живьём, а незарегистрированный в манифесте ассет у клиента не
 	// прекешируется и не нарисуется вовсе.
-	pResourceManifest->AddResource("particles/gymstrike/lead_segment.vpcf");
+	pResourceManifest->AddResource(KZ_LEAD_PARTICLE);
 	pResourceManifest->AddResource(KZ_LEAD_PARTICLE_STOCK);
 }
 
