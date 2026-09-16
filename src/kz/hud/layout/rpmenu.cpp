@@ -69,6 +69,15 @@ static CConVar<int> kz_rpmenu_repeat_ticks("kz_rpmenu_repeat_ticks", FCVAR_NONE,
 //   2 — + статические классы (rp-live, hidden, selected, focused, paused);
 //   3 — всё, включая шкалу и 32 отметки (штатное поведение).
 // Ручка временная: когда причина найдена, убрать вместе с ветками.
+// Какую страницу грузить в сущность меню реплея. Ручка нужна ровно потому, что панораму
+// НЕЛЬЗЯ проверить локально: клиент берёт разметку только из смонтированного аддона-VPK
+// (россыпь в csgo/ и папка csgo_addons/<id> проверены 17.09.2026 — не работают), поэтому
+// каждая проба страницы стоила бы часового окна публикации Steam. Кладём в аддон несколько
+// вариантов разом и переключаем отсюда. Пустая строка = штатная KZ_RPMENU_LAYOUT.
+// Смена подхватывается при следующем открытии меню (сущность создаётся заново).
+static CConVar<CUtlString> cyb_rpmenu_page("cyb_rpmenu_page", FCVAR_NONE,
+										   "Replay menu (panorama) DIAGNOSTIC: layout path to load; empty = default page.", "");
+
 static CConVar<int> cyb_rpmenu_fill("cyb_rpmenu_fill", FCVAR_NONE,
 									"Replay menu (panorama) DIAGNOSTIC: 0 nothing, 1 vars, 2 +static classes, 3 everything (default).", 3);
 
@@ -332,7 +341,9 @@ CCSCustomHudLayout *KZHUDService::EnsureReplayLayout(bool &created)
 		return NULL;
 	}
 	CEntityKeyValues *pKeyValues = new CEntityKeyValues();
-	pKeyValues->SetString("layout", KZ_RPMENU_LAYOUT);
+	const CUtlString &pageOverride = cyb_rpmenu_page.Get();
+	const char *page = (pageOverride.Get() && pageOverride.Get()[0]) ? pageOverride.Get() : KZ_RPMENU_LAYOUT;
+	pKeyValues->SetString("layout", page);
 	char name[32];
 	V_snprintf(name, sizeof(name), "kzrpmenu%i", this->player->GetPlayerSlot().Get());
 	pKeyValues->SetString("targetname", name);
@@ -393,7 +404,8 @@ bool KZHUDService::OpenReplayMenu()
 	// W из движения перед спектейтом) сработала бы как нажатие на первом же тике.
 	this->replayMenuHeld = HeldButtons(this->player);
 	this->replayMenuHoldTicks = 0;
-	KZ_LOG_INFO(LogChannel::General, "[cyb] replay_menu_open slot=%i\n", this->player->GetPlayerSlot().Get());
+	KZ_LOG_INFO(LogChannel::General, "[cyb] replay_menu_open slot=%i page=%s fill=%i\n", this->player->GetPlayerSlot().Get(),
+				cyb_rpmenu_page.Get().Get() && cyb_rpmenu_page.Get().Get()[0] ? cyb_rpmenu_page.Get().Get() : KZ_RPMENU_LAYOUT, cyb_rpmenu_fill.Get());
 	this->RenderReplayMenu(layout, true);
 	return true;
 }
