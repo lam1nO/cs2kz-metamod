@@ -107,17 +107,31 @@ namespace
 	// Пролог резолва, общий для плейбека и для !lead: базовый URL, токен и ключ по текущему
 	// курсу/режиму игрока. false — резолв невозможен по построению (центральные реплеи на
 	// сервере выключены либо режим/карта не поддержаны ключом), сеть не дёргаем.
-	bool PrepareResolve(KZPlayer *player, std::string &outUrl, std::string &outToken, ResolveKey &outKey)
+	// outReason — машинная причина такого отказа: без неё «повтор не найден» одинаково
+	// покрывал и выключенный конфиг, и неподдержанный режим, и реальный промах по ключу.
+	bool PrepareResolve(KZPlayer *player, std::string &outUrl, std::string &outToken, ResolveKey &outKey, const char **outReason = nullptr)
 	{
+		auto deny = [outReason](const char *reason)
+		{
+			if (outReason)
+			{
+				*outReason = reason;
+			}
+			return false;
+		};
 		const char *url = KZOptionService::GetOptionStr("cybEmitUrl", "");
 		if (!url || url[0] == '\0')
 		{
-			return false;
+			return deny("central_disabled");
 		}
 		outKey = BuildKey(player);
-		if (outKey.mode.empty() || !CybReplayCommon::IsValidMapName(outKey.map))
+		if (outKey.mode.empty())
 		{
-			return false;
+			return deny("mode_unsupported");
+		}
+		if (!CybReplayCommon::IsValidMapName(outKey.map))
+		{
+			return deny("map_name_rejected");
 		}
 		outUrl = url;
 		if (!outUrl.empty() && outUrl.back() == '/')
@@ -147,6 +161,48 @@ namespace
 		{
 			req.SetHeader("Authorization", std::string("Bearer ") + token);
 		}
+	}
+
+	// Ключ резолва в отказе. Отказ обязан называть КУРС и РЕЖИМ: именно этот невидимый
+	// фильтр 17.09 заставил владельца перебирать ник/SteamID/UUID на kz_angina_x, где
+	// записи лежали на бонусе, а он стоял на main. `logKey` — машинная строка в лог,
+	// `courseText`/`mode` — то же самое словами, для фразы в чат.
+	struct ResolveContext
+	{
+		std::string logKey;
+		std::string courseText;
+		std::string mode;
+		// Запрос шёл в /replays/v1/by-uuid: ключа курса/режима там нет вовсе, и «не найдено»
+		// относится к самому UUID.
+		bool byUuid {};
+	};
+
+	ResolveContext MakeContext(const ResolveKey &key)
+	{
+		ResolveContext ctx;
+		ctx.logKey = "map=" + key.map + " course=" + std::to_string(key.course) + " mode=" + key.mode;
+		ctx.courseText = CybReplayCommon::CourseText(key.course);
+		ctx.mode = key.mode;
+		return ctx;
+	}
+
+	// Машинная причина отказа из тела 404 api (ResolveFailReason в replays.service.ts).
+	// Пустая строка — тела нет либо оно не разобралось (старая сборка api, прокси): тогда
+	// печатаем прежнюю общую фразу, а не выдумываем причину.
+	std::string ReadFailReason(const HTTP::Response &resp)
+	{
+		std::optional<std::string> body = resp.Body();
+		if (!body.has_value() || body->empty())
+		{
+			return std::string();
+		}
+		Json json(*body);
+		if (!json.IsValid() || !json.HasValue("error"))
+		{
+			return std::string();
+		}
+		std::string reason;
+		return json.Get("error", reason) ? reason : std::string();
 	}
 
 	// Файл реплея: кэш downloads/ или реальная докачка по публичному URL (selstorage, без
@@ -258,7 +314,7 @@ namespace
 						 });
 	}
 
-	void OnResolveResponse(CPlayerUserId userID, HTTP::Response resp, CybReplayDownload::Kind kind, bool targetIsSelf)
+	void OnResolveResponse(CPlayerUserId userID, HTTP::Response resp, CybReplayDownload::Kind kind, bool targetIsSelf, ResolveContext ctx)
 	{
 		KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
 
@@ -268,6 +324,12 @@ namespace
 
 		if (resp.status == 404)
 		{
+			// Отказ игроку логируем ВСЕГДА и с машинной причиной: до 17.09 промах резолва не
+			// оставлял в логе сервера ни строки, и разбор жалобы «не запускается реплей»
+			// начинался с гадания, дошёл ли запрос до api вообще.
+			const std::string reason = ReadFailReason(resp);
+			KZ_LOG_WARN(LogChannel::Replays, "[cyb_replay] resolve_denied type=%s %s reason=%s\n", ResolveTypeArg(kind),
+						ctx.byUuid ? "by_uuid" : ctx.logKey.c_str(), reason.empty() ? "-" : reason.c_str());
 			if (player)
 			{
 				// AWR: фолбэка нет — в локальной БД плагина AWR не существует по построению.
@@ -287,12 +349,43 @@ namespace
 					KZ::replaysystem::commands::LoadReplayForRecord(player, KZ::replaysystem::commands::RecordType::SPBPro, "", "");
 					return;
 				}
+				// `!replay <uuid>`: ключа курса/режима в запросе нет вовсе, и «не найдено»
+				// здесь про САМ UUID. Частая причина — игрок взял со страницы карты UUID
+				// РАНА: это другой идентификатор, записи под ним нет.
+				if (ctx.byUuid)
+				{
+					player->languageService->PrintChat(true, false, "Replay - Uuid Not Found");
+					return;
+				}
 				// У pro-видов 404 означает не только «рекорда нет», но и частый случай
 				// «рекорд есть, а файла под него нет»: реплей пишется лишь на overall/NUB-ран,
 				// и если pro-рекорд игрока — другой ран, отдавать нечего (см. заголовок).
 				// Общая фраза про «повтор не найден» тут вводила бы в заблуждение.
 				const bool isPro = kind == CybReplayDownload::Kind::PBPro || kind == CybReplayDownload::Kind::WRPro;
-				player->languageService->PrintChat(true, false, isPro ? "Replay - Pro Not Saved" : "Replay - Central Not Found");
+				if (isPro)
+				{
+					player->languageService->PrintChat(true, false, "Replay - Pro Not Saved");
+					return;
+				}
+				// Причину api называет машинно — переводим её в фразу. Ключ (курс/режим) в
+				// фразе обязателен: он и есть невидимый фильтр, из-за которого отказ
+				// выглядел как «такого игрока нет».
+				if (reason == "no_replay")
+				{
+					player->languageService->PrintChat(true, false, "Replay - Record Without File", ctx.courseText.c_str(), ctx.mode.c_str());
+					return;
+				}
+				if (reason == "no_record")
+				{
+					player->languageService->PrintChat(true, false, "Replay - No Record Here", ctx.courseText.c_str(), ctx.mode.c_str());
+					return;
+				}
+				if (reason == "map_unknown")
+				{
+					player->languageService->PrintChat(true, false, "Replay - Map Unknown");
+					return;
+				}
+				player->languageService->PrintChat(true, false, "Replay - Central Not Found");
 			}
 			return;
 		}
@@ -383,11 +476,15 @@ void CybReplayDownload::RequestAndPlay(KZPlayer *player, Kind kind, u64 targetSt
 
 	std::string fullUrl, token;
 	ResolveKey key;
-	if (!PrepareResolve(player, fullUrl, token, key))
+	const char *denyReason = "-";
+	if (!PrepareResolve(player, fullUrl, token, key, &denyReason))
 	{
-		// Центральные реплеи выключены либо режим/карта не поддержаны ключом — с точки
-		// зрения игрока неотличимо от «такого реплея нет».
-		player->languageService->PrintChat(true, false, "Replay - Central Not Found");
+		// Отказ ДО сети: центральные реплеи выключены на сервере либо режим не поддержан
+		// центральным хранилищем. Раньше игрок и лог видели тут то же «повтор не найден»,
+		// что и при промахе по ключу, — две разные проблемы под одной фразой.
+		KZ_LOG_WARN(LogChannel::Replays, "[cyb_replay] resolve_skipped type=%s reason=%s\n", ResolveTypeArg(kind), denyReason);
+		player->languageService->PrintChat(true, false,
+										   KZ_STREQ(denyReason, "mode_unsupported") ? "Replay - Mode Unsupported" : "Replay - Central Disabled");
 		return;
 	}
 
@@ -398,7 +495,9 @@ void CybReplayDownload::RequestAndPlay(KZPlayer *player, Kind kind, u64 targetSt
 	// Фолбэк на локальный pro-PB возможен только для СВОЕГО реплея (см. OnResolveResponse).
 	const bool targetIsSelf = targetSteamId64 != 0 && targetSteamId64 == player->GetSteamId64();
 
-	req.Send([userID, kind, targetIsSelf](HTTP::Response resp) { OnResolveResponse(userID, resp, kind, targetIsSelf); },
+	const ResolveContext ctx = MakeContext(key);
+
+	req.Send([userID, kind, targetIsSelf, ctx](HTTP::Response resp) { OnResolveResponse(userID, resp, kind, targetIsSelf, ctx); },
 			 [userID]()
 			 {
 				 KZ_LOG_INFO(LogChannel::Replays, "[cyb_replay] resolve network error\n");
@@ -621,7 +720,10 @@ void CybReplayDownload::RequestAndPlayByUuid(KZPlayer *player, const char *uuid)
 	CPlayerUserId userID = player->GetClient()->GetUserID();
 
 	// Формат ответа идентичен resolve (url + replayUuid) — общий обработчик.
-	req.Send([userID](HTTP::Response resp) { OnResolveResponse(userID, resp, CybReplayDownload::Kind::PB, false); },
+	ResolveContext ctx;
+	ctx.byUuid = true;
+
+	req.Send([userID, ctx](HTTP::Response resp) { OnResolveResponse(userID, resp, CybReplayDownload::Kind::PB, false, ctx); },
 			 [userID]()
 			 {
 				 KZ_LOG_INFO(LogChannel::Replays, "[cyb_replay] by-uuid network error\n");

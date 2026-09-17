@@ -816,6 +816,58 @@
 		"en"		"{darkred}No central replay found for this map/course/mode."
 		"ru"		"{darkred}Центральный повтор для этой карты/маршрута/режима не найден."
 	}
+	// Отказы резолва, называющие ПРИЧИНУ. Причину приносит тело 404 api (ResolveFailReason в
+	// apps/api/src/modules/replays/replays.service.ts); общая фраза выше осталась запасной —
+	// на случай старой сборки api, которая reason ещё не шлёт. Курс и режим внутри фраз не
+	// украшение: это ключ запроса, невидимый игроку, и без него 17.09 владелец перебирал
+	// ник/SteamID/UUID, хотя причина была одна и от параметра не зависела.
+	"Replay - No Record Here"
+	{
+		"#format"	"course:s,mode:s"
+		"en"		"{darkred}This player has no record on {default}{course}{darkred} in {default}{mode}{darkred}. Stand on the course you want to watch."
+		"ru"		"{darkred}У этого игрока нет рекорда на курсе {default}{course}{darkred} в режиме {default}{mode}{darkred}. Встаньте на нужный курс."
+	}
+	// Рекорд есть, файла нет. Практически всегда это ДЛИННЫЙ ран: буфер записи не влезает в
+	// кап выгрузки 32 МБ (cyb_replay_upload.cpp), и файла не появится вовсе — игроку нужно
+	// сказать именно это, а не отправлять его искать другой параметр.
+	"Replay - Record Without File"
+	{
+		"#format"	"course:s,mode:s"
+		"en"		"{darkred}The record on {default}{course}{darkred} ({default}{mode}{darkred}) exists, but its replay was not saved (very long runs exceed the upload limit)."
+		"ru"		"{darkred}Рекорд на курсе {default}{course}{darkred} ({default}{mode}{darkred}) есть, но запись не сохранилась (очень длинные раны не влезают в лимит выгрузки)."
+	}
+	"Replay - Map Unknown"
+	{
+		"en"		"{darkred}The platform has no records for this map yet."
+		"ru"		"{darkred}На платформе ещё нет рекордов этой карты."
+	}
+	// `!replay <uuid>`: чаще всего игрок берёт со страницы карты UUID РАНА — это другой
+	// идентификатор, записи под ним нет и не будет.
+	"Replay - Uuid Not Found"
+	{
+		"en"		"{darkred}No replay with that UUID. Note: a run's UUID on the site is not the replay's UUID."
+		"ru"		"{darkred}Записи с таким UUID нет. Учтите: UUID рана на сайте — это не UUID записи."
+	}
+	// Отказ ДО сети: команда не пошла в api вовсе. Две разные причины, раньше обе прятались
+	// за общим «повтор не найден».
+	"Replay - Central Disabled"
+	{
+		"en"		"{darkred}Central replays are turned off on this server."
+		"ru"		"{darkred}Центральные повторы на этом сервере выключены."
+	}
+	"Replay - Mode Unsupported"
+	{
+		"en"		"{darkred}Central replays are not stored for this mode."
+		"ru"		"{darkred}Для этого режима центральные повторы не хранятся."
+	}
+	// `!replay pb <ник>`: ник тут ищется ТОЛЬКО среди игроков на сервере (цель уходит в
+	// запрос как steamid64). Прежний «игрок не найден» об этом молчал.
+	"Replay - Target Not Online"
+	{
+		"#format"	"name:s"
+		"en"		"{darkred}{default}{name}{darkred} is not on the server. Here a nickname only matches players currently online — use a SteamID64, or {default}!replay <nickname>{darkred} to search the platform."
+		"ru"		"{darkred}{default}{name}{darkred} сейчас не на сервере. Здесь ник ищется только среди присутствующих — укажите SteamID64 либо используйте {default}!replay <ник>{darkred} (поиск по базе)."
+	}
 	// Отказ pro-видов (!replay wrpro/pbpro/gpbpro). Отдельная фраза, потому что причина
 	// тут почти всегда НЕ «рекорда нет»: реплей выгружается только на overall/NUB-ран, и у
 	// держателя pro-рекорда файла под именно этот ран может не быть. Общая фраза про
@@ -954,13 +1006,16 @@
 		"ru"		"{nickname} - {time}"
 		"ua"		"{nickname} - {time}"
 	}
+	// Курс и режим в тексте ОБЯЗАТЕЛЬНЫ: поиск идёт по ключу (карта, курс, режим), но игроку
+	// этот фильтр нигде не виден, и без него отказ читается как «такого игрока нет вообще»
+	// (kz_angina_x 17.09: владелец стоял на Main, а записи лежали на бонусном курсе).
 	"Replay - Search No Matches"
 	{
-		"#format"	"query:s"
-		"en"		"{darkred}No player with a personal best on this map matches {grey}'{default}{query}{grey}'."
-		"chi"		"{darkred}本图没有个人纪录的玩家匹配 {grey}'{default}{query}{grey}'."
-		"ru"		"{darkred}Ни один игрок с рекордом на этой карте не подходит под {grey}'{default}{query}{grey}'."
-		"ua"		"{darkred}Жоден гравець із рекордом на цій карті не підходить під {grey}'{default}{query}{grey}'."
+		"#format"	"query:s,course:s,mode:s"
+		"en"		"{darkred}No player with a replay on {default}{course}{darkred} ({default}{mode}{darkred}) matches {grey}'{default}{query}{grey}'."
+		"chi"		"{darkred}在 {default}{course}{darkred} ({default}{mode}{darkred}) 上没有回放的玩家匹配 {grey}'{default}{query}{grey}'."
+		"ru"		"{darkred}На курсе {default}{course}{darkred} ({default}{mode}{darkred}) нет игрока с записью под {grey}'{default}{query}{grey}'."
+		"ua"		"{darkred}На курсі {default}{course}{darkred} ({default}{mode}{darkred}) немає гравця із записом під {grey}'{default}{query}{grey}'."
 	}
 	"Replay - Search Unavailable"
 	{

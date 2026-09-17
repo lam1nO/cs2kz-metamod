@@ -121,12 +121,19 @@ namespace KZ::replaysystem::commands
 			return;
 		}
 
+		// Курс и режим — ключ поиска и одновременно невидимый для игрока фильтр: оба обязаны
+		// попасть в отказ, иначе «никто не подходит» читается как «такого ника нет»
+		// (kz_angina_x 17.09).
+		const i32 courseNumber = KZ::course::GetCyberCourseNumber(player->timerService->GetCourse());
+		const std::string courseText = CybReplayCommon::CourseText(courseNumber);
+
 		// Режим — в api-нотацию общим маппингом; кастовый режим сверх ckz/vnl/kzt
 		// центральное хранилище не знает, PB-реплеев там нет по определению.
 		const char *mode = CybReplayCommon::MapMode(player->modeService->GetModeShortName());
 		if (!mode || mode[0] == '\0')
 		{
-			player->languageService->PrintChat(true, false, "Replay - Search No Matches", query.c_str());
+			player->languageService->PrintChat(true, false, "Replay - Search No Matches", query.c_str(), courseText.c_str(),
+											   player->modeService->GetModeShortName());
 			return;
 		}
 
@@ -139,6 +146,10 @@ namespace KZ::replaysystem::commands
 
 		HTTP::Request req(HTTP::Method::GET, fullUrl);
 		req.SetQuery("mode", mode);
+		// Курс, на котором стоит игрок — тот же ключ, что у резолва PB/WR. Без него api
+		// искал ТОЛЬКО по main, и на карте с бонусом `!replay <ник>` не находил никого,
+		// хотя записи бонуса лежали (kz_angina_x 17.09: 13 PB на курсе 102).
+		req.SetQuery("course", std::to_string(courseNumber));
 		// Контракт ограничивает query 64 символами — режем на своей стороне, иначе длинный
 		// ввод вернулся бы 400-м и игрок увидел бы «нет связи» вместо честного «не нашли».
 		// Режем ДО кодирования: считать надо исходные символы, а не percent-триплеты.
@@ -164,10 +175,12 @@ namespace KZ::replaysystem::commands
 		u64 requesterSteamId64 = player->GetSteamId64();
 		std::string requestedQuery = query;
 		std::string requestedMap = mapName;
+		std::string requestedCourse = courseText;
+		std::string requestedMode = mode;
 
 		// clang-format off
 		req.Send(
-			[userID, requesterSteamId64, requestedQuery, requestedMap](HTTP::Response resp)
+			[userID, requesterSteamId64, requestedQuery, requestedMap, requestedCourse, requestedMode](HTTP::Response resp)
 			{
 				KZPlayer *pl = g_pKZPlayerManager->ToPlayer(userID);
 				if (!pl)
@@ -212,7 +225,8 @@ namespace KZ::replaysystem::commands
 				KeyValues3 *results = kv.FindMember("results");
 				if (!results || results->GetType() != KV3_TYPE_ARRAY)
 				{
-					pl->languageService->PrintChat(true, false, "Replay - Search No Matches", requestedQuery.c_str());
+					pl->languageService->PrintChat(true, false, "Replay - Search No Matches", requestedQuery.c_str(), requestedCourse.c_str(),
+												   requestedMode.c_str());
 					return;
 				}
 
@@ -254,7 +268,8 @@ namespace KZ::replaysystem::commands
 
 				if (hits.empty())
 				{
-					pl->languageService->PrintChat(true, false, "Replay - Search No Matches", requestedQuery.c_str());
+					pl->languageService->PrintChat(true, false, "Replay - Search No Matches", requestedQuery.c_str(), requestedCourse.c_str(),
+												   requestedMode.c_str());
 					return;
 				}
 				// Однозначное совпадение — не мучаем игрока меню из одного пункта. Если меню
@@ -1425,7 +1440,11 @@ SCMD(kz_replay, SCFL_REPLAY | SCFL_HELP)
 			}
 			else if (!ParseStrictSteamId64(targetArg, targetSteamId64))
 			{
-				player->languageService->PrintChat(true, false, "Error Message (Player Not Found)", targetArg);
+				// Ник здесь резолвится ТОЛЬКО среди игроков на сервере — цель уходит в запрос
+				// как steamid64. Прежний «игрок не найден» об этом ограничении молчал, и
+				// выглядел как «нет такого игрока» вообще (жалоба 17.09): называем причину и
+				// два рабочих пути — SteamID64 либо `!replay <ник>` (поиск по базе платформы).
+				player->languageService->PrintChat(true, false, "Replay - Target Not Online", targetArg);
 				return MRES_SUPERCEDE;
 			}
 		}

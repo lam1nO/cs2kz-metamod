@@ -21,4 +21,9 @@ namespace CybReplayCommon
 
 	// api валидирует map как [a-z0-9_-]{1,128} (apps/api/src/modules/replays/replays.controller.ts).
 	bool IsValidMapName(const std::string &name);
+
+	// Cyber-номер курса словами — для ОТКАЗОВ реплея: курс входит в ключ резолва, но игроку
+	// нигде не виден, и без него «повтор не найден» читается как «такого игрока нет»
+	// (kz_angina_x 17.09). Конвенция номеров — KZ::course::GetCyberCourseNumber.
+	std::string CourseText(int cyberCourseNumber);
 } // namespace CybReplayCommon
