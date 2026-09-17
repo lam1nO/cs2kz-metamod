@@ -37,19 +37,21 @@ namespace KZ::replaysystem::menu
 	// регулируемой строки ещё и подсвеченные чипы A/D (класс focused, IsReplayMenuLineAdjustable).
 	enum class ReplayMenuLine
 	{
-		Pause,   // E — пауза/продолжить
-		Step,    // A/D — шаг на тик записи назад/вперёд (шаг сам ставит паузу)
-		Seek,    // A/D — перемотка ±RPMENU_SEEK_STEP_10 сек (menu.cpp)
-		Restart, // E — с начала
-		Speed,   // A/D — пресет скорости
-		End,     // E — остановить плейбек и убрать бота
+		Pause,    // E — пауза/продолжить
+		Step,     // A/D — шаг на тик записи назад/вперёд (шаг сам ставит паузу)
+		Seek,     // A/D — точная перемотка ±RPMENU_SEEK_STEP_FINE сек (menu.cpp)
+		SeekFast, // A/D — быстрая перемотка ±RPMENU_SEEK_STEP_FAST сек
+		Restart,  // E — с начала
+		Speed,    // A/D — пресет скорости
+		End,      // E — остановить плейбек и убрать бота
 		Count
 	};
 
 	// constexpr — таблица строк карточки (RPMENU_ROWS) проверяет себя static_assert'ом.
 	constexpr bool IsReplayMenuLineAdjustable(ReplayMenuLine line)
 	{
-		return line == ReplayMenuLine::Step || line == ReplayMenuLine::Seek || line == ReplayMenuLine::Speed;
+		return line == ReplayMenuLine::Step || line == ReplayMenuLine::Seek || line == ReplayMenuLine::SeekFast
+			   || line == ReplayMenuLine::Speed;
 	}
 
 	enum class ReplayMenuInput
@@ -93,9 +95,23 @@ namespace KZ::replaysystem::menu
 	// спека (§4, слот meta); перевода здесь нет, это имена из файла реплея. Пусто — данных нет.
 	std::string GetReplayMenuMetaText();
 
-	// Шаг перемотки строки Seek в секундах — подпись чипов A/D на карточке берётся отсюда,
-	// чтобы не разъехаться с самой перемоткой (RPMENU_SEEK_STEP_10 в menu.cpp).
-	int GetReplayMenuSeekStepSeconds();
+	// Шаг перемотки в секундах — подпись чипов A/D на карточке берётся отсюда, чтобы не
+	// разъехаться с самой перемоткой (RPMENU_SEEK_STEP_* в menu.cpp). fast — строка быстрой
+	// перемотки (ReplayMenuLine::SeekFast).
+	int GetReplayMenuSeekStepSeconds(bool fast);
+
+	// Метка типа реплея в шапке карточки (слот badge_type). Заполняется, только когда плейбек
+	// запущен через резолв `!replay pb/wr/awr/...`: тип — свойство ЗАПРОСА, в самом файле его
+	// нет (docs/design/2026-09-11-replay-player-panorama/data-availability.md §3). Пустой
+	// text — бейдж скрыть. cls — класс расцветки страницы («pb», «wr», «other»).
+	struct ReplayMenuBadge
+	{
+		std::string text;
+		const char *cls {"other"};
+	};
+
+	// Язык не нужен: PB/WR/AWR — одинаковые сокращения во всех локалях.
+	void GetReplayMenuBadge(ReplayMenuBadge &out);
 
 	// Контекстная подсказка биндов под списком — для ВЫБРАННОЙ строки.
 	std::string GetReplayMenuHintText(KZPlayer *player, ReplayMenuLine line);

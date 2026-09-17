@@ -8,6 +8,7 @@
 #include "commands.h"
 #include "kz_replaysystem.h" // GetPaused — строка состояния карточки
 #include "data.h"
+#include "cyb_replay_download.h" // Kind — вид запроса, которым запущен плейбек (бейдж шапки)
 #include "playback.h" // эффективная шкала тиков (без пауз) для строки состояния
 #include "utils/utils.h"
 #include "utils/simplecmds.h"
@@ -23,9 +24,12 @@ extern ICS2Menus *g_pMenus;
 
 namespace
 {
-	// Шаг перемотки (сек) регулируемой строки: A — назад, D — вперёд. ±30 сек остаётся
-	// командой !rpgoto +30.
-	constexpr float RPMENU_SEEK_STEP_10 = 10.0f;
+	// Шаги перемотки (сек) регулируемых строк: A — назад, D — вперёд. Их ДВА, отдельными
+	// пунктами меню, а не один: клавиатура даёт строке ровно одну пару A/D, и второй шаг иначе
+	// был бы доступен только мышью, которой у меню нет. Точный — подвести к месту, быстрый —
+	// перескочить кусок. ±30 сек остаётся командой !rpgoto +30.
+	constexpr float RPMENU_SEEK_STEP_FINE = 3.0f;
+	constexpr float RPMENU_SEEK_STEP_FAST = 15.0f;
 
 	// Пресеты скорости: A/D переключают по списку, а не прибавляют шаг — на замедлении
 	// осмысленны доли (0.25 ощутимо медленнее 0.5), а на ускорении — кратности.
@@ -77,10 +81,12 @@ void KZ::replaysystem::menu::ApplyReplayMenuInput(KZPlayer *player, ReplayMenuLi
 			}
 			break;
 		case ReplayMenuLine::Seek:
+		case ReplayMenuLine::SeekFast:
 			if (!select)
 			{
+				const int step = (int)(line == ReplayMenuLine::SeekFast ? RPMENU_SEEK_STEP_FAST : RPMENU_SEEK_STEP_FINE);
 				char seek[16];
-				V_snprintf(seek, sizeof(seek), "%+d", dir * (int)RPMENU_SEEK_STEP_10);
+				V_snprintf(seek, sizeof(seek), "%+d", dir * step);
 				commands::JumpToReplayTime(player, seek);
 			}
 			break;
@@ -129,16 +135,16 @@ std::string KZ::replaysystem::menu::GetReplayMenuLineText(KZPlayer *player, Repl
 		}
 		case ReplayMenuLine::Step:
 			return KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Step");
+		// Значений в подписях НЕТ: шаг и скорость написаны на чипах справа от строки, и дубль
+		// («ПЕРЕМОТКА 10С» рядом с чипом «−10s») только удлинял подпись (спека §4, макеты).
 		case ReplayMenuLine::Seek:
-			return KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Seek", (int)RPMENU_SEEK_STEP_10);
+			return KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Seek");
+		case ReplayMenuLine::SeekFast:
+			return KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Seek Fast");
 		case ReplayMenuLine::Restart:
 			return KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Restart");
 		case ReplayMenuLine::Speed:
-		{
-			char speedText[16];
-			commands::FormatReplaySpeed(commands::GetReplaySpeed(), speedText, sizeof(speedText));
-			return KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Speed", speedText);
-		}
+			return KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Speed");
 		case ReplayMenuLine::End:
 			return KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - End");
 		default:
@@ -254,18 +260,71 @@ void KZ::replaysystem::menu::GetReplayMenuStatus(ReplayMenuStatus &out)
 	// «Пауза» — и записанная пауза рана (GetPaused), и пауза плейбека зрителем (replayPaused):
 	// в обоих случаях время стоит.
 	out.paused = data::IsReplayPlaying() && (GetPaused() || data::GetCurrentReplay()->replayPaused);
-	commands::FormatReplaySpeed(commands::GetReplaySpeed(), out.speed, sizeof(out.speed));
+	// Карточка — ФИКСИРОВАННОЙ ширины формат «N.NN», а не чатовый FormatReplaySpeed («1», «0.25»):
+	// поле скорости и пилюля состояния переписываются на ходу, и плавающее число знаков
+	// дёргало бы соседние элементы строки. В чате формат прежний.
+	V_snprintf(out.speed, sizeof(out.speed), "%.2f", commands::GetReplaySpeed());
 }
 
-int KZ::replaysystem::menu::GetReplayMenuSeekStepSeconds()
+int KZ::replaysystem::menu::GetReplayMenuSeekStepSeconds(bool fast)
 {
-	return (int)RPMENU_SEEK_STEP_10;
+	return (int)(fast ? RPMENU_SEEK_STEP_FAST : RPMENU_SEEK_STEP_FINE);
 }
 
 bool KZ::replaysystem::menu::IsReplayMenuAwr()
 {
 	using namespace KZ::replaysystem;
 	return data::IsReplayPlaying() && data::GetCurrentReplay()->awrMode;
+}
+
+void KZ::replaysystem::menu::GetReplayMenuBadge(ReplayMenuBadge &out)
+{
+	using namespace KZ::replaysystem;
+	out.text.clear();
+	out.cls = "other";
+	if (!data::IsReplayPlaying())
+	{
+		return;
+	}
+	const auto *replay = data::GetCurrentReplay();
+	// AWR проверяем ПЕРВЫМ и по самому плейбеку, а не по виду запроса: в AWR-режим реплей
+	// уходит только через резолв awr, но режим мог и отвалиться (разрез не удался) — тогда
+	// играет обычная запись, и обещать «AWR» нельзя.
+	if (replay->awrMode)
+	{
+		out.text = "AWR";
+		out.cls = "wr"; // золотой, как метка AWR в чате
+		return;
+	}
+	// Метки не бывает у записи, запущенной мимо резолва: типа реплея в файле нет
+	// (data-availability.md §3). Бейдж в этом случае скрыт — ширина шапки от него не зависит.
+	if (replay->badgeKind < 0)
+	{
+		return;
+	}
+	switch ((CybReplayDownload::Kind)replay->badgeKind)
+	{
+		case CybReplayDownload::Kind::PB:
+			out.text = "PB";
+			out.cls = "pb";
+			break;
+		case CybReplayDownload::Kind::WR:
+			out.text = "WR";
+			out.cls = "wr";
+			break;
+		// Приоритет при совпадении «рекорд + pro» — за рекордом (решение в data-availability.md
+		// §3): цвет берём рекордный, а PRO дописываем текстом.
+		case CybReplayDownload::Kind::PBPro:
+			out.text = "PB PRO";
+			out.cls = "pb";
+			break;
+		case CybReplayDownload::Kind::WRPro:
+			out.text = "WR PRO";
+			out.cls = "wr";
+			break;
+		default:
+			break;
+	}
 }
 
 std::string KZ::replaysystem::menu::GetReplayMenuHintText(KZPlayer *player, ReplayMenuLine line)
@@ -278,7 +337,9 @@ std::string KZ::replaysystem::menu::GetReplayMenuHintText(KZPlayer *player, Repl
 		case ReplayMenuLine::Step:
 			return KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Hint Step");
 		case ReplayMenuLine::Seek:
-			return KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Hint Seek");
+			return KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Hint Seek", (int)RPMENU_SEEK_STEP_FINE);
+		case ReplayMenuLine::SeekFast:
+			return KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Hint Seek", (int)RPMENU_SEEK_STEP_FAST);
 		case ReplayMenuLine::Restart:
 			return KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Hint Restart");
 		case ReplayMenuLine::Speed:

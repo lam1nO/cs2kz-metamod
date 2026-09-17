@@ -19,35 +19,48 @@
 #include <cstdlib> // strtoull: steamId64 приезжает строкой (u64 не влезает в число JSON)
 #include <string>
 
-// Ожидание AWR-режима (см. заголовок): ставится перед докачкой, снимается первым же
-// LoadReplay ЭТОГО uuid. Один активный реплей на сервер — состояние глобальное, как и сам
-// плейбек. Хранится строка uuid, а не флаг: чужой `!replay <uuid>` не должен его подобрать.
-static_global char g_pendingAwrUuid[40] = {};
-static_global u64 g_pendingAwrMs = 0;
+// Ожидание вида записи и AWR-режима (см. заголовок): ставится перед докачкой, снимается
+// первым же LoadReplay ЭТОГО uuid. Один активный реплей на сервер — состояние глобальное, как
+// и сам плейбек. Хранится строка uuid, а не флаг: чужой `!replay <uuid>` не должен его подобрать.
+static_global char g_pendingUuid[40] = {};
+static_global CybReplayDownload::Pending g_pending {};
+
+void CybReplayDownload::SetPendingKind(const char *uuid, Kind kind)
+{
+	if (!uuid || uuid[0] == '\0')
+	{
+		CybReplayDownload::ClearPending();
+		return;
+	}
+	V_strncpy(g_pendingUuid, uuid, sizeof(g_pendingUuid));
+	g_pending.hasKind = true;
+	g_pending.kind = kind;
+}
 
 void CybReplayDownload::SetPendingAwr(const char *uuid, u64 awrMs)
 {
 	if (!uuid || uuid[0] == '\0')
 	{
-		CybReplayDownload::ClearPendingAwr();
+		CybReplayDownload::ClearPending();
 		return;
 	}
-	V_strncpy(g_pendingAwrUuid, uuid, sizeof(g_pendingAwrUuid));
-	g_pendingAwrMs = awrMs;
+	V_strncpy(g_pendingUuid, uuid, sizeof(g_pendingUuid));
+	g_pending.awr = true;
+	g_pending.awrMs = awrMs;
 }
 
-void CybReplayDownload::ClearPendingAwr()
+void CybReplayDownload::ClearPending()
 {
-	g_pendingAwrUuid[0] = '\0';
-	g_pendingAwrMs = 0;
+	g_pendingUuid[0] = '\0';
+	g_pending = CybReplayDownload::Pending();
 }
 
-bool CybReplayDownload::TakePendingAwr(const char *uuid, u64 &awrMs)
+bool CybReplayDownload::TakePending(const char *uuid, Pending &out)
 {
-	const bool match = g_pendingAwrUuid[0] != '\0' && uuid && uuid[0] != '\0' && KZ_STREQI(g_pendingAwrUuid, uuid);
-	awrMs = match ? g_pendingAwrMs : 0;
+	const bool match = g_pendingUuid[0] != '\0' && uuid && uuid[0] != '\0' && KZ_STREQI(g_pendingUuid, uuid);
+	out = match ? g_pending : CybReplayDownload::Pending();
 	// Гасим ВСЕГДА: ожидание одноразовое, и мимо своего uuid ему жить незачем.
-	CybReplayDownload::ClearPendingAwr();
+	CybReplayDownload::ClearPending();
 	return match;
 }
 
@@ -238,7 +251,7 @@ namespace
 							 KZPlayer *player = ok ? g_pKZPlayerManager->ToPlayer(uid) : nullptr;
 							 if (!player)
 							 {
-								 CybReplayDownload::ClearPendingAwr();
+								 CybReplayDownload::ClearPending();
 								 return;
 							 }
 							 KZ::replaysystem::commands::LoadReplay(player, replayUuid.c_str());
@@ -251,7 +264,7 @@ namespace
 
 		// Любой резолв начинается с чистого ожидания: привязка к uuid уже не даёт подобрать
 		// чужое, но незачем и держать протухшее.
-		CybReplayDownload::ClearPendingAwr();
+		CybReplayDownload::ClearPending();
 
 		if (resp.status == 404)
 		{
@@ -339,6 +352,10 @@ namespace
 			}
 			return;
 		}
+
+		// Вид запроса — бейджу карточки меню реплея (в файле записи его нет). Ставим ДО
+		// докачки, как и ожидание AWR: путь загрузки общий и донести туда вид иначе нечем.
+		CybReplayDownload::SetPendingKind(parsedUuid.ToString().c_str(), kind);
 
 		if (kind == CybReplayDownload::Kind::AWR)
 		{

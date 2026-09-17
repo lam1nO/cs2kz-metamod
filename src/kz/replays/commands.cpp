@@ -290,7 +290,7 @@ namespace KZ::replaysystem::commands
 			// Ожидание AWR снимаем: этот вызов реплей НЕ загрузит, а протухший uuid
 			// достался бы следующему `!replay <тот же uuid>` с диска — и обычный реплей
 			// сыграл бы как AWR.
-			CybReplayDownload::ClearPendingAwr();
+			CybReplayDownload::ClearPending();
 			player->languageService->PrintChat(true, false, "Replay - Loading Already");
 			return;
 		}
@@ -351,13 +351,15 @@ namespace KZ::replaysystem::commands
 			replayPath,
 			// Success callback (runs on main thread via ProcessAsyncLoadCompletion)
 			data::LoadSuccessCallback([playerUserID, loadedUuid]() {
-				// AWR (`!replay awr`): вид записи доносит сюда одноразовое ожидание резолва —
+				// Вид записи (AWR-режим и метка PB/WR) доносит сюда одноразовое ожидание резолва —
 				// путь загрузки общий для всех видов и донести его иначе нечем. Ожидание
 				// привязано к uuid, поэтому чужой реплей его не подберёт; забираем всё равно
 				// ПЕРВОЙ строкой, до любого раннего выхода (нет игрока, чужая карта), чтобы
 				// оно не осталось висеть на неудавшейся загрузке.
-				u64 pendingAwrMs = 0;
-				const bool pendingAwr = CybReplayDownload::TakePendingAwr(loadedUuid.c_str(), pendingAwrMs);
+				CybReplayDownload::Pending pending {};
+				CybReplayDownload::TakePending(loadedUuid.c_str(), pending);
+				const bool pendingAwr = pending.awr;
+				const u64 pendingAwrMs = pending.awrMs;
 				KZPlayer* player = g_pKZPlayerManager->ToPlayer(playerUserID);
 				if (!player)
 				{
@@ -404,6 +406,9 @@ namespace KZ::replaysystem::commands
 				// сегменты уже с учётом awrMode/awrDead.
 				replay->awrMode = pendingAwr;
 				replay->awrMs = pendingAwrMs;
+				// Вид запроса — бейджу шапки карточки меню реплея. -1 = запуск мимо резолва
+				// (`!replay <uuid>`, локальный файл): в самом файле типа записи нет.
+				replay->badgeKind = pending.hasKind ? (i32)pending.kind : -1;
 				if (replay->awrMode)
 				{
 					// Время рана — из шапки; у не-ранового реплея его нет, резать нечего.

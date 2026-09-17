@@ -53,8 +53,8 @@ namespace CybReplayDownload
 	void RequestAndPlay(KZPlayer *player, Kind kind, u64 targetSteamId64);
 
 	// Тот же резолв и та же докачка, но БЕЗ плейбека: колбэку уезжает ПУТЬ к готовому
-	// файлу в `downloads/` (`!lead`, src/kz/lead). Ни SetPendingAwr, ни LoadReplay здесь не
-	// зовутся — реплей-бот не спавнится, состояние глобального плейбека не трогается.
+	// файлу в `downloads/` (`!lead`, src/kz/lead). Ни ожидание (SetPending*), ни LoadReplay
+	// здесь не зовутся — реплей-бот не спавнится, глобальный плейбек не трогается.
 	//
 	// Путь, а не байты, намеренно: файл реплея — до 32 МБ, и его чтение обязано жить на
 	// рабочем потоке получателя, а не в тике колбэка. К моменту вызова файл гарантированно
@@ -104,10 +104,22 @@ namespace CybReplayDownload
 	// вид записи). Привязано к UUID: `!replay <uuid>` с диска идёт в LoadReplay напрямую,
 	// мимо резолва, и без привязки съел бы чужое ожидание. Take возвращает true только на
 	// тот же uuid и в ЛЮБОМ случае гасит состояние — протухнуть ожиданию негде.
+	// Тем же ожиданием едет и ВИД запроса (Kind) — для бейджа PB/WR в шапке карточки меню
+	// реплея: в файле записи типа нет, это свойство запроса (data-availability.md §3).
+	// Ставится на КАЖДОМ успешном резолве, не только у AWR.
+	struct Pending
+	{
+		bool hasKind {}; // false — плейбек запущен мимо резолва, вид записи неизвестен
+		Kind kind {};
+		u64 awrMs {}; // только при kind == AWR; 0 — разрез ещё не считали
+		bool awr {};
+	};
+
+	void SetPendingKind(const char *uuid, Kind kind);
 	void SetPendingAwr(const char *uuid, u64 awrMs);
-	bool TakePendingAwr(const char *uuid, u64 &awrMs);
+	bool TakePending(const char *uuid, Pending &out);
 	// Снять ожидание, не потребляя (error-пути докачки: файла не будет, LoadReplay не позовут).
-	void ClearPendingAwr();
+	void ClearPending();
 
 	// !replay <uuid>: докачка конкретного реплея по UUID (api GET
 	// /replays/v1/by-uuid). Вызывается из LoadReplay, когда файла нет локально —

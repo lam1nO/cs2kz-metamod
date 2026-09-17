@@ -846,16 +846,22 @@
 		"en"		"Resume"
 		"ru"		"Продолжить"
 	}
+	// Подписи строк — БЕЗ значений: шаг кадра, шаг перемотки и скорость написаны на чипах
+	// справа от строки, и дубль в подписи её только удлинял (спека §4, макеты card-*.png).
 	"Replay Panel - Step"
 	{
-		"en"		"Tick step"
-		"ru"		"Шаг по тикам"
+		"en"		"Frame"
+		"ru"		"Кадр"
 	}
 	"Replay Panel - Seek"
 	{
-		"#format"	"step:d"
-		"en"		"Seek {step}s"
-		"ru"		"Перемотка {step}с"
+		"en"		"Seek"
+		"ru"		"Перемотка"
+	}
+	"Replay Panel - Seek Fast"
+	{
+		"en"		"Fast seek"
+		"ru"		"Быстрая перемотка"
 	}
 	"Replay Panel - Restart"
 	{
@@ -864,9 +870,8 @@
 	}
 	"Replay Panel - Speed"
 	{
-		"#format"	"speed:s"
-		"en"		"Speed {speed}x"
-		"ru"		"Скорость {speed}x"
+		"en"		"Speed"
+		"ru"		"Скорость"
 	}
 	"Replay Panel - End"
 	{
@@ -905,10 +910,12 @@
 		"en"		"A/D step by tick"
 		"ru"		"A/D шаг по тикам"
 	}
+	// Одна фраза на обе строки перемотки — шаг подставляется (точная / быстрая).
 	"Replay Panel - Hint Seek"
 	{
-		"en"		"A/D seek back / forward"
-		"ru"		"A/D назад / вперёд"
+		"#format"	"step:d"
+		"en"		"A/D -{step}s / +{step}s"
+		"ru"		"A/D -{step}с / +{step}с"
 	}
 	"Replay Panel - Hint Restart"
 	{
@@ -980,12 +987,6 @@
 		"en"		"{gold}AWR {default}{time} {grey}(teleports cut)"
 		"ru"		"{gold}AWR {default}{time} {grey}(телепорты вырезаны)"
 	}
-	// Метка типа реплея в шапке panorama-карточки (слот badge_type; ширина шапки от текста
-	// бейджа не зависит): КОРОТКО и без разметки — время показано отдельными слотами.
-	// Хвостовой пробел — от чатового употребления, бейджу его срезает код.
-	"Replay Panel - AWR Mark"
-	{
-		"en"		"AWR "
-		"ru"		"AWR "
-	}
+	// Метки типа реплея в шапке карточки (PB/WR/AWR) фразы не имеют: это одинаковые во всех
+	// локалях сокращения, они заданы литералами в GetReplayMenuBadge (replays/menu.cpp).
 }

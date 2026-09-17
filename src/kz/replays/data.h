@@ -80,6 +80,13 @@ namespace KZ::replaysystem::data
 		// (AsyncLoadStatus::completedReplay) и обязан остаться тривиально копируемым.
 		// Владелец — сам ReplayPlayback, освобождается в FreeReplayData.
 		std::vector<awr::Interval> *awrDead;
+
+		// Вид запроса, которым запущен этот плейбек (CybReplayDownload::Kind как i32) — для
+		// бейджа PB/WR в шапке карточки меню. Именно i32, а не сам enum: data.h не должен
+		// тянуть заголовок докачки. -1 — запуск мимо резолва (`!replay <uuid>`, локальный
+		// файл, ручная запись): вида записи в самом файле нет, бейдж в этом случае скрыт
+		// (docs/design/2026-09-11-replay-player-panorama/data-availability.md §3).
+		i32 badgeKind;
 	};
 
 	// Границы скорости воспроизведения. Нижняя — чтобы кадр не держался дольше секунды
