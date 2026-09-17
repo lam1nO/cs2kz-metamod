@@ -605,37 +605,8 @@ namespace
 		return use;
 	}
 
-	// Хендл материала луча (m_hBaseMaterial, 8 байт) по живой схеме. Только ЧТЕНИЕ: писать в
-	// него целым нельзя — это хендл ресурса, а не число. Офсет кэшируется лишь когда схема
-	// ответила: закэшировать ноль означало бы навсегда читать голову объекта.
-	u64 LeadBeamBaseMaterial(CBeam *beam)
-	{
-		static SchemaKey key {0, false};
-		if (!key.offset)
-		{
-			key = schema::GetOffset("CBeam", hash_32_fnv1a_const("CBeam"), "m_hBaseMaterial", hash_32_fnv1a_const("m_hBaseMaterial"));
-		}
-		if (!key.offset)
-		{
-			return 0;
-		}
-		return *reinterpret_cast<const u64 *>(reinterpret_cast<uintptr_t>(beam) + key.offset);
-	}
 
 
-	// Подстройка сетевых полей вида (см. блок конваров cyb_lead_beam_*). Отдельно от
-	// ApplyLeadBeamExtras намеренно: там повторяется РЕЦЕПТ ПРОБЫ с фиксированными значениями,
-	// а здесь — живые ручки оператора, и смешивать доказанное с перебираемым нельзя.
-	struct LeadBeamTuning
-	{
-		const char *className; // класс, ОБЪЯВИВШИЙ поле: схема ищет по нему, как SCHEMA_FIELD
-		const char *fieldName;
-		bool isFloat;
-		f32 floatValue;
-		i64 intValue;
-		int size;   // ширина записи по дампу схемы CS2
-		bool write; // false — конвар сказал «не трогать»
-	};
 
 
 	// ПУТЬ ОТКАТА (cyb_lead_beam_entity 1): отрезок — штатная сущность-луч. Доказано живьём пробником
@@ -698,15 +669,6 @@ namespace
 		V_snprintf(renderColor, sizeof(renderColor), "%d %d %d", (int)color.r(), (int)color.g(), (int)color.b());
 		pKeyValues->SetString("rendercolor", renderColor);
 		pKeyValues->SetInt("renderamt", (int)color.a());
-		// Режим рендера — КЛЮЧОМ, а не только полем схемы выше. Запись поля до спавна не
-		// работает: DispatchSpawn перетирает m_nRenderMode своим значением, и конвар выглядел
-		// мёртвым — владелец серверов заметил это живьём 17.09.2026 («ширина меняется, режим
-		// нет»). Ширина потому и работала, что рядом идут ключи width/BoltWidth. Соседние
-		// rendercolor/renderamt — тот же механизм, просто rendermode в рецепт не попал.
-		if (renderMode >= 0 && renderMode <= 255)
-		{
-			pKeyValues->SetInt("rendermode", renderMode);
-		}
 		// Хендл берём ДО спавна: класс может умереть прямо в DispatchSpawn, и тогда трогать
 		// указатель уже нельзя (пробник ловил это же условие).
 		const CEntityHandle handle = beam->GetRefEHandle();
@@ -722,22 +684,6 @@ namespace
 		// после его работы — а такого состояния на пробе никто не видел).
 		beam->Teleport(&start, nullptr, &vec3_origin);
 		beam->m_vecEndPos(end);
-		// Режим рендера — ЕЩЁ РАЗ после спавна, и с чтением обратно в лог. Две прошлые попытки
-		// (поле до спавна, затем ключ rendermode) владелец проверил живьём — луч не менялся
-		// даже на режиме 10 («не рисовать»). Значит либо спавн перетирает поле, либо ключ
-		// называется иначе, либо поле не то. Гадать дальше нельзя: печатаем, ЧТО записали и
-		// ЧТО лежит в поле после записи, — один раз на перестроение, не на каждый отрезок.
-		if (renderMode >= 0 && renderMode <= 255)
-		{
-			beam->m_nRenderMode((uint8)renderMode);
-			static i32 lastLogged = -1;
-			if (lastLogged != renderMode)
-			{
-				lastLogged = renderMode;
-				KZ_LOG_INFO(LogChannel::General, "[cyb] lead_beam_rendermode want=%i after_spawn=%u\n", renderMode,
-							(unsigned)beam->m_nRenderMode());
-			}
-		}
 		// ЕДИНСТВЕННАЯ наша добавка к пост-спавн рецепту, и она не про ВИД: на метке команды
 		// держится личная видимость луча. Сбрось её спавн (чем бы он ни выставлял команду) —
 		// фильтр передачи перестал бы узнавать наши лучи по первому ключу. Второй ключ
