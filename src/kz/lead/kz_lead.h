@@ -56,6 +56,7 @@
 #define KZ_LEAD_PARTICLE_VAR_ALIVE "particles/gymstrike/lead_segment_alive.vpcf"
 #define KZ_LEAD_PARTICLE_VAR_SOLID "particles/gymstrike/lead_segment_solid.vpcf"
 #define KZ_LEAD_PARTICLE_VAR_FULL  "particles/gymstrike/lead_segment_full.vpcf"
+#define KZ_LEAD_PARTICLE_VAR_JOINT "particles/gymstrike/lead_segment_joint.vpcf"
 
 #define KZ_LEAD_TARGETNAME "cyb_lead_seg"
 // Энтити-класс отрезка на сущности-луче. Базовый `beam`, а НЕ `env_beam`: выбор владельца
