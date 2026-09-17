@@ -294,6 +294,8 @@ void KZHUDService::ApplyCrosshair(CCSCustomHudLayout *layout, bool show, bool fo
 	// хардкод-дефолтами конструктора MHUDCrosshairSettings, выдавая их за настройки игрока —
 	// «чужой» крестик хуже отсутствующего, поэтому до подтверждения ведём себя как при
 	// выключенном префе (ни классов, ни панелей не трогаем).
+	// show=false — получатель наблюдает за другим игроком (см. UpdateHudLayout): крестик там
+	// гасится всегда, независимо от префа.
 	const bool enabled = show && this->GetLayoutPrefs().crosshair && this->crosshair.confirmed;
 	ApplyFlagClass(this->player, layout, "mhud_crosshair", "hidden", state.shown, !enabled);
 	if (!enabled)
