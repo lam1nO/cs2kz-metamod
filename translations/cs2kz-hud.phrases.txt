@@ -406,6 +406,13 @@
 		"chi"		"回放菜单"
 		"ua"		"Меню реплею"
 	}
+	"HUD - Menu Label ReplayMenuScale"
+	{
+		"en"		"Card size"
+		"ru"		"Размер карточки"
+		"chi"		"卡片大小"
+		"ua"		"Розмір картки"
+	}
 	"HUD - Menu Label LineStep"
 	{
 		"en"		"Line spacing"

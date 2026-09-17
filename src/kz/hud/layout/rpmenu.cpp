@@ -4,7 +4,7 @@
 // пунктов и данные — KZ::replaysystem::menu (replays/menu.cpp), здесь — сущность, чтение
 // клавиш и запись страницы.
 //
-// Всю карточку (шапка, время, шкала, шесть строк, подсказка) рисует сама страница: размеры,
+// Всю карточку (шапка, время, шкала, семь строк, подсказка) рисует сама страница: размеры,
 // шрифты, цвета и фон живут в её vcss. Сервер умеет над ней ровно две операции —
 // SetDialogVariableString (текст слота) и SetHasClass (класс панели). Отсюда всё устройство
 // файла: ОДНА сущность на игрока (одна страница — один custom_hud_layout), таблица слотов
@@ -17,7 +17,7 @@
 // классами с шагом 0.25 %: .w-p--N — ширина заполнения, .x-p--N — позиция ручки
 // (rpmenu-positions.vcss). Про бюджет интерн-таблицы см. RPMENU_PROGRESS_STEPS ниже.
 //
-// Порядок строк на СТРАНИЦЕ (play, frame, seek, speed, restart, exit) не совпадает с порядком
+// Порядок строк на СТРАНИЦЕ (play, frame, seek, seek_fast, speed, restart, exit) не совпадает с порядком
 // ReplayMenuLine: W/S ходят по странице (RPMENU_ROWS), иначе выбор прыгал бы по карточке
 // вверх-вниз. Семантика каждой строки при этом прежняя — её задаёт поле line.
 //
@@ -33,6 +33,7 @@
 #include "kz/replays/kz_replaysystem.h"
 #include "kz/replays/menu.h"
 #include "kz/replays/data.h"
+#include "kz/replays/playback.h" // эффективная шкала тиков — в ней считаются отметки шкалы
 #include "sdk/entity/ccscustomhudlayout.h"
 #include "sdk/services.h"
 #include "entitykeyvalues.h"
@@ -81,6 +82,14 @@ static CConVar<CUtlString> cyb_rpmenu_page("cyb_rpmenu_page", FCVAR_NONE,
 static CConVar<int> cyb_rpmenu_fill("cyb_rpmenu_fill", FCVAR_NONE,
 									"Replay menu (panorama) DIAGNOSTIC: 0 nothing, 1 vars, 2 +static classes, 3 everything (default).", 3);
 
+// Чем подписаны чипы строки «Кадр»: 1 — стрелки U+25C0/U+25B6 (как в макете), 0 — буквы A/D.
+// Ручка, а не константа, ровно по той же причине, что cyb_rpmenu_page: наличие типографских
+// глифов в игровом шрифте локально не проверить, а публикация аддона стоит часового окна
+// Steam. Если вместо стрелок в игре «тофу» — ставится 0 по RCON, без публикации.
+// Подхватывается на следующем кадре меню (слот идёт через диф-кэш).
+static CConVar<bool> cyb_rpmenu_arrow_chips("cyb_rpmenu_arrow_chips", FCVAR_NONE,
+										   "Replay menu (panorama): label the frame-step chips with arrow glyphs instead of A/D.", true);
+
 namespace
 {
 	// Текстовые слоты страницы. panelId — панель с текстом, varName — имя dialog-переменной в
@@ -98,11 +107,11 @@ namespace
 		StateText,
 		PosTime,
 		DurTime,
-		TickLine,
 		SeekPreview,
 		RowPlay,
 		RowFrame,
 		RowSeek,
+		RowSeekFast,
 		RowSpeed,
 		RowRestart,
 		RowExit,
@@ -113,6 +122,8 @@ namespace
 		ChipFrameNext,
 		ChipSeekBack,
 		ChipSeekFwd,
+		ChipSeekFastBack,
+		ChipSeekFastFwd,
 		ChipSpeedDec,
 		ChipSpeedVal,
 		ChipSpeedInc,
@@ -129,35 +140,37 @@ namespace
 	// clang-format off
 	constexpr RPMenuVarDef RPMENU_VARS[] =
 	{
-		{"nick",               "nick"},
-		{"meta",               "meta"},
-		{"badge_type",         "badge"},
-		{"time_caption",       "time_caption"},
-		{"time_current",       "time_current"},
-		{"time_final",         "time_final"},
-		{"state_glyph",        "state_glyph"},
-		{"state_text",         "state_text"},
-		{"pos_time",           "pos_time"},
-		{"dur_time",           "dur_time"},
-		{"tick_line",          "tick_line"},
-		{"seek_preview",       "seek_preview"},
-		{"row_play_label",     "row_play"},
-		{"row_frame_label",    "row_frame"},
-		{"row_seek_label",     "row_seek"},
-		{"row_speed_label",    "row_speed"},
-		{"row_restart_label",  "row_restart"},
-		{"row_exit_label",     "row_exit"},
-		{"chip_key_e_play",    "chip_key_e_play"},
-		{"chip_key_e_restart", "chip_key_e_restart"},
-		{"chip_key_e_exit",    "chip_key_e_exit"},
-		{"chip_frame_prev",    "chip_frame_prev"},
-		{"chip_frame_next",    "chip_frame_next"},
-		{"chip_seek_back",     "chip_seek_back"},
-		{"chip_seek_fwd",      "chip_seek_fwd"},
-		{"chip_speed_dec",     "chip_speed_dec"},
-		{"chip_speed_val",     "chip_speed_val"},
-		{"chip_speed_inc",     "chip_speed_inc"},
-		{"hint_text",          "hint"},
+		{"nick",                "nick"},
+		{"meta",                "meta"},
+		{"badge_type",          "badge"},
+		{"time_caption",        "time_caption"},
+		{"time_current",        "time_current"},
+		{"time_final",          "time_final"},
+		{"state_glyph",         "state_glyph"},
+		{"state_text",          "state_text"},
+		{"pos_time",            "pos_time"},
+		{"dur_time",            "dur_time"},
+		{"seek_preview",        "seek_preview"},
+		{"row_play_label",      "row_play"},
+		{"row_frame_label",     "row_frame"},
+		{"row_seek_label",      "row_seek"},
+		{"row_seek_fast_label", "row_seek_fast"},
+		{"row_speed_label",     "row_speed"},
+		{"row_restart_label",   "row_restart"},
+		{"row_exit_label",      "row_exit"},
+		{"chip_key_e_play",     "chip_key_e_play"},
+		{"chip_key_e_restart",  "chip_key_e_restart"},
+		{"chip_key_e_exit",     "chip_key_e_exit"},
+		{"chip_frame_prev",     "chip_frame_prev"},
+		{"chip_frame_next",     "chip_frame_next"},
+		{"chip_seek_back",      "chip_seek_back"},
+		{"chip_seek_fwd",       "chip_seek_fwd"},
+		{"chip_seek_fast_back", "chip_seek_fast_back"},
+		{"chip_seek_fast_fwd",  "chip_seek_fast_fwd"},
+		{"chip_speed_dec",      "chip_speed_dec"},
+		{"chip_speed_val",      "chip_speed_val"},
+		{"chip_speed_inc",      "chip_speed_inc"},
+		{"hint_text",           "hint"},
 	};
 	// clang-format on
 	static_assert(KZ_ARRAYSIZE(RPMENU_VARS) == (size_t)RPVar::Count, "таблица слотов должна совпадать с RPVar");
@@ -178,12 +191,13 @@ namespace
 	// clang-format off
 	constexpr RPMenuRowDef RPMENU_ROWS[] =
 	{
-		{"row_play",    RPVar::RowPlay,    ReplayMenuLine::Pause,   NULL,               NULL},
-		{"row_frame",   RPVar::RowFrame,   ReplayMenuLine::Step,    "chip_frame_prev",  "chip_frame_next"},
-		{"row_seek",    RPVar::RowSeek,    ReplayMenuLine::Seek,    "chip_seek_back",   "chip_seek_fwd"},
-		{"row_speed",   RPVar::RowSpeed,   ReplayMenuLine::Speed,   "chip_speed_dec",   "chip_speed_inc"},
-		{"row_restart", RPVar::RowRestart, ReplayMenuLine::Restart, NULL,               NULL},
-		{"row_exit",    RPVar::RowExit,    ReplayMenuLine::End,     NULL,               NULL},
+		{"row_play",      RPVar::RowPlay,     ReplayMenuLine::Pause,    NULL,                  NULL},
+		{"row_frame",     RPVar::RowFrame,    ReplayMenuLine::Step,     "chip_frame_prev",     "chip_frame_next"},
+		{"row_seek",      RPVar::RowSeek,     ReplayMenuLine::Seek,     "chip_seek_back",      "chip_seek_fwd"},
+		{"row_seek_fast", RPVar::RowSeekFast, ReplayMenuLine::SeekFast, "chip_seek_fast_back", "chip_seek_fast_fwd"},
+		{"row_speed",     RPVar::RowSpeed,    ReplayMenuLine::Speed,    "chip_speed_dec",      "chip_speed_inc"},
+		{"row_restart",   RPVar::RowRestart,  ReplayMenuLine::Restart,  NULL,                  NULL},
+		{"row_exit",      RPVar::RowExit,     ReplayMenuLine::End,      NULL,                  NULL},
 	};
 	// clang-format on
 	constexpr i32 RPMENU_ROW_COUNT = (i32)KZ_ARRAYSIZE(RPMENU_ROWS);
@@ -228,10 +242,115 @@ namespace
 	// не выйдет, шкала замрёт с двумя ширинами сразу.
 	constexpr i32 RPMENU_PROGRESS_STEPS = 100;
 	// Имена классов, которые ставит этот файл помимо шкалы: rp-live, hidden, paused, selected,
-	// focused. Ровно они и перечислены в коде ниже — при добавлении нового обновить число.
-	constexpr i32 RPMENU_STATIC_CLASSES = 5;
+	// focused, shown, cp, tp, pb, wr, other + по одному на ступень масштаба карточки
+	// (RPMENU_SCALE_STEPS). При добавлении нового класса обновить число.
+	constexpr i32 RPMENU_STATIC_CLASSES = 11 + 8;
 	static_assert(2 * (RPMENU_PROGRESS_STEPS + 1) + RPMENU_STATIC_CLASSES <= HUD_LAYOUT_MAX_INTERNED_STRINGS,
 				  "имена классов шкалы не помещаются в интерн-таблицу сущности: уменьшите число шагов");
+
+	// Отметки на шкале (спека §1.1.1 и §5): чекпоинты и телепорты автора записи. Панелей в
+	// разметке ровно столько — на 390-пиксельной шкале больше и не различить, а каждая панель
+	// это ещё пара (панель, класс) в сетевом векторе сущности. Прыжков здесь пока нет: их на
+	// бхоп-ране сотни, для них нужен свой порог прореживания (data-availability.md §1).
+	constexpr i32 RPMENU_MARK_PANELS = 32;
+	// Минимальный зазор между отметками — 2 % шкалы (8 px из спеки при ширине 390). Более
+	// частые не рисуем: они слились бы в сплошную полосу.
+	constexpr i32 RPMENU_MARK_MIN_GAP = 2;
+	// Классы вида отметки; индекс = тип, порядок держать вместе с rpmenu.css.
+	constexpr const char *RPMENU_MARK_CLASSES[] = {"cp", "tp"};
+	constexpr i32 RPMARK_CP = 0;
+	constexpr i32 RPMARK_TP = 1;
+
+	// Классы расцветки бейджа типа записи (спека §3.7). Индекс кэшируется в ReplayMenuPageState,
+	// чтобы снимать ровно тот класс, который стоит сейчас.
+	constexpr const char *RPMENU_BADGE_CLASSES[] = {"pb", "wr", "other"};
+
+	i32 ReplayBadgeClassIndex(const char *cls)
+	{
+		for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(RPMENU_BADGE_CLASSES); i++)
+		{
+			if (KZ_STREQ(cls, RPMENU_BADGE_CLASSES[i]))
+			{
+				return i;
+			}
+		}
+		return 2; // other
+	}
+
+	// Позиции отметок в ШАГАХ шкалы (0..RPMENU_PROGRESS_STEPS), уже прорежённые и обрезанные по
+	// числу панелей. Считаются один раз на запись: один проход по tickData (счётчики чекпоинтов
+	// и телепортов лежат в КАЖДОМ тике, см. data-availability.md §1), а не каждый кадр.
+	void BuildReplayMarks(std::vector<i32> &steps, std::vector<i32> &types)
+	{
+		using namespace KZ::replaysystem;
+		steps.clear();
+		types.clear();
+		const auto *replay = data::GetCurrentReplay();
+		if (!data::IsReplayPlaying() || !replay->tickData || replay->tickCount < 2)
+		{
+			return;
+		}
+		// Отметки обязаны лежать в ТОЙ ЖЕ шкале, что и заполнение (позиция/длительность рана,
+		// menu.cpp), иначе на предстартовой части записи они разъехались бы с ручкой. Окно
+		// рана — последняя пара START/END; её нет у джамп-реплея и ручной записи, тогда шкала
+		// это вся запись.
+		u32 winStart = 0;
+		u32 winEnd = replay->tickCount - 1;
+		i32 courseId = -1;
+		if (!playback::RunWindowFromEvents(replay->tickData, replay->tickCount, replay->events, replay->numEvents, winStart, winEnd, courseId))
+		{
+			winStart = 0;
+			winEnd = replay->tickCount - 1;
+		}
+		const u32 effStart = playback::RawTickToEffective(winStart);
+		const u32 effEnd = playback::RawTickToEffective(winEnd);
+		if (effEnd <= effStart)
+		{
+			return;
+		}
+		const f64 span = (f64)(effEnd - effStart);
+		i32 lastStep = -RPMENU_MARK_MIN_GAP - 1;
+		const auto push = [&](u32 rawTick, i32 type)
+		{
+			if ((i32)steps.size() >= RPMENU_MARK_PANELS)
+			{
+				return;
+			}
+			const u32 eff = playback::RawTickToEffective(rawTick);
+			if (eff < effStart || eff > effEnd)
+			{
+				return;
+			}
+			const i32 step = (i32)(((f64)(eff - effStart) / span) * RPMENU_PROGRESS_STEPS + 0.5);
+			if (step - lastStep < RPMENU_MARK_MIN_GAP)
+			{
+				return;
+			}
+			lastStep = step;
+			steps.push_back(step);
+			types.push_back(type);
+		};
+		// Счётчики монотонно растут — момент роста и есть постановка чекпоинта / телепорт.
+		// Проход идёт по тикам, поэтому отметки выходят уже отсортированными, и прореживание
+		// можно делать на лету.
+		i32 prevCp = replay->tickData[0].checkpoint.checkpointCount;
+		i32 prevTp = replay->tickData[0].checkpoint.teleportCount;
+		for (u32 i = 1; i < replay->tickCount && (i32)steps.size() < RPMENU_MARK_PANELS; i++)
+		{
+			const i32 cp = replay->tickData[i].checkpoint.checkpointCount;
+			const i32 tp = replay->tickData[i].checkpoint.teleportCount;
+			if (tp > prevTp)
+			{
+				push(i, RPMARK_TP);
+			}
+			else if (cp > prevCp)
+			{
+				push(i, RPMARK_CP);
+			}
+			prevCp = cp;
+			prevTp = tp;
+		}
+	}
 
 	constexpr i32 RPMENU_REPEAT_DELAY_TICKS = 22;
 
@@ -579,6 +698,25 @@ void KZHUDService::RenderReplayMenu(CCSCustomHudLayout *layout, bool force)
 	}
 	const char *lang = this->player->languageService->GetLanguage();
 
+	// Масштаб карточки — единственный преф меню реплея, который читает страница (rpmenuScale,
+	// ступени RPMENU_SCALE_STEPS). Класс висит на САМОЙ карточке, а не на корне страницы:
+	// корневой панели resourcecompiler запрещает иметь id (проверено компиляцией 17.09.2026), а
+	// без id SetHasClass её не найдёт. Вид задан потомками — значит переключение класса метит
+	// слой на полный пересчёт (см. classDirty ниже).
+	const i32 scale = this->GetOwnLayoutPrefs().replayMenu.scale;
+	if (force || state.scale != scale)
+	{
+		char scaleClass[24];
+		if (!force && state.scale > 0)
+		{
+			V_snprintf(scaleClass, sizeof(scaleClass), "rp-scale--%i", state.scale);
+			state.classDirty |= ApplyClass(this->player, layout, "replay_card", scaleClass, false);
+		}
+		state.scale = scale;
+		V_snprintf(scaleClass, sizeof(scaleClass), "rp-scale--%i", scale);
+		state.classDirty |= ApplyClass(this->player, layout, "replay_card", scaleClass, true);
+	}
+
 	if (force)
 	{
 		// Заполнение шкалы идёт за плейбеком каждый тик — без сглаживания, иначе оно вечно
@@ -598,22 +736,27 @@ void KZHUDService::RenderReplayMenu(CCSCustomHudLayout *layout, bool force)
 	this->SetReplayMenuVar(layout, (i32)RPVar::ChipKeyPlay, "E", force);
 	this->SetReplayMenuVar(layout, (i32)RPVar::ChipKeyRestart, "E", force);
 	this->SetReplayMenuVar(layout, (i32)RPVar::ChipKeyExit, "E", force);
-	this->SetReplayMenuVar(layout, (i32)RPVar::ChipFramePrev, "A", force);
-	this->SetReplayMenuVar(layout, (i32)RPVar::ChipFrameNext, "D", force);
-	const int seekStep = KZ::replaysystem::menu::GetReplayMenuSeekStepSeconds();
+	// Стрелки макета против букв A/D — переключателем cyb_rpmenu_arrow_chips: есть ли эти
+	// глифы в игровом шрифте, локально не проверить (см. ручку).
+	const bool arrows = cyb_rpmenu_arrow_chips.Get();
+	this->SetReplayMenuVar(layout, (i32)RPVar::ChipFramePrev, arrows ? "\xE2\x97\x80" : "A", force);
+	this->SetReplayMenuVar(layout, (i32)RPVar::ChipFrameNext, arrows ? "\xE2\x96\xB6" : "D", force);
 	char seekBack[16], seekFwd[16];
-	V_snprintf(seekBack, sizeof(seekBack), "-%is", seekStep);
-	V_snprintf(seekFwd, sizeof(seekFwd), "+%is", seekStep);
+	V_snprintf(seekBack, sizeof(seekBack), "-%is", KZ::replaysystem::menu::GetReplayMenuSeekStepSeconds(false));
+	V_snprintf(seekFwd, sizeof(seekFwd), "+%is", KZ::replaysystem::menu::GetReplayMenuSeekStepSeconds(false));
 	this->SetReplayMenuVar(layout, (i32)RPVar::ChipSeekBack, seekBack, force);
 	this->SetReplayMenuVar(layout, (i32)RPVar::ChipSeekFwd, seekFwd, force);
+	V_snprintf(seekBack, sizeof(seekBack), "-%is", KZ::replaysystem::menu::GetReplayMenuSeekStepSeconds(true));
+	V_snprintf(seekFwd, sizeof(seekFwd), "+%is", KZ::replaysystem::menu::GetReplayMenuSeekStepSeconds(true));
+	this->SetReplayMenuVar(layout, (i32)RPVar::ChipSeekFastBack, seekBack, force);
+	this->SetReplayMenuVar(layout, (i32)RPVar::ChipSeekFastFwd, seekFwd, force);
 	this->SetReplayMenuVar(layout, (i32)RPVar::ChipSpeedDec, "-", force);
 	this->SetReplayMenuVar(layout, (i32)RPVar::ChipSpeedInc, "+", force);
-	// Слоты, которых сервер пока не наполняет: строка тиков и превью времени под курсором
-	// (мышиного режима нет). Переменная обязана СУЩЕСТВОВАТЬ, иначе на странице останется её
-	// плейсхолдер; пустая строка тиков — штатный вариант спеки (§1.1, высота строки
-	// сохраняется). Именно здесь и нужен проброс force: на первом кадре кэш пуст, и без него
-	// пустой текст «совпал» бы с кэшем и не ушёл бы вовсе.
-	this->SetReplayMenuVar(layout, (i32)RPVar::TickLine, "", force);
+	// Превью времени под курсором сервер не наполняет (мышиного режима нет), но переменная
+	// обязана СУЩЕСТВОВАТЬ, иначе на странице останется её плейсхолдер «{s:...}». Именно здесь
+	// и нужен проброс force: на первом кадре кэш пуст, и без него пустой текст «совпал» бы с
+	// кэшем и не ушёл бы вовсе. Строки тиков под шкалой на странице больше нет (решение
+	// владельца 17.09: не нужна) — вместе с ней ушёл и слот.
 	this->SetReplayMenuVar(layout, (i32)RPVar::SeekPreview, "", force);
 
 	// Шапка: ник автора записи, подстрочник «карта · курс · режим» и бейдж AWR — в старой
@@ -622,21 +765,27 @@ void KZHUDService::RenderReplayMenu(CCSCustomHudLayout *layout, bool force)
 	std::string meta = KZ::replaysystem::menu::GetReplayMenuMetaText();
 	// «—» — вариант «нет данных» из спеки (§4): панель meta высоту держит в любом случае.
 	this->SetReplayMenuVar(layout, (i32)RPVar::Meta, meta.empty() ? "\xE2\x80\x94" : meta.c_str(), force);
-	const bool awr = KZ::replaysystem::menu::IsReplayMenuAwr();
-	std::string badge;
-	if (awr)
+	// Бейдж типа записи. Раньше он был завязан ТОЛЬКО на AWR-режим, поэтому PB/WR не появлялись
+	// никогда: тип реплея — свойство ЗАПРОСА (`!replay pb/wr/...`), в файле его нет. Теперь вид
+	// запроса доезжает до плейбека (replay->badgeKind) и бейдж показывает его.
+	KZ::replaysystem::menu::ReplayMenuBadge badge {};
+	KZ::replaysystem::menu::GetReplayMenuBadge(badge);
+	const bool badgeShown = !badge.text.empty();
+	this->SetReplayMenuVar(layout, (i32)RPVar::Badge, badge.text.c_str(), force);
+	const i32 badgeClass = ReplayBadgeClassIndex(badge.cls);
+	if (force || state.badgeShown != (i32)badgeShown)
 	{
-		badge = KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - AWR Mark");
-		while (!badge.empty() && badge.back() == ' ')
-		{
-			badge.pop_back(); // фраза чатовая, с хвостовым пробелом-разделителем — бейджу он не нужен
-		}
+		state.badgeShown = (i32)badgeShown;
+		ApplyClass(this->player, layout, "badge_type", "hidden", !badgeShown);
 	}
-	this->SetReplayMenuVar(layout, (i32)RPVar::Badge, badge.c_str(), force);
-	if (force || state.awrBadge != (i32)awr)
+	if (force || state.badgeClass != badgeClass)
 	{
-		state.awrBadge = (i32)awr;
-		ApplyClass(this->player, layout, "badge_type", "hidden", !awr);
+		if (!force && state.badgeClass >= 0)
+		{
+			ApplyClass(this->player, layout, "badge_type", RPMENU_BADGE_CLASSES[state.badgeClass], false);
+		}
+		state.badgeClass = badgeClass;
+		ApplyClass(this->player, layout, "badge_type", RPMENU_BADGE_CLASSES[badgeClass], true);
 	}
 
 	// Время, скорость и состояние плейбека.
@@ -705,6 +854,48 @@ void KZHUDService::RenderReplayMenu(CCSCustomHudLayout *layout, bool force)
 		state.progress = progress;
 		ApplyProgressClass(this->player, layout, "seek_fill", "w", progress, true);
 		ApplyProgressClass(this->player, layout, "seek_cursor", "x", progress, true);
+	}
+
+	// Отметки чекпоинтов и телепортов. Считаются один раз на запись (проход по tickData) и
+	// дальше не трогаются: позиции отметок от плейбека не зависят. Ключ пересчёта — uuid
+	// записи: плейбек один на сервер, но запись в нём может смениться, пока меню открыто.
+	const std::string markUuid = KZ::replaysystem::data::IsReplayPlaying() ? KZ::replaysystem::data::GetCurrentReplay()->uuid.ToString() : "";
+	if (force || state.markUuid != markUuid)
+	{
+		std::vector<i32> steps, types;
+		BuildReplayMarks(steps, types);
+		state.markStep.resize(RPMENU_MARK_PANELS, -1);
+		state.markType.resize(RPMENU_MARK_PANELS, -1);
+		for (i32 i = 0; i < RPMENU_MARK_PANELS; i++)
+		{
+			char panelId[16];
+			V_snprintf(panelId, sizeof(panelId), "mark%i", i);
+			const i32 newStep = i < (i32)steps.size() ? steps[i] : -1;
+			const i32 newType = i < (i32)types.size() ? types[i] : -1;
+			// Снимаем ровно то, что стоит сейчас: пара (панель, класс) остаётся в сетевом
+			// векторе навсегда, и забытый старый класс дал бы отметку с двумя позициями.
+			if (!force && state.markStep[i] >= 0)
+			{
+				ApplyProgressClass(this->player, layout, panelId, "x", state.markStep[i], false);
+				ApplyClass(this->player, layout, panelId, RPMENU_MARK_CLASSES[state.markType[i]], false);
+			}
+			if (newStep < 0)
+			{
+				if (force || state.markStep[i] >= 0)
+				{
+					ApplyClass(this->player, layout, panelId, "shown", false);
+				}
+			}
+			else
+			{
+				ApplyProgressClass(this->player, layout, panelId, "x", newStep, true);
+				ApplyClass(this->player, layout, panelId, RPMENU_MARK_CLASSES[newType], true);
+				ApplyClass(this->player, layout, panelId, "shown", true);
+			}
+			state.markStep[i] = newStep;
+			state.markType[i] = newType;
+		}
+		state.markUuid = markUuid;
 	}
 
 	// Строки и подсказка.

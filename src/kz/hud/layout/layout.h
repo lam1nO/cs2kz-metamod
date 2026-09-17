@@ -44,6 +44,18 @@
 // размера, спека 2026-09-11-replay-player-panorama). Ключи, пункт настроек и запись в
 // GetOwnLayoutPrefs оставлены намеренно: у игроков уже лежат сохранённые значения, а ключи
 // входят в белый список обмена худом — их удаление отдельное решение, не часть переезда.
+// Масштаб карточки меню реплея (преф rpmenuScale, пункт «Меню реплея» в настройках). Это
+// ЕДИНСТВЕННЫЙ преф меню реплея, который новая страница действительно читает.
+// Ступени, а не любое число: сервер умеет только SetHasClass, поэтому каждый масштаб — свой
+// готовый набор правил в rpmenu-scale.css (генератор — tools/build_rpmenu_scale.py в аддоне).
+// Значение префа снапится к ближайшей ступени (SnapReplayMenuScale).
+#define RPMENU_DEF_SCALE 100
+#define RPMENU_SCALE_MIN 75
+#define RPMENU_SCALE_MAX 130
+extern const i32 RPMENU_SCALE_STEPS[];
+extern const i32 RPMENU_SCALE_STEP_COUNT;
+i32 SnapReplayMenuScale(i32 percent);
+
 #define RPMENU_DEF_X    -34
 #define RPMENU_DEF_Y    -8
 #define RPMENU_DEF_SIZE 20
@@ -71,9 +83,10 @@ const char *ResolveReplayMenuFontSlug(const char *slug);
 // айтем код менять не придётся.
 #define KZ_MHUD_LAYOUT "panorama/layout/custom_game/cs2kz/mhud.vxml_c"
 // Своя страница меню реплея спектатора (layout/rpmenu.cpp): карточка плеера целиком — шапка,
-// время, шкала перемотки, шесть пунктов и подсказка. Живёт ТОЛЬКО в нашем аддоне (custom_game/
-// cyber/…), апстримного аналога у неё нет; исходники разметки — gymstrike-kz/content/panorama
-// (rpmenu.xml + rpmenu.css + rpmenu-positions.css), спека 2026-09-11-replay-player-panorama.
+// время, шкала перемотки с отметками, семь пунктов и подсказка. Живёт ТОЛЬКО в нашем аддоне
+// (custom_game/cyber/…), апстримного аналога у неё нет; исходники разметки — gymstrike-kz/content/panorama
+// (rpmenu.xml + rpmenu.css + rpmenu-positions.css + rpmenu-scale.css), спека
+// 2026-09-11-replay-player-panorama.
 #define KZ_RPMENU_LAYOUT "panorama/layout/custom_game/cyber/rpmenu.vxml_c"
 
 // Отказ SetHasClass/SetDialogVariableString по упору в HUD_LAYOUT_MAX_INTERNED_STRINGS —

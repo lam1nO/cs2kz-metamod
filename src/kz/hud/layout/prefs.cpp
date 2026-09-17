@@ -13,6 +13,26 @@
 const char *const RPMENU_MONO_FONTS[] = {"stratum2-mono", "stratum2-mono-light", "stratum2-mono-bold", "noto-mono"};
 const i32 RPMENU_MONO_FONT_COUNT = (i32)KZ_ARRAYSIZE(RPMENU_MONO_FONTS);
 
+// Ступени масштаба карточки меню реплея (см. layout.h). Держать в ОДНОМ порядке с набором
+// классов .rp-scale--N в аддоне: лишняя ступень здесь — класс, которого нет в CSS, и карточка
+// молча останется прежнего размера.
+const i32 RPMENU_SCALE_STEPS[] = {75, 85, 100, 115, 130};
+const i32 RPMENU_SCALE_STEP_COUNT = (i32)KZ_ARRAYSIZE(RPMENU_SCALE_STEPS);
+
+i32 SnapReplayMenuScale(i32 percent)
+{
+	const auto dist = [percent](i32 step) { return step > percent ? step - percent : percent - step; };
+	i32 best = RPMENU_SCALE_STEPS[0];
+	for (i32 i = 1; i < RPMENU_SCALE_STEP_COUNT; i++)
+	{
+		if (dist(RPMENU_SCALE_STEPS[i]) < dist(best))
+		{
+			best = RPMENU_SCALE_STEPS[i];
+		}
+	}
+	return best;
+}
+
 const char *ResolveReplayMenuFontSlug(const char *slug)
 {
 	for (i32 i = 0; slug && i < RPMENU_MONO_FONT_COUNT; i++)
@@ -152,6 +172,10 @@ void KZHUDService::RefreshLayoutPrefs()
 	// Дефолт true — синхронизирован с текущими настройками игрока (задача hud-defaults).
 	this->layoutPrefs.crosshair = opts->GetPreferenceBool("mhudCrosshair", true);
 	this->layoutPrefs.crosshairScale = panorama::SnapToStep((i32)opts->GetPreferenceInt("mhudCrosshairScale", 100), 0, 500);
+
+	// Масштаб карточки меню реплея — единственный преф меню реплея, который читает его новая
+	// страница (остальные оставлены ради сохранённых значений, см. layout.h).
+	this->layoutPrefs.replayMenu.scale = SnapReplayMenuScale((i32)opts->GetPreferenceFloat("rpmenuScale", (f32)RPMENU_DEF_SCALE));
 
 	// Меню реплея спектатора (layout/rpmenu.cpp) — та же сетка, что у элементов худа.
 	this->layoutPrefs.replayMenu.x = panorama::SnapToStep((i32)opts->GetPreferenceFloat("rpmenuX", (f32)RPMENU_DEF_X), -100, 100);

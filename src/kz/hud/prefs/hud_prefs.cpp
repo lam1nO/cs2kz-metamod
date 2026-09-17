@@ -386,6 +386,11 @@ void KZHUDService::InitMenuPrefs()
 	// намеренно: ключи уже сохранены у игроков и входят в белый список обмена худом, их снятие —
 	// отдельное решение (см. layout.h у RPMENU_DEF_*). Пока не снято, пункты вводят в заблуждение.
 	KZOptNode *rpmenu = KZ::menu::AddSub(hud, "HUD - Menu Cat ReplayMenu");
+	// Единственный пункт страницы, который на новую карточку ВЛИЯЕТ. Значение снапится к
+	// ступеням RPMENU_SCALE_STEPS (layout/prefs.cpp): промежуточные проценты сервер в CSS
+	// поставить не может, карточка масштабируется готовыми наборами правил.
+	KZ::menu::AddSize(rpmenu, "HUD - Menu Label ReplayMenuScale", "rpmenuScale", RPMENU_DEF_SCALE, RPMENU_SCALE_MIN, RPMENU_SCALE_MAX);
+	KZ::menu::SetItemUnit(rpmenu, "%");
 	KZ::menu::AddPosition(rpmenu, "HUD - Menu Label Position", "rpmenuX", "rpmenuY", RPMENU_DEF_X, RPMENU_DEF_Y);
 	KZ::menu::AddSize(rpmenu, "HUD - Menu Label Size", "rpmenuSize", RPMENU_DEF_SIZE, LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX);
 	KZ::menu::AddChoice(rpmenu, "HUD - Menu Label Font", &RpMenuFontGetChoices, &RpMenuFontGetCurrent, &RpMenuFontOnPick);
