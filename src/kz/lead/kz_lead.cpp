@@ -220,6 +220,20 @@ CConVar<i32> cyb_lead_beam_rendermode("cyb_lead_beam_rendermode", FCVAR_NONE,
 // Пустая строка = материал не задавать (прежнее поведение, доказанный рецепт).
 // Перебирать живьём стоковыми путями — они уже есть у клиента, аддон для этого не нужен:
 // materials/sprites/laserbeam.vmat, materials/sprites/physbeam.vmat.
+// Перекрытие соседних отрезков, в юнитах на каждый конец. Зачем: лента частицы
+// (C_OP_RenderRopes) рисуется только МЕЖДУ частицами, поэтому на стыке двух соседних
+// отрезков остаётся пустое место — цепочка лент и читается как пунктир (скриншот владельца
+// 17.09.2026, там видны отдельные конусы). У штатной частицы стык закрывает второй рендерер
+// со спрайтами, но владелец отклонил его дословно: «нам не нужны точки». Перекрытие решает
+// ту же задачу геометрией: каждый отрезок продлевается на overlap юнитов в обе стороны вдоль
+// своего направления, соседи заходят друг на друга, стыков не остаётся.
+// 0 — прежнее поведение. Разумные значения — 1..8; больше даст утолщения на изломах пути.
+// Касается ТОЛЬКО частицы: у сущности-луча стыков нет, там отрезок рисуется целиком.
+CConVar<f32> cyb_lead_particle_overlap("cyb_lead_particle_overlap", FCVAR_NONE,
+									   "Extend each !lead particle segment by N units at both ends so neighbours overlap and joints "
+									   "stop reading as gaps (particle path only; 0 = off).",
+									   0.0f, [](CConVar<f32> *, CSplitScreenSlot, const f32 *, const f32 *) { LeadLookChanged(); });
+
 CConVar<CUtlString> cyb_lead_beam_material("cyb_lead_beam_material", FCVAR_NONE,
 										   "Material for the lead beam entity (m_hBaseMaterial via SetModel, e.g. "
 										   "materials/sprites/laserbeam.vmat); empty = leave unset (proven recipe).",
@@ -969,7 +983,27 @@ namespace
 
 	CEntityHandle CreateLeadSegment(const Vector &start, const Vector &end, const Color &color)
 	{
-		return cyb_lead_beam_entity.Get() ? CreateLeadBeamSegment(start, end, color) : CreateLeadParticleSegment(start, end, color);
+		if (cyb_lead_beam_entity.Get())
+		{
+			return CreateLeadBeamSegment(start, end, color);
+		}
+		// Перекрытие — только у частицы и только если задано: при нуле геометрия та же, что
+		// была, байт-в-байт. Направление берём по самому отрезку; вырожденный (нулевой длины)
+		// не трогаем вовсе, иначе нормализация даст NaN и отрезок уедет в бесконечность.
+		const f32 overlap = cyb_lead_particle_overlap.Get();
+		if (overlap > 0.0f)
+		{
+			Vector dir = end - start;
+			const f32 len = dir.Length();
+			if (len > 0.001f)
+			{
+				dir /= len;
+				const Vector a = start - dir * overlap;
+				const Vector b = end + dir * overlap;
+				return CreateLeadParticleSegment(a, b, color);
+			}
+		}
+		return CreateLeadParticleSegment(start, end, color);
 	}
 
 	// Снятие одного отрезка — ОБОИХ примитивов: сверка идёт по targetname, а он у частицы и у
