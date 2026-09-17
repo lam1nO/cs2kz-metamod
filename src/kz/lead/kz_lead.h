@@ -72,6 +72,15 @@
 // съедала бы квоту первым же случаем и молчала бы про все следующие — другой природы и на
 // другой карте. Живёт здесь, потому что дросселей два и второй — в kz_quiet.cpp.
 #define KZ_LEAD_WARN_THROTTLE_SEC 60.0
+// SurroundingBoundsType_t::USE_SPECIFIED_BOUNDS из живой схемы CS2. Самого enum'а в hl2sdk нет,
+// поэтому значение здесь числом (см. комментарий у полей в sdk/ccollisionproperty.h).
+#define KZ_LEAD_BEAM_SURROUND_SPECIFIED 3
+// Полразмера «бокса во всю карту» для режима cyb_lead_beam_bounds 2. 16384 — половина стороны
+// мира Source 2, то есть отсечения по границам не остаётся вовсе.
+#define KZ_LEAD_BEAM_BOUNDS_WORLD 16384.0f
+// Запас вокруг отрезка в режиме cyb_lead_beam_bounds 1 (юниты). Бокс строится по двум концам,
+// а рисуется луч ШИРИНОЙ: без запаса его края выходили бы за собственные границы видимости.
+#define KZ_LEAD_BEAM_BOUNDS_PAD 16.0f
 
 class KZLeadService : public KZBaseService
 {

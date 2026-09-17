@@ -14,6 +14,8 @@
 #include "sdk/entity/cparticlesystem.h"
 #include "sdk/entity/cbeam.h"
 #include "entitykeyvalues.h"
+// FileExists для проверки скомпилированного материала перед SetModel (см. ApplyLeadBeamMaterial).
+#include "filesystem.h"
 // Цепочка C++-классов созданной сущности (m_pClassInfo) — по ней ищутся ДОПОЛНИТЕЛЬНЫЕ поля
 // луча из рецепта пробника, см. ResolveLeadBeamExtras.
 #include "entity2/entityclass.h"
@@ -206,13 +208,23 @@ CConVar<i32> cyb_lead_beam_rendermode("cyb_lead_beam_rendermode", FCVAR_NONE,
 // Материал луча. Режим рендера (cyb_lead_beam_rendermode) на эту сущность НЕ влияет вовсе —
 // проверено владельцем живьём 17.09.2026: даже режим 10 («не рисовать») луч не спрятал.
 // Значит вид задаёт материал, а мы его намеренно не задавали («без него рисуется», проба
-// 11.09). Свечение на тёмных картах — свойство материала, а не режима, поэтому перебирать
-// надо материалы. Пустая строка = не задавать (прежнее поведение, доказанный рецепт).
-// Перебор живьём: выставить конвар, посмотреть на луч; ассет должен быть прекеширован —
-// стоковые материалы игры уже есть у клиента, свой пришлось бы возить в аддоне.
+// 11.09). Всё, что связано с ТУМАНОМ и ОСВЕЩЕНИЕМ, у луча тоже живёт в материале: полей про
+// туман нет ни у CBeam, ни у CBaseModelEntity (сверено с живой схемой CS2), а у частицы
+// m_nFogType компилятор ресурсов молча выбрасывает — то есть отдельной ручки «без тумана» в
+// этой подсистеме нет нигде, кроме материала.
+//
+// МЕХАНИЗМ ИСПРАВЛЕН 17.09.2026. Ключи material/texture/BeamTexture, которые писала прежняя
+// реализация, у этой энтити не читает никто: в схеме материал луча — m_hBaseMaterial, хендл
+// ресурса, а не строка, и ставится он движковым SetModel (тем же, которым получает модель
+// пешка реплей-бота). Отсюда конвар и выглядел мёртвым.
+// Пустая строка = материал не задавать (прежнее поведение, доказанный рецепт).
+// Перебирать живьём стоковыми путями — они уже есть у клиента, аддон для этого не нужен:
+// materials/sprites/laserbeam.vmat, materials/sprites/physbeam.vmat.
 CConVar<CUtlString> cyb_lead_beam_material("cyb_lead_beam_material", FCVAR_NONE,
-										   "Material for the lead beam entity (keyvalue 'material'); empty = leave unset (proven recipe).", "",
-										   [](CConVar<CUtlString> *, CSplitScreenSlot, const CUtlString *, const CUtlString *) { LeadLookChanged(); });
+										   "Material for the lead beam entity (m_hBaseMaterial via SetModel, e.g. "
+										   "materials/sprites/laserbeam.vmat); empty = leave unset (proven recipe).",
+										   "", [](CConVar<CUtlString> *, CSplitScreenSlot, const CUtlString *, const CUtlString *)
+										   { LeadLookChanged(); });
 
 CConVar<i32> cyb_lead_cp1_index("cyb_lead_cp1_index", FCVAR_NONE,
 								"Extra server control point index for the lead segment: 0..63 except 1 (data_cp) and 16 (tint_cp); -1 = unused.", -1,
@@ -273,6 +285,23 @@ CConVar<f32> cyb_lead_beam_width("cyb_lead_beam_width", FCVAR_NONE,
 								 "Lead beam segment width in units (beam entity only): 0.1..64, default 1. Applied to the next segment "
 								 "rebuild, which the change callback triggers right away.",
 								 KZ_LEAD_BEAM_WIDTH_DEFAULT, [](CConVar<f32> *, CSplitScreenSlot, const f32 *, const f32 *) { LeadLookChanged(); });
+
+// Границы ВИДИМОСТИ отрезка-луча. Причина жалобы 17.09.2026 («луч пропадает на участке
+// маршрута, мигает от движения камеры»): у сущности-луча origin — это только НАЧАЛО отрезка, а
+// surrounding-бокс, по которому идёт отсечение отрисовки и PVS, у свежесозданной энтити
+// вырожден в точку (все четыре вектора и m_nSurroundType — нули, сверено с живой схемой CS2).
+// Значит движок судит о видимости ВСЕГО отрезка по одной его точке и выбрасывает отрезок,
+// стоит этой точке уйти из кадра, — хотя сам отрезок в кадре.
+//   0 — не трогать (ДЕФОЛТ, прежнее поведение);
+//   1 — бокс по двум концам отрезка с запасом (отсечение остаётся, но судит по отрезку);
+//   2 — бокс во всю карту, отсечения не остаётся вовсе (дороже по трафику, зато отвечает на
+//       вопрос «дело вообще в отсечении?» однозначно).
+// Сквозь стены при этом луч не светит: surrounding-бокс решает только «рисовать ли», а
+// заслоняется луч по глубине, и её мы не трогаем.
+CConVar<i32> cyb_lead_beam_bounds("cyb_lead_beam_bounds", FCVAR_NONE,
+								  "Visibility bounds for lead beam segments (beam entity only): 0 = leave as spawned (default), "
+								  "1 = box around the segment, 2 = world-sized box (no culling).",
+								  0, [](CConVar<i32> *, CSplitScreenSlot, const i32 *, const i32 *) { LeadLookChanged(); });
 
 namespace
 {
@@ -365,14 +394,20 @@ namespace
 	const LeadBeamExtra g_leadBeamExtras[] = {
 		{"m_flFrameRate",     true,  0.0f, 0},
 		{"m_flHDRColorScale", true,  1.0f, 0},
+		// Имя с опечаткой ПРОБЫ, и оставлено как есть: в живой схеме CS2 поле зовётся
+		// m_fFadeLength, поэтому эта строка резолвится в missing и НИЧЕГО не пишет. Так и было
+		// на канарейке, когда вид признали доказанным; переименовать значило бы начать писать
+		// поле, которого в доказанном рецепте не было.
 		{"m_flFadeLength",    true,  0.0f, 0},
-		// Значение 1 — РОВНО то, что писала проба, и менять его нельзя: доказанный вид получен
-		// с ним. По нумерации Source 1 это BEAM_ENTPOINT («от сущности к точке»), а нужен нам
-		// по смыслу BEAM_POINTS = 0 («точка-точка»); совпадает ли нумерация CS2 с Source 1 —
-		// НЕ проверено. Проверять живьём: поставить 0 и посмотреть, изменится ли картинка.
+		// 1 — РОВНО то, что писала проба, и теперь это ещё и проверено по схеме: в CS2
+		// BeamType_t начинается с BEAM_INVALID = 0, то есть 1 — это BEAM_POINTS («точка-точка»),
+		// как нам и нужно. Нумерация Source 1 здесь ни при чём, менять значение не надо.
 		{"m_nBeamType",       false, 0.0f, 1},
 		{"m_nBeamFlags",      false, 0.0f, 0},
 		{"m_nNumBeamEnts",    false, 0.0f, 0},
+		// В схеме это CStrongHandle<IMaterial2>, то есть ХЕНДЛ РЕСУРСА шириной 8 байт, а не
+		// число. Записать в него целым безопасно ровно потому, что значение — ноль («хало нет»);
+		// любое другое здесь было бы мусорным указателем на ресурс.
 		{"m_nHaloIndex",      false, 0.0f, 0},
 	};
 	// clang-format on
@@ -635,6 +670,75 @@ namespace
 		return use;
 	}
 
+	// Материал луча — ПОСЛЕ спавна и движковым SetModel. Ключами он не задаётся: в схеме это
+	// m_hBaseMaterial, хендл ресурса (см. cyb_lead_beam_material). Пустой конвар = прежний
+	// рецепт «материал не трогаем».
+	void ApplyLeadBeamMaterial(CBeam *beam)
+	{
+		const CUtlString &want = cyb_lead_beam_material.Get();
+		if (!want.Get() || !want.Get()[0])
+		{
+			return;
+		}
+		// Несуществующий путь отдавать SetModel нельзя: луч остался бы вообще без материала, а
+		// оператор увидел бы ровно то же «конвар мёртвый», из-за которого этот механизм и
+		// переписан. Проверяем СКОМПИЛИРОВАННЫЙ файл (_c), как применение модели реплей-боту.
+		CUtlString compiled = want;
+		compiled.Append("_c");
+		if (!g_pFullFileSystem || !g_pFullFileSystem->FileExists(compiled.Get()))
+		{
+			static f64 lastWarn = -1.0e9;
+			if (LeadWarnDue(lastWarn))
+			{
+				KZ_LOG_WARN(LogChannel::Replays, "[lead] beam_material_missing path=%s note=material_left_unset\n", compiled.Get());
+			}
+			return;
+		}
+		g_pKZUtils->SetModel(beam, want.Get());
+	}
+
+	// Границы видимости отрезка (см. cyb_lead_beam_bounds). Зовётся ПОСЛЕ Teleport: телепорт
+	// пересчитывает surrounding-бокс по m_nSurroundType, и запись до него пропала бы.
+	void ApplyLeadBeamBounds(CBeam *beam, const Vector &start, const Vector &end)
+	{
+		const i32 mode = cyb_lead_beam_bounds.Get();
+		if (mode <= 0)
+		{
+			return;
+		}
+		CCollisionProperty *collision = beam->m_pCollision();
+		if (!collision)
+		{
+			static f64 lastWarn = -1.0e9;
+			if (LeadWarnDue(lastWarn))
+			{
+				KZ_LOG_WARN(LogChannel::Replays, "[lead] beam_bounds_skipped reason=no_collision_property mode=%i\n", mode);
+			}
+			return;
+		}
+		// specified — ЛОКАЛЬНЫЙ бокс (относительно origin, то есть начала отрезка),
+		// surrounding — уже посчитанный МИРОВОЙ. Пишем оба: первый переживает пересчёт,
+		// второй действует до ближайшего пересчёта.
+		Vector localMins, localMaxs;
+		if (mode >= 2)
+		{
+			localMins = Vector(-KZ_LEAD_BEAM_BOUNDS_WORLD, -KZ_LEAD_BEAM_BOUNDS_WORLD, -KZ_LEAD_BEAM_BOUNDS_WORLD);
+			localMaxs = Vector(KZ_LEAD_BEAM_BOUNDS_WORLD, KZ_LEAD_BEAM_BOUNDS_WORLD, KZ_LEAD_BEAM_BOUNDS_WORLD);
+		}
+		else
+		{
+			const f32 pad = KZ_LEAD_BEAM_BOUNDS_PAD;
+			const Vector delta = end - start;
+			localMins = Vector((std::min)(0.0f, delta.x) - pad, (std::min)(0.0f, delta.y) - pad, (std::min)(0.0f, delta.z) - pad);
+			localMaxs = Vector((std::max)(0.0f, delta.x) + pad, (std::max)(0.0f, delta.y) + pad, (std::max)(0.0f, delta.z) + pad);
+		}
+		collision->m_nSurroundType((uint8)KZ_LEAD_BEAM_SURROUND_SPECIFIED);
+		collision->m_vecSpecifiedSurroundingMins(localMins);
+		collision->m_vecSpecifiedSurroundingMaxs(localMaxs);
+		collision->m_vecSurroundingMins(mode >= 2 ? localMins : Vector(start.x + localMins.x, start.y + localMins.y, start.z + localMins.z));
+		collision->m_vecSurroundingMaxs(mode >= 2 ? localMaxs : Vector(start.x + localMaxs.x, start.y + localMaxs.y, start.z + localMaxs.z));
+	}
+
 	// ПУТЬ ОТКАТА (cyb_lead_beam_entity 1): отрезок — штатная сущность-луч. Доказано живьём пробником
 	// kz_beam_probe на канарейке 11.09: класс CBeam существует, поля сетевые, луч виден игроку
 	// и БЕЗ заданного материала.
@@ -692,19 +796,10 @@ namespace
 		pKeyValues->SetFloat("width", width);
 		// Остальные ключи — из того же рецепта пробника. Незнакомый ключ энтити просто
 		// игнорирует, поэтому цена их присутствия нулевая, а отсутствия — неизвестна.
-		// Материал (texture/material/BeamTexture) НЕ задаём намеренно: живая проба показала луч
-		// именно с material=- («без него рисуется»).
 		pKeyValues->SetFloat("BoltWidth", width);
-		// Материал — только если задан конваром: пустая строка сохраняет доказанный рецепт
-		// («material=-», движок рисует дефолтным). Три синонима ключа разом, потому что какой
-		// из них читает CS2 — неизвестно, а незнакомый ключ энтити игнорирует.
-		const CUtlString &beamMaterial = cyb_lead_beam_material.Get();
-		if (beamMaterial.Get() && beamMaterial.Get()[0])
-		{
-			pKeyValues->SetString("material", beamMaterial.Get());
-			pKeyValues->SetString("texture", beamMaterial.Get());
-			pKeyValues->SetString("BeamTexture", beamMaterial.Get());
-		}
+		// Материала среди ключей НЕТ намеренно: material/texture/BeamTexture эта энтити не
+		// читает (в схеме материал — хендл m_hBaseMaterial), и оставлять их значило бы держать
+		// ручку, которая ничего не делает. Материал ставит ApplyLeadBeamMaterial после спавна.
 		pKeyValues->SetFloat("life", 0.0f);  // 0 = луч не гаснет сам, снимаем его мы
 		pKeyValues->SetInt("spawnflags", 1); // «start on» у env_beam в Source 1
 		pKeyValues->SetBool("start_active", true);
@@ -759,6 +854,11 @@ namespace
 		// Поле сетевое, но команда энтити на отрисовку луча у клиента не влияет, поэтому от
 		// доказанного ВИДА эта строка не уводит — она про то, кому луч уйдёт.
 		beam->m_iTeamNum(KZ_LEAD_SEGMENT_TEAM);
+		// Материал и границы видимости — в самом хвосте, оба под своими конварами и оба при
+		// дефолте не делают ничего. Порядок важен: SetModel и Teleport трогают те же границы,
+		// поэтому бокс пишется ПОСЛЕ них, последним.
+		ApplyLeadBeamMaterial(beam);
+		ApplyLeadBeamBounds(beam, start, end);
 		return handle;
 	}
 

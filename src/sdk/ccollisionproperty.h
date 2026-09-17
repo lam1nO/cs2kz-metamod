@@ -25,6 +25,21 @@ public:
 	SCHEMA_FIELD(uint8, m_usSolidFlags)
 	SCHEMA_FIELD(uint8, m_CollisionGroup)
 
+	// Границы ВИДИМОСТИ, а не коллизии. Отбор «что вообще рисовать/слать» идёт не по
+	// m_vecMins/m_vecMaxs, а по surrounding-боксу: m_nSurroundType говорит, откуда его брать,
+	// m_vecSpecifiedSurrounding* — бокс В ЛОКАЛЬНЫХ координатах (относительно origin),
+	// m_vecSurrounding* — уже посчитанный МИРОВОЙ. У свежесозданной энтити все они нули, то
+	// есть бокс вырожден в точку в origin — для луча, у которого origin лишь один конец
+	// отрезка, это и есть «отрезок в кадре, а рисовать его не будут».
+	// Имена и ширины сверены с живой схемой CS2 (SteamTracking/GameTracking-CS2,
+	// DumpSource2/schemas/server/CCollisionProperty.h); m_nSurroundType объявлен там как
+	// SurroundingBoundsType_t : uint8_t, поэтому здесь uint8 — самого enum'а в hl2sdk нет.
+	SCHEMA_FIELD(uint8, m_nSurroundType)
+	SCHEMA_FIELD(Vector, m_vecSpecifiedSurroundingMins)
+	SCHEMA_FIELD(Vector, m_vecSpecifiedSurroundingMaxs)
+	SCHEMA_FIELD(Vector, m_vecSurroundingMins)
+	SCHEMA_FIELD(Vector, m_vecSurroundingMaxs)
+
 	CBaseModelEntity *GetOuter()
 	{
 		return (CBaseModelEntity *)((char *)this + 8);
