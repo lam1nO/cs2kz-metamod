@@ -243,9 +243,9 @@ namespace
 	constexpr i32 RPMENU_PROGRESS_STEPS = 100;
 	// Имена классов, которые ставит этот файл помимо шкалы: rp-live, hidden, paused, selected,
 	// focused, shown, cp, tp, pb, wr, other — одиннадцать, плюс по одному на ступень масштаба
-	// карточки (RPMENU_SCALE_STEP_COUNT, за сеанс игрок может перебрать их все).
-	// При добавлении нового класса обновить число.
-	constexpr i32 RPMENU_STATIC_CLASSES = 11 + 5;
+	// (RPMENU_SCALE_STEP_COUNT) и на якорь позиции (RPMENU_ANCHOR_COUNT): за сеанс игрок может
+	// перебрать их все. При добавлении нового класса обновить число.
+	constexpr i32 RPMENU_STATIC_CLASSES = 11 + 5 + 6;
 	static_assert(2 * (RPMENU_PROGRESS_STEPS + 1) + RPMENU_STATIC_CLASSES <= HUD_LAYOUT_MAX_INTERNED_STRINGS,
 				  "имена классов шкалы не помещаются в интерн-таблицу сущности: уменьшите число шагов");
 
@@ -704,7 +704,8 @@ void KZHUDService::RenderReplayMenu(CCSCustomHudLayout *layout, bool force)
 	// корневой панели resourcecompiler запрещает иметь id (проверено компиляцией 17.09.2026), а
 	// без id SetHasClass её не найдёт. Вид задан потомками — значит переключение класса метит
 	// слой на полный пересчёт (см. classDirty ниже).
-	const i32 scale = this->GetOwnLayoutPrefs().replayMenu.scale;
+	const MHUDLayoutPrefs &prefs = this->GetOwnLayoutPrefs();
+	const i32 scale = prefs.replayMenu.scale;
 	if (force || state.scale != scale)
 	{
 		char scaleClass[24];
@@ -716,6 +717,21 @@ void KZHUDService::RenderReplayMenu(CCSCustomHudLayout *layout, bool force)
 		state.scale = scale;
 		V_snprintf(scaleClass, sizeof(scaleClass), "rp-scale--%i", scale);
 		state.classDirty |= ApplyClass(this->player, layout, "replay_card", scaleClass, true);
+	}
+
+	// Позиция карточки — тем же способом: класс-якорь на той же панели (преф rpmenuAnchor).
+	const i32 anchor = ClampReplayMenuAnchor(prefs.replayMenu.anchor);
+	if (force || state.anchor != anchor)
+	{
+		char anchorClass[32];
+		if (!force && state.anchor >= 0)
+		{
+			V_snprintf(anchorClass, sizeof(anchorClass), "rp-pos--%s", RPMENU_ANCHORS[state.anchor]);
+			state.classDirty |= ApplyClass(this->player, layout, "replay_card", anchorClass, false);
+		}
+		state.anchor = anchor;
+		V_snprintf(anchorClass, sizeof(anchorClass), "rp-pos--%s", RPMENU_ANCHORS[anchor]);
+		state.classDirty |= ApplyClass(this->player, layout, "replay_card", anchorClass, true);
 	}
 
 	if (force)

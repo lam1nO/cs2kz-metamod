@@ -9,15 +9,30 @@
 
 #include "tier0/memdbgon.h"
 
-// См. layout.h (RPMENU_MONO_FONTS): порядок = порядок в выборе «Шрифт» страницы «Меню реплея».
-const char *const RPMENU_MONO_FONTS[] = {"stratum2-mono", "stratum2-mono-light", "stratum2-mono-bold", "noto-mono"};
-const i32 RPMENU_MONO_FONT_COUNT = (i32)KZ_ARRAYSIZE(RPMENU_MONO_FONTS);
-
 // Ступени масштаба карточки меню реплея (см. layout.h). Держать в ОДНОМ порядке с набором
 // классов .rp-scale--N в аддоне: лишняя ступень здесь — класс, которого нет в CSS, и карточка
 // молча останется прежнего размера.
 const i32 RPMENU_SCALE_STEPS[] = {75, 85, 100, 115, 130};
 const i32 RPMENU_SCALE_STEP_COUNT = (i32)KZ_ARRAYSIZE(RPMENU_SCALE_STEPS);
+
+// Якоря позиции карточки. Слаг = суффикс класса .rp-pos--<slug> в rpmenu.css, порядок держать
+// вместе с RPMENU_ANCHOR_PHRASES и с дефолтом RPMENU_DEF_ANCHOR.
+const char *const RPMENU_ANCHORS[] = {"left-top", "left-middle", "left-bottom", "right-top", "right-middle", "right-bottom"};
+const i32 RPMENU_ANCHOR_COUNT = (i32)KZ_ARRAYSIZE(RPMENU_ANCHORS);
+const char *const RPMENU_ANCHOR_PHRASES[] = {
+	"HUD - Menu Anchor LeftTop",  "HUD - Menu Anchor LeftMiddle",  "HUD - Menu Anchor LeftBottom",
+	"HUD - Menu Anchor RightTop", "HUD - Menu Anchor RightMiddle", "HUD - Menu Anchor RightBottom",
+};
+static_assert(KZ_ARRAYSIZE(RPMENU_ANCHORS) == KZ_ARRAYSIZE(RPMENU_ANCHOR_PHRASES), "у каждого якоря своя фраза");
+
+// Дефолты кэша префов продублированы литералами в MHUDLayoutPrefs::ReplayMenu (kz_hud.h):
+// layout.h включает kz_hud.h, а не наоборот, и RPMENU_DEF_* там недоступны.
+static_assert(RPMENU_DEF_SCALE == 100 && RPMENU_DEF_ANCHOR == 1, "разошлись с дефолтами в kz_hud.h");
+
+i32 ClampReplayMenuAnchor(i32 index)
+{
+	return index < 0 || index >= RPMENU_ANCHOR_COUNT ? RPMENU_DEF_ANCHOR : index;
+}
 
 i32 SnapReplayMenuScale(i32 percent)
 {
@@ -31,18 +46,6 @@ i32 SnapReplayMenuScale(i32 percent)
 		}
 	}
 	return best;
-}
-
-const char *ResolveReplayMenuFontSlug(const char *slug)
-{
-	for (i32 i = 0; slug && i < RPMENU_MONO_FONT_COUNT; i++)
-	{
-		if (KZ_STREQI(slug, RPMENU_MONO_FONTS[i]))
-		{
-			return RPMENU_MONO_FONTS[i];
-		}
-	}
-	return RPMENU_DEF_FONT;
 }
 
 const MHUDLayoutPrefs &KZHUDService::GetOwnLayoutPrefs()
@@ -173,24 +176,11 @@ void KZHUDService::RefreshLayoutPrefs()
 	this->layoutPrefs.crosshair = opts->GetPreferenceBool("mhudCrosshair", true);
 	this->layoutPrefs.crosshairScale = panorama::SnapToStep((i32)opts->GetPreferenceInt("mhudCrosshairScale", 100), 0, 500);
 
-	// Масштаб карточки меню реплея — единственный преф меню реплея, который читает его новая
-	// страница (остальные оставлены ради сохранённых значений, см. layout.h).
-	// Int, а не Float: пункт меню — список ступеней (KZOptStorage::Int, hud_prefs.cpp).
+	// Меню реплея: обе настройки — индексы/ступени, страница применяет их классами
+	// (.rp-scale--N и .rp-pos--<slug> на панели replay_card). Остальные ключи rpmenu* удалены
+	// 17.09.2026 как мёртвые — см. layout.h.
 	this->layoutPrefs.replayMenu.scale = SnapReplayMenuScale((i32)opts->GetPreferenceInt("rpmenuScale", RPMENU_DEF_SCALE));
-
-	// Меню реплея спектатора (layout/rpmenu.cpp) — та же сетка, что у элементов худа.
-	this->layoutPrefs.replayMenu.x = panorama::SnapToStep((i32)opts->GetPreferenceFloat("rpmenuX", (f32)RPMENU_DEF_X), -100, 100);
-	this->layoutPrefs.replayMenu.y = panorama::SnapToStep((i32)opts->GetPreferenceFloat("rpmenuY", (f32)RPMENU_DEF_Y), -100, 100);
-	this->layoutPrefs.replayMenu.size =
-		panorama::SnapToStep((i32)opts->GetPreferenceFloat("rpmenuSize", (f32)RPMENU_DEF_SIZE), LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX);
-	this->layoutPrefs.replayMenu.step = Clamp((i32)opts->GetPreferenceFloat("rpmenuStep", (f32)RPMENU_DEF_STEP), RPMENU_STEP_MIN, RPMENU_STEP_MAX);
-	// Только моно (см. RPMENU_MONO_FONTS в layout.h): чужой/старый слаг в префе → дефолт.
-	this->layoutPrefs.replayMenu.fontClass =
-		panorama::ResolveFontClass(ResolveReplayMenuFontSlug(opts->GetPreferenceStr("rpmenuFont", RPMENU_DEF_FONT)), RPMENU_DEF_FONT);
-	// Обводка (text-shadow 4px) визуально «пикселит» мелкий кегль — по умолчанию выключена,
-	// в отличие от элементов худа (их обводка живёт на ярких картах).
-	this->layoutPrefs.replayMenu.outline = opts->GetPreferenceBool("rpmenuOutline", false);
-	this->layoutPrefs.replayMenu.background = Clamp((i32)opts->GetPreferenceInt("rpmenuBackground", RPMENU_DEF_BACKGROUND), 0, 100);
+	this->layoutPrefs.replayMenu.anchor = ClampReplayMenuAnchor((i32)opts->GetPreferenceInt("rpmenuAnchor", RPMENU_DEF_ANCHOR));
 
 	// Последней строкой: набор целиком заполнен, мимикрия (GetLayoutPrefs) может его брать.
 	// Аналог апстримного `prefsDirty = false` в конце RefreshPrefs.

@@ -4,7 +4,6 @@
 // дефолты — ничего не меняя) сюда, а рендер (layout/menu.cpp) обходит KZ::menu::GetTree().
 #include "kz/hud/kz_hud.h"
 #include "kz/hud/layout/layout.h"
-#include "kz/hud/layout/panorama_tables.h" // GetFontDisplayName — подписи моно-шрифтов меню реплея
 #include "kz/hud/share/hud_share.h"
 #include "kz/option/menu/model.h"
 #include "kz/option/kz_option.h"
@@ -202,12 +201,11 @@ static_function void ShareTakeOnActivate(KZPlayer *player, i64 tag)
 	KZ::hudshare::TakeFromSpectated(player);
 }
 
-// === Шрифт меню реплея: выбор из моноширинных (layout.h/RPMENU_MONO_FONTS) ====================
-// Не AddFont: тот предлагает все ~70 семейств, а выравнивание СТАРОЙ карточки по левому краю
-// честно работало только в моно (см. комментарий у RPMENU_MONO_FONTS). Своя страница шрифты
-// берёт из vcss и этот преф не применяет — таблица осталась, чтобы не менять сохранённые
-// значения и резолвер обмена. Choice со Str-хранением — как preferredMode/preferredPistol
-// в misc_prefs.cpp; id = индекс в таблице.
+// === Настройки меню реплея ====================================================================
+// Оба пункта — Choice со Int-хранением (как preferredMode/preferredPistol в misc_prefs.cpp),
+// id = индекс в таблице. Пункта выбора шрифта здесь нет и не будет: карточка берёт шрифты из
+// своей vcss (решение владельца 17.09.2026).
+//
 // Масштаб карточки меню реплея — СПИСОК, а не числовой ползунок. Довод: страница умеет ровно
 // те размеры, под которые в аддоне сгенерирован набор правил (RPMENU_SCALE_STEPS), и ползунок
 // 75..130 с шагом 1 на 24 значениях из 56 не менял бы ничего — игрок читает это как «настройка
@@ -245,48 +243,30 @@ static_function void RpMenuScaleOnPick(KZPlayer *player, i64 tag, i64 id)
 	player->optionService->SetPreferenceInt("rpmenuScale", RPMENU_SCALE_STEPS[id]);
 }
 
-static_function void RpMenuFontGetChoices(KZPlayer *player, i64 tag, std::vector<KZChoice> &out)
+// Позиция карточки меню реплея — якоря, а не координаты (см. layout.h). Тот же довод, что у
+// масштаба: страница знает ровно те положения, под которые в её vcss есть правила.
+static_function void RpMenuAnchorGetChoices(KZPlayer *player, i64 tag, std::vector<KZChoice> &out)
 {
-	for (i64 i = 0; i < RPMENU_MONO_FONT_COUNT; i++)
+	const char *lang = player->languageService->GetLanguage();
+	for (i64 i = 0; i < RPMENU_ANCHOR_COUNT; i++)
 	{
-		out.push_back({panorama::GetFontDisplayName(RPMENU_MONO_FONTS[i], RPMENU_MONO_FONTS[i]), i});
+		out.push_back({KZLanguageService::PrepareMessageWithLang(lang, RPMENU_ANCHOR_PHRASES[i]), i});
 	}
 }
 
-static_function i64 RpMenuFontGetCurrent(KZPlayer *player, i64 tag)
+static_function i64 RpMenuAnchorGetCurrent(KZPlayer *player, i64 tag)
 {
-	const char *slug = ResolveReplayMenuFontSlug(player->optionService->GetPreferenceStr("rpmenuFont", RPMENU_DEF_FONT));
-	for (i64 i = 0; i < RPMENU_MONO_FONT_COUNT; i++)
-	{
-		if (KZ_STREQ(slug, RPMENU_MONO_FONTS[i]))
-		{
-			return i;
-		}
-	}
-	return 0;
+	return ClampReplayMenuAnchor((i32)player->optionService->GetPreferenceInt("rpmenuAnchor", RPMENU_DEF_ANCHOR));
 }
 
-static_function void RpMenuFontOnPick(KZPlayer *player, i64 tag, i64 id)
+static_function void RpMenuAnchorOnPick(KZPlayer *player, i64 tag, i64 id)
 {
-	if (id < 0 || id >= RPMENU_MONO_FONT_COUNT)
+	if (id < 0 || id >= RPMENU_ANCHOR_COUNT)
 	{
 		return;
 	}
 	// RefreshLayoutPrefs после пика зовёт сам ActivateMenuItem (layout/menu.cpp), как у любого Choice.
-	player->optionService->SetPreferenceStr("rpmenuFont", RPMENU_MONO_FONTS[id]);
-}
-
-// Для ValidateValue обмена настройками: строка не из таблицы моно — отказ, а не тихий дефолт в БД.
-static_function const char *RpMenuFontResolve(const char *value)
-{
-	for (i32 i = 0; value && i < RPMENU_MONO_FONT_COUNT; i++)
-	{
-		if (KZ_STREQI(value, RPMENU_MONO_FONTS[i]))
-		{
-			return RPMENU_MONO_FONTS[i];
-		}
-	}
-	return NULL;
+	player->optionService->SetPreferenceInt("rpmenuAnchor", id);
 }
 
 void KZHUDService::InitMenuPrefs()
@@ -413,36 +393,21 @@ void KZHUDService::InitMenuPrefs()
 	KZ::menu::SetItemPref(crosshair, "mhudCrosshairScale", KZOptStorage::Int, 100);
 	AddResetButton(crosshair, (i32)LayoutElement::Count);
 
-	// Меню реплея спектатора (layout/rpmenu.cpp) — отдельная страница настроек: позиция/размер/
-	// шрифт списка и шаг строк. Ключи читает layout/prefs.cpp:RefreshLayoutPrefs (rpmenu*),
-	// дефолты — RPMENU_DEF_* (layout/layout.h). Чистые префы без кэша-колбэков — кнопка сброса
-	// страницы допустима, и «Сбросить всё» её тоже накрывает (s_resettableNodes).
+	// Меню реплея спектатора (layout/rpmenu.cpp) — отдельная страница настроек. Пунктов ДВА, и
+	// оба списки: карточка живёт на своей panorama-странице, а сервер умеет над ней только
+	// SetHasClass, поэтому настраивается ровно то, под что в её vcss есть готовые наборы правил.
+	// Ключи читает layout/prefs.cpp:RefreshLayoutPrefs, дефолты — RPMENU_DEF_* (layout/layout.h).
+	// Чистые префы без кэша-колбэков — кнопка сброса страницы допустима, и «Сбросить всё» её
+	// тоже накрывает (s_resettableNodes).
 	//
-	// ВНИМАНИЕ: меню реплея переехало на свою panorama-страницу (KZ_RPMENU_LAYOUT) фиксированной
-	// вёрстки, и ни один из пунктов ниже на неё больше НЕ влияет. Страница оставлена как есть
-	// намеренно: ключи уже сохранены у игроков и входят в белый список обмена худом, их снятие —
-	// отдельное решение (см. layout.h у RPMENU_DEF_*). Пока не снято, пункты вводят в заблуждение.
+	// Пунктов позиции в процентах, кегля, шрифта, шага строк и подложки здесь БОЛЬШЕ НЕТ: они
+	// достались от карточки на разметке худа и после переезда не влияли ни на что (снято
+	// 17.09.2026 по замечанию владельца). Шрифты у карточки свои, выбор шрифта не нужен.
 	KZOptNode *rpmenu = KZ::menu::AddSub(hud, "HUD - Menu Cat ReplayMenu");
-	// Единственный пункт страницы, который на новую карточку ВЛИЯЕТ.
 	KZ::menu::AddChoice(rpmenu, "HUD - Menu Label ReplayMenuScale", &RpMenuScaleGetChoices, &RpMenuScaleGetCurrent, &RpMenuScaleOnPick);
 	KZ::menu::SetItemPref(rpmenu, "rpmenuScale", KZOptStorage::Int, RPMENU_DEF_SCALE);
-	KZ::menu::AddPosition(rpmenu, "HUD - Menu Label Position", "rpmenuX", "rpmenuY", RPMENU_DEF_X, RPMENU_DEF_Y);
-	KZ::menu::AddSize(rpmenu, "HUD - Menu Label Size", "rpmenuSize", RPMENU_DEF_SIZE, LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX);
-	KZ::menu::AddChoice(rpmenu, "HUD - Menu Label Font", &RpMenuFontGetChoices, &RpMenuFontGetCurrent, &RpMenuFontOnPick);
-	KZ::menu::SetItemPref(rpmenu, "rpmenuFont", KZOptStorage::Str, 0, RPMENU_DEF_FONT);
-	KZ::menu::SetItemStrResolver(rpmenu, &RpMenuFontResolve);
-	// Шаг строк в процентах экрана (как позиция), хранится Float, как размер — читается
-	// GetPreferenceFloat в RefreshLayoutPrefs.
-	KZ::menu::AddSize(rpmenu, "HUD - Menu Label LineStep", "rpmenuStep", RPMENU_DEF_STEP, RPMENU_STEP_MIN, RPMENU_STEP_MAX);
-	KZ::menu::SetItemUnit(rpmenu, "%");
-	// Голый преф без кэша-колбэков (в отличие от обводки элементов худа с миграцией hudOutline):
-	// читает layout/prefs.cpp напрямую. Дефолт выкл — см. там же.
-	KZ::menu::AddToggle(rpmenu, "HUD - Menu Label Outline", "rpmenuOutline", false);
-	// Непрозрачность чёрной подложки за строками (0 — выкл). Int, как прозрачность элементов худа:
-	// читатель (layout/prefs.cpp) берёт GetPreferenceInt.
-	KZ::menu::AddSize(rpmenu, "HUD - Menu Label Background", "rpmenuBackground", RPMENU_DEF_BACKGROUND, 0, 100);
-	KZ::menu::SetItemUnit(rpmenu, "%");
-	KZ::menu::SetItemPref(rpmenu, "rpmenuBackground", KZOptStorage::Int, RPMENU_DEF_BACKGROUND);
+	KZ::menu::AddChoice(rpmenu, "HUD - Menu Label ReplayMenuAnchor", &RpMenuAnchorGetChoices, &RpMenuAnchorGetCurrent, &RpMenuAnchorOnPick);
+	KZ::menu::SetItemPref(rpmenu, "rpmenuAnchor", KZOptStorage::Int, RPMENU_DEF_ANCHOR);
 	AddResetButton(rpmenu, RPMENU_RESET_SLOT);
 
 	// Обмен худом — СВОЯ подкатегория, а не пункты в General. Довод: в General лежит «сбросить

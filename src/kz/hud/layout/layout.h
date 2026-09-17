@@ -35,43 +35,35 @@
 #define LAYOUT_SIZE_MIN 8
 #define LAYOUT_SIZE_MAX 100
 
-// Меню реплея спектатора (layout/rpmenu.cpp): дефолты префов rpmenuX/Y/Size/Step/Font —
-// пункт «Меню реплея» в настройках (hud/prefs/hud_prefs.cpp). X/Y — проценты от центра,
-// size — пиксели, step — шаг строк в процентах.
+// Настройки меню реплея — страница «Меню реплея» в `!options` (hud/prefs/hud_prefs.cpp), ключи
+// читает layout/prefs.cpp:RefreshLayoutPrefs. Их РОВНО ДВЕ, и обе — списки, а не числа: сервер
+// умеет над panorama-страницей только SetHasClass, поэтому каждое значение обязано иметь свой
+// готовый набор правил в vcss аддона. Числовой ползунок здесь означал бы, что большинство
+// значений ничего не меняют — игрок читает это как «настройка сломана».
 //
-// ВНИМАНИЕ: с переездом меню на СВОЮ страницу (KZ_RPMENU_LAYOUT) рендер эти префы больше НЕ
-// читает — вся геометрия, шрифты и фон карточки заданы её vcss (карточка фиксированного
-// размера, спека 2026-09-11-replay-player-panorama). Ключи, пункт настроек и запись в
-// GetOwnLayoutPrefs оставлены намеренно: у игроков уже лежат сохранённые значения, а ключи
-// входят в белый список обмена худом — их удаление отдельное решение, не часть переезда.
-// Масштаб карточки меню реплея (преф rpmenuScale, пункт «Меню реплея» в настройках). Это
-// ЕДИНСТВЕННЫЙ преф меню реплея, который новая страница действительно читает.
-// Ступени, а не любое число: сервер умеет только SetHasClass, поэтому каждый масштаб — свой
-// готовый набор правил в rpmenu-scale.css (генератор — tools/build_rpmenu_scale.py в аддоне).
-// Значение префа снапится к ближайшей ступени (SnapReplayMenuScale).
+// Прежние ключи (rpmenuX/Y/Size/Step/Font/Outline/Background) удалены 17.09.2026: они остались
+// от карточки на разметке ХУДА и после переезда на свою страницу не влияли ни на что. Пункты
+// вводили в заблуждение (замечание владельца), а сохранённые у игроков значения теперь просто
+// не читаются — миграции не нужно. Состав белого списка обмена худом от этого меняется, и
+// старые снимки применяются с предупреждением о другом составе: это штатное поведение обмена
+// (отпечаток считается из реестра, см. hud/share/hud_share.cpp).
+
+// Масштаб карточки: ступени процентов, класс .rp-scale--N на панели replay_card.
+// Наборы правил — rpmenu-scale.css (генератор tools/build_rpmenu_scale.py в аддоне).
 #define RPMENU_DEF_SCALE 100
 extern const i32 RPMENU_SCALE_STEPS[];
 extern const i32 RPMENU_SCALE_STEP_COUNT;
 i32 SnapReplayMenuScale(i32 percent);
 
-#define RPMENU_DEF_X    -34
-#define RPMENU_DEF_Y    -8
-#define RPMENU_DEF_SIZE 20
-#define RPMENU_DEF_STEP 2
-#define RPMENU_DEF_FONT "stratum2-mono"
-#define RPMENU_STEP_MIN 1
-#define RPMENU_STEP_MAX 12
-#define RPMENU_DEF_BACKGROUND 30 // непрозрачность подложки, %
-
-// Шрифты меню реплея — таблица выбора в пункте настроек (реализация в layout/prefs.cpp);
-// преф rpmenuFont, не попавший в неё, читается как RPMENU_DEF_FONT.
-// Ограничение «только моноширинные» осталось от старой карточки на разметке ХУДА: там строки
-// добивались NBSP до одной длины в кодовых точках, и это точно работает только в моно. Своя
-// страница берёт шрифты из своего vcss и rpmenuFont не применяет вовсе, так что ни расширять,
-// ни урезать таблицу сейчас незачем — см. комментарий у дефолтов выше.
-extern const char *const RPMENU_MONO_FONTS[];
-extern const i32 RPMENU_MONO_FONT_COUNT;
-const char *ResolveReplayMenuFontSlug(const char *slug);
+// Позиция карточки: ЯКОРЯ, а не координаты. Класс .rp-pos--<slug> на той же панели; правила —
+// в rpmenu.css (их шесть, руками, генератор не нужен). Дефолт — левый край по центру высоты,
+// как в спеке (docs/design/2026-09-11-replay-player-panorama, §1.0).
+#define RPMENU_DEF_ANCHOR 1 // индекс "left-middle" в RPMENU_ANCHORS
+extern const char *const RPMENU_ANCHORS[];
+extern const i32 RPMENU_ANCHOR_COUNT;
+// Ключи фраз для пунктов выбора, в том же порядке, что RPMENU_ANCHORS.
+extern const char *const RPMENU_ANCHOR_PHRASES[];
+i32 ClampReplayMenuAnchor(i32 index);
 
 // Дефолт синхронизирован с текущими настройками игрока (задача hud-defaults): было
 // stratum2-bold-monodigit, стало lato-bold (слаг panorama_tables.cpp, "Lato Bold*").

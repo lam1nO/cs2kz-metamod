@@ -406,19 +406,62 @@
 		"chi"		"回放菜单"
 		"ua"		"Меню реплею"
 	}
+	// Якоря позиции карточки меню реплея (порядок — RPMENU_ANCHOR_PHRASES, layout/prefs.cpp).
+	"HUD - Menu Anchor LeftTop"
+	{
+		"en"		"Left, top"
+		"ru"		"Слева сверху"
+		"chi"		"左上"
+		"ua"		"Ліворуч зверху"
+	}
+	"HUD - Menu Anchor LeftMiddle"
+	{
+		"en"		"Left, middle"
+		"ru"		"Слева по центру"
+		"chi"		"左中"
+		"ua"		"Ліворуч по центру"
+	}
+	"HUD - Menu Anchor LeftBottom"
+	{
+		"en"		"Left, bottom"
+		"ru"		"Слева снизу"
+		"chi"		"左下"
+		"ua"		"Ліворуч знизу"
+	}
+	"HUD - Menu Anchor RightTop"
+	{
+		"en"		"Right, top"
+		"ru"		"Справа сверху"
+		"chi"		"右上"
+		"ua"		"Праворуч зверху"
+	}
+	"HUD - Menu Anchor RightMiddle"
+	{
+		"en"		"Right, middle"
+		"ru"		"Справа по центру"
+		"chi"		"右中"
+		"ua"		"Праворуч по центру"
+	}
+	"HUD - Menu Anchor RightBottom"
+	{
+		"en"		"Right, bottom"
+		"ru"		"Справа снизу"
+		"chi"		"右下"
+		"ua"		"Праворуч знизу"
+	}
+	"HUD - Menu Label ReplayMenuAnchor"
+	{
+		"en"		"Card position"
+		"ru"		"Положение карточки"
+		"chi"		"卡片位置"
+		"ua"		"Положення картки"
+	}
 	"HUD - Menu Label ReplayMenuScale"
 	{
 		"en"		"Card size"
 		"ru"		"Размер карточки"
 		"chi"		"卡片大小"
 		"ua"		"Розмір картки"
-	}
-	"HUD - Menu Label LineStep"
-	{
-		"en"		"Line spacing"
-		"ru"		"Интервал строк"
-		"chi"		"行距"
-		"ua"		"Інтервал рядків"
 	}
 	"HUD - Menu Cat Keys"
 	{
@@ -522,13 +565,6 @@
 		"ru"		"Обводка"
 		"chi"		"轮廓"
 		"ua"		"Обведення"
-	}
-	"HUD - Menu Label Background"
-	{
-		"en"		"Background"
-		"ru"		"Фон"
-		"chi"		"背景"
-		"ua"		"Тло"
 	}
 	"HUD - Menu Label Opacity"
 	{
