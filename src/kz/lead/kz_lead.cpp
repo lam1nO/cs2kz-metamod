@@ -222,8 +222,8 @@ CConVar<f32> cyb_lead_rdp("cyb_lead_rdp", FCVAR_NONE,
 // из-за чего ApplyWindow не находит пересечения и снимает ВСЕ прежние сущности разом.
 CConVar<bool> cyb_lead_beam_entity("cyb_lead_beam_entity", FCVAR_NONE,
 								   "Draw !lead segments with the native beam entity instead of info_particle_system "
-								   "(default: false - our additive particle, visible on dark maps).",
-								   false, [](CConVar<bool> *, CSplitScreenSlot, const bool *, const bool *) { LeadLookChanged(); });
+								   "(default: true - solid beam, no seams; the particle draws as a chain of cones).",
+								   true, [](CConVar<bool> *, CSplitScreenSlot, const bool *, const bool *) { LeadLookChanged(); });
 
 // Ширина отрезка-луча в юнитах (m_fWidth/m_fEndWidth). Только для сущности-луча: у частицы
 // толщину задаёт сам ассет, и этот конвар на неё не влияет. Применяется к СЛЕДУЮЩЕЙ
