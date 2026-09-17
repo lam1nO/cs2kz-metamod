@@ -249,13 +249,21 @@ namespace
 	static_assert(2 * (RPMENU_PROGRESS_STEPS + 1) + RPMENU_STATIC_CLASSES <= HUD_LAYOUT_MAX_INTERNED_STRINGS,
 				  "имена классов шкалы не помещаются в интерн-таблицу сущности: уменьшите число шагов");
 
-	// Отметки на шкале (спека §1.1.1 и §5): чекпоинты и телепорты автора записи. Панелей в
-	// разметке ровно столько — на 390-пиксельной шкале больше и не различить, а каждая панель
-	// это ещё пара (панель, класс) в сетевом векторе сущности. Прыжков здесь пока нет: их на
-	// бхоп-ране сотни, для них нужен свой порог прореживания (data-availability.md §1).
+	// Отметки на шкале (спека §1.1.1 и §5): чекпоинты и телепорты автора записи. Прыжков здесь
+	// пока нет: их на бхоп-ране сотни, для них нужен свой порог прореживания
+	// (data-availability.md §1).
+	//
+	// ПОЧЕМУ 32 ПАНЕЛИ, А НЕ БОЛЬШЕ. Шкала при масштабе 100 % шириной 334 px (карточка 360 минус
+	// рамка и поля), различимый зазор между штрихами — 8 px (спека §5), то есть больше ~40
+	// отметок на ней физически не прочитать. 32 при зазоре 2 % дают шаг ≈ 6.7 px — уже предел.
+	// Панели сверх этого не добавили бы читаемости, зато каждая — это ещё имя панели в
+	// интерн-таблице сущности и до трёх пар (панель, класс) в её сетевом векторе НАВСЕГДА.
+	// Поэтому набор фиксирован, а «не помещается» решается прореживанием, а не ростом числа
+	// панелей (BuildReplayMarks).
 	constexpr i32 RPMENU_MARK_PANELS = 32;
-	// Минимальный зазор между отметками — 2 % шкалы (8 px из спеки при ширине 390). Более
-	// частые не рисуем: они слились бы в сплошную полосу.
+	// Минимальный зазор между отметками — 2 % шкалы (8 px из спеки при ширине 390). Именно
+	// МИНИМАЛЬНЫЙ: на длинной записи с сотней чекпоинтов прореживание поднимает его само, пока
+	// набор не влезет в панели. Обрезать «первые 32 по порядку» нельзя — так пропадал хвост.
 	constexpr i32 RPMENU_MARK_MIN_GAP = 2;
 	// Классы вида отметки; индекс = тип, порядок держать вместе с rpmenu.css.
 	constexpr const char *RPMENU_MARK_CLASSES[] = {"cp", "tp"};
@@ -310,46 +318,82 @@ namespace
 			return;
 		}
 		const f64 span = (f64)(effEnd - effStart);
-		i32 lastStep = -RPMENU_MARK_MIN_GAP - 1;
-		const auto push = [&](u32 rawTick, i32 type)
+
+		// ПРОХОД ПЕРВЫЙ: раскладываем отметки по КОРЗИНАМ шага шкалы (0..RPMENU_PROGRESS_STEPS).
+		// Корзины, а не список: класс позиции у нас с шагом 1 %, две отметки внутри одного шага
+		// всё равно нарисовались бы в одной точке. Заодно это ограничивает память проходом по
+		// записи любой длины — корзин ровно 101, сколько бы чекпоинтов игрок ни поставил.
+		i32 slot[RPMENU_PROGRESS_STEPS + 1];
+		for (i32 i = 0; i <= RPMENU_PROGRESS_STEPS; i++)
 		{
-			if ((i32)steps.size() >= RPMENU_MARK_PANELS)
-			{
-				return;
-			}
+			slot[i] = -1;
+		}
+		const auto put = [&](u32 rawTick, i32 type)
+		{
 			const u32 eff = playback::RawTickToEffective(rawTick);
 			if (eff < effStart || eff > effEnd)
 			{
 				return;
 			}
 			const i32 step = (i32)(((f64)(eff - effStart) / span) * RPMENU_PROGRESS_STEPS + 0.5);
-			if (step - lastStep < RPMENU_MARK_MIN_GAP)
+			if (step < 0 || step > RPMENU_PROGRESS_STEPS)
 			{
 				return;
 			}
-			lastStep = step;
-			steps.push_back(step);
-			types.push_back(type);
+			// Телепорт важнее чекпоинта: он и рисуется заметнее (выше, оранжевым), и означает
+			// возврат назад, а не просто сохранение позиции.
+			if (slot[step] < 0 || type == RPMARK_TP)
+			{
+				slot[step] = type;
+			}
 		};
 		// Счётчики монотонно растут — момент роста и есть постановка чекпоинта / телепорт.
-		// Проход идёт по тикам, поэтому отметки выходят уже отсортированными, и прореживание
-		// можно делать на лету.
+		// Проход идёт по ВСЕЙ записи: прерывать его, набрав RPMENU_MARK_PANELS отметок, нельзя —
+		// именно так и пропадал хвост длинного рана (баг 17.09.2026: на WR kz_bhop_nothing_go
+		// после 11-й минуты отметок не было вовсе, потому что панели кончались раньше).
 		i32 prevCp = replay->tickData[0].checkpoint.checkpointCount;
 		i32 prevTp = replay->tickData[0].checkpoint.teleportCount;
-		for (u32 i = 1; i < replay->tickCount && (i32)steps.size() < RPMENU_MARK_PANELS; i++)
+		for (u32 i = 1; i < replay->tickCount; i++)
 		{
 			const i32 cp = replay->tickData[i].checkpoint.checkpointCount;
 			const i32 tp = replay->tickData[i].checkpoint.teleportCount;
 			if (tp > prevTp)
 			{
-				push(i, RPMARK_TP);
+				put(i, RPMARK_TP);
 			}
 			else if (cp > prevCp)
 			{
-				push(i, RPMARK_CP);
+				put(i, RPMARK_CP);
 			}
 			prevCp = cp;
 			prevTp = tp;
+		}
+
+		// ПРОХОД ВТОРОЙ: прореживание РАВНОМЕРНОЕ по всей шкале. Зазор растёт, пока набор не
+		// влезет в число панелей, поэтому на длинном ране отметки становятся реже, но остаются
+		// везде — в отличие от обрезки по счётчику, которая просто теряла конец записи.
+		// Цикл конечен: при зазоре ceil((RPMENU_PROGRESS_STEPS + 1) / RPMENU_MARK_PANELS) = 4
+		// отметок не может быть больше 26; верхняя граница в условии — страховка на случай
+		// правки констант, а не рабочий путь.
+		for (i32 gap = RPMENU_MARK_MIN_GAP; gap <= RPMENU_PROGRESS_STEPS + 1; gap++)
+		{
+			steps.clear();
+			types.clear();
+			i32 lastStep = -gap;
+			for (i32 step = 0; step <= RPMENU_PROGRESS_STEPS; step++)
+			{
+				if (slot[step] < 0 || step - lastStep < gap)
+				{
+					continue;
+				}
+				lastStep = step;
+				steps.push_back(step);
+				types.push_back(slot[step]);
+			}
+			if ((i32)steps.size() <= RPMENU_MARK_PANELS)
+			{
+				break;
+			}
 		}
 	}
 
