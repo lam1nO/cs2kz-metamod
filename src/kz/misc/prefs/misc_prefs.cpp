@@ -17,12 +17,12 @@
 // sgReset/sgTeleport) и в худшем вводит в заблуждение (не покрывает независимость двух
 // защит). Регистрируем два реальных живых префа: sgReset и sgTeleport.
 //
-// preferredCompareType и showTips пунктов меню НЕ имеют: оба снято по решению пользователя
-// (задача hud-defaults). Сами префы и команды (!comparelevel, !kz_tips) остаются рабочими,
-// подсказки в чат выключены безусловно в KZTipService::ShouldPrintTip (kz_tip.cpp).
+// preferredCompareType, showTips и preferredLanguage пунктов меню НЕ имеют: все три снято по
+// решению пользователя. Сами префы и команды (!comparelevel, !kz_tips, !language) остаются
+// рабочими, подсказки в чат выключены безусловно в KZTipService::ShouldPrintTip (kz_tip.cpp).
 //
 // Вызов регистрации (KZMiscMenu_Register) — в общем Init-порядке (cs2kz.cpp::Load, Task 15),
-// сразу после HUD и перед Jumpstats: категория часто используется (режим/стиль/язык/подсказки),
+// сразу после HUD и перед Jumpstats: категория часто используется (режим/стиль/пистолет/луч),
 // но реже, чем HUD.
 #include "kz/option/kz_option.h"
 #include "kz/option/menu/model.h"
@@ -225,67 +225,6 @@ namespace
 		player->beamService->playerBeamOffset = player->optionService->GetPreferenceVector("beamOffset", KZBeamService::defaultOffset);
 	}
 
-	// -------------------------------------------------------------- Language (Choice) ---
-	// Список курируем (короткий, как у прежних курированных шрифтов меню): реальных
-	// переводов у форка не 32 (весь translations/config.txt — таблица автоопределения по
-	// cl_language, не список готовых переводов), а по факту около 13 — тот же набор языков,
-	// что несёт большинство файлов translations/*.phrases.txt (см., например, фразу "Offset"
-	// в cs2kz-jumpstats.phrases.txt). Имена — автонимы, поэтому НЕ через PrepareMessageWithLang
-	// (имя языка не должно переводиться на текущий язык интерфейса).
-	struct LangChoiceDef
-	{
-		const char *code; // ключ preferredLanguage / suffix в .phrases.txt
-		const char *autonym;
-	};
-
-	const LangChoiceDef kLanguages[] = {
-		{"en", "English"}, {"ru", "Русский"}, {"de", "Deutsch"},    {"es", "Español"}, {"it", "Italiano"}, {"pl", "Polski"},   {"tr", "Türkçe"},
-		{"ko", "한국어"},  {"chi", "中文"},   {"ua", "Українська"}, {"sv", "Svenska"}, {"fi", "Suomi"},    {"lv", "Latviešu"},
-	};
-
-	void LanguageGetChoices(KZPlayer *player, i64 tag, std::vector<KZChoice> &out)
-	{
-		const char *current = player->languageService->GetLanguage();
-		for (i64 i = 0; i < (i64)KZ_ARRAYSIZE(kLanguages); i++)
-		{
-			out.push_back({std::string(kLanguages[i].autonym), i, nullptr, !V_stricmp(kLanguages[i].code, current)});
-		}
-	}
-
-	i64 LanguageGetCurrent(KZPlayer *player, i64 tag)
-	{
-		const char *current = player->languageService->GetLanguage();
-		for (i64 i = 0; i < (i64)KZ_ARRAYSIZE(kLanguages); i++)
-		{
-			if (!V_stricmp(kLanguages[i].code, current))
-			{
-				return i;
-			}
-		}
-		return -1;
-	}
-
-	// Повторяет SCMD(kz_language) (kz_language.cpp) — там же взят порядок вызовов.
-	void LanguageOnPick(KZPlayer *player, i64 tag, i64 id)
-	{
-		if (id < 0 || id >= (i64)KZ_ARRAYSIZE(kLanguages))
-		{
-			return;
-		}
-		const char *language = kLanguages[id].code;
-		bool shouldReconnect = !(player->checkpointService->GetCheckpointCount() || player->timerService->GetTimerRunning());
-		KZLanguageService::UpdateLanguage(player->GetSteamId64(false), language, KZLanguageService::LanguageInfo::CacheLevel::CACHE_OVERRIDE, true);
-		player->optionService->SetPreferenceStr("preferredLanguage", language);
-		if (!shouldReconnect)
-		{
-			// Обе строки, что печатает SCMD(kz_language): подтверждение смены ("Switch Language")
-			// и предупреждение про ручную смену меню. Без первой смена языка из меню проходила
-			// вообще без ответа игроку.
-			player->languageService->PrintChat(true, false, "Switch Language", language);
-			player->languageService->PrintChat(false, false, "Language Change - Manual Menu Change Required");
-		}
-	}
-
 	// --------------------------------------------------------- Safeguard (toggles) ------
 	i64 SgResetGetCurrent(KZPlayer *player, i64 tag)
 	{
@@ -329,8 +268,9 @@ void KZMiscMenu_Register()
 	// вокруг дефолта (0, 0, 1.75). onEdit — досинк кэша луча на закрытии попапа, см. выше.
 	KZ::menu::AddVector(cat, "Options - Menu Label BeamOffset", "beamOffset", KZBeamService::defaultOffset, -64, 64, 0, &BeamOffsetOnEdit);
 
-	KZ::menu::AddChoice(cat, "Options - Menu Label Language", &LanguageGetChoices, &LanguageGetCurrent, &LanguageOnPick);
-	KZ::menu::SetItemPref(cat, "preferredLanguage", KZOptStorage::Str);
+	// Пункта «Язык» нет (решение владельца 18.09): сервера русскоязычные, а смена языка из
+	// меню тянет реконнект либо ручное переоткрытие меню — цена, которой пункт не стоит.
+	// Команда !language и преф preferredLanguage остаются рабочими (kz_language.cpp).
 
 	// Пункта «Показывать подсказки» нет: подсказки всегда выключены (см. KZTipService::
 	// ShouldPrintTip, kz_tip.cpp) — включать нечего, пункт был бы no-op.
