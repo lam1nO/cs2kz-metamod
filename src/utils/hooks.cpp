@@ -979,7 +979,6 @@ static_function void Hook_BuildGameSessionManifest(const EventBuildGameSessionMa
 	pResourceManifest->AddResource(KZ_LEAD_PARTICLE_VAR_ALIVE);
 	pResourceManifest->AddResource(KZ_LEAD_PARTICLE_VAR_SOLID);
 	pResourceManifest->AddResource(KZ_LEAD_PARTICLE_VAR_FULL);
-	pResourceManifest->AddResource(KZ_LEAD_PARTICLE_VAR_JOINT);
 }
 
 static_function ILoadingSpawnGroup *Hook_OnCreateLoadingSpawnGroupHook(SpawnGroupHandle_t hSpawnGroup, bool bSynchronouslySpawnEntities,
