@@ -14,8 +14,6 @@
 #include "sdk/entity/cparticlesystem.h"
 #include "sdk/entity/cbeam.h"
 #include "entitykeyvalues.h"
-// FileExists для проверки скомпилированного материала перед SetModel (см. ApplyLeadBeamMaterial).
-#include "filesystem.h"
 // Цепочка C++-классов созданной сущности (m_pClassInfo) — по ней ищутся ДОПОЛНИТЕЛЬНЫЕ поля
 // луча из рецепта пробника, см. ResolveLeadBeamExtras.
 #include "entity2/entityclass.h"
@@ -173,72 +171,8 @@ CConVar<CUtlString> cyb_lead_particle("cyb_lead_particle", FCVAR_NONE,
 									  CUtlString(KZ_LEAD_PARTICLE),
 									  [](CConVar<CUtlString> *, CSplitScreenSlot, const CUtlString *, const CUtlString *) { LeadLookChanged(); });
 
-// Проба control point'ов: индекс и значение. Стоковую ui_annotation_line_segment.vpcf_c мы
-// 16.09.2026 РАЗОБРАЛИ (читалка KV3+LZ4: game-addons/gymstrike-kz/tools/decompile_vpcf_c.py,
-// результат — _reference/ui_annotation_line_segment.decompiled.json). Что там на самом деле:
-// C_INIT_CreateSequentialPathV2 раскладывает 2 частицы от CP0 к CP1, рендерера ДВА —
-// C_OP_RenderRopes (сама лента) и C_OP_RenderSprites (m_flRadiusScale 0.5, это и есть «точки
-// на концах», про которые говорит kz_beamprobe.cpp); у нашей частицы второго нет, поэтому
-// точек на вершинах не будет. Блендинг
-// ADD, m_flSelfIllumAmount = 1.0, m_flDiffuseAmount = 0.0 — то есть освещение карты
-// на неё НЕ влияет, и версия «луч тускнеет в темноте» неверна. Других CP, кроме CP0/CP1/CP16,
-// частица не читает, так что пробы ниже для НЕЁ бесполезны; для нашей частицы — тем более.
-// Оставлены как инструмент на случай очередного чужого ассета.
-// Известно только про два CP, которые уже используются (и идут не через эти поля, а через
-// свои keyvalue): data_cp=1 — КОНЕЦ отрезка, tint_cp=16 — цвет.
-// -1 — CP не задавать (дефолт: вид не меняется). Слотов серверных CP у сущности всего четыре
-// (SetControlPointValue, sdk/entity/cparticlesystem.h), поэтому проб здесь две.
-// Режим рендера луча-CBeam. ЭТО ГЛАВНАЯ РУЧКА ПО ЖАЛОБЕ 16.09.2026 («на тёмных картах луч
-// местами не виден», kz_bhop_nothing_go): по умолчанию m_nRenderMode у свежесозданной beam мы
-// не задаём вовсе, а дефолт движка — НЕ аддитивный, поэтому луч смешивается с фоном и на
-// тёмной геометрии тонет. В Source 1 нумерации kRenderTransAdd = 5; совпадает ли нумерация
-// РУЧКА МЁРТВАЯ, И ЭТО ПРОВЕРЕНО. 17.09.2026 владелец перебрал режимы живьём после двух
-// попыток починки (поле до спавна, затем ключ rendermode): вид не менялся НИ РАЗУ, в том
-// числе на режиме 10 («не рисовать») — луч остался виден. Значит m_nRenderMode на эту
-// сущность в CS2 не влияет вовсе, и искать видимость на тёмных картах надо в МАТЕРИАЛЕ
-// (cyb_lead_beam_material ниже), а не здесь. Конвар оставлен вместе с логом чтения поля:
-// он теперь инструмент разбора, а не настройка.
-// -1 (дефолт) — поле не трогать. Это сохраняет доказанный на канарейке 11.09 рецепт видимости
-// байт-в-байт: менять его вслепую нельзя, дефолты свежесозданной beam нам неизвестны.
-CConVar<i32> cyb_lead_beam_rendermode("cyb_lead_beam_rendermode", FCVAR_NONE,
-									  "Render mode for the lead beam entity (m_nRenderMode, 0..10; Source 1 numbering: 5 = TransAdd). "
-									  "-1 = leave untouched (default, proven recipe).",
-									  -1, [](CConVar<i32> *, CSplitScreenSlot, const i32 *, const i32 *) { LeadLookChanged(); });
 
-// Материал луча. Режим рендера (cyb_lead_beam_rendermode) на эту сущность НЕ влияет вовсе —
-// проверено владельцем живьём 17.09.2026: даже режим 10 («не рисовать») луч не спрятал.
-// Значит вид задаёт материал, а мы его намеренно не задавали («без него рисуется», проба
-// 11.09). Всё, что связано с ТУМАНОМ и ОСВЕЩЕНИЕМ, у луча тоже живёт в материале: полей про
-// туман нет ни у CBeam, ни у CBaseModelEntity (сверено с живой схемой CS2), а у частицы
-// m_nFogType компилятор ресурсов молча выбрасывает — то есть отдельной ручки «без тумана» в
-// этой подсистеме нет нигде, кроме материала.
-//
-// МЕХАНИЗМ ИСПРАВЛЕН 17.09.2026. Ключи material/texture/BeamTexture, которые писала прежняя
-// реализация, у этой энтити не читает никто: в схеме материал луча — m_hBaseMaterial, хендл
-// ресурса, а не строка, и ставится он движковым SetModel (тем же, которым получает модель
-// пешка реплей-бота). Отсюда конвар и выглядел мёртвым.
-// Пустая строка = материал не задавать (прежнее поведение, доказанный рецепт).
-// Перебирать живьём стоковыми путями — они уже есть у клиента, аддон для этого не нужен:
-// materials/sprites/laserbeam.vmat, materials/sprites/physbeam.vmat.
-// Перекрытие соседних отрезков, в юнитах на каждый конец. Зачем: лента частицы
-// (C_OP_RenderRopes) рисуется только МЕЖДУ частицами, поэтому на стыке двух соседних
-// отрезков остаётся пустое место — цепочка лент и читается как пунктир (скриншот владельца
-// 17.09.2026, там видны отдельные конусы). У штатной частицы стык закрывает второй рендерер
-// со спрайтами, но владелец отклонил его дословно: «нам не нужны точки». Перекрытие решает
-// ту же задачу геометрией: каждый отрезок продлевается на overlap юнитов в обе стороны вдоль
-// своего направления, соседи заходят друг на друга, стыков не остаётся.
-// 0 — прежнее поведение. Разумные значения — 1..8; больше даст утолщения на изломах пути.
-// Касается ТОЛЬКО частицы: у сущности-луча стыков нет, там отрезок рисуется целиком.
-CConVar<f32> cyb_lead_particle_overlap("cyb_lead_particle_overlap", FCVAR_NONE,
-									   "Extend each !lead particle segment by N units at both ends so neighbours overlap and joints "
-									   "stop reading as gaps (particle path only; 0 = off).",
-									   0.0f, [](CConVar<f32> *, CSplitScreenSlot, const f32 *, const f32 *) { LeadLookChanged(); });
 
-CConVar<CUtlString> cyb_lead_beam_material("cyb_lead_beam_material", FCVAR_NONE,
-										   "Material for the lead beam entity (m_hBaseMaterial via SetModel, e.g. "
-										   "materials/sprites/laserbeam.vmat); empty = leave unset (proven recipe).",
-										   "", [](CConVar<CUtlString> *, CSplitScreenSlot, const CUtlString *, const CUtlString *)
-										   { LeadLookChanged(); });
 
 CConVar<i32> cyb_lead_cp1_index("cyb_lead_cp1_index", FCVAR_NONE,
 								"Extra server control point index for the lead segment: 0..63 except 1 (data_cp) and 16 (tint_cp); -1 = unused.", -1,
@@ -283,7 +217,7 @@ CConVar<f32> cyb_lead_rdp("cyb_lead_rdp", FCVAR_NONE,
 // аддитивная, self-illum 1.0 и рисуется сквозь геометрию (m_bDisableZBuffering), то есть
 // видна везде и целиком.
 // Единица возвращает штатную сущность-луч (`beam`, CBeam) — прежний дефолт по пробе 11.09,
-// дорога назад одной командой, вместе с cyb_lead_beam_rendermode для подбора режима.
+// дорога назад одной командой — на случай, если у сущности-луча найдётся дефект.
 // Смешанных окон не бывает: колбэк перерисовывает отрезки, а RefreshSegments обнуляет окно,
 // из-за чего ApplyWindow не находит пересечения и снимает ВСЕ прежние сущности разом.
 CConVar<bool> cyb_lead_beam_entity("cyb_lead_beam_entity", FCVAR_NONE,
@@ -300,45 +234,9 @@ CConVar<f32> cyb_lead_beam_width("cyb_lead_beam_width", FCVAR_NONE,
 								 "rebuild, which the change callback triggers right away.",
 								 KZ_LEAD_BEAM_WIDTH_DEFAULT, [](CConVar<f32> *, CSplitScreenSlot, const f32 *, const f32 *) { LeadLookChanged(); });
 
-// === Сетевые поля вида луча ==================================================================
-// Замер на канарейке (cyb.206, 17.09.2026) снял с повестки сразу две версии: ширина ключами
-// доезжает и меняет картинку, а m_nRenderMode доезжает тоже (поле СЕТЕВОЕ и переоткрыто у
-// CBeam поимённо) — и не меняет НИЧЕГО, то есть на отрисовку луча в CS2 не влияет. Границы
-// видимости до клиента не доезжают в принципе (см. sdk/ccollisionproperty.h), поэтому ручка
-// границ удалена, а не оставлена мёртвой.
-//
-// Что реально остаётся управляемым с сервера: поля из сетевого набора самого CBeam плюс
-// переоткрытые поимённо m_nRenderFX/m_clrRender/m_nModelIndex. Ручки ниже — ровно они, и
-// каждая при дефолте воспроизводит нынешний вид байт-в-байт. Отрезки пересоздаются на каждой
-// перерисовке, поэтому «пометить изменение» здесь не требуется вовсе: сетевое поле свежей
-// энтити уезжает целиком первым же обновлением. Значит различать надо не «доехало/не доехало»,
-// а «сетевое/не сетевое» — и это печатает лог beam_tuning (offset/networked/значение).
-//
-// Яркость в HDR. Рецепт пробы пишет 1.0; на карте с сильным тонмаппингом это ровно та
-// величина, которой луч проигрывает фону, причём экспозиция считается по кадру — отсюда и
-// «мигает, когда двигаешь камерой».
-CConVar<f32> cyb_lead_beam_hdrscale("cyb_lead_beam_hdrscale", FCVAR_NONE,
-									"HDR color scale for the lead beam entity (m_flHDRColorScale); 1.0 = recipe value (default).", 1.0f,
-									[](CConVar<f32> *, CSplitScreenSlot, const f32 *, const f32 *) { LeadLookChanged(); });
 
-// Затухание концов отрезка. В рецепте пробы это поле названо m_flFadeLength — имени с таким
-// написанием в схеме НЕТ (настоящее — m_fFadeLength), поэтому оно не писалось никогда, и что
-// оставляет в нём спавн, мы не знаем. Отрицательное значение (дефолт) — не трогать, как было.
-CConVar<f32> cyb_lead_beam_fadelength("cyb_lead_beam_fadelength", FCVAR_NONE,
-									  "Fade length for the lead beam entity (m_fFadeLength); negative = leave untouched (default).", -1.0f,
-									  [](CConVar<f32> *, CSplitScreenSlot, const f32 *, const f32 *) { LeadLookChanged(); });
 
-// Флаги луча (m_nBeamFlags). Рецепт пробы пишет 0, поэтому 0 и дефолт: значение конвара просто
-// побеждает рецепт, поведение при дефолте не меняется.
-CConVar<i32> cyb_lead_beam_flags("cyb_lead_beam_flags", FCVAR_NONE,
-								 "Beam flags for the lead beam entity (m_nBeamFlags); 0 = recipe value (default).", 0,
-								 [](CConVar<i32> *, CSplitScreenSlot, const i32 *, const i32 *) { LeadLookChanged(); });
 
-// m_nRenderFX — второе поле вида, переоткрытое у CBeam поимённо рядом с m_nRenderMode. Режим
-// оказался инертным, а этот сосед не проверялся ни разу. -1 (дефолт) — не трогать.
-CConVar<i32> cyb_lead_beam_renderfx("cyb_lead_beam_renderfx", FCVAR_NONE,
-									"Render FX for the lead beam entity (m_nRenderFX, 0..255); -1 = leave untouched (default).", -1,
-									[](CConVar<i32> *, CSplitScreenSlot, const i32 *, const i32 *) { LeadLookChanged(); });
 
 namespace
 {
@@ -724,46 +622,6 @@ namespace
 		return *reinterpret_cast<const u64 *>(reinterpret_cast<uintptr_t>(beam) + key.offset);
 	}
 
-	// Материал луча — ПОСЛЕ спавна и движковым SetModel. Ключами он не задаётся: в схеме это
-	// m_hBaseMaterial, хендл ресурса (см. cyb_lead_beam_material). Пустой конвар = прежний
-	// рецепт «материал не трогаем».
-	void ApplyLeadBeamMaterial(CBeam *beam)
-	{
-		const CUtlString &want = cyb_lead_beam_material.Get();
-		if (!want.Get() || !want.Get()[0])
-		{
-			return;
-		}
-		// Несуществующий путь отдавать SetModel нельзя: луч остался бы вообще без материала, а
-		// оператор увидел бы ровно то же «конвар мёртвый», из-за которого этот механизм и
-		// переписан. Проверяем СКОМПИЛИРОВАННЫЙ файл (_c), как применение модели реплей-боту.
-		CUtlString compiled = want;
-		compiled.Append("_c");
-		if (!g_pFullFileSystem || !g_pFullFileSystem->FileExists(compiled.Get()))
-		{
-			static f64 lastWarn = -1.0e9;
-			if (LeadWarnDue(lastWarn))
-			{
-				KZ_LOG_WARN(LogChannel::Replays, "[lead] beam_material_missing path=%s note=material_left_unset\n", compiled.Get());
-			}
-			return;
-		}
-		const u64 before = LeadBeamBaseMaterial(beam);
-		g_pKZUtils->SetModel(beam, want.Get());
-		const u64 after = LeadBeamBaseMaterial(beam);
-		// ДОКАЗАТЕЛЬСТВО, А НЕ ЖУРНАЛ: m_hBaseMaterial — сетевое поле, а отрезки создаются
-		// заново на каждой перерисовке, поэтому ненулевой хендл здесь означает, что материал
-		// уехал клиенту. Нулевой после SetModel означает обратное: движковый SetModel наш путь
-		// не принял (он про модели), и перебирать материалы этой ручкой бессмысленно.
-		// Печатаем один раз на значение конвара, а не на отрезок (их до 384 за перерисовку).
-		static char lastLogged[256] = "";
-		if (V_stricmp(lastLogged, want.Get()) != 0)
-		{
-			V_strncpy(lastLogged, want.Get(), sizeof(lastLogged));
-			KZ_LOG_INFO(LogChannel::Replays, "[lead] beam_material path=%s handle_before=0x%llX handle_after=0x%llX\n", want.Get(),
-						(unsigned long long)before, (unsigned long long)after);
-		}
-	}
 
 	// Подстройка сетевых полей вида (см. блок конваров cyb_lead_beam_*). Отдельно от
 	// ApplyLeadBeamExtras намеренно: там повторяется РЕЦЕПТ ПРОБЫ с фиксированными значениями,
@@ -779,84 +637,6 @@ namespace
 		bool write; // false — конвар сказал «не трогать»
 	};
 
-	void ApplyLeadBeamTuning(CBeam *beam)
-	{
-		const f32 hdrScale = cyb_lead_beam_hdrscale.Get();
-		const f32 fadeLength = cyb_lead_beam_fadelength.Get();
-		const i32 beamFlags = cyb_lead_beam_flags.Get();
-		const i32 renderFx = cyb_lead_beam_renderfx.Get();
-		// clang-format off
-		const LeadBeamTuning tuning[] = {
-			{"CBeam",             "m_flHDRColorScale", true,  hdrScale,   0,              4, true},
-			{"CBeam",             "m_fFadeLength",     true,  fadeLength, 0,              4, fadeLength >= 0.0f},
-			{"CBeam",             "m_nBeamFlags",      false, 0.0f,       (i64)beamFlags, 4, true},
-			{"CBaseModelEntity",  "m_nRenderFX",       false, 0.0f,       (i64)renderFx,  1, renderFx >= 0 && renderFx <= 255},
-		};
-		// clang-format on
-		// Печать — на НАБОР значений, а не на отрезок: функция зовётся до 384 раз за
-		// перерисовку. Правка любого из конваров печатает набор заново, поэтому в логе всегда
-		// видно, с чем именно снят текущий круг проверок.
-		static bool everLogged = false;
-		static f32 lastHdr = 0.0f;
-		static f32 lastFade = 0.0f;
-		static i32 lastFlags = 0;
-		static i32 lastFx = 0;
-		const bool logNow = !everLogged || lastHdr != hdrScale || lastFade != fadeLength || lastFlags != beamFlags || lastFx != renderFx;
-		if (logNow)
-		{
-			everLogged = true;
-			lastHdr = hdrScale;
-			lastFade = fadeLength;
-			lastFlags = beamFlags;
-			lastFx = renderFx;
-		}
-		// Офсеты кэшируются по индексу и ТОЛЬКО когда схема ответила: закэшировать ноль значило
-		// бы навсегда писать в голову объекта. Ноль здесь невозможен и как настоящий офсет —
-		// все четыре поля лежат далеко в хвосте класса.
-		static SchemaKey keys[KZ_ARRAYSIZE(tuning)] {};
-		for (u32 i = 0; i < KZ_ARRAYSIZE(tuning); i++)
-		{
-			if (!keys[i].offset)
-			{
-				keys[i] = schema::GetOffset(tuning[i].className, hash_32_fnv1a_const(tuning[i].className), tuning[i].fieldName,
-											hash_32_fnv1a_const(tuning[i].fieldName));
-			}
-			if (!keys[i].offset)
-			{
-				if (logNow)
-				{
-					KZ_LOG_WARN(LogChannel::Replays, "[lead] beam_tuning name=%s resolved=0 note=field_not_in_schema\n", tuning[i].fieldName);
-				}
-				continue;
-			}
-			if (logNow)
-			{
-				// networked=0 означает «ручка бессмысленна»: отрезки создаются заново, поэтому
-				// сетевое поле уезжает клиенту само, а несетевое не уедет никогда и перебирать
-				// его — терять круг проверок. Ровно так сгорела ручка границ видимости.
-				KZ_LOG_INFO(LogChannel::Replays, "[lead] beam_tuning name=%s offset=0x%X networked=%i write=%i value=%.3f/%lli\n",
-							tuning[i].fieldName, keys[i].offset, keys[i].networked ? 1 : 0, tuning[i].write ? 1 : 0, tuning[i].floatValue,
-							(long long)tuning[i].intValue);
-			}
-			if (!tuning[i].write)
-			{
-				continue;
-			}
-			const uintptr_t addr = reinterpret_cast<uintptr_t>(beam) + keys[i].offset;
-			if (tuning[i].isFloat)
-			{
-				*reinterpret_cast<f32 *>(addr) = tuning[i].floatValue;
-			}
-			else if (tuning[i].size == 1)
-			{
-				*reinterpret_cast<u8 *>(addr) = (u8)tuning[i].intValue;
-			}
-			else
-			{
-				*reinterpret_cast<i32 *>(addr) = (i32)tuning[i].intValue;
-			}
-		}
-	}
 
 	// ПУТЬ ОТКАТА (cyb_lead_beam_entity 1): отрезок — штатная сущность-луч. Доказано живьём пробником
 	// kz_beam_probe на канарейке 11.09: класс CBeam существует, поля сетевые, луч виден игроку
@@ -891,18 +671,10 @@ namespace
 		// 0 — прямая линия. Ненулевая амплитуда дала бы «волну», которая врёт о маршруте.
 		beam->m_fAmplitude(0.0f);
 		beam->m_bTurnedOff(false);
-		// Альфу держим 255: осмысленность полупрозрачности зависит от m_nRenderMode, который по
-		// умолчанию не задаётся (см. cyb_lead_beam_rendermode) — а «наполовину прозрачный луч»
-		// непроверен и на канарейке не нужен.
+		// Альфу держим 255: полупрозрачность зависела бы от m_nRenderMode, а он на вид этой
+		// сущности не влияет — проверено перебором всех режимов на канарейке 17.09.2026,
+		// включая 10 («не рисовать»), луч не изменился ни разу. Ручку убрали как мёртвую.
 		beam->m_clrRender(color);
-		// Режим рендера — единственное поле рецепта, которое мы сознательно оставили
-		// управляемым: см. cyb_lead_beam_rendermode. При -1 ничего не пишем, и рецепт остаётся
-		// тем, что доказан живьём.
-		const i32 renderMode = cyb_lead_beam_rendermode.Get();
-		if (renderMode >= 0 && renderMode <= 255)
-		{
-			beam->m_nRenderMode((uint8)renderMode);
-		}
 		// Метка «наша энтити» — дешёвый признак для фильтра передачи (kz_quiet.cpp): движку на
 		// не-частице она ничего не значит, зато читается одним полем, без вызова в движок.
 		beam->m_iTeamNum(KZ_LEAD_SEGMENT_TEAM);
@@ -916,9 +688,9 @@ namespace
 		// Остальные ключи — из того же рецепта пробника. Незнакомый ключ энтити просто
 		// игнорирует, поэтому цена их присутствия нулевая, а отсутствия — неизвестна.
 		pKeyValues->SetFloat("BoltWidth", width);
-		// Материала среди ключей НЕТ намеренно: material/texture/BeamTexture эта энтити не
-		// читает (в схеме материал — хендл m_hBaseMaterial), и оставлять их значило бы держать
-		// ручку, которая ничего не делает. Материал ставит ApplyLeadBeamMaterial после спавна.
+		// Материала здесь НЕТ намеренно: ключи material/texture/BeamTexture эта энтити не
+		// читает (в схеме материал — хендл m_hBaseMaterial), а движковый SetModel вида луча не
+		// менял — проверено живьём 17.09.2026. Ручку материала убрали как мёртвую.
 		pKeyValues->SetFloat("life", 0.0f);  // 0 = луч не гаснет сам, снимаем его мы
 		pKeyValues->SetInt("spawnflags", 1); // «start on» у env_beam в Source 1
 		pKeyValues->SetBool("start_active", true);
@@ -973,11 +745,6 @@ namespace
 		// Поле сетевое, но команда энтити на отрисовку луча у клиента не влияет, поэтому от
 		// доказанного ВИДА эта строка не уводит — она про то, кому луч уйдёт.
 		beam->m_iTeamNum(KZ_LEAD_SEGMENT_TEAM);
-		// Материал и подстройка сетевых полей вида — в самом хвосте. Оба при дефолте оставляют
-		// прежний вид; ApplyLeadBeamTuning идёт ПОСЛЕ ApplyLeadBeamExtras намеренно, чтобы
-		// конвар побеждал значение рецепта там, где они спорят (m_flHDRColorScale, m_nBeamFlags).
-		ApplyLeadBeamMaterial(beam);
-		ApplyLeadBeamTuning(beam);
 		return handle;
 	}
 
@@ -986,22 +753,6 @@ namespace
 		if (cyb_lead_beam_entity.Get())
 		{
 			return CreateLeadBeamSegment(start, end, color);
-		}
-		// Перекрытие — только у частицы и только если задано: при нуле геометрия та же, что
-		// была, байт-в-байт. Направление берём по самому отрезку; вырожденный (нулевой длины)
-		// не трогаем вовсе, иначе нормализация даст NaN и отрезок уедет в бесконечность.
-		const f32 overlap = cyb_lead_particle_overlap.Get();
-		if (overlap > 0.0f)
-		{
-			Vector dir = end - start;
-			const f32 len = dir.Length();
-			if (len > 0.001f)
-			{
-				dir /= len;
-				const Vector a = start - dir * overlap;
-				const Vector b = end + dir * overlap;
-				return CreateLeadParticleSegment(a, b, color);
-			}
 		}
 		return CreateLeadParticleSegment(start, end, color);
 	}

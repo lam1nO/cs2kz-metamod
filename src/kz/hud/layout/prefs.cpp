@@ -15,25 +15,6 @@
 const i32 RPMENU_SCALE_STEPS[] = {75, 85, 100, 115, 130};
 const i32 RPMENU_SCALE_STEP_COUNT = (i32)KZ_ARRAYSIZE(RPMENU_SCALE_STEPS);
 
-// Якоря позиции карточки. Слаг = суффикс класса .rp-pos--<slug> в rpmenu.css, порядок держать
-// вместе с RPMENU_ANCHOR_PHRASES и с дефолтом RPMENU_DEF_ANCHOR.
-const char *const RPMENU_ANCHORS[] = {"left-top", "left-middle", "left-bottom", "right-top", "right-middle", "right-bottom"};
-const i32 RPMENU_ANCHOR_COUNT = (i32)KZ_ARRAYSIZE(RPMENU_ANCHORS);
-const char *const RPMENU_ANCHOR_PHRASES[] = {
-	"HUD - Menu Anchor LeftTop",  "HUD - Menu Anchor LeftMiddle",  "HUD - Menu Anchor LeftBottom",
-	"HUD - Menu Anchor RightTop", "HUD - Menu Anchor RightMiddle", "HUD - Menu Anchor RightBottom",
-};
-static_assert(KZ_ARRAYSIZE(RPMENU_ANCHORS) == KZ_ARRAYSIZE(RPMENU_ANCHOR_PHRASES), "у каждого якоря своя фраза");
-
-// Дефолты кэша префов продублированы литералами в MHUDLayoutPrefs::ReplayMenu (kz_hud.h):
-// layout.h включает kz_hud.h, а не наоборот, и RPMENU_DEF_* там недоступны.
-static_assert(RPMENU_DEF_SCALE == 100 && RPMENU_DEF_ANCHOR == 1, "разошлись с дефолтами в kz_hud.h");
-
-i32 ClampReplayMenuAnchor(i32 index)
-{
-	return index < 0 || index >= RPMENU_ANCHOR_COUNT ? RPMENU_DEF_ANCHOR : index;
-}
-
 i32 SnapReplayMenuScale(i32 percent)
 {
 	const auto dist = [percent](i32 step) { return step > percent ? step - percent : percent - step; };
@@ -180,7 +161,9 @@ void KZHUDService::RefreshLayoutPrefs()
 	// (.rp-scale--N и .rp-pos--<slug> на панели replay_card). Остальные ключи rpmenu* удалены
 	// 17.09.2026 как мёртвые — см. layout.h.
 	this->layoutPrefs.replayMenu.scale = SnapReplayMenuScale((i32)opts->GetPreferenceInt("rpmenuScale", RPMENU_DEF_SCALE));
-	this->layoutPrefs.replayMenu.anchor = ClampReplayMenuAnchor((i32)opts->GetPreferenceInt("rpmenuAnchor", RPMENU_DEF_ANCHOR));
+	// Позиция — проценты от центра, та же сетка и тот же снап, что у элементов худа.
+	this->layoutPrefs.replayMenu.posX = panorama::SnapToStep((i32)opts->GetPreferenceFloat("rpmenuPosX", (f32)RPMENU_DEF_POS_X), -100, 100);
+	this->layoutPrefs.replayMenu.posY = panorama::SnapToStep((i32)opts->GetPreferenceFloat("rpmenuPosY", (f32)RPMENU_DEF_POS_Y), -100, 100);
 
 	// Последней строкой: набор целиком заполнен, мимикрия (GetLayoutPrefs) может его брать.
 	// Аналог апстримного `prefsDirty = false` в конце RefreshPrefs.

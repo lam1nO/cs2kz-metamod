@@ -243,11 +243,16 @@ namespace
 	constexpr i32 RPMENU_PROGRESS_STEPS = 100;
 	// Имена классов, которые ставит этот файл помимо шкалы: rp-live, hidden, paused, selected,
 	// focused, shown, cp, tp, pb, wr, other — одиннадцать, плюс по одному на ступень масштаба
-	// (RPMENU_SCALE_STEP_COUNT) и на якорь позиции (RPMENU_ANCHOR_COUNT): за сеанс игрок может
-	// перебрать их все. При добавлении нового класса обновить число.
-	constexpr i32 RPMENU_STATIC_CLASSES = 11 + 5 + 6;
-	static_assert(2 * (RPMENU_PROGRESS_STEPS + 1) + RPMENU_STATIC_CLASSES <= HUD_LAYOUT_MAX_INTERNED_STRINGS,
-				  "имена классов шкалы не помещаются в интерн-таблицу сущности: уменьшите число шагов");
+	// (RPMENU_SCALE_STEP_COUNT). При добавлении нового класса обновить число.
+	constexpr i32 RPMENU_STATIC_CLASSES = 11 + 5;
+	// Классы позиции карточки — та же сетка, что у элементов худа: проценты от центра с шагом 1
+	// внутри ±100, то есть 201 имя на ось. Худший случай (игрок прогнал степпер от края до края
+	// по обеим осям за один просмотр) считаем честно, хотя вживую так не двигают: сущность меню
+	// создаётся заново на каждый просмотр реплея, и интерн-таблица вместе с ней обнуляется.
+	constexpr i32 RPMENU_POSITION_CLASSES = 2 * 201;
+	static_assert(2 * (RPMENU_PROGRESS_STEPS + 1) + RPMENU_STATIC_CLASSES + RPMENU_POSITION_CLASSES
+					  <= HUD_LAYOUT_MAX_INTERNED_STRINGS,
+				  "имена классов страницы не помещаются в интерн-таблицу сущности: уменьшите число шагов");
 
 	// Отметки на шкале (спека §1.1.1 и §5): чекпоинты и телепорты автора записи. Прыжков здесь
 	// пока нет: их на бхоп-ране сотни, для них нужен свой порог прореживания
@@ -763,20 +768,15 @@ void KZHUDService::RenderReplayMenu(CCSCustomHudLayout *layout, bool force)
 		state.classDirty |= ApplyClass(this->player, layout, "replay_card", scaleClass, true);
 	}
 
-	// Позиция карточки — тем же способом: класс-якорь на той же панели (преф rpmenuAnchor).
-	const i32 anchor = ClampReplayMenuAnchor(prefs.replayMenu.anchor);
-	if (force || state.anchor != anchor)
-	{
-		char anchorClass[32];
-		if (!force && state.anchor >= 0)
-		{
-			V_snprintf(anchorClass, sizeof(anchorClass), "rp-pos--%s", RPMENU_ANCHORS[state.anchor]);
-			state.classDirty |= ApplyClass(this->player, layout, "replay_card", anchorClass, false);
-		}
-		state.anchor = anchor;
-		V_snprintf(anchorClass, sizeof(anchorClass), "rp-pos--%s", RPMENU_ANCHORS[anchor]);
-		state.classDirty |= ApplyClass(this->player, layout, "replay_card", anchorClass, true);
-	}
+	// Позиция карточки — проценты от центра экрана теми же классами, что у элементов худа
+	// (.x--[neg]Npct / .y--[neg]Npct из cs2kz/positions.css). SetLayoutValueClass сам снимает
+	// прошлый класс, ставит новый и логирует упор в интерн-таблицу.
+	//
+	// classDirty здесь НЕ нужен: x/y красят саму карточку, а не её потомков — тот же довод, что
+	// у классов шкалы. Это важно не из экономии: игрок двигает карточку степпером, и пометка
+	// слоя на полный пересчёт шла бы на каждое нажатие «+».
+	this->SetLayoutValueClass(layout, "replay_card", state.posX, prefs.replayMenu.posX, "x", true);
+	this->SetLayoutValueClass(layout, "replay_card", state.posY, prefs.replayMenu.posY, "y", true);
 
 	if (force)
 	{

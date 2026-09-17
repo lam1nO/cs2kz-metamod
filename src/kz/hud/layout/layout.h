@@ -55,15 +55,18 @@ extern const i32 RPMENU_SCALE_STEPS[];
 extern const i32 RPMENU_SCALE_STEP_COUNT;
 i32 SnapReplayMenuScale(i32 percent);
 
-// Позиция карточки: ЯКОРЯ, а не координаты. Класс .rp-pos--<slug> на той же панели; правила —
-// в rpmenu.css (их шесть, руками, генератор не нужен). Дефолт — левый край по центру высоты,
-// как в спеке (docs/design/2026-09-11-replay-player-panorama, §1.0).
-#define RPMENU_DEF_ANCHOR 1 // индекс "left-middle" в RPMENU_ANCHORS
-extern const char *const RPMENU_ANCHORS[];
-extern const i32 RPMENU_ANCHOR_COUNT;
-// Ключи фраз для пунктов выбора, в том же порядке, что RPMENU_ANCHORS.
-extern const char *const RPMENU_ANCHOR_PHRASES[];
-i32 ClampReplayMenuAnchor(i32 index);
+// Позиция карточки: ПРОЦЕНТЫ ОТ ЦЕНТРА экрана по обеим осям, как у элементов худа, и теми же
+// классами .x--[neg]Npct / .y--[neg]Npct из cs2kz/positions.css (файл уже едет в аддоне ради
+// mhud — своего набора классов заводить не пришлось). Пункт — обычный Position со степперами
+// ±1/±5, ровно как у соседей (решение владельца 17.09.2026: якоря-список заменены на шаги).
+//
+// Дефолт по X считается так: центр карточки = 960 + (-36 % × 1920) = 268.8, то есть левый край
+// при масштабе 100 % (ширина 360) — 89 px. Спека просит 48, но держать ЛЕВЫЙ край на месте при
+// центрирующем позиционировании нельзя: на 130 % карточка шириной 468 уехала бы за левый край
+// экрана. -36 % держит её на экране на всех пяти масштабах (75…130 %), а точную посадку игрок
+// доводит теми же ±1/±5.
+#define RPMENU_DEF_POS_X (-36)
+#define RPMENU_DEF_POS_Y 0
 
 // Дефолт синхронизирован с текущими настройками игрока (задача hud-defaults): было
 // stratum2-bold-monodigit, стало lato-bold (слаг panorama_tables.cpp, "Lato Bold*").

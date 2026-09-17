@@ -243,31 +243,6 @@ static_function void RpMenuScaleOnPick(KZPlayer *player, i64 tag, i64 id)
 	player->optionService->SetPreferenceInt("rpmenuScale", RPMENU_SCALE_STEPS[id]);
 }
 
-// Позиция карточки меню реплея — якоря, а не координаты (см. layout.h). Тот же довод, что у
-// масштаба: страница знает ровно те положения, под которые в её vcss есть правила.
-static_function void RpMenuAnchorGetChoices(KZPlayer *player, i64 tag, std::vector<KZChoice> &out)
-{
-	const char *lang = player->languageService->GetLanguage();
-	for (i64 i = 0; i < RPMENU_ANCHOR_COUNT; i++)
-	{
-		out.push_back({KZLanguageService::PrepareMessageWithLang(lang, RPMENU_ANCHOR_PHRASES[i]), i});
-	}
-}
-
-static_function i64 RpMenuAnchorGetCurrent(KZPlayer *player, i64 tag)
-{
-	return ClampReplayMenuAnchor((i32)player->optionService->GetPreferenceInt("rpmenuAnchor", RPMENU_DEF_ANCHOR));
-}
-
-static_function void RpMenuAnchorOnPick(KZPlayer *player, i64 tag, i64 id)
-{
-	if (id < 0 || id >= RPMENU_ANCHOR_COUNT)
-	{
-		return;
-	}
-	// RefreshLayoutPrefs после пика зовёт сам ActivateMenuItem (layout/menu.cpp), как у любого Choice.
-	player->optionService->SetPreferenceInt("rpmenuAnchor", id);
-}
 
 void KZHUDService::InitMenuPrefs()
 {
@@ -406,8 +381,10 @@ void KZHUDService::InitMenuPrefs()
 	KZOptNode *rpmenu = KZ::menu::AddSub(hud, "HUD - Menu Cat ReplayMenu");
 	KZ::menu::AddChoice(rpmenu, "HUD - Menu Label ReplayMenuScale", &RpMenuScaleGetChoices, &RpMenuScaleGetCurrent, &RpMenuScaleOnPick);
 	KZ::menu::SetItemPref(rpmenu, "rpmenuScale", KZOptStorage::Int, RPMENU_DEF_SCALE);
-	KZ::menu::AddChoice(rpmenu, "HUD - Menu Label ReplayMenuAnchor", &RpMenuAnchorGetChoices, &RpMenuAnchorGetCurrent, &RpMenuAnchorOnPick);
-	KZ::menu::SetItemPref(rpmenu, "rpmenuAnchor", KZOptStorage::Int, RPMENU_DEF_ANCHOR);
+	// Позиция — обычный Position со степперами ±1/±5, как у элементов худа: владелец просил
+	// двигать карточку «+ и −», а не выбирать из списка углов. Классы позиции берутся из
+	// cs2kz/positions.css, которая и так едет в аддоне (см. layout.h).
+	KZ::menu::AddPosition(rpmenu, "HUD - Menu Label Position", "rpmenuPosX", "rpmenuPosY", RPMENU_DEF_POS_X, RPMENU_DEF_POS_Y);
 	AddResetButton(rpmenu, RPMENU_RESET_SLOT);
 
 	// Обмен худом — СВОЯ подкатегория, а не пункты в General. Довод: в General лежит «сбросить

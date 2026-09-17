@@ -199,7 +199,8 @@ struct MHUDLayoutPrefs
 	struct ReplayMenu
 	{
 		i32 scale {100}; // проценты, ступени RPMENU_SCALE_STEPS
-		i32 anchor {1};  // индекс в RPMENU_ANCHORS ("left-middle")
+		i32 posX {-36};  // проценты от центра экрана, как у элементов худа
+		i32 posY {0};
 	};
 
 	ReplayMenu replayMenu {};
@@ -839,7 +840,10 @@ private:
 		i32 badgeShown {-1};  // показан ли бейдж типа записи (класс hidden снят)
 		i32 badgeClass {-1};   // индекс расцветки бейджа в RPMENU_BADGE_CLASSES
 		i32 scale {-1};        // ступень масштаба карточки (класс .rp-scale--N на replay_card)
-		i32 anchor {-1};       // якорь позиции карточки (класс .rp-pos--<slug> там же)
+		// Позиция карточки (классы .x--/.y--Npct там же). INT_MIN — ещё не выставляли:
+		// ноль здесь реальное значение, им «не выставлено» не закодировать.
+		i32 posX {INT_MIN};
+		i32 posY {INT_MIN};
 		// Позиции отметок шкалы (шаг классов .x-p--N) и их тип; -1 — панель скрыта. Размер —
 		// столько же панелей mark*, сколько их в разметке (RPMENU_MARK_PANELS).
 		std::vector<i32> markStep {};
