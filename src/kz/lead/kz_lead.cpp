@@ -190,17 +190,29 @@ CConVar<CUtlString> cyb_lead_particle("cyb_lead_particle", FCVAR_NONE,
 // местами не виден», kz_bhop_nothing_go): по умолчанию m_nRenderMode у свежесозданной beam мы
 // не задаём вовсе, а дефолт движка — НЕ аддитивный, поэтому луч смешивается с фоном и на
 // тёмной геометрии тонет. В Source 1 нумерации kRenderTransAdd = 5; совпадает ли нумерация
-// CS2 — НЕ проверено: до 17.09.2026 конвар был МЁРТВ (значение писалось до DispatchSpawn и
-// перетиралось спавном, см. ключ rendermode ниже). Одобренный владельцем вид «текущий луч
-// хороший» получен на CBeam БЕЗ действующего режима рендера, то есть заслуга перехода на
-// сущность-луч, а не режима. После починки ключа режимы надо перебрать заново и на ТЁМНОЙ
-// карте (kz_bhop_nothing_go — с неё началась жалоба).
+// РУЧКА МЁРТВАЯ, И ЭТО ПРОВЕРЕНО. 17.09.2026 владелец перебрал режимы живьём после двух
+// попыток починки (поле до спавна, затем ключ rendermode): вид не менялся НИ РАЗУ, в том
+// числе на режиме 10 («не рисовать») — луч остался виден. Значит m_nRenderMode на эту
+// сущность в CS2 не влияет вовсе, и искать видимость на тёмных картах надо в МАТЕРИАЛЕ
+// (cyb_lead_beam_material ниже), а не здесь. Конвар оставлен вместе с логом чтения поля:
+// он теперь инструмент разбора, а не настройка.
 // -1 (дефолт) — поле не трогать. Это сохраняет доказанный на канарейке 11.09 рецепт видимости
 // байт-в-байт: менять его вслепую нельзя, дефолты свежесозданной beam нам неизвестны.
 CConVar<i32> cyb_lead_beam_rendermode("cyb_lead_beam_rendermode", FCVAR_NONE,
 									  "Render mode for the lead beam entity (m_nRenderMode, 0..10; Source 1 numbering: 5 = TransAdd). "
 									  "-1 = leave untouched (default, proven recipe).",
 									  -1, [](CConVar<i32> *, CSplitScreenSlot, const i32 *, const i32 *) { LeadLookChanged(); });
+
+// Материал луча. Режим рендера (cyb_lead_beam_rendermode) на эту сущность НЕ влияет вовсе —
+// проверено владельцем живьём 17.09.2026: даже режим 10 («не рисовать») луч не спрятал.
+// Значит вид задаёт материал, а мы его намеренно не задавали («без него рисуется», проба
+// 11.09). Свечение на тёмных картах — свойство материала, а не режима, поэтому перебирать
+// надо материалы. Пустая строка = не задавать (прежнее поведение, доказанный рецепт).
+// Перебор живьём: выставить конвар, посмотреть на луч; ассет должен быть прекеширован —
+// стоковые материалы игры уже есть у клиента, свой пришлось бы возить в аддоне.
+CConVar<CUtlString> cyb_lead_beam_material("cyb_lead_beam_material", FCVAR_NONE,
+										   "Material for the lead beam entity (keyvalue 'material'); empty = leave unset (proven recipe).", "",
+										   [](CConVar<CUtlString> *, CSplitScreenSlot, const CUtlString *, const CUtlString *) { LeadLookChanged(); });
 
 CConVar<i32> cyb_lead_cp1_index("cyb_lead_cp1_index", FCVAR_NONE,
 								"Extra server control point index for the lead segment: 0..63 except 1 (data_cp) and 16 (tint_cp); -1 = unused.", -1,
@@ -683,6 +695,16 @@ namespace
 		// Материал (texture/material/BeamTexture) НЕ задаём намеренно: живая проба показала луч
 		// именно с material=- («без него рисуется»).
 		pKeyValues->SetFloat("BoltWidth", width);
+		// Материал — только если задан конваром: пустая строка сохраняет доказанный рецепт
+		// («material=-», движок рисует дефолтным). Три синонима ключа разом, потому что какой
+		// из них читает CS2 — неизвестно, а незнакомый ключ энтити игнорирует.
+		const CUtlString &beamMaterial = cyb_lead_beam_material.Get();
+		if (beamMaterial.Get() && beamMaterial.Get()[0])
+		{
+			pKeyValues->SetString("material", beamMaterial.Get());
+			pKeyValues->SetString("texture", beamMaterial.Get());
+			pKeyValues->SetString("BeamTexture", beamMaterial.Get());
+		}
 		pKeyValues->SetFloat("life", 0.0f);  // 0 = луч не гаснет сам, снимаем его мы
 		pKeyValues->SetInt("spawnflags", 1); // «start on» у env_beam в Source 1
 		pKeyValues->SetBool("start_active", true);
