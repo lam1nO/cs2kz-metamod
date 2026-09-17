@@ -208,6 +208,43 @@ static_function void ShareTakeOnActivate(KZPlayer *player, i64 tag)
 // берёт из vcss и этот преф не применяет — таблица осталась, чтобы не менять сохранённые
 // значения и резолвер обмена. Choice со Str-хранением — как preferredMode/preferredPistol
 // в misc_prefs.cpp; id = индекс в таблице.
+// Масштаб карточки меню реплея — СПИСОК, а не числовой ползунок. Довод: страница умеет ровно
+// те размеры, под которые в аддоне сгенерирован набор правил (RPMENU_SCALE_STEPS), и ползунок
+// 75..130 с шагом 1 на 24 значениях из 56 не менял бы ничего — игрок читает это как «настройка
+// не работает» (замечание владельца 17.09.2026).
+static_function void RpMenuScaleGetChoices(KZPlayer *player, i64 tag, std::vector<KZChoice> &out)
+{
+	for (i64 i = 0; i < RPMENU_SCALE_STEP_COUNT; i++)
+	{
+		char label[16];
+		V_snprintf(label, sizeof(label), "%i%%", RPMENU_SCALE_STEPS[i]);
+		out.push_back({label, i});
+	}
+}
+
+static_function i64 RpMenuScaleGetCurrent(KZPlayer *player, i64 tag)
+{
+	const i32 scale = SnapReplayMenuScale((i32)player->optionService->GetPreferenceInt("rpmenuScale", RPMENU_DEF_SCALE));
+	for (i64 i = 0; i < RPMENU_SCALE_STEP_COUNT; i++)
+	{
+		if (RPMENU_SCALE_STEPS[i] == scale)
+		{
+			return i;
+		}
+	}
+	return 0;
+}
+
+static_function void RpMenuScaleOnPick(KZPlayer *player, i64 tag, i64 id)
+{
+	if (id < 0 || id >= RPMENU_SCALE_STEP_COUNT)
+	{
+		return;
+	}
+	// RefreshLayoutPrefs после пика зовёт сам ActivateMenuItem (layout/menu.cpp), как у любого Choice.
+	player->optionService->SetPreferenceInt("rpmenuScale", RPMENU_SCALE_STEPS[id]);
+}
+
 static_function void RpMenuFontGetChoices(KZPlayer *player, i64 tag, std::vector<KZChoice> &out)
 {
 	for (i64 i = 0; i < RPMENU_MONO_FONT_COUNT; i++)
@@ -386,11 +423,9 @@ void KZHUDService::InitMenuPrefs()
 	// намеренно: ключи уже сохранены у игроков и входят в белый список обмена худом, их снятие —
 	// отдельное решение (см. layout.h у RPMENU_DEF_*). Пока не снято, пункты вводят в заблуждение.
 	KZOptNode *rpmenu = KZ::menu::AddSub(hud, "HUD - Menu Cat ReplayMenu");
-	// Единственный пункт страницы, который на новую карточку ВЛИЯЕТ. Значение снапится к
-	// ступеням RPMENU_SCALE_STEPS (layout/prefs.cpp): промежуточные проценты сервер в CSS
-	// поставить не может, карточка масштабируется готовыми наборами правил.
-	KZ::menu::AddSize(rpmenu, "HUD - Menu Label ReplayMenuScale", "rpmenuScale", RPMENU_DEF_SCALE, RPMENU_SCALE_MIN, RPMENU_SCALE_MAX);
-	KZ::menu::SetItemUnit(rpmenu, "%");
+	// Единственный пункт страницы, который на новую карточку ВЛИЯЕТ.
+	KZ::menu::AddChoice(rpmenu, "HUD - Menu Label ReplayMenuScale", &RpMenuScaleGetChoices, &RpMenuScaleGetCurrent, &RpMenuScaleOnPick);
+	KZ::menu::SetItemPref(rpmenu, "rpmenuScale", KZOptStorage::Int, RPMENU_DEF_SCALE);
 	KZ::menu::AddPosition(rpmenu, "HUD - Menu Label Position", "rpmenuX", "rpmenuY", RPMENU_DEF_X, RPMENU_DEF_Y);
 	KZ::menu::AddSize(rpmenu, "HUD - Menu Label Size", "rpmenuSize", RPMENU_DEF_SIZE, LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX);
 	KZ::menu::AddChoice(rpmenu, "HUD - Menu Label Font", &RpMenuFontGetChoices, &RpMenuFontGetCurrent, &RpMenuFontOnPick);

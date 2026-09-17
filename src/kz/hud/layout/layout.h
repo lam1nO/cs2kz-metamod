@@ -50,8 +50,6 @@
 // готовый набор правил в rpmenu-scale.css (генератор — tools/build_rpmenu_scale.py в аддоне).
 // Значение префа снапится к ближайшей ступени (SnapReplayMenuScale).
 #define RPMENU_DEF_SCALE 100
-#define RPMENU_SCALE_MIN 75
-#define RPMENU_SCALE_MAX 130
 extern const i32 RPMENU_SCALE_STEPS[];
 extern const i32 RPMENU_SCALE_STEP_COUNT;
 i32 SnapReplayMenuScale(i32 percent);

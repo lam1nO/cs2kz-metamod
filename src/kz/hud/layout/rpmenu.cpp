@@ -242,9 +242,10 @@ namespace
 	// не выйдет, шкала замрёт с двумя ширинами сразу.
 	constexpr i32 RPMENU_PROGRESS_STEPS = 100;
 	// Имена классов, которые ставит этот файл помимо шкалы: rp-live, hidden, paused, selected,
-	// focused, shown, cp, tp, pb, wr, other + по одному на ступень масштаба карточки
-	// (RPMENU_SCALE_STEPS). При добавлении нового класса обновить число.
-	constexpr i32 RPMENU_STATIC_CLASSES = 11 + 8;
+	// focused, shown, cp, tp, pb, wr, other — одиннадцать, плюс по одному на ступень масштаба
+	// карточки (RPMENU_SCALE_STEP_COUNT, за сеанс игрок может перебрать их все).
+	// При добавлении нового класса обновить число.
+	constexpr i32 RPMENU_STATIC_CLASSES = 11 + 5;
 	static_assert(2 * (RPMENU_PROGRESS_STEPS + 1) + RPMENU_STATIC_CLASSES <= HUD_LAYOUT_MAX_INTERNED_STRINGS,
 				  "имена классов шкалы не помещаются в интерн-таблицу сущности: уменьшите число шагов");
 

@@ -175,7 +175,8 @@ void KZHUDService::RefreshLayoutPrefs()
 
 	// Масштаб карточки меню реплея — единственный преф меню реплея, который читает его новая
 	// страница (остальные оставлены ради сохранённых значений, см. layout.h).
-	this->layoutPrefs.replayMenu.scale = SnapReplayMenuScale((i32)opts->GetPreferenceFloat("rpmenuScale", (f32)RPMENU_DEF_SCALE));
+	// Int, а не Float: пункт меню — список ступеней (KZOptStorage::Int, hud_prefs.cpp).
+	this->layoutPrefs.replayMenu.scale = SnapReplayMenuScale((i32)opts->GetPreferenceInt("rpmenuScale", RPMENU_DEF_SCALE));
 
 	// Меню реплея спектатора (layout/rpmenu.cpp) — та же сетка, что у элементов худа.
 	this->layoutPrefs.replayMenu.x = panorama::SnapToStep((i32)opts->GetPreferenceFloat("rpmenuX", (f32)RPMENU_DEF_X), -100, 100);
