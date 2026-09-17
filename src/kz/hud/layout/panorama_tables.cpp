@@ -100,13 +100,6 @@ static_global const PanoramaFontDef PANORAMA_FONTS[] =
 	{"trebuchet", "font-family--trebuchet", "Trebuchet MS*", "Trebuchet MS*", "Regular"},
 	{"trebuchet-bold", "font-family--trebuchet-bold", "Trebuchet MS Bold*", "Trebuchet MS*", "Bold"},
 	{"trebuchet-italic", "font-family--trebuchet-italic", "Trebuchet MS Italic*", "Trebuchet MS*", "Italic"},
-	// Verdana — наше добавление (16.09.2026). Классы живут в нашем аддоне GYMSTRIKE-KZ
-	// (fonts.css), в апстримном наборе их нет. Игра Verdana не поставляет (в
-	// game/csgo/panorama/fonts только Noto и stratum2.uifont), поэтому звёздочка в имени —
-	// как у Trebuchet MS: резолвится системным шрифтом, иначе молча падает на Arial Unicode MS.
-	{"verdana", "font-family--verdana", "Verdana*", "Verdana*", "Regular"},
-	{"verdana-bold", "font-family--verdana-bold", "Verdana Bold*", "Verdana*", "Bold"},
-	{"verdana-italic", "font-family--verdana-italic", "Verdana Italic*", "Verdana*", "Italic"},
 	{"lato-light", "font-family--lato-light", "Lato Light*", "Lato*", "Light"},
 	{"lato", "font-family--lato", "Lato*", "Lato*", "Regular"},
 	{"lato-bold", "font-family--lato-bold", "Lato Bold*", "Lato*", "Bold"},
