@@ -286,22 +286,45 @@ CConVar<f32> cyb_lead_beam_width("cyb_lead_beam_width", FCVAR_NONE,
 								 "rebuild, which the change callback triggers right away.",
 								 KZ_LEAD_BEAM_WIDTH_DEFAULT, [](CConVar<f32> *, CSplitScreenSlot, const f32 *, const f32 *) { LeadLookChanged(); });
 
-// Границы ВИДИМОСТИ отрезка-луча. Причина жалобы 17.09.2026 («луч пропадает на участке
-// маршрута, мигает от движения камеры»): у сущности-луча origin — это только НАЧАЛО отрезка, а
-// surrounding-бокс, по которому идёт отсечение отрисовки и PVS, у свежесозданной энтити
-// вырожден в точку (все четыре вектора и m_nSurroundType — нули, сверено с живой схемой CS2).
-// Значит движок судит о видимости ВСЕГО отрезка по одной его точке и выбрасывает отрезок,
-// стоит этой точке уйти из кадра, — хотя сам отрезок в кадре.
-//   0 — не трогать (ДЕФОЛТ, прежнее поведение);
-//   1 — бокс по двум концам отрезка с запасом (отсечение остаётся, но судит по отрезку);
-//   2 — бокс во всю карту, отсечения не остаётся вовсе (дороже по трафику, зато отвечает на
-//       вопрос «дело вообще в отсечении?» однозначно).
-// Сквозь стены при этом луч не светит: surrounding-бокс решает только «рисовать ли», а
-// заслоняется луч по глубине, и её мы не трогаем.
-CConVar<i32> cyb_lead_beam_bounds("cyb_lead_beam_bounds", FCVAR_NONE,
-								  "Visibility bounds for lead beam segments (beam entity only): 0 = leave as spawned (default), "
-								  "1 = box around the segment, 2 = world-sized box (no culling).",
-								  0, [](CConVar<i32> *, CSplitScreenSlot, const i32 *, const i32 *) { LeadLookChanged(); });
+// === Сетевые поля вида луча ==================================================================
+// Замер на канарейке (cyb.206, 17.09.2026) снял с повестки сразу две версии: ширина ключами
+// доезжает и меняет картинку, а m_nRenderMode доезжает тоже (поле СЕТЕВОЕ и переоткрыто у
+// CBeam поимённо) — и не меняет НИЧЕГО, то есть на отрисовку луча в CS2 не влияет. Границы
+// видимости до клиента не доезжают в принципе (см. sdk/ccollisionproperty.h), поэтому ручка
+// границ удалена, а не оставлена мёртвой.
+//
+// Что реально остаётся управляемым с сервера: поля из сетевого набора самого CBeam плюс
+// переоткрытые поимённо m_nRenderFX/m_clrRender/m_nModelIndex. Ручки ниже — ровно они, и
+// каждая при дефолте воспроизводит нынешний вид байт-в-байт. Отрезки пересоздаются на каждой
+// перерисовке, поэтому «пометить изменение» здесь не требуется вовсе: сетевое поле свежей
+// энтити уезжает целиком первым же обновлением. Значит различать надо не «доехало/не доехало»,
+// а «сетевое/не сетевое» — и это печатает лог beam_tuning (offset/networked/значение).
+//
+// Яркость в HDR. Рецепт пробы пишет 1.0; на карте с сильным тонмаппингом это ровно та
+// величина, которой луч проигрывает фону, причём экспозиция считается по кадру — отсюда и
+// «мигает, когда двигаешь камерой».
+CConVar<f32> cyb_lead_beam_hdrscale("cyb_lead_beam_hdrscale", FCVAR_NONE,
+									"HDR color scale for the lead beam entity (m_flHDRColorScale); 1.0 = recipe value (default).", 1.0f,
+									[](CConVar<f32> *, CSplitScreenSlot, const f32 *, const f32 *) { LeadLookChanged(); });
+
+// Затухание концов отрезка. В рецепте пробы это поле названо m_flFadeLength — имени с таким
+// написанием в схеме НЕТ (настоящее — m_fFadeLength), поэтому оно не писалось никогда, и что
+// оставляет в нём спавн, мы не знаем. Отрицательное значение (дефолт) — не трогать, как было.
+CConVar<f32> cyb_lead_beam_fadelength("cyb_lead_beam_fadelength", FCVAR_NONE,
+									  "Fade length for the lead beam entity (m_fFadeLength); negative = leave untouched (default).", -1.0f,
+									  [](CConVar<f32> *, CSplitScreenSlot, const f32 *, const f32 *) { LeadLookChanged(); });
+
+// Флаги луча (m_nBeamFlags). Рецепт пробы пишет 0, поэтому 0 и дефолт: значение конвара просто
+// побеждает рецепт, поведение при дефолте не меняется.
+CConVar<i32> cyb_lead_beam_flags("cyb_lead_beam_flags", FCVAR_NONE,
+								 "Beam flags for the lead beam entity (m_nBeamFlags); 0 = recipe value (default).", 0,
+								 [](CConVar<i32> *, CSplitScreenSlot, const i32 *, const i32 *) { LeadLookChanged(); });
+
+// m_nRenderFX — второе поле вида, переоткрытое у CBeam поимённо рядом с m_nRenderMode. Режим
+// оказался инертным, а этот сосед не проверялся ни разу. -1 (дефолт) — не трогать.
+CConVar<i32> cyb_lead_beam_renderfx("cyb_lead_beam_renderfx", FCVAR_NONE,
+									"Render FX for the lead beam entity (m_nRenderFX, 0..255); -1 = leave untouched (default).", -1,
+									[](CConVar<i32> *, CSplitScreenSlot, const i32 *, const i32 *) { LeadLookChanged(); });
 
 namespace
 {
@@ -670,6 +693,23 @@ namespace
 		return use;
 	}
 
+	// Хендл материала луча (m_hBaseMaterial, 8 байт) по живой схеме. Только ЧТЕНИЕ: писать в
+	// него целым нельзя — это хендл ресурса, а не число. Офсет кэшируется лишь когда схема
+	// ответила: закэшировать ноль означало бы навсегда читать голову объекта.
+	u64 LeadBeamBaseMaterial(CBeam *beam)
+	{
+		static SchemaKey key {0, false};
+		if (!key.offset)
+		{
+			key = schema::GetOffset("CBeam", hash_32_fnv1a_const("CBeam"), "m_hBaseMaterial", hash_32_fnv1a_const("m_hBaseMaterial"));
+		}
+		if (!key.offset)
+		{
+			return 0;
+		}
+		return *reinterpret_cast<const u64 *>(reinterpret_cast<uintptr_t>(beam) + key.offset);
+	}
+
 	// Материал луча — ПОСЛЕ спавна и движковым SetModel. Ключами он не задаётся: в схеме это
 	// m_hBaseMaterial, хендл ресурса (см. cyb_lead_beam_material). Пустой конвар = прежний
 	// рецепт «материал не трогаем».
@@ -694,49 +734,114 @@ namespace
 			}
 			return;
 		}
+		const u64 before = LeadBeamBaseMaterial(beam);
 		g_pKZUtils->SetModel(beam, want.Get());
+		const u64 after = LeadBeamBaseMaterial(beam);
+		// ДОКАЗАТЕЛЬСТВО, А НЕ ЖУРНАЛ: m_hBaseMaterial — сетевое поле, а отрезки создаются
+		// заново на каждой перерисовке, поэтому ненулевой хендл здесь означает, что материал
+		// уехал клиенту. Нулевой после SetModel означает обратное: движковый SetModel наш путь
+		// не принял (он про модели), и перебирать материалы этой ручкой бессмысленно.
+		// Печатаем один раз на значение конвара, а не на отрезок (их до 384 за перерисовку).
+		static char lastLogged[256] = "";
+		if (V_stricmp(lastLogged, want.Get()) != 0)
+		{
+			V_strncpy(lastLogged, want.Get(), sizeof(lastLogged));
+			KZ_LOG_INFO(LogChannel::Replays, "[lead] beam_material path=%s handle_before=0x%llX handle_after=0x%llX\n", want.Get(),
+						(unsigned long long)before, (unsigned long long)after);
+		}
 	}
 
-	// Границы видимости отрезка (см. cyb_lead_beam_bounds). Зовётся ПОСЛЕ Teleport: телепорт
-	// пересчитывает surrounding-бокс по m_nSurroundType, и запись до него пропала бы.
-	void ApplyLeadBeamBounds(CBeam *beam, const Vector &start, const Vector &end)
+	// Подстройка сетевых полей вида (см. блок конваров cyb_lead_beam_*). Отдельно от
+	// ApplyLeadBeamExtras намеренно: там повторяется РЕЦЕПТ ПРОБЫ с фиксированными значениями,
+	// а здесь — живые ручки оператора, и смешивать доказанное с перебираемым нельзя.
+	struct LeadBeamTuning
 	{
-		const i32 mode = cyb_lead_beam_bounds.Get();
-		if (mode <= 0)
+		const char *className; // класс, ОБЪЯВИВШИЙ поле: схема ищет по нему, как SCHEMA_FIELD
+		const char *fieldName;
+		bool isFloat;
+		f32 floatValue;
+		i64 intValue;
+		int size;   // ширина записи по дампу схемы CS2
+		bool write; // false — конвар сказал «не трогать»
+	};
+
+	void ApplyLeadBeamTuning(CBeam *beam)
+	{
+		const f32 hdrScale = cyb_lead_beam_hdrscale.Get();
+		const f32 fadeLength = cyb_lead_beam_fadelength.Get();
+		const i32 beamFlags = cyb_lead_beam_flags.Get();
+		const i32 renderFx = cyb_lead_beam_renderfx.Get();
+		// clang-format off
+		const LeadBeamTuning tuning[] = {
+			{"CBeam",             "m_flHDRColorScale", true,  hdrScale,   0,              4, true},
+			{"CBeam",             "m_fFadeLength",     true,  fadeLength, 0,              4, fadeLength >= 0.0f},
+			{"CBeam",             "m_nBeamFlags",      false, 0.0f,       (i64)beamFlags, 4, true},
+			{"CBaseModelEntity",  "m_nRenderFX",       false, 0.0f,       (i64)renderFx,  1, renderFx >= 0 && renderFx <= 255},
+		};
+		// clang-format on
+		// Печать — на НАБОР значений, а не на отрезок: функция зовётся до 384 раз за
+		// перерисовку. Правка любого из конваров печатает набор заново, поэтому в логе всегда
+		// видно, с чем именно снят текущий круг проверок.
+		static bool everLogged = false;
+		static f32 lastHdr = 0.0f;
+		static f32 lastFade = 0.0f;
+		static i32 lastFlags = 0;
+		static i32 lastFx = 0;
+		const bool logNow = !everLogged || lastHdr != hdrScale || lastFade != fadeLength || lastFlags != beamFlags || lastFx != renderFx;
+		if (logNow)
 		{
-			return;
+			everLogged = true;
+			lastHdr = hdrScale;
+			lastFade = fadeLength;
+			lastFlags = beamFlags;
+			lastFx = renderFx;
 		}
-		CCollisionProperty *collision = beam->m_pCollision();
-		if (!collision)
+		// Офсеты кэшируются по индексу и ТОЛЬКО когда схема ответила: закэшировать ноль значило
+		// бы навсегда писать в голову объекта. Ноль здесь невозможен и как настоящий офсет —
+		// все четыре поля лежат далеко в хвосте класса.
+		static SchemaKey keys[KZ_ARRAYSIZE(tuning)] {};
+		for (u32 i = 0; i < KZ_ARRAYSIZE(tuning); i++)
 		{
-			static f64 lastWarn = -1.0e9;
-			if (LeadWarnDue(lastWarn))
+			if (!keys[i].offset)
 			{
-				KZ_LOG_WARN(LogChannel::Replays, "[lead] beam_bounds_skipped reason=no_collision_property mode=%i\n", mode);
+				keys[i] = schema::GetOffset(tuning[i].className, hash_32_fnv1a_const(tuning[i].className), tuning[i].fieldName,
+											hash_32_fnv1a_const(tuning[i].fieldName));
 			}
-			return;
+			if (!keys[i].offset)
+			{
+				if (logNow)
+				{
+					KZ_LOG_WARN(LogChannel::Replays, "[lead] beam_tuning name=%s resolved=0 note=field_not_in_schema\n", tuning[i].fieldName);
+				}
+				continue;
+			}
+			if (logNow)
+			{
+				// networked=0 означает «ручка бессмысленна»: отрезки создаются заново, поэтому
+				// сетевое поле уезжает клиенту само, а несетевое не уедет никогда и перебирать
+				// его — терять круг проверок. Ровно так сгорела ручка границ видимости.
+				KZ_LOG_INFO(LogChannel::Replays, "[lead] beam_tuning name=%s offset=0x%X networked=%i write=%i value=%.3f/%lli\n",
+							tuning[i].fieldName, keys[i].offset, keys[i].networked ? 1 : 0, tuning[i].write ? 1 : 0, tuning[i].floatValue,
+							(long long)tuning[i].intValue);
+			}
+			if (!tuning[i].write)
+			{
+				continue;
+			}
+			const uintptr_t addr = reinterpret_cast<uintptr_t>(beam) + keys[i].offset;
+			if (tuning[i].isFloat)
+			{
+				*reinterpret_cast<f32 *>(addr) = tuning[i].floatValue;
+			}
+			else if (tuning[i].size == 1)
+			{
+				*reinterpret_cast<u8 *>(addr) = (u8)tuning[i].intValue;
+			}
+			else
+			{
+				*reinterpret_cast<i32 *>(addr) = (i32)tuning[i].intValue;
+			}
 		}
-		// specified — ЛОКАЛЬНЫЙ бокс (относительно origin, то есть начала отрезка),
-		// surrounding — уже посчитанный МИРОВОЙ. Пишем оба: первый переживает пересчёт,
-		// второй действует до ближайшего пересчёта.
-		Vector localMins, localMaxs;
-		if (mode >= 2)
-		{
-			localMins = Vector(-KZ_LEAD_BEAM_BOUNDS_WORLD, -KZ_LEAD_BEAM_BOUNDS_WORLD, -KZ_LEAD_BEAM_BOUNDS_WORLD);
-			localMaxs = Vector(KZ_LEAD_BEAM_BOUNDS_WORLD, KZ_LEAD_BEAM_BOUNDS_WORLD, KZ_LEAD_BEAM_BOUNDS_WORLD);
-		}
-		else
-		{
-			const f32 pad = KZ_LEAD_BEAM_BOUNDS_PAD;
-			const Vector delta = end - start;
-			localMins = Vector((std::min)(0.0f, delta.x) - pad, (std::min)(0.0f, delta.y) - pad, (std::min)(0.0f, delta.z) - pad);
-			localMaxs = Vector((std::max)(0.0f, delta.x) + pad, (std::max)(0.0f, delta.y) + pad, (std::max)(0.0f, delta.z) + pad);
-		}
-		collision->m_nSurroundType((uint8)KZ_LEAD_BEAM_SURROUND_SPECIFIED);
-		collision->m_vecSpecifiedSurroundingMins(localMins);
-		collision->m_vecSpecifiedSurroundingMaxs(localMaxs);
-		collision->m_vecSurroundingMins(mode >= 2 ? localMins : Vector(start.x + localMins.x, start.y + localMins.y, start.z + localMins.z));
-		collision->m_vecSurroundingMaxs(mode >= 2 ? localMaxs : Vector(start.x + localMaxs.x, start.y + localMaxs.y, start.z + localMaxs.z));
 	}
 
 	// ПУТЬ ОТКАТА (cyb_lead_beam_entity 1): отрезок — штатная сущность-луч. Доказано живьём пробником
@@ -854,11 +959,11 @@ namespace
 		// Поле сетевое, но команда энтити на отрисовку луча у клиента не влияет, поэтому от
 		// доказанного ВИДА эта строка не уводит — она про то, кому луч уйдёт.
 		beam->m_iTeamNum(KZ_LEAD_SEGMENT_TEAM);
-		// Материал и границы видимости — в самом хвосте, оба под своими конварами и оба при
-		// дефолте не делают ничего. Порядок важен: SetModel и Teleport трогают те же границы,
-		// поэтому бокс пишется ПОСЛЕ них, последним.
+		// Материал и подстройка сетевых полей вида — в самом хвосте. Оба при дефолте оставляют
+		// прежний вид; ApplyLeadBeamTuning идёт ПОСЛЕ ApplyLeadBeamExtras намеренно, чтобы
+		// конвар побеждал значение рецепта там, где они спорят (m_flHDRColorScale, m_nBeamFlags).
 		ApplyLeadBeamMaterial(beam);
-		ApplyLeadBeamBounds(beam, start, end);
+		ApplyLeadBeamTuning(beam);
 		return handle;
 	}
 
