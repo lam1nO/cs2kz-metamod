@@ -51,6 +51,20 @@ static_function bool ContainsContext(const CSchemaCollection<ResponseContext_t> 
 	return false;
 }
 
+// Имена контекстов в лог: разбор отчёта «ключ не сбросился/пропал» упирается в то, КАКОЙ ключ
+// разошёлся, а счётчика для этого мало. Список ограничен по длине: контекстов на пешке бывают
+// десятки (angina_x — 22 фильтра), строка лога не резиновая.
+static_function void AppendContextName(char *out, int size, const ResponseContext_t &ctx)
+{
+	const int len = V_strlen(out);
+	// Место кончилось — счётчик в строке лога всё равно честный, обрезается только перечисление.
+	if (len + 1 >= size)
+	{
+		return;
+	}
+	V_snprintf(out + len, size - len, "%s%s:%s", len ? "," : "", ctx.m_iszName.String(), ctx.m_iszValue.String());
+}
+
 // Канонический вид «режим + стили» для сверки на выходе из prac. Строим через тот же
 // BuildStylesString, что и ключ SavedRuns, чтобы «те же стили» значило одно и то же во всём форке.
 static_function void SnapshotModeStyles(KZPlayer *player, char *modeOut, int modeSize, char *stylesOut, int stylesSize)
@@ -137,11 +151,13 @@ void KZPracService::RestoreMapContexts()
 	// сообщение игроку (иначе закрытые ворота выглядят как баг карты), и след в логе.
 	const int liveCount = contexts.Count();
 	i32 collected = 0, restored = 0;
+	char collectedNames[256] = {}, restoredNames[256] = {};
 	for (int i = 0; i < liveCount; i++)
 	{
 		if (!ContainsContext(this->entryContexts, *contexts.ElementUnchecked(i)))
 		{
 			collected++;
+			AppendContextName(collectedNames, sizeof(collectedNames), *contexts.ElementUnchecked(i));
 		}
 	}
 	FOR_EACH_VEC(this->entryContexts, i)
@@ -149,6 +165,7 @@ void KZPracService::RestoreMapContexts()
 		if (!ContainsContext(contexts, liveCount, this->entryContexts[i]))
 		{
 			restored++;
+			AppendContextName(restoredNames, sizeof(restoredNames), this->entryContexts[i]);
 		}
 	}
 	if (collected || restored)
@@ -169,8 +186,10 @@ void KZPracService::RestoreMapContexts()
 			*contexts.ElementUnchecked(i) = this->entryContexts[i];
 		}
 		this->player->languageService->PrintChat(true, false, "Prac - Map Keys Reset");
-		KZ_LOG_INFO(LogChannel::Timer, "[cyb] prac_map_contexts_restored steam_id=%llu collected=%d restored=%d\n",
-					this->player->GetSteamId64(false), collected, restored);
+		KZ_LOG_INFO(LogChannel::Timer,
+					"[cyb] prac_map_contexts_restored steam_id=%llu map=%s collected=%d restored=%d collected_names=%s restored_names=%s\n",
+					this->player->GetSteamId64(false), g_pKZUtils->GetCurrentMapName().Get(), collected, restored,
+					collectedNames[0] ? collectedNames : "-", restoredNames[0] ? restoredNames : "-");
 	}
 	this->entryContexts.RemoveAll();
 }
@@ -492,12 +511,12 @@ void KZPracService::ExitPrac()
 
 	this->player->noclipService->DisableNoclip();
 	this->player->noclipService->HandleNoclip();
-	// Ключи карты — к состоянию входа, в любом исходе ниже (свободный prac, возврат в ран, потеря
-	// рана из-за смены режима — DropFrozenRun повторит вызов, он идемпотентен).
-	this->RestoreMapContexts();
 
 	if (!this->frozen.active)
 	{
+		// Свободный prac: телепорта дальше нет, игрок остаётся ровно там же. Значит карта после
+		// нас ничего не допишет, и снапшот возвращаем прямо здесь.
+		this->RestoreMapContexts();
 		this->inPrac = false;
 		this->ClearPoints();
 		this->ResetPracTime();
@@ -543,6 +562,19 @@ void KZPracService::ExitPrac()
 	// Возврат со скоростью входа (ревизия 2): вошёл стоя — она нулевая и её всё равно съест
 	// пауза; вошёл на бегу или в полёте — это единственный способ вернуть то же состояние.
 	const bool still = this->frozen.enteredStill;
+	// Ключи карты — к состоянию входа, и ИМЕННО в этом порядке: сначала закрываем касания там,
+	// где игрок стоит сейчас, потом пишем снапшот, и только потом телепортируем.
+	// Телепорт сам по себе EndTouch не шлёт: список касаний пересчитывает следующий
+	// UpdateTriggerTouchList (kz_trigger.cpp), то есть выходы `OnEndTouch` триггеров, в которых
+	// игрок стоял в prac, приезжали СЛЕДУЮЩИМ тиком — уже поверх восстановленного набора и молча
+	// его перетирали. На kz_mjs_katharaxith это буквально ключи: касета — `OnEndTouch → !activator
+	// AddContext att_white:1` (ключ переживал бы prac), а стартовая зона — `OnEndTouch →
+	// !activator ClearContext` (сносило бы и честно взятые ключи, ворота обоих бхопов закрыты).
+	// EndTouchAll здесь — не искусственный выход: игрок в этот момент действительно покидает эти
+	// триггеры, просто на тик раньше. В ветках без телепорта (свободный prac, DropFrozenRun) его
+	// звать НЕЛЬЗЯ — игрок остаётся на месте, и карта получила бы ложный выход из триггера.
+	this->player->triggerService->EndTouchAll();
+	this->RestoreMapContexts();
 	this->player->Teleport(&this->frozen.origin, &this->frozen.angles, &this->frozen.velocity);
 	this->player->recordingService->OnResume();
 	// Пауза только если игрок стоял: ForcePause обнуляет скорость и ставит MOVETYPE_NONE, то
