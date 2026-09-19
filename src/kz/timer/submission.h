@@ -242,6 +242,9 @@ private:
 	// его дошлёт ретраер дискового outbox по write-ahead мете из OnReplayReady().
 	void TryUploadCentralReplay();
 
+	// Автор рана, если слот всё ещё за ним (гард переиспользования userID, см. .cpp).
+	KZPlayer *GetAuthorIfStillHere() const;
+
 	// Update caches after receiving API / DB responses.
 	void UpdateGlobalCache();
 	void UpdateLocalCache();

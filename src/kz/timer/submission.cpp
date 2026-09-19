@@ -702,10 +702,25 @@ void RunSubmission::TryUploadCentralReplay()
 // Cache updates
 // ---------------------------------------------------------------------------
 
+// Автор рана, если он ВСЁ ЕЩЁ на своём слоте. userID переиспользуется: пока летел ответ api
+// или запрос в БД, автор мог уйти, а слот занять другой игрок — и PB автора лёг бы в кэш
+// ЧУЖОМУ (в худе показывался бы его PB, CheckMissedTime слал бы по нему «упустил лучшее
+// время»). Тот же гард стоит в колбэках FetchPlatformPB и UpdateLocalPBCache.
+KZPlayer *RunSubmission::GetAuthorIfStillHere() const
+{
+	// pl, а не player: одноимённое поле RunSubmission::player (данные автора) иначе затенялось бы.
+	KZPlayer *pl = g_pKZPlayerManager->ToPlayer(this->userID);
+	if (!pl || pl->GetSteamId64() != this->player.steamid64)
+	{
+		return nullptr;
+	}
+	return pl;
+}
+
 void RunSubmission::UpdateGlobalCache()
 {
 	KZGlobalService::UpdateRecordCache();
-	KZPlayer *player = g_pKZPlayerManager->ToPlayer(this->userID);
+	KZPlayer *player = this->GetAuthorIfStillHere();
 	if (player && this->globalResponse.received)
 	{
 		const KZCourseDescriptor *course = KZ::course::GetCourse(this->course.name.c_str());
@@ -728,7 +743,7 @@ void RunSubmission::UpdateGlobalCache()
 
 void RunSubmission::UpdateLocalCache()
 {
-	KZPlayer *player = g_pKZPlayerManager->ToPlayer(this->userID);
+	KZPlayer *player = this->GetAuthorIfStillHere();
 	if (player)
 	{
 		player->timerService->UpdateLocalPBCache();

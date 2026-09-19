@@ -1020,6 +1020,15 @@ SCMD(kz_pro, SCFL_TIMER | SCFL_PREFERENCE | SCFL_HELP)
 
 void KZTimerService::Reset()
 {
+	// Reset зовётся на дисконнекте (PlayerManager::OnClientDisconnect), то есть ровно там, где
+	// слот переходит к следующему игроку: KZPlayer и его сервисы переиспользуются, а PB-кэш
+	// пережил бы смену владельца. Чистит его иначе ТОЛЬКО смена карты (ClearRecordCache), и до
+	// неё новый жилец слота видел в худе чужой PB, а CheckMissedTime слал ему персональное
+	// «упустил лучшее время» по чужому времени (жалоба 19.09, srv-7 kz_kukkojapallokidutus,
+	// слот 8). Своими строками из БД новичок это не перетирает: UpdateLocalPBCache только
+	// дописывает, а у него на карте рекордов может не быть вовсе. Платформенный кэш от того же
+	// сценария уже закрыт в FetchPlatformPB(resetCache=true) — здесь закрываются остальные два.
+	this->ClearPBCache();
 	this->timerRunning = {};
 	this->currentTime = {};
 	this->currentCourseGUID = 0;
@@ -2460,11 +2469,14 @@ CUtlString KZTimerService::GetCurrentRunMetadata()
 void KZTimerService::UpdateLocalPBCache()
 {
 	CPlayerUserId uid = player->GetClient()->GetUserID();
+	const u64 steamID64 = player->GetSteamId64();
 
-	auto onQuerySuccess = [uid](std::vector<ISQLQuery *> queries)
+	auto onQuerySuccess = [uid, steamID64](std::vector<ISQLQuery *> queries)
 	{
 		KZPlayer *pl = g_pKZPlayerManager->ToPlayer(uid);
-		if (!pl)
+		// Гард переиспользования userID, как в колбэке FetchPlatformPB: пока летел запрос,
+		// игрок мог уйти, а слот занять другой — его PB-кэш набился бы чужими рекордами.
+		if (!pl || pl->GetSteamId64() != steamID64)
 		{
 			return;
 		}
