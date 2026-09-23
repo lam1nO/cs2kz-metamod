@@ -109,16 +109,23 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 {
 	setlocale(LC_ALL, "en_US.utf8");
 	PLUGIN_SAVEVARS();
+	// Строки стадий загрузки — в КОНСОЛЬ (Msg), а не в наш лог-файл: при падении плагина
+	// файл в overlay инстанса пересоздаётся откатом профиля, а консоль агент сохраняет в
+	// persist/crash. 23.09.2026 их отсутствие стоило двух кругов сборки: дамп обрывался на
+	// libv8system, и точку падения пришлось доставать из ядра.
+	Msg("[CS2KZ] load: enter\n");
 	modules::Initialize();
 	if (!interfaces::Initialize(ismm, error, maxlen))
 	{
 		return false;
 	}
 
+	Msg("[CS2KZ] load: interfaces ok\n");
 	KZOptionService::InitOptions();
 	InitKZLogging();
 	kz_log_to_file.Set((bool)KZOptionService::GetOptionInt("logToFile", true));
 
+	Msg("[CS2KZ] load: logging ok\n");
 	if (!utils::Initialize(ismm, error, maxlen))
 	{
 		// Поднят только логгер — снимаем его, больше сворачивать нечего.
@@ -126,6 +133,7 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 		return false;
 	}
 
+	Msg("[CS2KZ] load: utils ok\n");
 	ConVar_Register();
 	// Проверка ДО детуров и до единого Init(): она read-only (обходит CConVarRef на
 	// ДВИЖКОВЫЕ конвары, валидные с utils::Initialize) и ни от чего в Load() не зависит,
@@ -138,8 +146,10 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 		return false;
 	}
 
+	Msg("[CS2KZ] load: cvars ok\n");
 	hooks::Initialize();
 	ix::initNetSystem();
+	Msg("[CS2KZ] load: hooks ok, ставим детуры движения\n");
 	if (!movement::InitDetours())
 	{
 		snprintf(error, maxlen, "Failed to install one or more movement detours.");
@@ -185,6 +195,7 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 	CybAwrBackfill::Init();
 	KZRecordingService::Init();
 
+	Msg("[CS2KZ] load: детуры встали\n");
 	ismm->AddListener(this, this);
 	KZ::mapapi::Init();
 	KZ::mode::InitModeManager();

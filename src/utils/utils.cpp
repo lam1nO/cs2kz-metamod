@@ -694,23 +694,34 @@ bool utils::IsServerSecure()
 	return g_steamAPI.SteamGameServer()->BSecure();
 }
 
+// Читаем steam.inf обычным stdio, а НЕ через g_pFullFileSystem. Причина — падение на
+// билде CS2 25470087 (23.09.2026): связка Open/ReadLine движкового IFileSystem уводила в
+// SIGSEGV внутри tier0 на разборе CUtlString, то есть интерфейс разъехался с тем, что
+// описан в hl2sdk. Поймано ядром: KZPlugin::Load → utils::Initialize → UpdateServerVersion.
+// Баг прятался за первой поломкой: до этой строки плагин не доживал, отваливаясь раньше на
+// ненайденных сигнатурах. Версия сервера нужна только в заголовке реплея
+// (KZRecordingService), поэтому отказ чтения — не повод не грузиться: остаётся 0.
 void utils::UpdateServerVersion()
 {
-	FileHandle_t fp = g_pFullFileSystem->Open("steam.inf", "r");
-	if (fp)
+	char path[1024];
+	V_snprintf(path, sizeof(path), "%s/csgo/steam.inf", Plat_GetGameDirectory());
+	FILE *fp = fopen(path, "r");
+	if (!fp)
 	{
-		CUtlString line = g_pFullFileSystem->ReadLine(fp);
-		while (!line.IsEmpty())
-		{
-			if (line.MatchesPattern(CUtlString(SERVER_VERSION_KEY) + "*"))
-			{
-				serverVersion = atoi(line.Get() + strlen(SERVER_VERSION_KEY));
-				break;
-			}
-			line = g_pFullFileSystem->ReadLine(fp);
-		}
-		g_pFullFileSystem->Close(fp);
+		KZ_LOG_WARN(LogChannel::General, "steam.inf not found at %s: server version stays 0\n", path);
+		return;
 	}
+
+	char line[256];
+	while (fgets(line, sizeof(line), fp))
+	{
+		if (V_strncmp(line, SERVER_VERSION_KEY, strlen(SERVER_VERSION_KEY)) == 0)
+		{
+			serverVersion = atoi(line + strlen(SERVER_VERSION_KEY));
+			break;
+		}
+	}
+	fclose(fp);
 }
 
 u32 utils::GetServerVersion()
