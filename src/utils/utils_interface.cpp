@@ -375,6 +375,15 @@ u32 KZUtils::GetPlayerCount()
 
 void KZUtils::AddTriangleOverlay(Vector const &p1, Vector const &p2, Vector const &p3, u8 r, u8 g, u8 b, u8 a, bool noDepthTest, f64 flDuration)
 {
+	// Дев-оверлеи (отрисовка клипов/триггеров) идут в движок по ИНДЕКСАМ vtable из gamedata,
+	// а апдейт CS2 25470087 их сдвинул: вызов уходил в чужой слот и ронял сервер на первом
+	// же кадре физики после загрузки карты (ClearOverlays из OnPhysicsGameSystemFrameBoundary,
+	// поймано ядром 23.09.2026). Признак пригодности берём тот же, что у остальной отрисовки —
+	// найденная сигнатура DebugDrawMesh: нет её, значит рисовать нечем и чистить нечего.
+	if (!this->DebugDrawMesh)
+	{
+		return;
+	}
 	void *debugoverlay = CALL_VIRTUAL(void *, g_pGameConfig->GetOffset("GetDebugOverlay"), interfaces::pServer);
 	if (debugoverlay)
 	{
@@ -384,6 +393,15 @@ void KZUtils::AddTriangleOverlay(Vector const &p1, Vector const &p2, Vector cons
 
 void KZUtils::ClearOverlays()
 {
+	// Дев-оверлеи (отрисовка клипов/триггеров) идут в движок по ИНДЕКСАМ vtable из gamedata,
+	// а апдейт CS2 25470087 их сдвинул: вызов уходил в чужой слот и ронял сервер на первом
+	// же кадре физики после загрузки карты (ClearOverlays из OnPhysicsGameSystemFrameBoundary,
+	// поймано ядром 23.09.2026). Признак пригодности берём тот же, что у остальной отрисовки —
+	// найденная сигнатура DebugDrawMesh: нет её, значит рисовать нечем и чистить нечего.
+	if (!this->DebugDrawMesh)
+	{
+		return;
+	}
 	void *debugoverlay = CALL_VIRTUAL(void *, g_pGameConfig->GetOffset("GetDebugOverlay"), interfaces::pServer);
 	if (debugoverlay)
 	{
