@@ -349,7 +349,8 @@ void KZ::quiet::OnPostEvent(INetworkMessageInternal *pEvent, const CNetMessage *
 			break;
 		}
 		// Used by kz_misc to block valve's player say messages.
-		case CS_UM_SayText:
+		// CS_UM_SayText снят: в SDK от 17.09 этой константы больше нет (а CS_UM_SayText2 был
+		// синонимом UM_SayText2 — компилятор ловил дубль case). Апстрим сделал так же.
 		case UM_SayText:
 		{
 			if (!KZOptionService::GetOptionInt("overridePlayerChat", true))
@@ -367,7 +368,6 @@ void KZ::quiet::OnPostEvent(INetworkMessageInternal *pEvent, const CNetMessage *
 			}
 			return;
 		}
-		case CS_UM_SayText2:
 		case UM_SayText2:
 		{
 			auto msg = const_cast<CNetMessage *>(pData)->ToPB<CUserMessageSayText2>();
