@@ -442,6 +442,19 @@ const char *PLUGIN_REVISION_COUNT = \"{revision_count}\";
 
     SdkHelpers.configureCxx(context, binary, sdk)
 
+    # Список статических библиотек SDK приходит из hl2sdk-manifests (субмодуль metamod).
+    # Наш metamod держится на июльском пине, а hl2sdk поднят до сентябрьского, и в новом SDK
+    # часть библиотек просто исчезла (tier1.a — её исходники теперь собираются напрямую).
+    # Линковщик падает на несуществующем файле, поэтому отсеиваем такие записи здесь.
+    # Правильное решение — поднять metamod, но он требует khook вместо SourceHook, а наш код
+    # на SourceHook завязан: это отдельная задача, не для аварийной починки.
+    missing_libs = [f for f in cxx.postlink
+                    if isinstance(f, str) and f.endswith('.a') and not os.path.exists(f)]
+    if missing_libs:
+        for f in missing_libs:
+            print('AMBuildScript: пропускаю отсутствующую библиотеку SDK: {}'.format(f))
+        cxx.postlink = [f for f in cxx.postlink if f not in missing_libs]
+
     cxx.linkflags += additionalLibs(context, binary, sdk)
     cxx.defines += additionalDefines(context, binary, sdk)
     cxx.cxxincludes += additionalIncludes(context, binary, sdk)
