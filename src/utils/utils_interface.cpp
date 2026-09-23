@@ -132,11 +132,17 @@ CUtlVector<CServerSideClient *> *KZUtils::GetClientList()
 	// её видимости в этом TU.
 	if (!list || list->Count() < 0 || list->Count() > 64)
 	{
-		static_persist bool warned = false;
-		if (!warned)
+		// Предупреждаем ТОЛЬКО когда игровой сервер уже поднят. На загрузке плагина объект
+		// ещё не инициализирован, и счётчик там мусорный при ЛЮБОМ значении офсета —
+		// проверено живьём на 584 и на 600 (23.09.2026). Ранняя жалоба уводила в ложный след.
+		if (GameEntitySystem())
 		{
-			warned = true;
-			KZ_LOG_WARN(LogChannel::General, "ClientOffset looks wrong: client list rejected, re-snap the offset\n");
+			static_persist bool warned = false;
+			if (!warned)
+			{
+				warned = true;
+				KZ_LOG_WARN(LogChannel::General, "ClientOffset looks wrong: client list rejected, re-snap the offset\n");
+			}
 		}
 		return nullptr;
 	}

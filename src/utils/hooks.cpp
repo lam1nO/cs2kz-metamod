@@ -755,6 +755,10 @@ static_function void Hook_StartupServer(const GameSessionConfiguration_t &config
 	// Смена карты доехала. Закрывает две вещи: «сервер завис на смене карты»
 	// (строки нет — значит загрузка не завершилась) и «на какой версии это было».
 	KZ_LOG_INFO(LogChannel::General, "[cyb] map_loaded map=%s cs2kz=%s\n", g_pKZUtils->GetCurrentMapName().Get(), PLUGIN_FULL_VERSION);
+	// Маркер в КОНСОЛЬ (переживает падение, в отличие от лог-файла в overlay): после апдейта
+	// CS2 25470087 сервер падал уже ПОСЛЕ загрузки карты, и по стадиям загрузки это было не
+	// локализовать. Парный маркер первого игрового тика — в Detour_PhysicsSimulate.
+	Msg("[CS2KZ] run: map loaded\n");
 	KZ::zones::OnMapLoaded();
 	RETURN_META(MRES_IGNORED);
 }

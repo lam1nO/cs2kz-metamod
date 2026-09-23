@@ -98,6 +98,14 @@ MovementPlayerManager *playerManager = static_cast<MovementPlayerManager *>(g_pP
 void FASTCALL movement::Detour_PhysicsSimulate(CCSPlayerController *controller)
 {
 	VPROF_BUDGET(__func__, "CS2KZ");
+	// Первый игровой тик — в консоль, один раз. Отделяет «упали на загрузке карты» от
+	// «упали в игровом такте» без ядра (23.09.2026, билд 25470087).
+	static bool firstTickLogged = false;
+	if (!firstTickLogged)
+	{
+		firstTickLogged = true;
+		Msg("[CS2KZ] run: first physics tick\n");
+	}
 	if (controller->m_bIsHLTV)
 	{
 		return;
