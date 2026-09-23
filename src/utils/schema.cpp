@@ -15,6 +15,16 @@ using SchemaTableMap_t = std::map<uint32_t, SchemaKeyValueMap_t>;
 
 static constexpr uint32_t g_ChainKey = hash_32_fnv1a_const("__m_pChainEntity");
 
+// Грубая проверка «указатель похож на указатель»: отсекает мусор, который приезжает из
+// структур движка, когда их раскладка в hl2sdk разъехалась с билдом игры (малые числа,
+// смещения, обрывки float). Не гарантирует читаемость — гарантирует, что мы не разыменуем
+// очевидную ерунду. Пользовательское адресное пространство x86-64 — ниже 0x0000800000000000.
+static inline bool plausiblePtr(const void *p)
+{
+	const uintptr_t v = (uintptr_t)p;
+	return v > 0x10000 && v < 0x0000800000000000ULL;
+}
+
 // Признак «поле сетевое» берём из МЕТАДАННЫХ СХЕМЫ (MNetworkEnable), а не из базы сетевого
 // сериализатора. Причина — инцидент 23.09.2026 (билд CS2 25470087): прежний путь ходил в
 // CNetworkSerializerCodeGenDatabase::m_ClassInfos, чья раскладка в hl2sdk с этим билдом
@@ -105,12 +115,36 @@ static void InitSchemaKeyValueMap(SchemaClassInfoData_t *pClassInfo, SchemaKeyVa
 		keyValueMap.insert(keyValuePair);
 	}
 
-	short dataNumFields = pClassInfo->m_pDataDescMap ? pClassInfo->m_pDataDescMap->dataNumFields : 0;
+	// Датамапа (старый datadesc) — ДОПОЛНЕНИЕ к полям схемы: добавляет то, чего в схеме нет.
+	// Её указатель берётся по смещению внутри SchemaClassInfoData_t, и если раскладка этой
+	// структуры в hl2sdk разъехалась с билдом игры, сюда приезжает не-NULL мусор: обход читал
+	// имя поля по случайному адресу и ронял сервер после загрузки карты (23.09.2026, билд
+	// 25470087; ядро: #0 schema::GetOffset, шаг 112 = sizeof(typedescription_t), чтение
+	// fieldName по +8). Поэтому — проверка правдоподобия, и при отказе датамапа пропускается
+	// целиком: поля схемы уже разобраны выше, теряется только дополнение.
+	const datamap_t *pDataMap = pClassInfo->m_pDataDescMap;
+	short dataNumFields = 0;
+	if (plausiblePtr(pDataMap))
+	{
+		dataNumFields = pDataMap->dataNumFields;
+		if (dataNumFields < 0 || dataNumFields > 4096 || !plausiblePtr(pDataMap->dataDesc))
+		{
+			static bool warnedDataMap = false;
+			if (!warnedDataMap)
+			{
+				warnedDataMap = true;
+				Warning("InitSchemaKeyValueMap(): датамапа '%s' неправдоподобна (полей=%d) — "
+						"пропускаем; раскладка datamap в hl2sdk не совпадает с билдом игры\n",
+						pClassInfo->m_pszName, (int)dataNumFields);
+			}
+			dataNumFields = 0;
+		}
+	}
 	for (int i = 0; i < dataNumFields; ++i)
 	{
-		auto &field = pClassInfo->m_pDataDescMap->dataDesc[i];
+		auto &field = pDataMap->dataDesc[i];
 
-		if (!field.fieldName || !field.fieldName[0] || field.fieldOffset < 0)
+		if (!plausiblePtr(field.fieldName) || !field.fieldName[0] || field.fieldOffset < 0)
 		{
 			continue;
 		}
