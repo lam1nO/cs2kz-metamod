@@ -68,7 +68,9 @@ i32 FASTCALL movement::Detour_ProcessUsercmds(CCSPlayerController *controller, P
 	player->OnProcessUsercmds(cmds, numcmds);
 	auto retValue = ProcessUsercmds(controller, cmds, numcmds, paused, margin);
 	player->OnProcessUsercmdsPost(cmds, numcmds);
-	VPROF_EXIT_SCOPE();
+	// Явный выход из скоупа снят: он и так был лишним — VPROF_BUDGET выше это RAII, скоуп
+	// закрывался дважды. Билд CS2 25470087 убрал CVProfile::ExitScope из tier0, и лишний
+	// вызов стал неразрешимым символом, из-за которого metamod не грузил плагин целиком.
 	return retValue;
 }
 
