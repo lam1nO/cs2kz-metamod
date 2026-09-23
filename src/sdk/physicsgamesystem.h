@@ -372,5 +372,5 @@ public:
 	};
 
 	uint8_t unk[0x78];
-	CUtlMap<uint, PhysicsSpawnGroups_t> m_PhysicsSpawnGroups;
+	CUtlOrderedMap<uint, PhysicsSpawnGroups_t, CDefLess<uint>, unsigned short> m_PhysicsSpawnGroups;
 };
