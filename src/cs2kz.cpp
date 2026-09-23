@@ -82,7 +82,7 @@ static void AcquireMenusInterface()
 
 PLUGIN_EXPOSE(KZPlugin, g_KZPlugin);
 
-// Свернуть то, что успели поднять, ПЕРЕД отказом из Load(). MM:S на Load() == false не
+// Свернуть детуры, конвары и netsystem ПЕРЕД отказом из Load(). MM:S на Load() == false не
 // зовёт Unload(), а .so закрывает: оставленный трамплин увёл бы первый же тик физики в
 // выгруженную память, а запись в таблице конваров движка осталась бы висячей — по ней
 // пройдёт UnlockConVars следующего плагина. SourceHook-хуки (hooks::Initialize) сюда не
@@ -114,6 +114,16 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 	}
 
 	ConVar_Register();
+	// Проверка ДО детуров и до единого Init(): она read-only (обходит CConVarRef на
+	// ДВИЖКОВЫЕ конвары, валидные с utils::Initialize) и ни от чего в Load() не зависит,
+	// а её отказ ниже по функции оставлял бы после себя и трамплины, и рабочий поток
+	// AsyncFileIO в закрываемом .so. Здесь же сворачивать нечего, кроме конваров.
+	if (!KZ::mode::CheckModeCvars())
+	{
+		ConVar_Unregister();
+		return false;
+	}
+
 	hooks::Initialize();
 	ix::initNetSystem();
 	if (!movement::InitDetours())
@@ -160,13 +170,6 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 	// команда kz_awr_backfill работает и с выключенным автоподбором.
 	CybAwrBackfill::Init();
 	KZRecordingService::Init();
-	if (!KZ::mode::CheckModeCvars())
-	{
-		// Сюда доходим с УЖЕ установленными детурами движения — без уборки отказ загрузки
-		// оставил бы трамплины в выгруженном .so (см. AbortLoadCleanup).
-		AbortLoadCleanup();
-		return false;
-	}
 
 	ismm->AddListener(this, this);
 	KZ::mapapi::Init();
