@@ -307,6 +307,9 @@ void hooks::Initialize()
 		SH_STATIC(Hook_OnCreateLoadingSpawnGroupHook), 
 		false
 	);
+	// ДИАГНОСТИКА (23.09.2026): PlayerRunCommand/FinishMove тоже вешаются по номеру в
+	// vtable из gamedata — выключаем вместе с хуками сущностей.
+#if 0
 	CCSPlayer_MovementServices *moveServicesVtbl = (CCSPlayer_MovementServices *)modules::server->FindVirtualTable("CCSPlayer_MovementServices");
 	playerRunCommandHook = SH_ADD_MANUALDVPHOOK(
 	 	PlayerRunCommand, 
@@ -321,6 +324,7 @@ void hooks::Initialize()
 		SH_STATIC(Hook_OnFinishMove),
 		false
 	);
+#endif
 	// clang-format on
 }
 
@@ -378,6 +382,17 @@ void hooks::Cleanup()
 // Entity hooks
 static_function void AddEntityHooks(CBaseEntity *entity)
 {
+	// ДИАГНОСТИКА (23.09.2026): ручные вирт-хуки по номерам vtable не вешаются.
+	// Проверяем гипотезу, что обновление сдвинуло индексы StartTouch/Touch/EndTouch/
+	// Teleport/ChangeTeam и мы перехватываем чужую виртуалку с другой сигнатурой.
+	static bool diagLogged = false;
+	if (!diagLogged)
+	{
+		diagLogged = true;
+		Msg("[CS2KZ] ДИАГНОСТИКА: хуки сущностей отключены\n");
+	}
+	return;
+
 	if (!V_stricmp(entity->GetClassname(), "cs_player_controller") && !changeTeamHook)
 	{
 		changeTeamHook = SH_ADD_MANUALVPHOOK(ChangeTeam, entity, SH_STATIC(Hook_OnChangeTeamPost), true);
