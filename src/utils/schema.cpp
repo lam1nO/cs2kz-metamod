@@ -16,17 +16,27 @@ using SchemaTableMap_t = std::map<uint32_t, SchemaKeyValueMap_t>;
 static constexpr uint32_t g_ChainKey = hash_32_fnv1a_const("__m_pChainEntity");
 
 
-// Признак «поле сетевое» берём из МЕТАДАННЫХ СХЕМЫ (MNetworkEnable), а не из базы сетевого
-// сериализатора. Причина — инцидент 23.09.2026 (билд CS2 25470087): прежний путь ходил в
-// CNetworkSerializerCodeGenDatabase::m_ClassInfos, чья раскладка в hl2sdk с этим билдом
-// разъехалась, и обход массива читал имя класса по случайному адресу → SIGSEGV уже после
-// загрузки карты (ядро: #0 schema::GetOffset, шаг 112 = sizeof(CNetworkSerializerClassInfo)).
-// Метаданные лежат в самой записи поля, которую мы и так разбираем, и от раскладки сетевого
-// сериализатора не зависят вовсе — то есть этот класс отказов закрыт, а не обойдён.
+// Признак «поле сетевое» — из базы сетевого сериализатора, как у апстрима.
 //
-// MNetworkEnable — штатная пометка networked-полей в схеме CS2; ею же пользуются другие
-// плагины (CounterStrikeSharp). Гейт по GameEntitySystem() сохранён: до её появления схема
-// отдаёт неполные данные, и кэшировать результат нельзя (инцидент cyb.151 — ноуклип).
+// ИСТОРИЯ, чтобы это не сломали снова (23.09.2026, билд CS2 25470087):
+// утром этот обход падал (SIGSEGV в schema::GetOffset уже после загрузки карты), и я
+// заменил его на чтение метаданных схемы — искал в поле пометку "MNetworkEnable".
+// Замена компилировалась, не падала и была НЕВЕРНОЙ: она возвращала false для ВСЕХ полей
+// подряд. Проверено живьём через kz_beam_probe — 0 сетевых из 154, включая заведомо
+// сетевые m_vecEndPos/m_hEndEntity/m_nBeamType.
+//
+// Цена ошибки: раз поле не считается сетевым, запись в него не помечает состояние
+// изменившимся, и клиент об изменении не узнаёт. Наружу это вылезло как «в ноклипе камера
+// проваливается сквозь стены и дрожит» (клиент не видит смены movetype и предсказывает
+// ходьбу) и как пустой ранговый клан-тег в таблице (m_szClan ставится, но не доезжает).
+//
+// Падал же обход не сам по себе: раскладка CEntityClass в hl2sdk разъехалась с этим билдом
+// CS2, и чтение шло по случайному адресу. Апстрим hl2sdk починил её в aeaa10b6 («Update
+// datamap_t, typedescription_t, CEntityClass…»), и мы этот SDK уже взяли. То есть лечить
+// надо было причину, а не убирать симптом.
+//
+// Гейт по GameEntitySystem() сохранён: до её появления схема отдаёт неполные данные, и
+// кэшировать результат нельзя — это отдельный инцидент cyb.151, тоже про ноклип.
 static bool IsFieldNetworked(const char *cppName, SchemaClassFieldData_t &field)
 {
 	if (!GameEntitySystem())
@@ -34,20 +44,27 @@ static bool IsFieldNetworked(const char *cppName, SchemaClassFieldData_t &field)
 		return false;
 	}
 
-	const int count = field.m_nStaticMetadataCount;
-	SchemaMetadataEntryData_t *pMeta = field.m_pStaticMetadata;
-	if (count <= 0 || count > 256 || !pMeta)
+	// Just use a random class to get access to the full database, as some schema classes don't have entity representations
+	CEntityClass *pBaseClass = GameEntitySystem()->FindClassByName("CBaseEntity");
+	if (!pBaseClass || !pBaseClass->m_NetworkSerializerInfo)
+	{
+		return false;
+	}
+	CNetworkSerializerCodeGenDatabase *pDatabase = pBaseClass->m_NetworkSerializerInfo->m_pDatabase;
+	if (!pDatabase)
+	{
+		return false;
+	}
+	int index = pDatabase->m_ClassInfos.Find(cppName);
+
+	if (index == pDatabase->m_ClassInfos.InvalidIndex())
 	{
 		return false;
 	}
 
-	for (int i = 0; i < count; ++i)
+	if (pDatabase->m_ClassInfos[index]->FindField(field.m_pszName))
 	{
-		const char *pszName = pMeta[i].m_pszName;
-		if (pszName && V_strcmp(pszName, "MNetworkEnable") == 0)
-		{
-			return true;
-		}
+		return true;
 	}
 
 	return false;
