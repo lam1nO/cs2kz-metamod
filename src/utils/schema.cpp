@@ -15,6 +15,17 @@ using SchemaTableMap_t = std::map<uint32_t, SchemaKeyValueMap_t>;
 
 static constexpr uint32_t g_ChainKey = hash_32_fnv1a_const("__m_pChainEntity");
 
+// Признак «поле сетевое» берём из МЕТАДАННЫХ СХЕМЫ (MNetworkEnable), а не из базы сетевого
+// сериализатора. Причина — инцидент 23.09.2026 (билд CS2 25470087): прежний путь ходил в
+// CNetworkSerializerCodeGenDatabase::m_ClassInfos, чья раскладка в hl2sdk с этим билдом
+// разъехалась, и обход массива читал имя класса по случайному адресу → SIGSEGV уже после
+// загрузки карты (ядро: #0 schema::GetOffset, шаг 112 = sizeof(CNetworkSerializerClassInfo)).
+// Метаданные лежат в самой записи поля, которую мы и так разбираем, и от раскладки сетевого
+// сериализатора не зависят вовсе — то есть этот класс отказов закрыт, а не обойдён.
+//
+// MNetworkEnable — штатная пометка networked-полей в схеме CS2; ею же пользуются другие
+// плагины (CounterStrikeSharp). Гейт по GameEntitySystem() сохранён: до её появления схема
+// отдаёт неполные данные, и кэшировать результат нельзя (инцидент cyb.151 — ноуклип).
 static bool IsFieldNetworked(const char *cppName, SchemaClassFieldData_t &field)
 {
 	if (!GameEntitySystem())
@@ -22,18 +33,20 @@ static bool IsFieldNetworked(const char *cppName, SchemaClassFieldData_t &field)
 		return false;
 	}
 
-	// Just use a random class to get access to the full database, as some schema classes don't have entity representations
-	CNetworkSerializerCodeGenDatabase *pDatabase = GameEntitySystem()->FindClassByName("CBaseEntity")->m_NetworkSerializerInfo->m_pDatabase;
-	int index = pDatabase->m_ClassInfos.Find(cppName);
-
-	if (index == pDatabase->m_ClassInfos.InvalidIndex())
+	const int count = field.m_nStaticMetadataCount;
+	SchemaMetadataEntryData_t *pMeta = field.m_pStaticMetadata;
+	if (count <= 0 || count > 256 || !pMeta)
 	{
 		return false;
 	}
 
-	if (pDatabase->m_ClassInfos[index]->FindField(field.m_pszName))
+	for (int i = 0; i < count; ++i)
 	{
-		return true;
+		const char *pszName = pMeta[i].m_pszName;
+		if (pszName && V_strcmp(pszName, "MNetworkEnable") == 0)
+		{
+			return true;
+		}
 	}
 
 	return false;
