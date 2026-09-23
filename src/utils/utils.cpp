@@ -73,7 +73,14 @@ bool utils::Initialize(ISmmAPI *ismm, char *error, size_t maxlen)
 	RESOLVE_SIG(g_pGameConfig, "CreateEntityByName", CreateEntityByName_t, CreateEntityByName, sigResolved);
 	RESOLVE_SIG(g_pGameConfig, "DispatchSpawn", DispatchSpawn_t, DispatchSpawn, sigResolved);
 	RESOLVE_SIG(g_pGameConfig, "RemoveEntity", RemoveEntity_t, RemoveEntity, sigResolved);
-	RESOLVE_SIG(g_pGameConfig, "DebugDrawMesh", DebugDrawMesh_t, DebugDrawMesh, sigResolved);
+	// DebugDrawMesh — НЕобязательная: она рисует player-clip/триггеры по dev-команде и
+	// на игру не влияет, а обязательной она валила загрузку плагина целиком (23.09.2026,
+	// билд CS2 25470087). Вызовы гейтятся проверкой на NULL в kz_misc.cpp.
+	DebugDrawMesh_t *DebugDrawMesh = (DebugDrawMesh_t *)g_pGameConfig->ResolveSignature("DebugDrawMesh");
+	if (!DebugDrawMesh)
+	{
+		KZ_LOG_WARN(LogChannel::General, "DebugDrawMesh не найдена: отрисовка коллизий по dev-командам выключена\n");
+	}
 	RESOLVE_SIG(g_pGameConfig, "CreateBot", CreateBot_t, CreateBot, sigResolved);
 	RESOLVE_SIG(g_pGameConfig, "SetOrAddAttributeValueByName", SetOrAddAttributeValueByName_t, SetOrAddAttributeValueByName, sigResolved);
 	RESOLVE_SIG(g_pGameConfig, "SetModel", SetModel_t, SetModel, sigResolved);

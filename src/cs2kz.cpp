@@ -103,7 +103,12 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 	ConVar_Register();
 	hooks::Initialize();
 	ix::initNetSystem();
-	movement::InitDetours();
+	if (!movement::InitDetours())
+	{
+		snprintf(error, maxlen, "Failed to install one or more movement detours.");
+		KZ_LOG_WARN(LogChannel::General, "%s\n", error);
+		return false;
+	}
 	KZCheckpointService::Init();
 	KZPracService::Init();
 	KZTimerService::Init();

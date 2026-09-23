@@ -110,4 +110,15 @@ void CDetour<T>::FreeDetour()
 	name.CreateDetour(config); \
 	name.EnableDetour();
 
+// Тот же INIT_DETOUR, но провал гасит флаг вызывающего. Нужен там, где НЕустановленный
+// детур меняет ПОВЕДЕНИЕ, а не выключает фичу: 23.09.2026 апдейт CS2 25470087 сломал
+// часть сигнатур движения, и без этого плагин загрузился бы с наполовину ванильной
+// физикой, продолжая писать раны в базу. Честный отказ загрузки лучше тихой лжи.
+#define INIT_DETOUR_REQUIRED(config, name, ok) \
+	INIT_DETOUR(config, name); \
+	if (!name.GetFunc()) \
+	{ \
+		ok = false; \
+	}
+
 void FlushAllDetours();

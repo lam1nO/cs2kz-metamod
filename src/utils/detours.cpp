@@ -23,6 +23,10 @@ DECLARE_MOVEMENT_DETOUR(SetupMove);
 DECLARE_MOVEMENT_DETOUR(ProcessMovement);
 DECLARE_MOVEMENT_DETOUR(PlayerMove);
 DECLARE_MOVEMENT_DETOUR(CheckParameters);
+// CanMove и MoveInit объявлены, но НЕ устанавливаются (см. movement::InitDetours):
+// их хуки пустые во всех режимах и стилях. Объявления и тела детуров оставлены
+// намеренно — вернуть достаточно двух строк INIT_DETOUR_REQUIRED и записей в gamedata,
+// а снос virtual-методов поменял бы vtable интерфейсов режимов/стилей (отдельные .so).
 DECLARE_MOVEMENT_DETOUR(CanMove);
 DECLARE_MOVEMENT_DETOUR(FullWalkMove);
 DECLARE_MOVEMENT_DETOUR(MoveInit);

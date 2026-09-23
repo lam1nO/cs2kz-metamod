@@ -41,7 +41,8 @@ extern CUtlVector<TraceHistory> traceHistory;
 
 namespace movement
 {
-	void InitDetours();
+	// false = хотя бы один обязательный детур не встал (сигнатура не сошлась с билдом)
+	bool InitDetours();
 
 	void FASTCALL Detour_PhysicsSimulate(CCSPlayerController *);
 	void FASTCALL Detour_SetupMove(CCSPlayer_MovementServices *, PlayerCommand *, CMoveData *);

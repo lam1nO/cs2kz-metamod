@@ -786,6 +786,11 @@ CConVar<Color> kz_trigger_multiple_colors[KZTRIGGER_COUNT] =
 
 static_function void DrawClipMeshes(CPhysicsGameSystem *gs)
 {
+	// натив необязательный: не нашёлся на этом билде — рисовать нечем, но сервер жив
+	if (!g_pKZUtils->DebugDrawMesh)
+	{
+		return;
+	}
 	if (clipsDrawn)
 	{
 		return;
@@ -854,6 +859,11 @@ static_function void DrawClipMeshes(CPhysicsGameSystem *gs)
 
 static_function void DrawTriggers()
 {
+	// натив необязательный: не нашёлся на этом билде — рисовать нечем, но сервер жив
+	if (!g_pKZUtils->DebugDrawMesh)
+	{
+		return;
+	}
 	if (triggersDrawn || !GameEntitySystem())
 	{
 		return;

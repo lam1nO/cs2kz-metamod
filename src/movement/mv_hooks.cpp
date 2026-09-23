@@ -13,37 +13,43 @@ CUtlVector<TraceHistory> traceHistory;
 #endif
 extern CGameConfig *g_pGameConfig;
 
-void movement::InitDetours()
+bool movement::InitDetours()
 {
-	INIT_DETOUR(g_pGameConfig, PhysicsSimulate);
-	INIT_DETOUR(g_pGameConfig, ProcessUsercmds);
-	INIT_DETOUR(g_pGameConfig, SetupMove);
-	INIT_DETOUR(g_pGameConfig, ProcessMovement);
-	INIT_DETOUR(g_pGameConfig, PlayerMove);
-	INIT_DETOUR(g_pGameConfig, CheckParameters);
-	INIT_DETOUR(g_pGameConfig, CanMove);
-	INIT_DETOUR(g_pGameConfig, FullWalkMove);
-	INIT_DETOUR(g_pGameConfig, MoveInit);
-	INIT_DETOUR(g_pGameConfig, CheckWater);
-	INIT_DETOUR(g_pGameConfig, WaterMove);
-	INIT_DETOUR(g_pGameConfig, CheckVelocity);
-	INIT_DETOUR(g_pGameConfig, Duck);
-	INIT_DETOUR(g_pGameConfig, CanUnduck);
-	INIT_DETOUR(g_pGameConfig, LadderMove);
-	INIT_DETOUR(g_pGameConfig, CheckJumpButtonLegacy);
-	INIT_DETOUR(g_pGameConfig, CheckJumpButtonModern);
-	INIT_DETOUR(g_pGameConfig, OnJumpLegacy);
-	INIT_DETOUR(g_pGameConfig, OnJumpModern);
-	INIT_DETOUR(g_pGameConfig, AirMove);
-	INIT_DETOUR(g_pGameConfig, AirAccelerate);
-	INIT_DETOUR(g_pGameConfig, Friction);
-	INIT_DETOUR(g_pGameConfig, WalkMove);
-	INIT_DETOUR(g_pGameConfig, TryPlayerMove);
-	INIT_DETOUR(g_pGameConfig, CategorizePosition);
-	INIT_DETOUR(g_pGameConfig, CheckFalling);
-	INIT_DETOUR(g_pGameConfig, PostThink);
-}
+	bool ok = true;
+	INIT_DETOUR_REQUIRED(g_pGameConfig, PhysicsSimulate, ok);
+	INIT_DETOUR_REQUIRED(g_pGameConfig, ProcessUsercmds, ok);
+	INIT_DETOUR_REQUIRED(g_pGameConfig, SetupMove, ok);
+	INIT_DETOUR_REQUIRED(g_pGameConfig, ProcessMovement, ok);
+	INIT_DETOUR_REQUIRED(g_pGameConfig, PlayerMove, ok);
+	INIT_DETOUR_REQUIRED(g_pGameConfig, CheckParameters, ok);
+	INIT_DETOUR_REQUIRED(g_pGameConfig, FullWalkMove, ok);
+	INIT_DETOUR_REQUIRED(g_pGameConfig, CheckWater, ok);
+	INIT_DETOUR_REQUIRED(g_pGameConfig, WaterMove, ok);
+	INIT_DETOUR_REQUIRED(g_pGameConfig, CheckVelocity, ok);
+	INIT_DETOUR_REQUIRED(g_pGameConfig, Duck, ok);
+	INIT_DETOUR_REQUIRED(g_pGameConfig, CanUnduck, ok);
+	INIT_DETOUR_REQUIRED(g_pGameConfig, LadderMove, ok);
+	INIT_DETOUR_REQUIRED(g_pGameConfig, CheckJumpButtonLegacy, ok);
+	INIT_DETOUR_REQUIRED(g_pGameConfig, CheckJumpButtonModern, ok);
+	INIT_DETOUR_REQUIRED(g_pGameConfig, OnJumpLegacy, ok);
+	INIT_DETOUR_REQUIRED(g_pGameConfig, OnJumpModern, ok);
+	INIT_DETOUR_REQUIRED(g_pGameConfig, AirMove, ok);
+	INIT_DETOUR_REQUIRED(g_pGameConfig, AirAccelerate, ok);
+	INIT_DETOUR_REQUIRED(g_pGameConfig, Friction, ok);
+	INIT_DETOUR_REQUIRED(g_pGameConfig, WalkMove, ok);
+	INIT_DETOUR_REQUIRED(g_pGameConfig, TryPlayerMove, ok);
+	INIT_DETOUR_REQUIRED(g_pGameConfig, CategorizePosition, ok);
+	INIT_DETOUR_REQUIRED(g_pGameConfig, CheckFalling, ok);
+	INIT_DETOUR_REQUIRED(g_pGameConfig, PostThink, ok);
 
+	// CanMove и MoveInit больше не детурятся: их хуки (OnCanMove/OnMoveInit и Post) —
+	// пустые виртуальные во ВСЕХ реализациях (movement.h, kz.h/kz_player.cpp только
+	// пробрасывает, kz_mode.h, kz_style.h; ни один режим и ни один стиль их не
+	// переопределяет). Держать под них сигнатуры значило платить пересъёмкой после
+	// каждого апдейта Valve за поведение, которого нет. Если режим/стиль когда-нибудь
+	// реализует эти хуки — вернуть обе записи в gamedata и строки сюда.
+	return ok;
+}
 MovementPlayerManager *playerManager = static_cast<MovementPlayerManager *>(g_pPlayerManager);
 
 void FASTCALL movement::Detour_PhysicsSimulate(CCSPlayerController *controller)
