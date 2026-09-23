@@ -96,7 +96,6 @@ struct alignas(8) CRegionSVM;
 
 struct alignas(8) RnHull_t
 {
-public:
 	Vector m_vCentroid;
 	float32 m_flMaxAngularRadius;
 	AABB_t m_Bounds;
@@ -104,13 +103,13 @@ public:
 	matrix3x4_t m_MassProperties;
 	float32 m_flVolume;
 	float32 m_flSurfaceArea;
-	CUtlVector<RnVertex_t> m_Vertices;
 	CUtlVector<Vector> m_VertexPositions;
-	CUtlVector<RnHalfEdge_t> m_Edges;
-	CUtlVector<RnFace_t> m_Faces;
 	CUtlVector<RnPlane_t> m_FacePlanes;
 	uint32 m_nFlags;
 	CRegionSVM *m_pRegionSVM;
+	CUtlVector<RnVertex_t> m_Vertices;
+	CUtlVector<RnHalfEdge_t> m_Edges;
+	CUtlVector<RnFace_t> m_Faces;
 };
 
 struct alignas(8) RnHullDesc_t : public RnShapeDesc_t
@@ -335,12 +334,12 @@ struct CPhysAggregateData
 	int16 m_nIncrementalVectorIndex;
 	int16 m_nReserved;
 	CUtlVectorUltraConservative<char const *> m_BoneNames;
-	CUtlMemory<uint32> m_BonesHash;
-	CUtlMemory<uint16> m_IndexNames;
-	CUtlMemory<uint16> m_IndexHash;
-	CUtlMemory<uint16> m_BoneParents;
-	CUtlMemory<matrix3x4_t, int> m_BindPose;
-	CUtlMemory<PhysShapeMarkup_t> m_shapeMarkups;
+	CUtlVectorMemory_Growable<uint32> m_BonesHash;
+	CUtlVectorMemory_Growable<uint16> m_IndexNames;
+	CUtlVectorMemory_Growable<uint16> m_IndexHash;
+	CUtlVectorMemory_Growable<uint16> m_BoneParents;
+	CUtlVectorMemory_Growable<matrix3x4_t, int> m_BindPose;
+	CUtlVectorMemory_Growable<PhysShapeMarkup_t> m_shapeMarkups;
 	CUtlVectorConservative<const VPhysXBodyPart_t *> m_Parts;
 	CUtlVectorUltraConservative<CPhysConstraintData> m_Constraints;
 	CUtlVectorUltraConservative<const VPhysXJoint_t *> m_Joints;
