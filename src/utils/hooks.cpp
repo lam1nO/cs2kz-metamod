@@ -186,9 +186,8 @@ static_function CServerSideClientBase *Hook_ConnectClientPost(const char *, ns_a
 
 // CServerSideClient
 // Ответ клиента на наш CSVCMsg_GetCvarValue (cvarquery::Query). Слот втаблицы совпадает с
-// апстримным: src/sdk/serversideclient.h у нас и у origin/master различаются РОВНО одной строкой
-// (:200, ApplyConVars против переименованного ProcessSetConVar — та же одна чисто-виртуальная
-// функция в той же позиции), при равной длине файла, поэтому все индексы ниже неё идентичны.
+// апстримным: 23.09.2026 расхождение снято — зеркало CServerSideClient приведено к апстримному
+// (ProcessSetConVar вместо старого ApplyConVars, та же позиция), файлы больше не расходятся.
 static_global int respondCvarValueHook {};
 SH_DECL_HOOK1(CServerSideClientBase, ProcessRespondCvarValue, SH_NOATTRIB, 0, bool, const CNetMessagePB<CCLCMsg_RespondCvarValue> &);
 static_function bool Hook_ProcessRespondCvarValue(const CNetMessagePB<CCLCMsg_RespondCvarValue> &msg);

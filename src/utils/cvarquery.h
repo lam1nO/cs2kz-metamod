@@ -10,9 +10,9 @@
 //
 // Расхождение с апстримом: пассивный источник (cvarquery::OnClientConVar/SetChangeCallback — все
 // конвары, что клиент репортит сам в userinfo и setinfo) НЕ портирован. Его кормит хук на
-// CServerSideClientBase::ProcessSetConVar, а у нас этот слот втаблицы объявлен под старым именем
-// ApplyConVars с другой сигнатурой (src/sdk/serversideclient.h:200) — включение пассивного пути
-// требует переименования слота и в этот транш не входит. Активного Query() крестику достаточно.
+// CServerSideClientBase::ProcessSetConVar; слот теперь объявлен правильно (23.09.2026, вместе с
+// подъёмом hl2sdk), так что препятствие снято — не хватает только самого порта. Активного
+// Query() крестику достаточно.
 namespace cvarquery
 {
 	enum class Status
