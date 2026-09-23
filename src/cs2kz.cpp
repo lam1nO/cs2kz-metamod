@@ -109,16 +109,19 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 {
 	setlocale(LC_ALL, "en_US.utf8");
 	PLUGIN_SAVEVARS();
+	Msg("[CS2KZ-DIAG] load: enter\n");
 	modules::Initialize();
 	if (!interfaces::Initialize(ismm, error, maxlen))
 	{
 		return false;
 	}
 
+	Msg("[CS2KZ-DIAG] load: interfaces ok\n");
 	KZOptionService::InitOptions();
 	InitKZLogging();
 	kz_log_to_file.Set((bool)KZOptionService::GetOptionInt("logToFile", true));
 
+	Msg("[CS2KZ-DIAG] load: logging ok\n");
 	if (!utils::Initialize(ismm, error, maxlen))
 	{
 		// Поднят только логгер — снимаем его, больше сворачивать нечего.
@@ -126,6 +129,7 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 		return false;
 	}
 
+	Msg("[CS2KZ-DIAG] load: utils ok\n");
 	ConVar_Register();
 	// Проверка ДО детуров и до единого Init(): она read-only (обходит CConVarRef на
 	// ДВИЖКОВЫЕ конвары, валидные с utils::Initialize) и ни от чего в Load() не зависит,
@@ -138,14 +142,15 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 		return false;
 	}
 
+	Msg("[CS2KZ-DIAG] load: cvars+modecheck ok\n");
 	hooks::Initialize();
 	ix::initNetSystem();
+	Msg("[CS2KZ-DIAG] load: hooks+net ok, ставим детуры\n");
+	// ДИАГНОСТИЧЕСКАЯ СБОРКА: отказ намеренно НЕ фатален, чтобы отделить «упало в детуре»
+	// от «упало в уборке после отказа». В релиз не мержить — вернуть AbortLoadCleanup+false.
 	if (!movement::InitDetours())
 	{
-		snprintf(error, maxlen, "Failed to install one or more movement detours.");
-		KZ_LOG_WARN(LogChannel::General, "%s\n", error);
-		AbortLoadCleanup();
-		return false;
+		Msg("[CS2KZ-DIAG] load: ДЕТУРЫ НЕ ВСТАЛИ (диагностика: продолжаем)\n");
 	}
 	KZCheckpointService::Init();
 	KZPracService::Init();

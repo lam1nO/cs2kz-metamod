@@ -16,6 +16,7 @@ extern CGameConfig *g_pGameConfig;
 bool movement::InitDetours()
 {
 	bool ok = true;
+	Msg("[CS2KZ-DIAG] детуры: фаза 1 (резолв)\n");
 
 	// Фаза 1 — только резолв сигнатур и funchook_prepare: игра ещё не тронута.
 	CREATE_DETOUR(g_pGameConfig, PhysicsSimulate, ok);
@@ -50,6 +51,7 @@ bool movement::InitDetours()
 		return false;
 	}
 
+	Msg("[CS2KZ-DIAG] детуры: фаза 1 ок, фаза 2 (установка)\n");
 	// Фаза 2 — установка. Провал здесь означает отказ funchook, а не сигнатуры.
 	ENABLE_DETOUR(PhysicsSimulate, ok);
 	ENABLE_DETOUR(ProcessUsercmds, ok);
@@ -82,6 +84,7 @@ bool movement::InitDetours()
 		return false;
 	}
 
+	Msg("[CS2KZ-DIAG] детуры: все встали\n");
 	// CanMove и MoveInit больше не детурятся: их хуки (OnCanMove/OnMoveInit и Post) —
 	// пустые виртуальные во ВСЕХ реализациях дерева (movement.h, kz.h/kz_player.cpp только
 	// пробрасывает, kz_mode.h, kz_style.h; ни один режим и ни один стиль их не
