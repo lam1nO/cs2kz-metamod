@@ -132,16 +132,20 @@ CUtlVector<CServerSideClient *> *KZUtils::GetClientList()
 	// её видимости в этом TU.
 	if (!list || list->Count() < 0 || list->Count() > 64)
 	{
-		// Предупреждаем ТОЛЬКО когда игровой сервер уже поднят. На загрузке плагина объект
-		// ещё не инициализирован, и счётчик там мусорный при ЛЮБОМ значении офсета —
-		// проверено живьём на 584 и на 600 (23.09.2026). Ранняя жалоба уводила в ложный след.
-		if (GameEntitySystem())
+		// Предупреждаем ТОЛЬКО когда карта уже загружена. Раньше условием было наличие
+		// GameEntitySystem(), но она появляется ДО того, как движок инициализирует вектор
+		// клиентов, и счётчик там мусорный при ЛЮБОМ значении офсета. Из-за этого гард
+		// один раз срабатывал вхолостую и защёлкивался, а строка в логе уводила в ложный
+		// след — на верном офсете 616 тоже (23.09.2026).
+		if (utils::IsMapLoaded())
 		{
 			static_persist bool warned = false;
 			if (!warned)
 			{
 				warned = true;
-				KZ_LOG_WARN(LogChannel::General, "ClientOffset looks wrong: client list rejected, re-snap the offset\n");
+				// Печатаем наблюдаемое значение и сам офсет: без них жалоба недоказуема.
+				KZ_LOG_WARN(LogChannel::General, "ClientOffset looks wrong: offset=%d count=%d, re-snap the offset\n", offset,
+							list ? list->Count() : -1);
 			}
 		}
 		return nullptr;

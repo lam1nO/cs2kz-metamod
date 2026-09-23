@@ -759,6 +759,7 @@ static_function void Hook_StartupServer(const GameSessionConfiguration_t &config
 	// CS2 25470087 сервер падал уже ПОСЛЕ загрузки карты, и по стадиям загрузки это было не
 	// локализовать. Парный маркер первого игрового тика — в Detour_PhysicsSimulate.
 	Msg("[CS2KZ] run: map loaded\n");
+	utils::SetMapLoaded();
 	KZ::zones::OnMapLoaded();
 	RETURN_META(MRES_IGNORED);
 }

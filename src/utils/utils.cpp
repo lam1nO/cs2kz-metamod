@@ -901,3 +901,15 @@ bool utils::ParseSteamID2(std::string_view steamID, u64 &out)
 
 	return true;
 }
+
+static bool s_mapLoaded = false;
+
+bool utils::IsMapLoaded()
+{
+	return s_mapLoaded;
+}
+
+void utils::SetMapLoaded()
+{
+	s_mapLoaded = true;
+}

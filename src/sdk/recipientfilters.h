@@ -117,11 +117,21 @@ public:
 	{
 		m_Recipients.ClearAll();
 
-		for (int i = 0; i < g_pKZUtils->GetClientList()->Count(); i++)
+		// GetClientList() отдаёт nullptr, когда проверка правдоподобия отвергла список
+		// (неверный ClientOffset или движок ещё не поднял вектор). Без этой проверки
+		// широковещательный фильтр падал на разыменовании нуля — то есть поломка офсета
+		// превращалась из отказа в крэш.
+		auto *clients = g_pKZUtils->GetClientList();
+		if (!clients)
 		{
-			if (g_pKZUtils->GetClientList()->Element(i)->IsInGame())
+			return;
+		}
+		for (int i = 0; i < clients->Count(); i++)
+		{
+			CServerSideClient *client = clients->Element(i);
+			if (client && client->IsInGame())
 			{
-				AddRecipient(g_pKZUtils->GetClientList()->Element(i)->GetPlayerSlot());
+				AddRecipient(client->GetPlayerSlot());
 			}
 		}
 	}

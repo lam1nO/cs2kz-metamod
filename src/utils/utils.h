@@ -12,6 +12,12 @@ class CBasePlayerController;
 
 namespace utils
 {
+	// Поднимается один раз, когда движок доложил о загруженной карте. Нужен тем проверкам,
+	// которым нельзя срабатывать на полусобранном сервере: GameEntitySystem() появляется
+	// заметно раньше, чем движок инициализирует свои вектора.
+	bool IsMapLoaded();
+	void SetMapLoaded();
+
 	bool Initialize(ISmmAPI *ismm, char *error, size_t maxlen);
 	void Cleanup();
 
