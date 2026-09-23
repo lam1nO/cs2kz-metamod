@@ -87,11 +87,22 @@ PLUGIN_EXPOSE(KZPlugin, g_KZPlugin);
 // выгруженную память, а запись в таблице конваров движка осталась бы висячей — по ней
 // пройдёт UnlockConVars следующего плагина. SourceHook-хуки (hooks::Initialize) сюда не
 // входят: их MM:S снимает по plugin id сама. Вызывать можно повторно.
+// Снять слушателя логов, зарегистрированного InitKZLogging: это глобальный объект нашего
+// .so в таблице логгера движка, и после dlclose первая же строка лога движка ушла бы по
+// vtable в выгруженную память. Зеркально Unload(). Зовётся ПОСЛЕ печати причины отказа.
+static void AbortLoggingCleanup()
+{
+	LoggingSystem_UnregisterLoggingListener(&g_KZLoggingListener);
+	kz_log_to_file.Set(false);
+	g_KZLoggingListener.CheckFile();
+}
+
 static void AbortLoadCleanup()
 {
 	FlushAllDetours();
 	ConVar_Unregister();
 	ix::uninitNetSystem();
+	AbortLoggingCleanup();
 }
 
 bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool late)
@@ -110,6 +121,8 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 
 	if (!utils::Initialize(ismm, error, maxlen))
 	{
+		// Поднят только логгер — снимаем его, больше сворачивать нечего.
+		AbortLoggingCleanup();
 		return false;
 	}
 
@@ -121,6 +134,7 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 	if (!KZ::mode::CheckModeCvars())
 	{
 		ConVar_Unregister();
+		AbortLoggingCleanup();
 		return false;
 	}
 
