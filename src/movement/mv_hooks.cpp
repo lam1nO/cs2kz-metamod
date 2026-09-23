@@ -16,40 +16,85 @@ extern CGameConfig *g_pGameConfig;
 bool movement::InitDetours()
 {
 	bool ok = true;
-	INIT_DETOUR_REQUIRED(g_pGameConfig, PhysicsSimulate, ok);
-	INIT_DETOUR_REQUIRED(g_pGameConfig, ProcessUsercmds, ok);
-	INIT_DETOUR_REQUIRED(g_pGameConfig, SetupMove, ok);
-	INIT_DETOUR_REQUIRED(g_pGameConfig, ProcessMovement, ok);
-	INIT_DETOUR_REQUIRED(g_pGameConfig, PlayerMove, ok);
-	INIT_DETOUR_REQUIRED(g_pGameConfig, CheckParameters, ok);
-	INIT_DETOUR_REQUIRED(g_pGameConfig, FullWalkMove, ok);
-	INIT_DETOUR_REQUIRED(g_pGameConfig, CheckWater, ok);
-	INIT_DETOUR_REQUIRED(g_pGameConfig, WaterMove, ok);
-	INIT_DETOUR_REQUIRED(g_pGameConfig, CheckVelocity, ok);
-	INIT_DETOUR_REQUIRED(g_pGameConfig, Duck, ok);
-	INIT_DETOUR_REQUIRED(g_pGameConfig, CanUnduck, ok);
-	INIT_DETOUR_REQUIRED(g_pGameConfig, LadderMove, ok);
-	INIT_DETOUR_REQUIRED(g_pGameConfig, CheckJumpButtonLegacy, ok);
-	INIT_DETOUR_REQUIRED(g_pGameConfig, CheckJumpButtonModern, ok);
-	INIT_DETOUR_REQUIRED(g_pGameConfig, OnJumpLegacy, ok);
-	INIT_DETOUR_REQUIRED(g_pGameConfig, OnJumpModern, ok);
-	INIT_DETOUR_REQUIRED(g_pGameConfig, AirMove, ok);
-	INIT_DETOUR_REQUIRED(g_pGameConfig, AirAccelerate, ok);
-	INIT_DETOUR_REQUIRED(g_pGameConfig, Friction, ok);
-	INIT_DETOUR_REQUIRED(g_pGameConfig, WalkMove, ok);
-	INIT_DETOUR_REQUIRED(g_pGameConfig, TryPlayerMove, ok);
-	INIT_DETOUR_REQUIRED(g_pGameConfig, CategorizePosition, ok);
-	INIT_DETOUR_REQUIRED(g_pGameConfig, CheckFalling, ok);
-	INIT_DETOUR_REQUIRED(g_pGameConfig, PostThink, ok);
+
+	// Фаза 1 — только резолв сигнатур и funchook_prepare: игра ещё не тронута.
+	CREATE_DETOUR(g_pGameConfig, PhysicsSimulate, ok);
+	CREATE_DETOUR(g_pGameConfig, ProcessUsercmds, ok);
+	CREATE_DETOUR(g_pGameConfig, SetupMove, ok);
+	CREATE_DETOUR(g_pGameConfig, ProcessMovement, ok);
+	CREATE_DETOUR(g_pGameConfig, PlayerMove, ok);
+	CREATE_DETOUR(g_pGameConfig, CheckParameters, ok);
+	CREATE_DETOUR(g_pGameConfig, FullWalkMove, ok);
+	CREATE_DETOUR(g_pGameConfig, CheckWater, ok);
+	CREATE_DETOUR(g_pGameConfig, WaterMove, ok);
+	CREATE_DETOUR(g_pGameConfig, CheckVelocity, ok);
+	CREATE_DETOUR(g_pGameConfig, Duck, ok);
+	CREATE_DETOUR(g_pGameConfig, CanUnduck, ok);
+	CREATE_DETOUR(g_pGameConfig, LadderMove, ok);
+	CREATE_DETOUR(g_pGameConfig, CheckJumpButtonLegacy, ok);
+	CREATE_DETOUR(g_pGameConfig, CheckJumpButtonModern, ok);
+	CREATE_DETOUR(g_pGameConfig, OnJumpLegacy, ok);
+	CREATE_DETOUR(g_pGameConfig, OnJumpModern, ok);
+	CREATE_DETOUR(g_pGameConfig, AirMove, ok);
+	CREATE_DETOUR(g_pGameConfig, AirAccelerate, ok);
+	CREATE_DETOUR(g_pGameConfig, Friction, ok);
+	CREATE_DETOUR(g_pGameConfig, WalkMove, ok);
+	CREATE_DETOUR(g_pGameConfig, TryPlayerMove, ok);
+	CREATE_DETOUR(g_pGameConfig, CategorizePosition, ok);
+	CREATE_DETOUR(g_pGameConfig, CheckFalling, ok);
+	CREATE_DETOUR(g_pGameConfig, PostThink, ok);
+
+	if (!ok)
+	{
+		// Ни один детур не установлен, снимаем подготовленные и честно отказываем.
+		FlushAllDetours();
+		return false;
+	}
+
+	// Фаза 2 — установка. Провал здесь означает отказ funchook, а не сигнатуры.
+	ENABLE_DETOUR(PhysicsSimulate, ok);
+	ENABLE_DETOUR(ProcessUsercmds, ok);
+	ENABLE_DETOUR(SetupMove, ok);
+	ENABLE_DETOUR(ProcessMovement, ok);
+	ENABLE_DETOUR(PlayerMove, ok);
+	ENABLE_DETOUR(CheckParameters, ok);
+	ENABLE_DETOUR(FullWalkMove, ok);
+	ENABLE_DETOUR(CheckWater, ok);
+	ENABLE_DETOUR(WaterMove, ok);
+	ENABLE_DETOUR(CheckVelocity, ok);
+	ENABLE_DETOUR(Duck, ok);
+	ENABLE_DETOUR(CanUnduck, ok);
+	ENABLE_DETOUR(LadderMove, ok);
+	ENABLE_DETOUR(CheckJumpButtonLegacy, ok);
+	ENABLE_DETOUR(CheckJumpButtonModern, ok);
+	ENABLE_DETOUR(OnJumpLegacy, ok);
+	ENABLE_DETOUR(OnJumpModern, ok);
+	ENABLE_DETOUR(AirMove, ok);
+	ENABLE_DETOUR(AirAccelerate, ok);
+	ENABLE_DETOUR(Friction, ok);
+	ENABLE_DETOUR(WalkMove, ok);
+	ENABLE_DETOUR(TryPlayerMove, ok);
+	ENABLE_DETOUR(CategorizePosition, ok);
+	ENABLE_DETOUR(CheckFalling, ok);
+	ENABLE_DETOUR(PostThink, ok);
+
+	if (!ok)
+	{
+		FlushAllDetours();
+		return false;
+	}
 
 	// CanMove и MoveInit больше не детурятся: их хуки (OnCanMove/OnMoveInit и Post) —
-	// пустые виртуальные во ВСЕХ реализациях (movement.h, kz.h/kz_player.cpp только
+	// пустые виртуальные во ВСЕХ реализациях дерева (movement.h, kz.h/kz_player.cpp только
 	// пробрасывает, kz_mode.h, kz_style.h; ни один режим и ни один стиль их не
-	// переопределяет). Держать под них сигнатуры значило платить пересъёмкой после
-	// каждого апдейта Valve за поведение, которого нет. Если режим/стиль когда-нибудь
-	// реализует эти хуки — вернуть обе записи в gamedata и строки сюда.
-	return ok;
+	// переопределяет). Держать под них сигнатуры значило платить пересъёмкой после каждого
+	// апдейта Valve за поведение, которого нет. ВНИМАНИЕ: режимы и стили грузятся как чужие
+	// .so из addons/cs2kz/modes (KZ::mode::LoadModePlugins), и внешний режим, реализовавший
+	// эти хуки, соберётся и загрузится, но вызван не будет — молча. Возвращаешь детуры —
+	// верни и записи в gamedata, пересняв сигнатуры: старые мертвы с билда 25470087.
+	return true;
 }
+
 MovementPlayerManager *playerManager = static_cast<MovementPlayerManager *>(g_pPlayerManager);
 
 void FASTCALL movement::Detour_PhysicsSimulate(CCSPlayerController *controller)

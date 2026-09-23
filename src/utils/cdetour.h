@@ -10,7 +10,7 @@ class CDetourBase
 public:
 	virtual const char *GetName() = 0;
 	virtual bool CreateDetour(CGameConfig *gameConfig) = 0;
-	virtual void EnableDetour() = 0;
+	virtual bool EnableDetour() = 0;
 	virtual void DisableDetour() = 0;
 	virtual void FreeDetour() = 0;
 };
@@ -22,6 +22,9 @@ public:
 	CDetour(T *pfnDetour, const char *pszName) : m_pfnDetour(pfnDetour), m_pszName(pszName)
 	{
 		m_hook = nullptr;
+		// без этого у детура, который не создавали, m_pfnFunc — мусор: вызов оригинала
+		// из такого детура ушёл бы по случайному адресу
+		m_pfnFunc = nullptr;
 		m_bInstalled = false;
 		m_pSignature = nullptr;
 		m_pSymbol = nullptr;
@@ -29,7 +32,7 @@ public:
 	}
 
 	bool CreateDetour(CGameConfig *gameConfig);
-	void EnableDetour() override;
+	bool EnableDetour() override;
 	void DisableDetour() override;
 	void FreeDetour() override;
 
@@ -81,14 +84,22 @@ bool CDetour<T>::CreateDetour(CGameConfig *gameConfig)
 }
 
 template<typename T>
-void CDetour<T>::EnableDetour()
+bool CDetour<T>::EnableDetour()
 {
 	if (!m_hook)
 	{
 		Warning("Could not create detour for %s\n", m_pszName);
-		return;
+		return false;
 	}
-	funchook_install(m_hook, 0);
+	// Результат install'а раньше терялся: провал выглядел как успешно поставленный
+	// детур, то есть тихо менял поведение игры. Возвращаем его вызывающему.
+	int rc = funchook_install(m_hook, 0);
+	if (rc != 0)
+	{
+		Warning("Could not install detour for %s (funchook rc=%d)\n", m_pszName, rc);
+		return false;
+	}
+	return true;
 }
 
 template<typename T>
@@ -110,13 +121,25 @@ void CDetour<T>::FreeDetour()
 	name.CreateDetour(config); \
 	name.EnableDetour();
 
-// Тот же INIT_DETOUR, но провал гасит флаг вызывающего. Нужен там, где НЕустановленный
-// детур меняет ПОВЕДЕНИЕ, а не выключает фичу: 23.09.2026 апдейт CS2 25470087 сломал
-// часть сигнатур движения, и без этого плагин загрузился бы с наполовину ванильной
-// физикой, продолжая писать раны в базу. Честный отказ загрузки лучше тихой лжи.
-#define INIT_DETOUR_REQUIRED(config, name, ok) \
-	INIT_DETOUR(config, name); \
-	if (!name.GetFunc()) \
+// Установка обязательного детура в ДВЕ фазы. Нужна там, где НЕустановленный детур меняет
+// ПОВЕДЕНИЕ, а не выключает фичу: 23.09.2026 апдейт CS2 25470087 сломал часть сигнатур
+// движения, и без этого плагин загрузился бы с наполовину ванильной физикой, продолжая
+// писать раны в базу. Честный отказ загрузки лучше тихой лжи.
+//
+// Почему именно две фазы, а не «поставил и проверил»: отказ обязан быть ВСЁ-ИЛИ-НИЧЕГО.
+// Если резолвить и ставить по одному, то к моменту отказа часть функций игры уже
+// пропатчена трамплинами, а Load(), вернувший false, не получит Unload() — .so закроют,
+// и первый же тик физики уйдёт в выгруженную память. Поэтому сперва CREATE_DETOUR для
+// всех (это только резолв и funchook_prepare, игра не тронута), и лишь если сошлись все —
+// ENABLE_DETOUR. На провале вызывающий обязан позвать FlushAllDetours().
+#define CREATE_DETOUR(config, name, ok) \
+	if (!name.CreateDetour(config)) \
+	{ \
+		ok = false; \
+	}
+
+#define ENABLE_DETOUR(name, ok) \
+	if (!name.EnableDetour()) \
 	{ \
 		ok = false; \
 	}

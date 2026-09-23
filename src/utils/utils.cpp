@@ -79,7 +79,7 @@ bool utils::Initialize(ISmmAPI *ismm, char *error, size_t maxlen)
 	DebugDrawMesh_t *DebugDrawMesh = (DebugDrawMesh_t *)g_pGameConfig->ResolveSignature("DebugDrawMesh");
 	if (!DebugDrawMesh)
 	{
-		KZ_LOG_WARN(LogChannel::General, "DebugDrawMesh не найдена: отрисовка коллизий по dev-командам выключена\n");
+		KZ_LOG_WARN(LogChannel::General, "DebugDrawMesh not found: dev collision drawing disabled\n");
 	}
 	RESOLVE_SIG(g_pGameConfig, "CreateBot", CreateBot_t, CreateBot, sigResolved);
 	RESOLVE_SIG(g_pGameConfig, "SetOrAddAttributeValueByName", SetOrAddAttributeValueByName_t, SetOrAddAttributeValueByName, sigResolved);
