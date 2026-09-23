@@ -736,7 +736,12 @@ static_global bool triggersDrawn = false;
 
 static_function void ResetOverlays()
 {
-	g_pKZUtils->ClearOverlays();
+	// Чистим ТОЛЬКО если что-то рисовали: сам вызов идёт по индексам vtable, сдвинутым
+	// апдейтом 25470087, и на штатном сервере (отрисовка выключена) его быть не должно.
+	if (clipsDrawn || triggersDrawn)
+	{
+		g_pKZUtils->ClearOverlays();
+	}
 	clipsDrawn = false;
 	triggersDrawn = false;
 }
@@ -950,7 +955,12 @@ void KZ::misc::OnPhysicsGameSystemFrameBoundary(void *pThis)
 	if (pThis != physicsGameSystem)
 	{
 		physicsGameSystem = (CPhysicsGameSystem *)pThis;
-		g_pKZUtils->ClearOverlays();
+		// то же условие, что в ResetOverlays: на карте без отрисовки чистить нечего, а
+		// безусловный вызов ронял сервер на первом кадре физики после загрузки карты
+		if (clipsDrawn || triggersDrawn)
+		{
+			g_pKZUtils->ClearOverlays();
+		}
 		clipsDrawn = false;
 	}
 	if (kz_showtriggers.Get())

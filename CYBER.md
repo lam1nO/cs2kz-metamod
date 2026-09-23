@@ -2207,8 +2207,26 @@ Mapping API регистрирует их как родные триггеры �
   `false`, не получает `Unload()`: .so закрывают, и оставленный трамплин увёл бы первый же
   тик физики в выгруженную память.
 
-Незакрытое: `CCSPlayer_ItemServices_SetWearables` (реплей-бот, есть проверка на NULL и
-строка в лог) и `TraceShape` (только под `DEBUG_TPM`). Обе помечены в gamedata.
+**Итог сверки с апстримом (23.09, коммит `20e376c2` «Update sigs»).** Шесть сигнатур, снятых
+нами по якорям, совпали с апстримными **байт в байт** (`SetOrAddAttributeValueByName`,
+`CheckVelocity`, `CheckJumpButtonLegacy/Modern`, `OnJumpLegacy`, `AirMove`, `WalkMove`) —
+независимое подтверждение, что функции опознаны верно. Апстрим дал сверх того `DebugDrawMesh`,
+`CanMove`, `MoveInit`, `TraceShape`; они взяты как есть, `CanMove`/`MoveInit` возвращены в
+детуры. Незакрытым остаётся только `CCSPlayer_ItemServices_SetWearables` (реплей-бот, есть
+проверка на NULL и строка в лог).
+
+## Дев-оверлеи после апдейта 25470087: индексы vtable сдвинулись
+
+Апстрим починил сигнатуры, но НЕ офсеты. `KZUtils::ClearOverlays` и `AddTriangleOverlay`
+ходят в движок по индексам vtable из gamedata (`GetDebugOverlay` 73, `ClearOverlays` 3,
+`DebugTriangle`), и на новом билде вызов уходит в чужой слот. Ронял сервер на ПЕРВОМ кадре
+физики после загрузки карты: `OnPhysicsGameSystemFrameBoundary` звал `ClearOverlays`
+безусловно при смене карты. Поймано ядром (`#0 KZUtils::ClearOverlays`).
+
+Сделано: вызывающие в `kz_misc.cpp` зовут `ClearOverlays` только когда реально рисовали
+(`clipsDrawn || triggersDrawn`), то есть на штатном сервере путь в движок не берётся вовсе.
+Индексы НЕ пересняты — включаешь `kz_showtriggers`/отрисовку клипов на живом билде, сначала
+пересними их, иначе получишь тот же SIGSEGV.
 
 ## Конвенции текстов (ru), проверяются на ревью
 

@@ -24,7 +24,9 @@ bool movement::InitDetours()
 	CREATE_DETOUR(g_pGameConfig, ProcessMovement, ok);
 	CREATE_DETOUR(g_pGameConfig, PlayerMove, ok);
 	CREATE_DETOUR(g_pGameConfig, CheckParameters, ok);
+	CREATE_DETOUR(g_pGameConfig, CanMove, ok);
 	CREATE_DETOUR(g_pGameConfig, FullWalkMove, ok);
+	CREATE_DETOUR(g_pGameConfig, MoveInit, ok);
 	CREATE_DETOUR(g_pGameConfig, CheckWater, ok);
 	CREATE_DETOUR(g_pGameConfig, WaterMove, ok);
 	CREATE_DETOUR(g_pGameConfig, CheckVelocity, ok);
@@ -57,7 +59,9 @@ bool movement::InitDetours()
 	ENABLE_DETOUR(ProcessMovement, ok);
 	ENABLE_DETOUR(PlayerMove, ok);
 	ENABLE_DETOUR(CheckParameters, ok);
+	ENABLE_DETOUR(CanMove, ok);
 	ENABLE_DETOUR(FullWalkMove, ok);
+	ENABLE_DETOUR(MoveInit, ok);
 	ENABLE_DETOUR(CheckWater, ok);
 	ENABLE_DETOUR(WaterMove, ok);
 	ENABLE_DETOUR(CheckVelocity, ok);
@@ -82,14 +86,10 @@ bool movement::InitDetours()
 		return false;
 	}
 
-	// CanMove и MoveInit больше не детурятся: их хуки (OnCanMove/OnMoveInit и Post) —
-	// пустые виртуальные во ВСЕХ реализациях дерева (movement.h, kz.h/kz_player.cpp только
-	// пробрасывает, kz_mode.h, kz_style.h; ни один режим и ни один стиль их не
-	// переопределяет). Держать под них сигнатуры значило платить пересъёмкой после каждого
-	// апдейта Valve за поведение, которого нет. ВНИМАНИЕ: режимы и стили грузятся как чужие
-	// .so из addons/cs2kz/modes (KZ::mode::LoadModePlugins), и внешний режим, реализовавший
-	// эти хуки, соберётся и загрузится, но вызван не будет — молча. Возвращаешь детуры —
-	// верни и записи в gamedata, пересняв сигнатуры: старые мертвы с билда 25470087.
+	// CanMove и MoveInit 23.09.2026 временно снимались с детуринга (их хуки пусты во всех
+	// режимах и стилях дерева), но апстрим в тот же день выложил рабочие сигнатуры под
+	// билд 25470087 — детуры возвращены, чтобы не расходиться с ним на ровном месте и не
+	// ломать внешние режимы из addons/cs2kz/modes, которые эти хуки могут реализовать.
 	return true;
 }
 
