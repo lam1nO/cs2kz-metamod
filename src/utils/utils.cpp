@@ -12,6 +12,9 @@
 #include "igameeventsystem.h"
 #include "sdk/recipientfilters.h"
 #include "sdk/navphysicsinterface.h"
+// MASK_PLAYERSOLID и прочие маски трассировки: с SDK от 17.09 заголовок больше не
+// подтягивается транзитивно, включаем явно
+#include "bspflags.h"
 #include "public/networksystem/inetworkmessages.h"
 #include "gametrace.h"
 
