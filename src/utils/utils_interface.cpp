@@ -123,7 +123,24 @@ CUtlVector<CServerSideClient *> *KZUtils::GetClientList()
 		return nullptr;
 	}
 	static_persist const int offset = g_pGameConfig->GetOffset("ClientOffset");
-	return (CUtlVector<CServerSideClient *> *)((char *)g_pNetworkServerService->GetIGameServer() + offset);
+	auto *list = (CUtlVector<CServerSideClient *> *)((char *)g_pNetworkServerService->GetIGameServer() + offset);
+	// Сырой офсет в чужую структуру — то, что ломается апдейтом молча (23.09.2026: движок
+	// вырос на 16 байт, старое значение давало мусор и SIGSEGV на первом же обращении).
+	// Дешёвая проверка правдоподобия превращает падение в отказ: слотов у сервера не больше
+	// 64, отрицательного размера не бывает, а пустой список — законное состояние.
+	// 64 — предел слотов у движка; константу sdk сюда не тянем, чтобы не зависеть от
+	// её видимости в этом TU.
+	if (!list || list->Count() < 0 || list->Count() > 64)
+	{
+		static_persist bool warned = false;
+		if (!warned)
+		{
+			warned = true;
+			KZ_LOG_WARN(LogChannel::General, "ClientOffset looks wrong: client list rejected, re-snap the offset\n");
+		}
+		return nullptr;
+	}
+	return list;
 }
 
 CUtlString KZUtils::GetCurrentMapName(bool *result)
