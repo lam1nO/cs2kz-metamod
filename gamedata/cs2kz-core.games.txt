@@ -350,6 +350,26 @@
 		}
 		"Offsets"
 		{
+			// ПЕРЕСНЯТО 23.09.2026 под билд CS2 25470087. Апдейт вставил виртуальные
+			// функции в vtable CBaseEntity: две ниже индекса 102 и ещё одну между 172 и
+			// 185 (linux). Поэтому сдвиг НЕ равномерный: до ~171 это +2, выше — +3, и
+			// виртуалки самих наследников (Respawn, CommitSuicide, PassesTriggerFilters,
+			// ControllerRespawn) съезжают на полный +3.
+			//
+			// Как снято (всё на живом libserver.so, vaddr = файловый офс + 0x1000):
+			//   Teleport            — колбэк команды ent_teleport зовёт call *0x520(%rax),
+			//                         0x520/8 = 164; тело принимает 4 аргумента.
+			//   StartTouch/EndTouch — CBaseTrigger переопределяет слоты 149 и 151.
+			//   IsEntityPawn        — слот 170: у CBaseEntity `xor eax,eax; ret`,
+			//                         у CCSPlayerPawn `mov $1,eax; ret`.
+			//   ControllerChangeTeam— слот 104 содержит строку "%s<%i><%s><%s>" ChangeTeam().
+			//   Respawn             — слот 352 содержит строку "Player.Respawn".
+			// Значения для windows пересчитаны тем же сдвигом и ЖИВЬЁМ НЕ ПРОВЕРЕНЫ:
+			// мы собираем и катим только linux.
+			//
+			// PlayerRunCommand (26) и FinishMove (39) НЕ трогаем: CCSPlayer_MovementServices
+			// не наследует CBaseEntity, её vtable апдейт не сдвинул — слот 26 принимает два
+			// аргумента, слот 39 читает CMoveData по третьему, что и ожидается.
 			"QuietPlayerSlot"
 			{
 				"windows"		"576"
@@ -362,51 +382,51 @@
 			}
 			"Teleport"
 			{
-				"windows"		"163"
-				"linux"			"162"
+				"windows"		"165"
+				"linux"			"164"
 			}
 			// 2 functions after one with "targethealthfrac"
 			"CollisionRulesChanged"
 			{
-				"windows"		"186"
-				"linux"			"185"
+				"windows"		"189"
+				"linux"			"188"
 			}
 			// 11 functions after one with "CBasePlayerPawn::PhysicsSimulate"
 			"IsEntityPawn"
 			{
-				"windows"		"169"
-				"linux"			"168"
+				"windows"		"171"
+				"linux"			"170"
 			}
 			// Right after IsEntityPawn
 			"IsEntityController"
 			{
-				"windows"		"170"
-				"linux"			"169"
+				"windows"		"172"
+				"linux"			"171"
 			}
 			// String: "%s<%i><%s><%s>" ChangeTeam() CTMDBG..."
 			"ControllerChangeTeam"
 			{
-				"windows"		"103"
-				"linux"			"102"
+				"windows"		"105"
+				"linux"			"104"
 			}
 			// Look for the kill command, go through its callback and you should a find call like this, with v9 being a pawn pointer:
 			// return (*(*v9 + 2832LL))(v9, v27, 0LL);
 			// 2832 (354 * 8) is the offset
 			"CommitSuicide"
 			{
-				"windows"		"384"
-				"linux"			"384"
+				"windows"		"387"
+				"linux"			"387"
 			}
 			"ControllerRespawn"
 			{
-				"windows"		"270"
-				"linux"			"272"
+				"windows"		"273"
+				"linux"			"275"
 			}
 			// "Player.Respawn"
 			"Respawn"
 			{
-				"windows"		"348"
-				"linux"			"349"
+				"windows"		"351"
+				"linux"			"352"
 			}
 			// Как снимать: в libengine2.so найти строку "sv_fullupdate", от её xref'а выйти на
 			// колбэк команды, а из него — на геттеры клиента и счётчика. Они читают this+N:
@@ -428,23 +448,23 @@
 			// teleport_trigger_debug cvar
 			"StartTouch"
 			{
-				"windows"		"148"
-				"linux"			"147"
-			}
-			"Touch"
-			{
-				"windows"		"149"
-				"linux"			"148"
-			}
-			"EndTouch"
-			{
 				"windows"		"150"
 				"linux"			"149"
 			}
+			"Touch"
+			{
+				"windows"		"151"
+				"linux"			"150"
+			}
+			"EndTouch"
+			{
+				"windows"		"152"
+				"linux"			"151"
+			}
 			"PassesTriggerFilters"
 			{
-				"windows"		"269"
-				"linux"			"270"
+				"windows"		"272"
+				"linux"			"273"
 			}
 			// In DebugDrawMesh, offset used when solid=true
 			"DebugTriangle"
