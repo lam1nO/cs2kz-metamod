@@ -46,8 +46,7 @@ bool movement::InitDetours()
 
 	if (!ok)
 	{
-		// Ни один детур не установлен, снимаем подготовленные и честно отказываем.
-		FlushAllDetours();
+		// Ни один детур не установлен — подготовленные снимет AbortLoadCleanup вызывающего.
 		return false;
 	}
 
@@ -80,7 +79,6 @@ bool movement::InitDetours()
 
 	if (!ok)
 	{
-		FlushAllDetours();
 		return false;
 	}
 

@@ -77,7 +77,24 @@ bool CDetour<T>::CreateDetour(CGameConfig *gameConfig)
 	}
 
 	m_hook = funchook_create();
-	funchook_prepare(m_hook, (void **)&m_pfnFunc, (void *)m_pfnDetour);
+	if (!m_hook)
+	{
+		Warning("Could not create detour handle for %s\n", m_pszName);
+		return false;
+	}
+
+	// Код возврата prepare раньше терялся, и это была дыра в «всё-или-ничего»: funchook
+	// умеет отказать на релокации пролога (rip-relative lea, слишком короткие инструкции,
+	// нет свободных регистров — свои коды в funchook.h), а install на пустом хуке вернул бы
+	// 0. Детур не стоял бы, а мы считали бы, что стоит.
+	int rc = funchook_prepare(m_hook, (void **)&m_pfnFunc, (void *)m_pfnDetour);
+	if (rc != 0)
+	{
+		Warning("Could not prepare detour for %s (funchook rc=%d)\n", m_pszName, rc);
+		funchook_destroy(m_hook);
+		m_hook = nullptr;
+		return false;
+	}
 
 	g_vecDetours.AddToTail(this);
 	return true;
@@ -131,17 +148,24 @@ void CDetour<T>::FreeDetour()
 // пропатчена трамплинами, а Load(), вернувший false, не получит Unload() — .so закроют,
 // и первый же тик физики уйдёт в выгруженную память. Поэтому сперва CREATE_DETOUR для
 // всех (это только резолв и funchook_prepare, игра не тронута), и лишь если сошлись все —
-// ENABLE_DETOUR. На провале вызывающий обязан позвать FlushAllDetours().
+// ENABLE_DETOUR. На провале вызывающий обязан свернуть уже поднятое (у нас это
+// AbortLoadCleanup в cs2kz.cpp, он зовёт FlushAllDetours).
 #define CREATE_DETOUR(config, name, ok) \
-	if (!name.CreateDetour(config)) \
+	do \
 	{ \
-		ok = false; \
-	}
+		if (!name.CreateDetour(config)) \
+		{ \
+			ok = false; \
+		} \
+	} while (0)
 
 #define ENABLE_DETOUR(name, ok) \
-	if (!name.EnableDetour()) \
+	do \
 	{ \
-		ok = false; \
-	}
+		if (!name.EnableDetour()) \
+		{ \
+			ok = false; \
+		} \
+	} while (0)
 
 void FlushAllDetours();

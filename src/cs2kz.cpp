@@ -8,6 +8,7 @@
 #include "utils/hooks.h"
 #include "utils/gameconfig.h"
 #include "utils/async_file_io.h"
+#include "utils/detours.h" // FlushAllDetours — уборка перед отказом Load()
 
 #include "movement/movement.h"
 #include "kz/kz.h"
@@ -81,6 +82,18 @@ static void AcquireMenusInterface()
 
 PLUGIN_EXPOSE(KZPlugin, g_KZPlugin);
 
+// Свернуть то, что успели поднять, ПЕРЕД отказом из Load(). MM:S на Load() == false не
+// зовёт Unload(), а .so закрывает: оставленный трамплин увёл бы первый же тик физики в
+// выгруженную память, а запись в таблице конваров движка осталась бы висячей — по ней
+// пройдёт UnlockConVars следующего плагина. SourceHook-хуки (hooks::Initialize) сюда не
+// входят: их MM:S снимает по plugin id сама. Вызывать можно повторно.
+static void AbortLoadCleanup()
+{
+	FlushAllDetours();
+	ConVar_Unregister();
+	ix::uninitNetSystem();
+}
+
 bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool late)
 {
 	setlocale(LC_ALL, "en_US.utf8");
@@ -107,6 +120,7 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 	{
 		snprintf(error, maxlen, "Failed to install one or more movement detours.");
 		KZ_LOG_WARN(LogChannel::General, "%s\n", error);
+		AbortLoadCleanup();
 		return false;
 	}
 	KZCheckpointService::Init();
@@ -148,6 +162,9 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 	KZRecordingService::Init();
 	if (!KZ::mode::CheckModeCvars())
 	{
+		// Сюда доходим с УЖЕ установленными детурами движения — без уборки отказ загрузки
+		// оставил бы трамплины в выгруженном .so (см. AbortLoadCleanup).
+		AbortLoadCleanup();
 		return false;
 	}
 
