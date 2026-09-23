@@ -157,6 +157,26 @@ static bool InitSchemaFieldsForClass(SchemaTableMap_t &tableMap, const char *cla
 		return false;
 	}
 
+	// Проверка правдоподобия того, что вернул движок. FindDeclaredClass — ВИРТУАЛЬНЫЙ вызов по
+	// раскладке интерфейса из hl2sdk; если апдейт Valve сдвинул её, сюда приходит не-NULL мусор,
+	// и разбор полей читает имя по случайному адресу — ровно так сервер падал 23.09.2026 на
+	// билде 25470087 (ядро: #0 schema::GetOffset, шаг 112 = sizeof(SchemaClassInfoData_t),
+	// чтение m_pszName). Дешёвые инварианты: имя непустое, печатное и совпадает с запрошенным,
+	// число полей в разумных пределах. Не сошлось — честный отказ и строка в лог с ИМЕНЕМ
+	// класса, а не SIGSEGV.
+	const char *pszName = pClassInfo->m_pszName;
+	const bool sane = pszName && (uintptr_t)pszName > 0x10000 && pClassInfo->m_nFieldCount < 4096
+					  && V_strcmp(pszName, className) == 0;
+	if (!sane)
+	{
+		SchemaKeyValueMap_t map;
+		tableMap.insert(std::make_pair(classKey, map));
+		Warning("InitSchemaFieldsForClass(): движок вернул неправдоподобный класс для '%s' "
+				"(поля=%u) — раскладка схемы в hl2sdk не совпадает с билдом игры\n",
+				className, (unsigned)pClassInfo->m_nFieldCount);
+		return false;
+	}
+
 	SchemaKeyValueMap_t &keyValueMap = tableMap.insert(std::make_pair(classKey, SchemaKeyValueMap_t())).first->second;
 
 	InitSchemaKeyValueMap(pClassInfo, keyValueMap);
