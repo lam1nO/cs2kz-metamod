@@ -367,6 +367,15 @@
 			// Значения для windows пересчитаны тем же сдвигом и ЖИВЬЁМ НЕ ПРОВЕРЕНЫ:
 			// мы собираем и катим только linux.
 			//
+			// СВЕРЕНО С АПСТРИМОМ (KZGlobalTeam a31501db «Fix offsets», 23.09 17:33 CEST),
+			// снятым независимо от нас. Из пятнадцати индексов совпали двенадцать, включая
+			// все, что я проверял по живому бинарнику. Разошлись четыре, и везде взято
+			// апстримное: CollisionRulesChanged 188→187, ControllerRespawn 275→276,
+			// PassesTriggerFilters 273→272, DebugTriangle 57→52, GetDebugOverlay 73→74.
+			// Отдельно ClientOffset: 584 → 616. Наша собственная проверка списка клиентов
+			// отвергала 584 («ClientOffset looks wrong» в логе канарейки), так что здесь
+			// апстрим подтвердил ровно то, на что жаловался наш же гард.
+			//
 			// PlayerRunCommand (26) и FinishMove (39) НЕ трогаем: CCSPlayer_MovementServices
 			// не наследует CBaseEntity, её vtable апдейт не сдвинул — слот 26 принимает два
 			// аргумента, слот 39 читает CMoveData по третьему, что и ожидается.
@@ -388,8 +397,8 @@
 			// 2 functions after one with "targethealthfrac"
 			"CollisionRulesChanged"
 			{
-				"windows"		"189"
-				"linux"			"188"
+				"windows"		"188"
+				"linux"			"187"
 			}
 			// 11 functions after one with "CBasePlayerPawn::PhysicsSimulate"
 			"IsEntityPawn"
@@ -419,8 +428,8 @@
 			}
 			"ControllerRespawn"
 			{
-				"windows"		"273"
-				"linux"			"275"
+				"windows"		"274"
+				"linux"			"276"
 			}
 			// "Player.Respawn"
 			"Respawn"
@@ -442,8 +451,8 @@
 			// должно быть строки «ClientOffset looks wrong».
 			"ClientOffset"
 			{
-				"windows"		"584"
-				"linux"			"584"
+				"windows"		"616"
+				"linux"			"616"
 			}
 			// teleport_trigger_debug cvar
 			"StartTouch"
@@ -463,14 +472,14 @@
 			}
 			"PassesTriggerFilters"
 			{
-				"windows"		"272"
-				"linux"			"273"
+				"windows"		"271"
+				"linux"			"272"
 			}
 			// In DebugDrawMesh, offset used when solid=true
 			"DebugTriangle"
 			{
-				"windows"		"56"
-				"linux"			"57"
+				"windows"		"52"
+				"linux"			"52"
 			}
 			// CDebugOverlayGameSystem second vtable, offset 1 (windows):
 			//   result = debugoverlay;
@@ -482,8 +491,8 @@
 			
 			"GetDebugOverlay"
 			{
-				"windows"		"73"
-				"linux"			"73"
+				"windows"		"74"
+				"linux"			"74"
 			}
 			"ClearOverlays"
 			{
