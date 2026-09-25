@@ -111,11 +111,15 @@ struct MHUDCrosshairSettings
 	f32 size {5.0f};
 	f32 thickness {0.5f};
 	f32 gap {-2.0f};
+	// cl_crosshair_outlinethickness апдейт CS2 25470087 убрал: толщина обводки больше не
+	// настраивается игроком, игра рисует её единицей. Поле оставлено, чтобы не трогать расчёт.
 	f32 outlineThickness {1.0f};
-	i32 color {1};
 	i32 r {50}, g {250}, b {50};
+	// Из cl_crosshaircolor_a. Прежние cl_crosshairalpha и cl_crosshairusealpha убраны, как и
+	// пресеты cl_crosshaircolor: цвет теперь только покомпонентный.
 	i32 alpha {200};
-	bool useAlpha {true};
+	// cl_crosshair_screen_height — база, от которой клиент масштабирует размеры (раньше 480).
+	i32 screenHeight {480};
 	bool drawOutline {true};
 	bool dot {false};
 	bool tStyle {false};

@@ -12,12 +12,24 @@
 
 // Geometry from client.dll's painter, classic static only (no recoil, friendly-fire warning or
 // weapon-based gap):
-//   length    = int(screenHeight / 480 * cl_crosshairsize)
-//   thickness = max(1, int(screenHeight / 480 * cl_crosshairthickness))
-//   gap       = int(cl_crosshairgap + 4)              raw pixels, not screen-scaled
+//   length    = int(screenHeight / cl_crosshair_screen_height * cl_crosshair_length)
+//   thickness = max(1, int(screenHeight / cl_crosshair_screen_height * cl_crosshair_thickness))
+//   gap       = int(cl_crosshair_gap + 4)             raw pixels, not screen-scaled
 //   arm       = [center + thickness/2 + gap, + length]
 //   dot       = thickness-sized square; cl_crosshair_t drops the top arm
-//   alpha     = cl_crosshairusealpha ? cl_crosshairalpha : 200
+//   alpha     = cl_crosshaircolor_a
+//
+// ПЕРЕИМЕНОВАНИЯ апдейта CS2 25470087 (24.09.2026): cl_crosshairsize -> cl_crosshair_length,
+// cl_crosshairthickness -> cl_crosshair_thickness, cl_crosshairgap -> cl_crosshair_gap,
+// cl_crosshairalpha -> cl_crosshaircolor_a; убраны cl_crosshairusealpha,
+// cl_crosshair_outlinethickness и пресеты cl_crosshaircolor; добавлен cl_crosshair_screen_height.
+// До этой правки опрос старых имён возвращал cvar_not_found, крестик не подтверждался и НЕ
+// РИСОВАЛСЯ вовсе (см. ApplyCrosshair/confirmed) — в логе это было видно как
+// crosshair_cvar_query_failed на каждом заходе.
+//
+// Новые стили (cl_crosshairstyle: кольцо/квадрат) апстрим завёл в cb82728 вместе с 10k строк
+// panorama-CSS в СВОЁМ аддоне. У нас аддон свой, поэтому стили не переносим: как и раньше,
+// рисуем классический крест. Это не регресс — раньше было так же.
 
 #include "kz/hud/layout/layout.h"
 #include "kz/hud/layout/panorama_tables.h"
@@ -31,7 +43,10 @@
 
 // Panorama's 1080px reference over the client's 480px crosshair scale. Exact at 1080p; elsewhere
 // mhudCrosshairScale carries the correction, since no convar reports the client's resolution.
-#define MHUD_XH_SCALE     2.25f
+// База масштабирования Panorama и нижний предел cl_crosshair_screen_height (клиент меньшее
+// игнорирует). MHUD_XH_SCALE больше не нужен: он был равен MHUD_XH_REFERENCE_HEIGHT / 480.
+#define MHUD_XH_REFERENCE_HEIGHT  1080.0f
+#define MHUD_XH_MIN_SCREEN_HEIGHT 240
 #define MHUD_XH_MIN_SCALE 25
 #define MHUD_XH_MAX_SCALE 400
 // Largest suffix xh-w--/xh-h-- define.
@@ -77,19 +92,17 @@ static_function bool ParseBool(const char *value)
 
 // clang-format off
 static_global const MHUDCrosshairCvar CROSSHAIR_CVARS[] = {
-	{"cl_crosshairsize",             [](MHUDCrosshairSettings &s, const char *v) { s.size = (f32)atof(v); }},
-	{"cl_crosshairthickness",        [](MHUDCrosshairSettings &s, const char *v) { s.thickness = (f32)atof(v); }},
-	{"cl_crosshairgap",              [](MHUDCrosshairSettings &s, const char *v) { s.gap = (f32)atof(v); }},
-	{"cl_crosshair_outlinethickness",[](MHUDCrosshairSettings &s, const char *v) { s.outlineThickness = (f32)atof(v); }},
-	{"cl_crosshair_drawoutline",     [](MHUDCrosshairSettings &s, const char *v) { s.drawOutline = ParseBool(v); }},
-	{"cl_crosshairdot",              [](MHUDCrosshairSettings &s, const char *v) { s.dot = ParseBool(v); }},
-	{"cl_crosshair_t",               [](MHUDCrosshairSettings &s, const char *v) { s.tStyle = ParseBool(v); }},
-	{"cl_crosshaircolor",            [](MHUDCrosshairSettings &s, const char *v) { s.color = atoi(v); }},
-	{"cl_crosshaircolor_r",          [](MHUDCrosshairSettings &s, const char *v) { s.r = atoi(v); }},
-	{"cl_crosshaircolor_g",          [](MHUDCrosshairSettings &s, const char *v) { s.g = atoi(v); }},
-	{"cl_crosshaircolor_b",          [](MHUDCrosshairSettings &s, const char *v) { s.b = atoi(v); }},
-	{"cl_crosshairalpha",            [](MHUDCrosshairSettings &s, const char *v) { s.alpha = atoi(v); }},
-	{"cl_crosshairusealpha",         [](MHUDCrosshairSettings &s, const char *v) { s.useAlpha = ParseBool(v); }},
+	{"cl_crosshair_length",        [](MHUDCrosshairSettings &s, const char *v) { s.size = (f32)atof(v); }},
+	{"cl_crosshair_thickness",     [](MHUDCrosshairSettings &s, const char *v) { s.thickness = (f32)atof(v); }},
+	{"cl_crosshair_gap",           [](MHUDCrosshairSettings &s, const char *v) { s.gap = (f32)atof(v); }},
+	{"cl_crosshair_drawoutline",   [](MHUDCrosshairSettings &s, const char *v) { s.drawOutline = ParseBool(v); }},
+	{"cl_crosshairdot",            [](MHUDCrosshairSettings &s, const char *v) { s.dot = ParseBool(v); }},
+	{"cl_crosshair_t",             [](MHUDCrosshairSettings &s, const char *v) { s.tStyle = ParseBool(v); }},
+	{"cl_crosshaircolor_r",        [](MHUDCrosshairSettings &s, const char *v) { s.r = atoi(v); }},
+	{"cl_crosshaircolor_g",        [](MHUDCrosshairSettings &s, const char *v) { s.g = atoi(v); }},
+	{"cl_crosshaircolor_b",        [](MHUDCrosshairSettings &s, const char *v) { s.b = atoi(v); }},
+	{"cl_crosshaircolor_a",        [](MHUDCrosshairSettings &s, const char *v) { s.alpha = atoi(v); }},
+	{"cl_crosshair_screen_height", [](MHUDCrosshairSettings &s, const char *v) { s.screenHeight = atoi(v); }},
 };
 // clang-format on
 
@@ -202,24 +215,12 @@ void KZHUDService::OnCrosshairCvarValue(const char *name, const char *value)
 
 // === Отрисовка =======================================================================
 
-// cl_crosshaircolor 0..4 — пресеты; 5 значит "смотреть в cl_crosshaircolor_*".
+// Цвет берём только из cl_crosshaircolor_r/g/b: апдейт CS2 25470087 убрал и пресеты
+// cl_crosshaircolor (0..4), и ветку «5 = смотреть в покомпонентные». Апстрим поступил так же
+// (cb82728). Альфу здесь не кладём — её применяет класс прозрачности ниже.
 static_function Color GetCrosshairColor(const MHUDCrosshairSettings &settings)
 {
-	switch (settings.color)
-	{
-		case 0:
-			return Color(250, 50, 50, 255);
-		case 2:
-			return Color(250, 250, 50, 255);
-		case 3:
-			return Color(50, 50, 250, 255);
-		case 4:
-			return Color(50, 250, 250, 255);
-		case 5:
-			return Color(Clamp(settings.r, 0, 255), Clamp(settings.g, 0, 255), Clamp(settings.b, 0, 255), 255);
-		default:
-			return Color(50, 250, 50, 255);
-	}
+	return Color(Clamp(settings.r, 0, 255), Clamp(settings.g, 0, 255), Clamp(settings.b, 0, 255), 255);
 }
 
 // Переносит одно числовое класс-семейство с oldValue на newValue на всех перечисленных панелях.
@@ -307,7 +308,12 @@ void KZHUDService::ApplyCrosshair(CCSCustomHudLayout *layout, bool show, bool fo
 	const MHUDCrosshairSettings &settings = this->crosshair;
 	const f32 scale = Clamp(this->GetLayoutPrefs().crosshairScale, MHUD_XH_MIN_SCALE, MHUD_XH_MAX_SCALE) / 100.0f;
 	// Всё, что игра считает от высоты экрана, — в device-пикселях, которые она бы нарисовала.
-	const f32 screenScale = MHUD_XH_SCALE / scale;
+	// Клиент масштабирует размеры как screenHeight / cl_crosshair_screen_height, а Panorama —
+	// как screenHeight / 1080, поэтому реальная высота экрана сокращается и остаётся
+	// 1080 / cl_crosshair_screen_height (вывод апстрима, cb82728). Прежняя константа
+	// MHUD_XH_SCALE = 2.25 — это то же самое при базе 480, которая до апдейта была зашита в
+	// клиенте намертво; теперь игрок её меняет, и мы обязаны следовать.
+	const f32 screenScale = (MHUD_XH_REFERENCE_HEIGHT / (f32)MAX(settings.screenHeight, MHUD_XH_MIN_SCREEN_HEIGHT)) / scale;
 	const i32 lengthDev = (i32)(screenScale * settings.size);
 	const i32 thicknessDev = MAX(1, (i32)(screenScale * settings.thickness));
 	// Зазор и обводка — сырые device-пиксели, экранным масштабом не умножаются.
@@ -325,7 +331,7 @@ void KZHUDService::ApplyCrosshair(CCSCustomHudLayout *layout, bool show, bool fo
 	const i32 margin = ToMarginClass(innerDev, scale, outline);
 	const i32 marginFar = ToMarginClass(innerDev + 1, scale, outline);
 	// Игра красит обводку тем же альфа-каналом, что и сами бары.
-	const i32 alpha = Clamp(settings.useAlpha ? settings.alpha : 200, 0, 255);
+	const i32 alpha = Clamp(settings.alpha, 0, 255);
 	const i32 opacity = alpha * MHUD_XH_OPACITY_STEPS / 255;
 	// ResolveSwatchClass, а НЕ ResolveColorClass: плечи и точка — пустые <Panel>, у .xh-arm своего
 	// фона нет (crosshair.css), поэтому красит только `background-color` (pal-bg-N/gbg-N).
