@@ -47,5 +47,5 @@ DECLARE_MOVEMENT_EXTERN_DETOUR(CategorizePosition);
 DECLARE_MOVEMENT_EXTERN_DETOUR(CheckFalling);
 DECLARE_MOVEMENT_EXTERN_DETOUR(PostThink);
 
-void InitDetours();
+bool InitDetours();
 void FlushAllDetours();

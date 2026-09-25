@@ -23,10 +23,9 @@ DECLARE_MOVEMENT_DETOUR(SetupMove);
 DECLARE_MOVEMENT_DETOUR(ProcessMovement);
 DECLARE_MOVEMENT_DETOUR(PlayerMove);
 DECLARE_MOVEMENT_DETOUR(CheckParameters);
-// CanMove и MoveInit объявлены, но НЕ устанавливаются (см. movement::InitDetours):
-// их хуки пустые во всех режимах и стилях. Объявления и тела детуров оставлены
-// намеренно — вернуть достаточно двух строк INIT_DETOUR_REQUIRED и записей в gamedata,
-// а снос virtual-методов поменял бы vtable интерфейсов режимов/стилей (отдельные .so).
+// CanMove и MoveInit СНОВА УСТАНАВЛИВАЮТСЯ (23.09.2026, см. movement::InitDetours).
+// Комментарий о том, что они выключены, устарел и был снят: он относился к периоду, когда
+// их сигнатуры не резолвились на билде 25470087.
 DECLARE_MOVEMENT_DETOUR(CanMove);
 DECLARE_MOVEMENT_DETOUR(FullWalkMove);
 DECLARE_MOVEMENT_DETOUR(MoveInit);
@@ -49,15 +48,44 @@ DECLARE_MOVEMENT_DETOUR(CategorizePosition);
 DECLARE_MOVEMENT_DETOUR(CheckFalling);
 DECLARE_MOVEMENT_DETOUR(PostThink);
 
-void InitDetours()
+// Те же две фазы и тот же принцип «всё-или-ничего», что и в movement::InitDetours.
+// 23.09.2026 я закрыл этим только детуры движения, а здешние так и остались на INIT_DETOUR,
+// который результат не проверяет вовсе: не разрешись сигнатура — плагин грузился дальше, а
+// фича молча пропадала. Апстрим пришёл к тому же выводу в 2a81023 «Make sure to stop loading
+// if signatures fail»; таблицу оттуда не переносим — у нас уже есть макросы с проверкой, и
+// повторять их чужой формой значило бы трогать сильно разошедшийся файл ради стиля.
+bool InitDetours()
 {
 	g_vecDetours.RemoveAll();
-	INIT_DETOUR(g_pGameConfig, RecvServerBrowserPacket);
-	INIT_DETOUR(g_pGameConfig, CPhysicsGameSystemFrameBoundary);
+	bool ok = true;
+
+	// Фаза 1 — только резолв и подготовка трамплина, игра не тронута.
+	CREATE_DETOUR(g_pGameConfig, RecvServerBrowserPacket, ok);
+	CREATE_DETOUR(g_pGameConfig, CPhysicsGameSystemFrameBoundary, ok);
 #ifdef DEBUG_TPM
-	INIT_DETOUR(g_pGameConfig, TraceShape);
+	CREATE_DETOUR(g_pGameConfig, TraceShape, ok);
+#endif
+	if (!ok)
+	{
+		FlushAllDetours();
+		return false;
+	}
+
+	// Фаза 2 — установка.
+	ENABLE_DETOUR(RecvServerBrowserPacket, ok);
+	ENABLE_DETOUR(CPhysicsGameSystemFrameBoundary, ok);
+#ifdef DEBUG_TPM
+	ENABLE_DETOUR(TraceShape, ok);
 	TraceShape.DisableDetour();
 #endif
+	if (!ok)
+	{
+		// Часть трамплинов уже стоит — снимаем здесь, чтобы вызывающему было нечего
+		// доворачивать (Load(), вернувший false, Unload() не получит).
+		FlushAllDetours();
+		return false;
+	}
+	return true;
 }
 
 void FlushAllDetours()

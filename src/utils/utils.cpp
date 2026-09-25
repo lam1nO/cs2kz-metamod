@@ -101,7 +101,11 @@ bool utils::Initialize(ISmmAPI *ismm, char *error, size_t maxlen)
 	utils::UnlockConVars();
 	utils::UnlockConCommands();
 	utils::UpdateServerVersion();
-	InitDetours();
+	if (!InitDetours())
+	{
+		V_snprintf(error, maxlen, "Failed to resolve or install one or more detours.");
+		return false;
+	}
 	return true;
 }
 

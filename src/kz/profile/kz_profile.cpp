@@ -102,8 +102,9 @@ CConVar<bool> kz_gg1_bridge("kz_gg1_bridge", FCVAR_NONE, "Whether to broadcast p
 // (в отличие от {gold} — им подсвечен Legend), и именно с ним приписка жила с cyb.115.
 #define KZ_PERSONAL_TAG_DEFAULT_CHAT_COLOR "yellow"
 // Предел байтов текста приписки. 24 — предел платформы (PLAYER_TAG_MAX_BYTES в контрактах), но
-// проверяем СВОЙ буфер: clanTag[32] минус скобки формата "[%s]" и нуль = 29 байт. Меньшее из
-// двух, чтобы расширение лимита на платформе не начало молча резать тег в snprintf.
+// проверяем СВОЙ буфер: clanTag[32] минус нуль = 31 байт (скобок в формате больше нет,
+// см. UpdateClantag). Берём меньшее из двух, чтобы расширение лимита на платформе не начало
+// молча резать тег в snprintf.
 #define KZ_PERSONAL_TAG_MAX_BYTES 24
 // Пауза перед единственным повтором после транзиентного отказа. Пять секунд — чтобы повтор не
 // лёг в ту же секунду, что и сбойнувший запрос (сетевой блип на коннекте, перезапуск api), но
@@ -621,23 +622,27 @@ void KZProfileService::UpdateClantag()
 	// Персональная приписка перекрывает ранговый тег: она не зависит ни от очков, ни от режима,
 	// ни от стилей — то есть переживает все три события, по которым тег перерисовывается.
 	// Проверка стоит ДО GetCurrentRankIndex: иначе очередной ответ платформы об очках затирал бы
-	// приписку. Скобки ставит формат здесь, а не хранит платформа: api отдаёт голый текст,
-	// иначе в игре вышло бы «[[KZ Boss]]». Цвет в скорборде не применяем — движок цвет
-	// клан-тега (m_szClan) не передаёт вовсе.
+	// приписку.
+	//
+	// СКОБКИ НЕ СТАВИМ (24.09.2026): апдейт CS2 25470087 добавил показ клан-тегов «в штатном
+	// режиме», и клиент теперь оборачивает тег в скобки сам. Наши поверх давали «[[KZ Boss]]»
+	// в таблице — ровно это и было видно 23.09. Апстрим пришёл к тому же в cab9b5e.
+	// В ЧАТЕ скобки остаются: их ставит GetPrefix своей строкой, clanTag там не участвует.
+	// Цвет в скорборде не применяем — движок цвет клан-тега (m_szClan) не передаёт вовсе.
 	if (this->personalTag[0] != '\0')
 	{
-		V_snprintf(this->clanTag, sizeof(this->clanTag), "[%s]", this->personalTag);
+		V_snprintf(this->clanTag, sizeof(this->clanTag), "%s", this->personalTag);
 		this->SetClantag(this->clanTag);
 		return;
 	}
 	i32 rank = this->GetCurrentRankIndex();
 	if (rank >= 0)
 	{
-		V_snprintf(this->clanTag, sizeof(this->clanTag), "[%s %s]", this->player->modeService->GetModeShortName(), rankNames[rank]);
+		V_snprintf(this->clanTag, sizeof(this->clanTag), "%s %s", this->player->modeService->GetModeShortName(), rankNames[rank]);
 	}
 	else
 	{
-		V_snprintf(this->clanTag, sizeof(this->clanTag), "[%s%s]", this->player->modeService->GetModeShortName(),
+		V_snprintf(this->clanTag, sizeof(this->clanTag), "%s%s", this->player->modeService->GetModeShortName(),
 				   this->player->styleServices.Count() > 0 ? "*" : "");
 	}
 
@@ -670,6 +675,18 @@ void KZProfileService::OnPhysicsSimulatePost()
 	if (g_pKZUtils->GetServerGlobals()->realtime >= this->timeToNextRatingRefresh)
 	{
 		this->RequestRating();
+	}
+
+	// Движок ЗАТИРАЕТ m_szClan стим-тегом игрока, как только доедут данные персоны от GC
+	// (причина от апстрима, cab9b5e). Поэтому одной записи мало: у кого стим-тега нет, поле
+	// становится пустым, и в таблице не видно ничего — ровно это и наблюдалось 23.09 у игрока
+	// без персональной приписки при живом ранге (в чате префикс был, в скорборде пусто).
+	// Сравниваем и переставляем; расхождения нет — не трогаем, чтобы не дёргать сеть впустую.
+	CCSPlayerController *controller = this->player->GetController();
+	if (this->clanTag[0] != '\0' && controller && controller->m_iConnected() == PlayerConnectedState::PlayerConnected
+		&& !KZ_STREQ(controller->m_szClan().String(), this->clanTag))
+	{
+		this->player->SetClan(this->clanTag);
 	}
 }
 
