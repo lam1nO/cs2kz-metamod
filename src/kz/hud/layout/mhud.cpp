@@ -584,6 +584,10 @@ void KZHUDService::ApplyPbWrCells(CCSCustomHudLayout *layout, const char *prefix
 		this->SetLayoutValueClass(layout, capId, extra.pwCapSize[i], style.size, "font-size", false);
 		this->SetLayoutBoolClass(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, PBWR_CELL_IDS[i]), "hidden", extra.pbwrCellHidden[i], !cells[i]);
 	}
+	// Бейджи NUB/PRO — тот же кегль, что у времени: font-size ребёнку через класс корня не
+	// наследуется (см. ApplyChildLabelStyle), без класса бейдж не растёт вместе с элементом.
+	this->SetLayoutValueClass(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "pw_b_nub"), extra.pwBadgeSize[0], style.size, "font-size", false);
+	this->SetLayoutValueClass(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "pw_b_pro"), extra.pwBadgeSize[1], style.size, "font-size", false);
 	// Строка гаснет, когда обе её ячейки выключены: иначе от неё остался бы бейдж NUB/PRO.
 	this->SetLayoutBoolClass(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "pw_nub"), "hidden", extra.pbwrRowHidden[0], !(cells[0] || cells[2]));
 	this->SetLayoutBoolClass(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "pw_pro"), "hidden", extra.pbwrRowHidden[1], !(cells[1] || cells[3]));
@@ -645,6 +649,9 @@ void KZHUDService::ApplyShowPosLines(CCSCustomHudLayout *layout, const char *pre
 	const char *angId = PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "mhud_ang");
 	this->SetLayoutVar(layout, angId, "ang", extra.angText, ang);
 	this->ApplyChildLabelStyle(layout, angId, extra.posLine[1], style.size, style.fontClass, colorClass);
+	// Подписи pos/ang: только кегль — цвет и шрифт у них свои из css (как у подписей PB/WR).
+	this->SetLayoutValueClass(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "mhud_pos_cap"), extra.posCapSize[0], style.size, "font-size", false);
+	this->SetLayoutValueClass(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "mhud_ang_cap"), extra.posCapSize[1], style.size, "font-size", false);
 }
 
 void KZHUDService::UpdateShowPosElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force)
