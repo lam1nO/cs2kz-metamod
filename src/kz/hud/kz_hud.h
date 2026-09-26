@@ -18,6 +18,7 @@ struct KZOptNode;
 // GetMHUDColorPref из удалённого particle-пути); значения не менялись ни на бит (иначе у
 // игроков поехали бы цвета худа).
 extern const Color MHUD_DEF_BASE_COLOR;
+extern const Color MHUD_DEF_SHOWPOS_COLOR;
 extern const Color MHUD_DEF_PERF_COLOR;
 extern const Color MHUD_DEF_JUMPBUG_COLOR;
 extern const Color MHUD_DEF_CJ_COLOR;
@@ -82,6 +83,10 @@ struct LayoutElementDef
 	// «Прогресс» по умолчанию ВЫКЛЮЧЕН, и один и тот же ответ обязаны давать
 	// RefreshLayoutPrefs (layout/prefs.cpp) и пункт меню (hud/prefs/hud_prefs.cpp).
 	bool enabledDefault;
+	// Дефолтный шрифт элемента (слаг panorama_tables.cpp). Поэлементный: по дизайну showpos
+	// моноширинный, курс и тип рана — Stratum2 Bold, остальные — LAYOUT_DEFAULT_FONT. Один
+	// источник для RefreshLayoutPrefs, пункта меню, редактора и перезаписи оформления.
+	const char *fontDefault;
 };
 
 extern const LayoutElementDef LAYOUT_ELEMENTS[(i32)LayoutElement::Count];

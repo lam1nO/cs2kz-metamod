@@ -304,8 +304,8 @@ void KZHUDService::RenderEditor()
 		this->SetMenuBoolClass(layout, "ep_step5", "on", this->menuApplied.epStep5, this->editorStep == 5);
 		V_snprintf(buf, sizeof(buf), "%ipx", el.size);
 		this->SetMenuVar(layout, "edit_props", "sz", buf);
-		const char *slug = this->player->optionService->GetPreferenceStr(def.fontKey, LAYOUT_DEFAULT_FONT);
-		this->SetMenuVar(layout, "ep_font", "font", panorama::GetFontDisplayName(slug, LAYOUT_DEFAULT_FONT));
+		const char *slug = this->player->optionService->GetPreferenceStr(def.fontKey, def.fontDefault);
+		this->SetMenuVar(layout, "ep_font", "font", panorama::GetFontDisplayName(slug, def.fontDefault));
 		Color colorDef;
 		const char *colorKey = GetElementColorKey((LayoutElement)sel, colorDef);
 		const char *swatch = colorKey ? panorama::ResolveSwatchClass(this->GetMHUDColorPref(colorKey, colorDef)) : NULL;

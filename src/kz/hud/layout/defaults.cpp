@@ -75,7 +75,7 @@ void KZHUDService::ApplyHudDefaults()
 			opts->SetPreferenceFloat(def.xKey, (f64)def.xDefault);
 			opts->SetPreferenceFloat(def.yKey, (f64)def.yDefault);
 			opts->SetPreferenceFloat(def.sizeKey, (f64)def.sizeDefault);
-			opts->SetPreferenceStr(def.fontKey, LAYOUT_DEFAULT_FONT);
+			opts->SetPreferenceStr(def.fontKey, def.fontDefault);
 			opts->SetPreferenceBool(def.outlineKey, false);
 			opts->SetPreferenceInt(def.opacityKey, 100);
 			written += 7;
@@ -147,7 +147,7 @@ void KZHUDService::ApplyHudDefaults()
 			{"mhudDeltaAheadColor", &MHUD_DEF_DELTA_AHEAD_COLOR},
 			{"mhudDeltaBehindColor", &MHUD_DEF_DELTA_BEHIND_COLOR},
 			{"mhudPbWrColor", &MHUD_DEF_BASE_COLOR},
-			{"mhudShowPosColor", &MHUD_DEF_BASE_COLOR},
+			{"mhudShowPosColor", &MHUD_DEF_SHOWPOS_COLOR},
 			{"mhudCourseColor", &MHUD_DEF_BASE_COLOR},
 			{"mhudLeadProgressColor", &MHUD_DEF_BASE_COLOR},
 		};

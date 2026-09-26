@@ -188,7 +188,7 @@ static_function void AddHudElementItems(KZOptNode *node, LayoutElement e)
 	KZ::menu::AddToggle(node, "HUD - Menu Label Enabled", def.enabledKey, def.enabledDefault);
 	KZ::menu::AddPosition(node, "HUD - Menu Label Position", def.xKey, def.yKey, def.xDefault, def.yDefault);
 	KZ::menu::AddSize(node, "HUD - Menu Label Size", def.sizeKey, def.sizeDefault, LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX);
-	KZ::menu::AddFont(node, "HUD - Menu Label Font", def.fontKey, LAYOUT_DEFAULT_FONT);
+	KZ::menu::AddFont(node, "HUD - Menu Label Font", def.fontKey, def.fontDefault);
 	// Обводка — теперь поэлементный тумблер (def.outlineKey, задача 4), а не один общий
 	// пункт на всё меню: старый "Outline" в General убран, чтобы не осталось двух источников.
 	// Через колбэки — из-за миграции с hudOutline, см. OutlineGetCurrent выше.
@@ -530,7 +530,7 @@ void KZHUDService::InitMenuPrefs()
 	KZ::menu::AddColor(timer, "HUD - Menu Label DeltaBehindColor", "mhudDeltaBehindColor", MHUD_DEF_DELTA_BEHIND_COLOR);
 	KZ::menu::AddColor(elementNodes[(i32)LayoutElement::LeadProgress], "HUD - Menu Label Color", "mhudLeadProgressColor", MHUD_DEF_BASE_COLOR);
 	KZ::menu::AddColor(elementNodes[(i32)LayoutElement::PbWr], "HUD - Menu Label Color", "mhudPbWrColor", MHUD_DEF_BASE_COLOR);
-	KZ::menu::AddColor(elementNodes[(i32)LayoutElement::ShowPos], "HUD - Menu Label Color", "mhudShowPosColor", MHUD_DEF_BASE_COLOR);
+	KZ::menu::AddColor(elementNodes[(i32)LayoutElement::ShowPos], "HUD - Menu Label Color", "mhudShowPosColor", MHUD_DEF_SHOWPOS_COLOR);
 	KZ::menu::AddColor(elementNodes[(i32)LayoutElement::Course], "HUD - Menu Label Color", "mhudCourseColor", MHUD_DEF_BASE_COLOR);
 	// У «Прогресса» своего цвета нет (в дизайне не просили) — только общие поля.
 

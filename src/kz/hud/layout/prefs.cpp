@@ -103,7 +103,7 @@ void KZHUDService::RefreshLayoutPrefs()
 		element.size = panorama::SnapToStep((i32)opts->GetPreferenceFloat(def.sizeKey, (f32)def.sizeDefault), LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX);
 		// Шрифт разрешается в css-класс уже здесь: UpdateLayoutElement (Task 4) кладёт его на
 		// панель напрямую, повторный резолв в геймтике не нужен и не делается.
-		element.fontClass = panorama::ResolveFontClass(opts->GetPreferenceStr(def.fontKey, LAYOUT_DEFAULT_FONT), LAYOUT_DEFAULT_FONT);
+		element.fontClass = panorama::ResolveFontClass(opts->GetPreferenceStr(def.fontKey, def.fontDefault), def.fontDefault);
 		// Миграция общего hudOutline — в GetElementOutlinePref (выше): тот же ответ показывает
 		// пункт меню, второе чтение с другим дефолтом развело бы меню с худом.
 		element.outline = this->GetElementOutlinePref((LayoutElement)e);
@@ -128,7 +128,7 @@ void KZHUDService::RefreshLayoutPrefs()
 	this->layoutPrefs.keysOverlapGlow = this->GetMHUDColorPref("mhudKeysOverlapGlowColor", MHUD_DEF_KEYS_OVERLAP_GLOW_COLOR);
 	this->layoutPrefs.checkpoint = this->GetMHUDColorPref("mhudCheckpointColor", MHUD_DEF_BASE_COLOR);
 	this->layoutPrefs.pbwrColor = this->GetMHUDColorPref("mhudPbWrColor", MHUD_DEF_BASE_COLOR);
-	this->layoutPrefs.showPosColor = this->GetMHUDColorPref("mhudShowPosColor", MHUD_DEF_BASE_COLOR);
+	this->layoutPrefs.showPosColor = this->GetMHUDColorPref("mhudShowPosColor", MHUD_DEF_SHOWPOS_COLOR);
 	this->layoutPrefs.courseColor = this->GetMHUDColorPref("mhudCourseColor", MHUD_DEF_BASE_COLOR);
 	this->layoutPrefs.leadProgressColor = this->GetMHUDColorPref("mhudLeadProgressColor", MHUD_DEF_BASE_COLOR);
 
@@ -239,6 +239,7 @@ const char *GetElementColorKey(LayoutElement element, Color &def)
 		case LayoutElement::PbWr:
 			return "mhudPbWrColor";
 		case LayoutElement::ShowPos:
+			def = MHUD_DEF_SHOWPOS_COLOR;
 			return "mhudShowPosColor";
 		case LayoutElement::Course:
 			return "mhudCourseColor";

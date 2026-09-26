@@ -39,6 +39,8 @@ extern bool g_menusHasSlotStatus;
 // Дефолтные цвета худа (объявления — extern в kz_hud.h). Значения апстрима, не менялись ни
 // на бит; жили в particles.cpp и переехали сюда вместе с удалением particle-пути.
 const Color MHUD_DEF_BASE_COLOR(255, 255, 255, 255);
+// Значения showpos по дизайну — #CFD8DE; подписи X/Y/Z красит CSS аддона.
+const Color MHUD_DEF_SHOWPOS_COLOR(0xCF, 0xD8, 0xDE, 0xFF);
 const Color MHUD_DEF_PERF_COLOR(0x40, 0xFF, 0x40, 0xFF);
 const Color MHUD_DEF_JUMPBUG_COLOR(0xFF, 0xFF, 0x20, 0xFF);
 const Color MHUD_DEF_CJ_COLOR(0x71, 0xEE, 0xB8, 0xFF);
