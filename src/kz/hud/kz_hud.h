@@ -937,7 +937,7 @@ private:
 		// Кегль бейджей строк NUB/PRO (pw_b_nub/pw_b_pro) и подписей showpos (mhud_pos_cap/
 		// mhud_ang_cap): тот же font-size--N, что у корня, иначе при масштабе они оставались мелкими.
 		i32 pwBadgeSize[2] {INT_MIN, INT_MIN};
-		i32 posCapSize[2] {INT_MIN, INT_MIN};
+		LayoutChildStyleState posCap[2] {};
 		ColorClassCache pwColor {};
 		// Строки showpos mhud_pos/mhud_ang: текст первой (вторая — angText выше) и стиль обеих.
 		std::string posText {};

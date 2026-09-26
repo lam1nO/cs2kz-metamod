@@ -692,9 +692,10 @@ void KZHUDService::ApplyShowPosLines(CCSCustomHudLayout *layout, const char *pre
 	const char *angId = PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "mhud_ang");
 	this->SetLayoutVar(layout, angId, "ang", extra.angText, ang);
 	this->ApplyChildLabelStyle(layout, angId, extra.posLine[1], style.size, style.fontClass, colorClass);
-	// Подписи pos/ang: только кегль — цвет и шрифт у них свои из css (как у подписей PB/WR).
-	this->SetLayoutValueClass(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "mhud_pos_cap"), extra.posCapSize[0], style.size, "font-size", false);
-	this->SetLayoutValueClass(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "mhud_ang_cap"), extra.posCapSize[1], style.size, "font-size", false);
+	// Подписи pos/ang — тем же кеглем/шрифтом/цветом, что и значения: серые css-подписи в игре
+	// не читались (отзыв владельца 27.09); цвет элемента правится в редакторе.
+	this->ApplyChildLabelStyle(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "mhud_pos_cap"), extra.posCap[0], style.size, style.fontClass, colorClass);
+	this->ApplyChildLabelStyle(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "mhud_ang_cap"), extra.posCap[1], style.size, style.fontClass, colorClass);
 }
 
 void KZHUDService::UpdateShowPosElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force)
