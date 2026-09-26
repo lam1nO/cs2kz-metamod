@@ -72,6 +72,20 @@ namespace KZ::hudfmt
 		}
 	}
 
+	void FormatCheckpointLine(int cpIndex, int teleports, char *out, size_t outLen)
+	{
+		// Строка panorama-худа по дизайну: «CP 3 · TP 2»; teleports < 0 — AWR-реплей, где счётчик
+		// ТП вырезан вместе с петлями, вместо числа метка «AWR». HTML-худ этим не пользуется.
+		if (teleports < 0)
+		{
+			snprintf(out, outLen, "CP %d \xC2\xB7 AWR", cpIndex);
+		}
+		else
+		{
+			snprintf(out, outLen, "CP %d \xC2\xB7 TP %d", cpIndex, teleports);
+		}
+	}
+
 	bool GridCellToPercent(const char *buttonId, int cols, int rows, int &xPct, int &yPct)
 	{
 		if (!buttonId || buttonId[0] != 'g' || !isdigit((unsigned char)buttonId[1]))

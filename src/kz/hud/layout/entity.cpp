@@ -30,17 +30,12 @@ extern const LayoutElementDef LAYOUT_ELEMENTS[(i32)LayoutElement::Count] =
 	{"mhud_prespeed",   "mhud_prespeed",   "prespeed",   "hudPrespeed",   "mhudPrespeedX",   "mhudPrespeedY",   "mhudPrespeedSize",   "mhudPrespeedFont",   "mhudPrespeedOutline",   "mhudPrespeedOpacity",   LAYOUT_DEF_PRESPEED_X,   LAYOUT_DEF_PRESPEED_Y,   LAYOUT_DEF_PRESPEED_SIZE,   true},
 	{"mhud_keys",       "mhud_keys",       "keys",       "hudKeys",       "mhudKeysX",       "mhudKeysY",       "mhudKeysSize",       "mhudKeysFont",       "mhudKeysOutline",       "mhudKeysOpacity",       LAYOUT_DEF_KEYS_X,       LAYOUT_DEF_KEYS_Y,       LAYOUT_DEF_KEYS_SIZE,       true},
 	{"mhud_checkpoint", "mhud_checkpoint", "checkpoint", "hudCpTp",       "mhudCheckpointX", "mhudCheckpointY", "mhudCheckpointSize", "mhudCheckpointFont", "mhudCheckpointOutline", "mhudCheckpointOpacity", LAYOUT_DEF_CHECKPOINT_X, LAYOUT_DEF_CHECKPOINT_Y, LAYOUT_DEF_CHECKPOINT_SIZE, true},
-	// panelId/varName здесь — ЛЕЙБЛ ТАЙМЕРА, и это не опечатка: панели `mhud_leadprogress` в
-	// чужой разметке mhud.vxml_c не существует (текстовых лейблов там четыре, все заняты).
-	// Элемент пишется в ДРУГУЮ сущность — свою копию той же страницы
-	// (KZHUDService::EnsureLeadProgressLayout), где лейбл таймера свободен; диф-кэши у
-	// элементов разные (layoutElements[] по индексу), так что с настоящим таймером он не
-	// конфликтует. Ключи префов при этом СВОИ (mhudLeadProgress*) — настройка отдельная.
-	// Дефолт тумблера false: элемент новый, включают его явно.
-	// posPanelId — mhud_timer_row, как у настоящего таймера: в разметке лейбл mhud_timer теперь
-	// внутри строки, и строка несёт позицию и hidden (по умолчанию скрыта). Иначе на копии
-	// страницы «Прогресс» навсегда остался бы невидимым.
-	{"mhud_timer",      "mhud_timer_row",  "timer",      "mhudLeadProgress", "mhudLeadProgressX", "mhudLeadProgressY", "mhudLeadProgressSize", "mhudLeadProgressFont", "mhudLeadProgressOutline", "mhudLeadProgressOpacity", LAYOUT_DEF_LEADPROGRESS_X, LAYOUT_DEF_LEADPROGRESS_Y, LAYOUT_DEF_LEADPROGRESS_SIZE, false},
+	// «Прогресс» — своя панель mhud_progress (подпись + процент + полоса) на ОБЩЕЙ сущности худа.
+	// Раньше элемент жил на отдельной копии страницы и занимал её лейбл таймера: своей панели в
+	// разметке не было. varName "progress" — переменная процента (лейбл mhud_progress_pct внутри
+	// корня); подпись и ширину полосы пишет UpdateLeadProgressElement. Ключи префов прежние
+	// (mhudLeadProgress*). Дефолт тумблера false: элемент включают явно.
+	{"mhud_progress",   "mhud_progress",   "progress",   "mhudLeadProgress", "mhudLeadProgressX", "mhudLeadProgressY", "mhudLeadProgressSize", "mhudLeadProgressFont", "mhudLeadProgressOutline", "mhudLeadProgressOpacity", LAYOUT_DEF_LEADPROGRESS_X, LAYOUT_DEF_LEADPROGRESS_Y, LAYOUT_DEF_LEADPROGRESS_SIZE, false},
 	// Поля редактора `!hud` (§4.1 спеки). Корни — Panel (pbwr, showpos) или Label (course,
 	// runtype). У pbwr varName не пишется никогда: текст идёт в переменные ячеек (mhud.cpp).
 	{"mhud_pbwr",       "mhud_pbwr",       "pbwr",       "hudPbWr",       "mhudPbWrX",       "mhudPbWrY",       "mhudPbWrSize",       "mhudPbWrFont",       "mhudPbWrOutline",       "mhudPbWrOpacity",       LAYOUT_DEF_PBWR_X,       LAYOUT_DEF_PBWR_Y,       LAYOUT_DEF_PBWR_SIZE,       true},
@@ -337,11 +332,6 @@ CCSCustomHudLayout *KZHUDService::EnsureOwnedLayout(bool &created)
 		// такое же единственное глобальное состояние, что и старая, просто с чистыми
 		// интерн-таблицами.
 		this->DestroyOwnedLayout();
-		// Копия страницы под элемент «Прогресс» — ОТДЕЛЬНАЯ сущность с ОТДЕЛЬНЫМ интерн-пулом,
-		// и раскладку она берёт из того же эффективного набора префов (GetLayoutPrefs), то есть
-		// при мимикрии тоже меняется на каждую новую цель. Значит и упирается в тот же лимит
-		// 1024 — сносим её здесь же, иначе долгий спектейт-марафон исчерпал бы пул именно у неё.
-		this->DestroyOwnedLeadProgressLayout();
 	}
 
 	if (CBaseEntity *cached = this->ownedLayout.Get())
@@ -387,10 +377,6 @@ void KZHUDService::DestroyOwnedLayout()
 	// ЭТОЙ сущности (что на ней уже выставлено), а не абстрактные значения игрока — оставить
 	// их живыми означало бы отдать следующему владельцу слота (реконнект/новый игрок) чужой
 	// кэш, из-за которого UpdateLayoutElement решит, что менять уже нечего.
-	// Цикл проходит и по LeadProgress, чья сущность ОТДЕЛЬНАЯ (ownedLeadProgressLayout): его
-	// кэш здесь сбрасывается зря, но безвредно — на следующем тике элемент просто перешлёт
-	// свои классы заново (новых интерн-строк это не создаёт, они уже в таблице сущности).
-	// Обратная ошибка была бы настоящим багом, поэтому лишний сброс предпочтительнее.
 	for (i32 i = 0; i < (i32)LayoutElement::Count; i++)
 	{
 		this->layoutElements[i] = LayoutElementState();
@@ -428,21 +414,18 @@ void KZHUDService::LayoutCleanup()
 			player->hudService->DestroyOwnedMenuLayout();
 			// Страница меню реплея (layout/rpmenu.cpp) — третья персональная сущность, та же причина.
 			player->hudService->DestroyOwnedReplayLayout();
-			// Копия страницы под элемент «Прогресс» (layout/mhud.cpp) — четвёртая.
-			player->hudService->DestroyOwnedLeadProgressLayout();
 		}
 	}
 }
 
 bool KZHUDService::OwnsLayoutEntity(CEntityHandle handle)
 {
-	// Своих сущностей четыре: сам худ (ownedLayout), отдельное меню настроек (ownedMenuLayout,
-	// Task 11), копия под элемент «Прогресс» (ownedLeadProgressLayout) и страница меню реплея
+	// Своих сущностей три: сам худ (ownedLayout), отдельное меню настроек (ownedMenuLayout,
+	// Task 11) и страница меню реплея
 	// спектатора (ownedReplayLayout, layout/rpmenu.cpp) — транзит (KZ::quiet) гасит всё, чего
 	// нет в этом списке, и без проверки каждой сущность игроку не долетала бы вовсе
 	// (пустые/невалидные хэндлы по-прежнему false).
 	return (this->ownedLayout.IsValid() && this->ownedLayout.ToInt() == handle.ToInt())
 		   || (this->ownedMenuLayout.IsValid() && this->ownedMenuLayout.ToInt() == handle.ToInt())
-		   || (this->ownedLeadProgressLayout.IsValid() && this->ownedLeadProgressLayout.ToInt() == handle.ToInt())
 		   || (this->ownedReplayLayout.IsValid() && this->ownedReplayLayout.ToInt() == handle.ToInt());
 }

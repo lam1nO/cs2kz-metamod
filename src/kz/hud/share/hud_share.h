@@ -64,7 +64,7 @@ namespace KZ::hudshare
 	//   - пишет всё в ОДНОМ KZOptionService::BatchScope (одна сериализация prefKV, один UPDATE);
 	//   - сохраняет слот отката тем же пакетом;
 	//   - поднимает пол по видимости, если после импорта не виден ни один элемент;
-	//   - зовёт DestroyOwnedLayout() + DestroyOwnedLeadProgressLayout() (интерн-пулы сущностей)
+	//   - зовёт DestroyOwnedLayout() (интерн-пул сущности худа)
 	//     и RefreshLayoutPrefs() (кэш префов);
 	//   - печатает игроку итог/отказ и логирует его с машинно-читаемым reason.
 	// sourceDetail — необязательная деталь для лога (код обмена, steam_id наблюдаемого); NULL можно.

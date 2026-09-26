@@ -44,10 +44,8 @@ enum class LayoutElement
 	Prespeed,
 	Keys,
 	Checkpoint,
-	// «Прогресс: N%» по маршруту `!lead` (kz/lead). Живёт на ДОПОЛНИТЕЛЬНОЙ копии сущности
-	// худа (ownedLeadProgressLayout): свободного лейбла в разметке mhud.vxml нет (она общая с
-	// апстримом, четыре текстовых лейбла заняты элементами худа), а лишняя копия страницы даёт
-	// ещё один.
+	// «Прогресс» по маршруту `!lead` (kz/lead): панель mhud_progress на ОБЩЕЙ сущности худа —
+	// подпись, процент и полоса (класс w-p--N на заливке), см. UpdateLeadProgressElement.
 	// ДОБАВЛЯТЬ НОВЫЕ ТОЛЬКО ПЕРЕД Count: индексом адресуются оперативные массивы
 	// (layoutElements/s_resettableNodes). Префы элементов хранятся по СТРОКОВЫМ ключам
 	// (LayoutElementDef), не по индексу, — сохранённые настройки игроков от добавления
@@ -735,11 +733,6 @@ public:
 	// LayoutCleanup() и CloseReplayMenu().
 	void DestroyOwnedReplayLayout();
 
-	// Снести копию страницы под элемент «Прогресс» (layout/mhud.cpp) и сбросить её диф-кэш.
-	// Публичный по той же причине, что DestroyOwnedLayout: снос зовёт и импорт чужого худа
-	// (hud/share/hud_share.cpp) — у копии свой интерн-пул классов, переживший бы импорт.
-	void DestroyOwnedLeadProgressLayout();
-
 private:
 	// Единственная точка расчёта SpeedInfo (Task 6/R3, см. комментарий у struct SpeedInfo):
 	// HTML-путь (BuildVersionCHud) и panorama-layout (layout/mhud.cpp)
@@ -829,19 +822,6 @@ private:
 
 	// Сущность худа ЭТОГО игрока; чужим не транслируется (KZ::quiet::OnCheckTransmit).
 	CHandle<CBaseEntity> ownedLayout {};
-	// ДОПОЛНИТЕЛЬНАЯ копия страницы худа под элемент «Прогресс» (LayoutElement::LeadProgress).
-	// Зачем копия: в разметке mhud.vxml_c текстовых лейблов ровно четыре, и все четыре заняты
-	// элементами худа — своего лейбла для шестого элемента там нет. Своим аддон стал 08.09
-	// (KZ_WORKSHOP_ADDON_ID), но путь и содержимое mhud.vxml намеренно общие с апстримом, так
-	// что лейбл туда не дописывают. Лишняя копия страницы у того же клиента даёт ещё один
-	// свободный лейбл `mhud_timer`, который и становится «Прогрессом» со своими
-	// позицией/кеглем/шрифтом/обводкой/прозрачностью.
-	// Создаётся ТОЛЬКО под включённый преф, гасится при выключении.
-	CHandle<CBaseEntity> ownedLeadProgressLayout {};
-	// Отказ создания копии уже залогирован (сущность не создалась — лимит энтити): элемент
-	// обновляется каждый тик, и без защёлки это было бы 64 KZ_LOG_ERROR в секунду на игрока
-	// (та же причина, что у replayMenuFailLogged). Снимается на успешном создании.
-	bool leadProgressFailLogged {};
 	LayoutElementState layoutElements[(i32)LayoutElement::Count] {};
 
 	// Слот эффективного источника mhudMimicSpec на МОМЕНТ последней проверки EnsureOwnedLayout:
@@ -928,6 +908,7 @@ private:
 		const char *deltaStateClass {}; // d-ahead/d-behind — только при дефолтных цветах
 		const char *deltaColorClass {}; // pal-fg-N/grad-N — только при своих цветах
 		i32 deltaFontSize {INT_MIN};
+		const char *deltaFontClass {}; // шрифт таймера — дельта в той же строке тем же начертанием
 		// Ближайший цвет палитры ищется только при смене цвета (как в ApplyLayoutLabel).
 		const char *deltaColorComputed {};
 		u32 deltaColorPacked {};
@@ -940,6 +921,11 @@ private:
 		std::string posText {};
 		LayoutChildStyleState posLine[2] {};
 		ColorClassCache posColor {};
+		// «Прогресс»: подпись {s:progress_cap}, ширина заливки (w-p--N) и стиль процента.
+		std::string progressCap {};
+		i32 progressFill {INT_MIN};
+		LayoutChildStyleState progressPct {};
+		ColorClassCache progressColor {};
 	};
 
 	LayoutExtraState layoutExtra {};
@@ -959,6 +945,8 @@ private:
 						const char *(&texts)[4]);
 	void ApplyShowPosLines(CCSCustomHudLayout *layout, const char *prefix, LayoutExtraState &extra, const char *pos, const char *ang,
 						   const MHUDLayoutPrefs::Element &style, const Color &color);
+	void ApplyLeadProgressParts(CCSCustomHudLayout *layout, const char *prefix, LayoutExtraState &extra, i32 percent,
+								const MHUDLayoutPrefs::Element &style, const Color &color);
 	// Запись элемента на ЛЮБЫЕ id и ЛЮБОЙ кэш (реплика редактора: e_*/x_* на сущности меню).
 	// UpdateLayoutElement — её частный случай для настоящего худа (LAYOUT_ELEMENTS, layoutElements).
 	void ApplyLayoutElementTo(CCSCustomHudLayout *layout, const MHUDLayoutPrefs::Element &cached, LayoutElementState &state, const char *panelId,
@@ -1066,11 +1054,8 @@ private:
 	void UpdateShowPosElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force);
 	void UpdateCourseElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force);
 	void UpdateRunTypeElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force);
-	// «Прогресс: N%» — своя сущность (ownedLeadProgressLayout), поэтому и layout себе ищет
-	// сам, а не получает его от UpdateHudLayout: элемент живёт только пока включён преф и есть
-	// путь маршрута (source->leadService), иначе сущность гасится.
-	void UpdateLeadProgressElement(KZPlayer *source);
-	CCSCustomHudLayout *EnsureLeadProgressLayout(bool &created);
+	// «Прогресс» — панель mhud_progress на сущности худа, тот же контракт source.
+	void UpdateLeadProgressElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force);
 
 	// === Окно !options и редактор !hud — состояние и рендер (layout/menu.cpp, layout/editor.cpp)
 

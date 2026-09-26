@@ -41,12 +41,11 @@
 	// Знак процента — "%%", ДВА, а не четыре как в чат-фразах (cs2kz-jumpstats): проходов
 	// форматирования здесь один (PrepareMessageWithLang → tinyformat, где "%%" = литерал "%"),
 	// второго printf-прохода PrintChat на этом пути нет — текст идёт прямо в лейбл.
-	"Lead - Hud Progress"
+	"Lead - Hud Progress Caption"
 	{
-		"#format"	"percent:d"
-		"en"		"Progress: {percent}%%"
-		"ru"		"Прогресс: {percent}%%"
-		"chi"		"进度: {percent}%%"
-		"ua"		"Прогрес: {percent}%%"
+		"en"		"PROGRESS"
+		"ru"		"ПРОГРЕСС"
+		"chi"		"进度"
+		"ua"		"ПРОГРЕС"
 	}
 }

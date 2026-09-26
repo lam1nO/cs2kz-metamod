@@ -32,6 +32,9 @@ int main()
 		FormatCourseLine("main", "CKZ", many, 4, guard, 8);
 		assert(strlen(guard) == 7 && guard[8] == 'Z' && guard[23] == 'Z');
 	}
+	FormatCheckpointLine(3, 2, b, sizeof(b)); assert(!strcmp(b, "CP 3 \xC2\xB7 TP 2"));
+	FormatCheckpointLine(0, 0, b, sizeof(b)); assert(!strcmp(b, "CP 0 \xC2\xB7 TP 0"));
+	FormatCheckpointLine(4, -1, b, sizeof(b)); assert(!strcmp(b, "CP 4 \xC2\xB7 AWR"));
 	int x, y;
 	// центр ячейки 0..63 x 0..35: x=round((c+0.5)*100/64), y=round((r+0.5)*100/36).
 	// Плановое ожидание g0_0 (x==0) арифметически неверно: (0+0.5)*100/64=0.78125 → round=1.

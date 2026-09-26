@@ -20,6 +20,7 @@
 #include "kz/mode/kz_mode.h"              // KZModeService::GetModeShortName для метки режима в строке 1
 #include "kz/replays/cyb_replay_common.h" // MapMode — тот же маппинг режима, что у PB/WR-фетча
 #include "kz/jumpstats/kz_jumpstats.h"    // JumpType_Jumpbug/jumps.Tail() для приписки JB у скорости
+#include "kz/hud/hud_format.h"            // FormatCheckpointLine — строка CP/TP panorama-худа
 #include "kz/lead/kz_lead.h"               // SetCompareWanted(false) — путь дельты вне panorama не держим
 
 #include <algorithm>
@@ -420,9 +421,6 @@ void KZHUDService::Reset()
 	// Слот реально освобождается — сущность и кэши классов панелей иначе достались бы
 	// следующему игроку в этом слоте (реконнект/новый игрок).
 	this->DestroyOwnedLayout();
-	// Копия страницы под элемент «Прогресс» (layout/mhud.cpp) — отдельная сущность, тот же
-	// повод: слот освобождается. Преф прогресса гасит KZLeadService::Reset.
-	this->DestroyOwnedLeadProgressLayout();
 	// Значения cl_crosshair* и флаг confirmed (Task 10) — DestroyOwnedLayout больше их не
 	// трогает (только кэш классов ЭТОЙ сущности): здесь слот реально освобождается, и без
 	// сброса новый игрок унаследовал бы «подтверждённые» cl_crosshair* ПРЕДЫДУЩЕГО, а
@@ -648,19 +646,21 @@ Vector KZHUDService::GetDisplayVelocity(KZPlayer *src)
 	return velocity;
 }
 
+// Строка CP/TP panorama-худа (mhud_checkpoint) — формат дизайна «CP 3 · TP 2»
+// (KZ::hudfmt::FormatCheckpointLine, host-тест). Числа не переводятся, поэтому language не
+// нужен; параметр оставлен ради сигнатуры. HTML-худ своей строкой не пользуется этим методом
+// («HUD - Bottom CP/TP Text», BuildVersionCHud) — его формат не тронут.
 std::string KZHUDService::GetCheckpointText(const char *language)
 {
 	const bool isReplay = KZ::replaysystem::IsReplayBot(this->player);
 	const i32 cp = isReplay ? KZ::replaysystem::GetCurrentCpIndex() : this->player->checkpointService->GetCurrentCpIndex();
-	const i32 cpCount = isReplay ? KZ::replaysystem::GetCheckpointCount() : this->player->checkpointService->GetCheckpointCount();
 	// AWR-реплей: телепорты вырезаны, счётчик ТП кадра врал бы про то, что видит зритель —
-	// вместо числа метка «AWR» (отдельная фраза: в этой числовой позиции строка не форматируется).
-	if (isReplay && KZ::replaysystem::IsAwrMode())
-	{
-		return KZLanguageService::PrepareMessageWithLang(language, "HUD - Checkpoint AWR Text", cp, cpCount);
-	}
-	const i32 tp = isReplay ? KZ::replaysystem::GetTeleportCount() : (i32)this->player->checkpointService->GetTeleportCount();
-	return KZLanguageService::PrepareMessageWithLang(language, "HUD - Checkpoint Text", cp, cpCount, tp);
+	// вместо числа метка «AWR» (teleports < 0 в форматтере).
+	const bool awr = isReplay && KZ::replaysystem::IsAwrMode();
+	const i32 tp = awr ? -1 : (isReplay ? KZ::replaysystem::GetTeleportCount() : (i32)this->player->checkpointService->GetTeleportCount());
+	char buf[48];
+	KZ::hudfmt::FormatCheckpointLine(cp, tp, buf, sizeof(buf));
+	return buf;
 }
 
 std::string KZHUDService::GetTimerText(const char *language)
@@ -1938,7 +1938,6 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	if (cfg->IsHudEditorOpen())
 	{
 		cfg->DestroyOwnedLayout();
-		cfg->DestroyOwnedLeadProgressLayout();
 		cfg->ClearBottomPanel();
 		cfg->TickHudEditor();
 		return;
@@ -1978,9 +1977,6 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 		// Ушли с panorama-типа (или он никогда не был выбран) — сущность и её кэши классов
 		// не должны переживать смену типа, иначе на экране останется застывший худ.
 		cfg->DestroyOwnedLayout();
-		// Копия страницы под «Прогресс» живёт по тому же правилу: вне panorama её быть не
-		// должно (иначе на экране остался бы висеть процент от прошлого типа худа).
-		cfg->DestroyOwnedLeadProgressLayout();
 	}
 	if (!usePanorama && player == target && target->leadService)
 	{

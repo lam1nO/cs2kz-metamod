@@ -58,7 +58,7 @@ static_global const EditorReplicaDef EDITOR_REPLICA[(i32)LayoutElement::Count] =
 	{"e_prespeed",     "x_mhud_prespeed",     "prespeed",     "tag_prespeed",     "HUD Editor - Element Prespeed"},
 	{"e_keys",         "x_mhud_keys",         "keys",         "tag_keys",         "HUD Editor - Element Keys"},
 	{"e_checkpoint",   "x_mhud_checkpoint",   "checkpoint",   "tag_checkpoint",   "HUD Editor - Element Checkpoint"},
-	{"e_leadprogress", "x_mhud_leadprogress", "leadprogress", "tag_leadprogress", "HUD Editor - Element LeadProgress"},
+	{"e_leadprogress", "x_mhud_progress",     "progress",     "tag_leadprogress", "HUD Editor - Element LeadProgress"},
 	{"e_pbwr",         "x_mhud_pbwr",         "pbwr",         "tag_pbwr",         "HUD Editor - Element PbWr"},
 	{"e_showpos",      "x_mhud_showpos",      "pos",          "tag_showpos",      "HUD Editor - Element ShowPos"},
 	{"e_course",       "x_mhud_course",       "course",       "tag_course",       "HUD Editor - Element Course"},
@@ -107,6 +107,8 @@ static_global const EditorExtraColorDef EDITOR_EXTRA_COLORS[(i32)LayoutElement::
 // Плейсхолдер таймера стартует с 01:23.456 и идёт по серверному времени (§4.5).
 #define KZ_EDITOR_TIMER_START 83.456
 #define KZ_EDITOR_DELTA_PLACEHOLDER 0.312
+#define KZ_EDITOR_PROGRESS_PLACEHOLDER 38
+#define KZ_EDITOR_PROGRESS_TEXT "38%"
 // Панель свойств уезжает влево (flip), если выбранный элемент в правой нижней части экрана:
 // x > 60% и y > 60% от левого-верхнего угла = больше 10 от центра.
 #define KZ_EDITOR_FLIP_FROM 10
@@ -163,7 +165,6 @@ void KZHUDService::OpenHudEditor()
 	// Настоящий худ под редактором не нужен (реплика стоит на его месте) — сносим сразу, DrawPanels
 	// держит его снесённым, пока редактор открыт.
 	this->DestroyOwnedLayout();
-	this->DestroyOwnedLeadProgressLayout();
 	// Переводит игрока в режим курсора — снятие на всех путях закрытия (шапка layout/menu.cpp).
 	layout->SetInputCaptureEnabled(this->player->GetPlayerSlot(), true);
 	this->RenderEditor();
@@ -347,7 +348,6 @@ void KZHUDService::RenderEditorReplica(CCSCustomHudLayout *layout, bool tickOnly
 		return;
 	}
 
-	const char *lang = this->player->languageService->GetLanguage();
 	// Дельта: «позади» (+0.312, d-behind) — видна, когда в префах выбрано сравнение.
 	this->ApplyTimerDelta(layout, "x_", this->editorExtra, prefs, prefs.elements[(i32)LayoutElement::Timer].enabled && prefs.timerCompare != 0,
 						  KZ_EDITOR_DELTA_PLACEHOLDER);
@@ -365,10 +365,16 @@ void KZHUDService::RenderEditorReplica(CCSCustomHudLayout *layout, bool tickOnly
 		this->ApplyKeysLook(layout, "x_", this->editorKeys, prefs, keys, false, none);
 	}
 
-	const std::string cp = KZLanguageService::PrepareMessageWithLang(lang, "HUD - Checkpoint Text", 3, 5, 2);
-	apply(LayoutElement::Checkpoint, true, cp.c_str(), prefs.checkpoint);
-	const std::string progress = KZLanguageService::PrepareMessageWithLang(lang, "Lead - Hud Progress", 38);
-	apply(LayoutElement::LeadProgress, true, progress.c_str(), prefs.leadProgressColor);
+	char cp[48];
+	KZ::hudfmt::FormatCheckpointLine(3, 2, cp, sizeof(cp));
+	apply(LayoutElement::Checkpoint, true, cp, prefs.checkpoint);
+	// «Прогресс»: 38% — плейсхолдер дизайна (подпись, процент и полоса та же запись, что у худа).
+	if (prefs.elements[(i32)LayoutElement::LeadProgress].enabled)
+	{
+		this->ApplyLeadProgressParts(layout, "x_", this->editorExtra, KZ_EDITOR_PROGRESS_PLACEHOLDER,
+									 prefs.elements[(i32)LayoutElement::LeadProgress], prefs.leadProgressColor);
+	}
+	apply(LayoutElement::LeadProgress, true, KZ_EDITOR_PROGRESS_TEXT, prefs.leadProgressColor);
 
 	// PB/WR — настоящие по курсу игрока, если есть; иначе плейсхолдеры дизайна.
 	const bool cells[4] = {prefs.pbNub, prefs.pbPro, prefs.wrNub, prefs.wrPro};

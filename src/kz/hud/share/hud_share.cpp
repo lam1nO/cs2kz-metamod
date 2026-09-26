@@ -760,10 +760,6 @@ KZ::hudshare::ApplyStats KZ::hudshare::Apply(KZPlayer *to, const char *snapshot,
 	// меняет, поэтому штатный триггер пересоздания (layoutMimicSource, layout/entity.cpp) здесь
 	// не сработает, и звать снос надо явно. Он же обнуляет кэши классов элементов.
 	to->hudService->DestroyOwnedLayout();
-	// Копия страницы под элемент «Прогресс» — ОТДЕЛЬНАЯ сущность со своим интерн-пулом, а
-	// чужой набор меняет и её раскладку (mhudLeadProgress*): без сноса она осталась бы с
-	// классами прошлого худа. Пересоздастся сама на следующем тике, если элемент включён.
-	to->hudService->DestroyOwnedLeadProgressLayout();
 	// Кэш префов: без него игрок увидит новый худ только после перезахода.
 	to->hudService->RefreshLayoutPrefs();
 
