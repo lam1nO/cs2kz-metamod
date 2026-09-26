@@ -1416,7 +1416,18 @@ const PBData *KZTimerService::GetCompareTarget(PBDataKey key)
 	return nullptr;
 }
 
-bool KZTimerService::GetHudPBTime(f64 &outTime, const KZCourseDescriptor *course)
+// Время нужного зачёта из записи кэша: overall (NUB — лучший ран вообще, в том числе без
+// телепортов) или pro (только без телепортов). 0 — записи/времени нет.
+static_function f64 HudRecordTime(const PBData *data, bool pro)
+{
+	if (!data)
+	{
+		return 0.0;
+	}
+	return pro ? data->pro.pbTime : data->overall.pbTime;
+}
+
+bool KZTimerService::GetHudPBTime(f64 &outTime, const KZCourseDescriptor *course, bool pro)
 {
 	if (!course)
 	{
@@ -1438,8 +1449,12 @@ bool KZTimerService::GetHudPBTime(f64 &outTime, const KZCourseDescriptor *course
 	// Известный компромисс: удалённый рекорд, о котором платформа ещё не знает, останется
 	// видимым до смены карты — ровно как и до этой правки (кэш платформы не умеет забывать).
 	f64 best = 0.0;
-	i32 modeIdx = ApiModeToIndex(CybReplayCommon::MapMode(std::string(modeInfo.shortModeName.Get(), modeInfo.shortModeName.Length())));
-	if (modeIdx >= 0)
+	// PRO платформа не отдаёт: ручка /ingest/v1/kz/records (apps/api, kzRecordsForHud) считает
+	// PB как MIN(kz_runs.time_ms) БЕЗ деления на pro/nub, а WR — из kz_records (тоже overall).
+	// Поэтому PRO берётся только из наших кэшей ниже; платформенный кэш и счётчики промахов по
+	// нему (NoteHudPlatformMiss) для PRO не трогаем — промах тут не патология, а норма.
+	i32 modeIdx = pro ? -1 : ApiModeToIndex(CybReplayCommon::MapMode(std::string(modeInfo.shortModeName.Get(), modeInfo.shortModeName.Length())));
+	if (!pro && modeIdx >= 0)
 	{
 		const i32 cyberCourse = KZ::course::GetCyberCourseNumber(course);
 		auto it = this->platformPbCache.find(ToPlatformKey(modeIdx, cyberCourse));
@@ -1452,7 +1467,7 @@ bool KZTimerService::GetHudPBTime(f64 &outTime, const KZCourseDescriptor *course
 			KZTimerService::NoteHudPlatformMiss(false, modeInfo.shortModeName.Get(), modeIdx, cyberCourse, this->platformPbCache.size());
 		}
 	}
-	else
+	else if (!pro)
 	{
 		KZTimerService::NoteHudPlatformMiss(false, modeInfo.shortModeName.Get(), modeIdx, -1, this->platformPbCache.size());
 	}
@@ -1468,10 +1483,10 @@ bool KZTimerService::GetHudPBTime(f64 &outTime, const KZCourseDescriptor *course
 	// именно первая: она и означает, что платформенный кэш устарел.
 	const bool platformHitPb = best > 0;
 	PBDataKey key = ToPBDataKey(modeInfo.id, course->guid);
-	const PBData *ourPb = this->GetCompareTargetForType(COMPARE_SPB, key);
-	if (ourPb && ourPb->overall.pbTime > 0 && (best <= 0 || ourPb->overall.pbTime < best))
+	const f64 ourPb = HudRecordTime(this->GetCompareTargetForType(COMPARE_SPB, key), pro);
+	if (ourPb > 0 && (best <= 0 || ourPb < best))
 	{
-		best = ourPb->overall.pbTime;
+		best = ourPb;
 		if (platformHitPb)
 		{
 			KZTimerService::NoteHudLocalWin(false);
@@ -1479,10 +1494,10 @@ bool KZTimerService::GetHudPBTime(f64 &outTime, const KZCourseDescriptor *course
 	}
 	if (best <= 0)
 	{
-		const PBData *globalPb = this->GetCompareTargetForType(COMPARE_GPB, key);
-		if (globalPb && globalPb->overall.pbTime > 0)
+		const f64 globalPb = HudRecordTime(this->GetCompareTargetForType(COMPARE_GPB, key), pro);
+		if (globalPb > 0)
 		{
-			best = globalPb->overall.pbTime;
+			best = globalPb;
 		}
 	}
 	if (best <= 0)
@@ -1493,7 +1508,7 @@ bool KZTimerService::GetHudPBTime(f64 &outTime, const KZCourseDescriptor *course
 	return true;
 }
 
-bool KZTimerService::GetHudWorldRecordTime(f64 &outTime, const KZCourseDescriptor *course)
+bool KZTimerService::GetHudWorldRecordTime(f64 &outTime, const KZCourseDescriptor *course, bool pro)
 {
 	if (!course)
 	{
@@ -1509,8 +1524,9 @@ bool KZTimerService::GetHudWorldRecordTime(f64 &outTime, const KZCourseDescripto
 	// wrCache через UpdateLocalRecordCache) — на каждом финише из БД; «платформенный первым»
 	// прятал свежий рекорд до смены карты.
 	f64 best = 0.0;
-	i32 modeIdx = ApiModeToIndex(CybReplayCommon::MapMode(std::string(modeInfo.shortModeName.Get(), modeInfo.shortModeName.Length())));
-	if (modeIdx >= 0)
+	// PRO WR платформа не отдаёт (kz_records — overall), см. GetHudPBTime: только наши кэши.
+	i32 modeIdx = pro ? -1 : ApiModeToIndex(CybReplayCommon::MapMode(std::string(modeInfo.shortModeName.Get(), modeInfo.shortModeName.Length())));
+	if (!pro && modeIdx >= 0)
 	{
 		const i32 cyberCourse = KZ::course::GetCyberCourseNumber(course);
 		auto it = KZTimerService::platformWrCache.find(ToPlatformKey(modeIdx, cyberCourse));
@@ -1523,7 +1539,7 @@ bool KZTimerService::GetHudWorldRecordTime(f64 &outTime, const KZCourseDescripto
 			KZTimerService::NoteHudPlatformMiss(true, modeInfo.shortModeName.Get(), modeIdx, cyberCourse, KZTimerService::platformWrCache.size());
 		}
 	}
-	else
+	else if (!pro)
 	{
 		KZTimerService::NoteHudPlatformMiss(true, modeInfo.shortModeName.Get(), modeIdx, -1, KZTimerService::platformWrCache.size());
 	}
@@ -1534,10 +1550,10 @@ bool KZTimerService::GetHudWorldRecordTime(f64 &outTime, const KZCourseDescripto
 	// GetHudPBTime выше.
 	const bool platformHitWr = best > 0; // см. GetHudPBTime: считаем только реальную победу
 	PBDataKey key = ToPBDataKey(modeInfo.id, course->guid);
-	const PBData *ourWr = this->GetCompareTargetForType(COMPARE_SR, key);
-	if (ourWr && ourWr->overall.pbTime > 0 && (best <= 0 || ourWr->overall.pbTime < best))
+	const f64 ourWr = HudRecordTime(this->GetCompareTargetForType(COMPARE_SR, key), pro);
+	if (ourWr > 0 && (best <= 0 || ourWr < best))
 	{
-		best = ourWr->overall.pbTime;
+		best = ourWr;
 		if (platformHitWr)
 		{
 			KZTimerService::NoteHudLocalWin(true);
@@ -1545,10 +1561,10 @@ bool KZTimerService::GetHudWorldRecordTime(f64 &outTime, const KZCourseDescripto
 	}
 	if (best <= 0)
 	{
-		const PBData *globalWr = this->GetCompareTargetForType(COMPARE_WR, key);
-		if (globalWr && globalWr->overall.pbTime > 0)
+		const f64 globalWr = HudRecordTime(this->GetCompareTargetForType(COMPARE_WR, key), pro);
+		if (globalWr > 0)
 		{
-			best = globalWr->overall.pbTime;
+			best = globalWr;
 		}
 	}
 	if (best <= 0)

@@ -32,6 +32,27 @@
 #define LAYOUT_DEF_LEADPROGRESS_Y    (LAYOUT_DEF_TIMER_Y + 6)
 #define LAYOUT_DEF_LEADPROGRESS_SIZE 18
 
+// Поля редактора `!hud` (PB/WR, showpos, курс, тип рана) — ВРЕМЕННЫЕ дефолты до решения
+// владельца (чеклист H6). Борд 1 даёт их в процентах ЭКРАНА от левого верхнего угла
+// (PB/WR 1/88, showpos 1/2, курс 50/2, тип рана 47/93), а у нас X/Y — проценты от ЦЕНТРА, и
+// элемент центрируется на своей точке. Прямой перевод p-50 увёл бы левые элементы
+// наполовину за край экрана, поэтому они подтянуты внутрь примерно на полширины элемента.
+#define LAYOUT_DEF_PBWR_X    (-40)
+#define LAYOUT_DEF_PBWR_Y    38
+#define LAYOUT_DEF_PBWR_SIZE 17
+
+#define LAYOUT_DEF_SHOWPOS_X    (-42)
+#define LAYOUT_DEF_SHOWPOS_Y    (-46)
+#define LAYOUT_DEF_SHOWPOS_SIZE 13
+
+#define LAYOUT_DEF_COURSE_X    0
+#define LAYOUT_DEF_COURSE_Y    (-46)
+#define LAYOUT_DEF_COURSE_SIZE 13
+
+#define LAYOUT_DEF_RUNTYPE_X    (-3)
+#define LAYOUT_DEF_RUNTYPE_Y    43
+#define LAYOUT_DEF_RUNTYPE_SIZE 15
+
 #define LAYOUT_SIZE_MIN 8
 #define LAYOUT_SIZE_MAX 100
 

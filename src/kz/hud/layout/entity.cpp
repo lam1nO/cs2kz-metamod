@@ -25,11 +25,11 @@ void LogHudInternFailure(KZPlayer *player, const char *panelId, const char *clas
 // clang-format off
 extern const LayoutElementDef LAYOUT_ELEMENTS[(i32)LayoutElement::Count] =
 {
-	{"mhud_timer",      "timer",      "hudTimer",      "mhudTimerX",      "mhudTimerY",      "mhudTimerSize",      "mhudTimerFont",      "mhudTimerOutline",      "mhudTimerOpacity",      LAYOUT_DEF_TIMER_X,      LAYOUT_DEF_TIMER_Y,      LAYOUT_DEF_TIMER_SIZE,      true},
-	{"mhud_speed",      "speed",      "hudSpeed",      "mhudSpeedX",      "mhudSpeedY",      "mhudSpeedSize",      "mhudSpeedFont",      "mhudSpeedOutline",      "mhudSpeedOpacity",      LAYOUT_DEF_SPEED_X,      LAYOUT_DEF_SPEED_Y,      LAYOUT_DEF_SPEED_SIZE,      true},
-	{"mhud_prespeed",   "prespeed",   "hudPrespeed",   "mhudPrespeedX",   "mhudPrespeedY",   "mhudPrespeedSize",   "mhudPrespeedFont",   "mhudPrespeedOutline",   "mhudPrespeedOpacity",   LAYOUT_DEF_PRESPEED_X,   LAYOUT_DEF_PRESPEED_Y,   LAYOUT_DEF_PRESPEED_SIZE,   true},
-	{"mhud_keys",       "keys",       "hudKeys",       "mhudKeysX",       "mhudKeysY",       "mhudKeysSize",       "mhudKeysFont",       "mhudKeysOutline",       "mhudKeysOpacity",       LAYOUT_DEF_KEYS_X,       LAYOUT_DEF_KEYS_Y,       LAYOUT_DEF_KEYS_SIZE,       true},
-	{"mhud_checkpoint", "checkpoint", "hudCpTp",       "mhudCheckpointX", "mhudCheckpointY", "mhudCheckpointSize", "mhudCheckpointFont", "mhudCheckpointOutline", "mhudCheckpointOpacity", LAYOUT_DEF_CHECKPOINT_X, LAYOUT_DEF_CHECKPOINT_Y, LAYOUT_DEF_CHECKPOINT_SIZE, true},
+	{"mhud_timer",      "mhud_timer_row",  "timer",      "hudTimer",      "mhudTimerX",      "mhudTimerY",      "mhudTimerSize",      "mhudTimerFont",      "mhudTimerOutline",      "mhudTimerOpacity",      LAYOUT_DEF_TIMER_X,      LAYOUT_DEF_TIMER_Y,      LAYOUT_DEF_TIMER_SIZE,      true},
+	{"mhud_speed",      "mhud_speed",      "speed",      "hudSpeed",      "mhudSpeedX",      "mhudSpeedY",      "mhudSpeedSize",      "mhudSpeedFont",      "mhudSpeedOutline",      "mhudSpeedOpacity",      LAYOUT_DEF_SPEED_X,      LAYOUT_DEF_SPEED_Y,      LAYOUT_DEF_SPEED_SIZE,      true},
+	{"mhud_prespeed",   "mhud_prespeed",   "prespeed",   "hudPrespeed",   "mhudPrespeedX",   "mhudPrespeedY",   "mhudPrespeedSize",   "mhudPrespeedFont",   "mhudPrespeedOutline",   "mhudPrespeedOpacity",   LAYOUT_DEF_PRESPEED_X,   LAYOUT_DEF_PRESPEED_Y,   LAYOUT_DEF_PRESPEED_SIZE,   true},
+	{"mhud_keys",       "mhud_keys",       "keys",       "hudKeys",       "mhudKeysX",       "mhudKeysY",       "mhudKeysSize",       "mhudKeysFont",       "mhudKeysOutline",       "mhudKeysOpacity",       LAYOUT_DEF_KEYS_X,       LAYOUT_DEF_KEYS_Y,       LAYOUT_DEF_KEYS_SIZE,       true},
+	{"mhud_checkpoint", "mhud_checkpoint", "checkpoint", "hudCpTp",       "mhudCheckpointX", "mhudCheckpointY", "mhudCheckpointSize", "mhudCheckpointFont", "mhudCheckpointOutline", "mhudCheckpointOpacity", LAYOUT_DEF_CHECKPOINT_X, LAYOUT_DEF_CHECKPOINT_Y, LAYOUT_DEF_CHECKPOINT_SIZE, true},
 	// panelId/varName здесь — ЛЕЙБЛ ТАЙМЕРА, и это не опечатка: панели `mhud_leadprogress` в
 	// чужой разметке mhud.vxml_c не существует (текстовых лейблов там четыре, все заняты).
 	// Элемент пишется в ДРУГУЮ сущность — свою копию той же страницы
@@ -37,7 +37,16 @@ extern const LayoutElementDef LAYOUT_ELEMENTS[(i32)LayoutElement::Count] =
 	// элементов разные (layoutElements[] по индексу), так что с настоящим таймером он не
 	// конфликтует. Ключи префов при этом СВОИ (mhudLeadProgress*) — настройка отдельная.
 	// Дефолт тумблера false: элемент новый, включают его явно.
-	{"mhud_timer",      "timer",      "mhudLeadProgress", "mhudLeadProgressX", "mhudLeadProgressY", "mhudLeadProgressSize", "mhudLeadProgressFont", "mhudLeadProgressOutline", "mhudLeadProgressOpacity", LAYOUT_DEF_LEADPROGRESS_X, LAYOUT_DEF_LEADPROGRESS_Y, LAYOUT_DEF_LEADPROGRESS_SIZE, false},
+	// posPanelId — mhud_timer_row, как у настоящего таймера: в разметке лейбл mhud_timer теперь
+	// внутри строки, и строка несёт позицию и hidden (по умолчанию скрыта). Иначе на копии
+	// страницы «Прогресс» навсегда остался бы невидимым.
+	{"mhud_timer",      "mhud_timer_row",  "timer",      "mhudLeadProgress", "mhudLeadProgressX", "mhudLeadProgressY", "mhudLeadProgressSize", "mhudLeadProgressFont", "mhudLeadProgressOutline", "mhudLeadProgressOpacity", LAYOUT_DEF_LEADPROGRESS_X, LAYOUT_DEF_LEADPROGRESS_Y, LAYOUT_DEF_LEADPROGRESS_SIZE, false},
+	// Поля редактора `!hud` (§4.1 спеки). Корни — Panel (pbwr, showpos) или Label (course,
+	// runtype). У pbwr varName не пишется никогда: текст идёт в переменные ячеек (mhud.cpp).
+	{"mhud_pbwr",       "mhud_pbwr",       "pbwr",       "hudPbWr",       "mhudPbWrX",       "mhudPbWrY",       "mhudPbWrSize",       "mhudPbWrFont",       "mhudPbWrOutline",       "mhudPbWrOpacity",       LAYOUT_DEF_PBWR_X,       LAYOUT_DEF_PBWR_Y,       LAYOUT_DEF_PBWR_SIZE,       true},
+	{"mhud_showpos",    "mhud_showpos",    "pos",        "hudShowPos",    "mhudShowPosX",    "mhudShowPosY",    "mhudShowPosSize",    "mhudShowPosFont",    "mhudShowPosOutline",    "mhudShowPosOpacity",    LAYOUT_DEF_SHOWPOS_X,    LAYOUT_DEF_SHOWPOS_Y,    LAYOUT_DEF_SHOWPOS_SIZE,    false},
+	{"mhud_course",     "mhud_course",     "course",     "hudCourse",     "mhudCourseX",     "mhudCourseY",     "mhudCourseSize",     "mhudCourseFont",     "mhudCourseOutline",     "mhudCourseOpacity",     LAYOUT_DEF_COURSE_X,     LAYOUT_DEF_COURSE_Y,     LAYOUT_DEF_COURSE_SIZE,     true},
+	{"mhud_runtype",    "mhud_runtype",    "runtype",    "hudRunType",    "mhudRunTypeX",    "mhudRunTypeY",    "mhudRunTypeSize",    "mhudRunTypeFont",    "mhudRunTypeOutline",    "mhudRunTypeOpacity",    LAYOUT_DEF_RUNTYPE_X,    LAYOUT_DEF_RUNTYPE_Y,    LAYOUT_DEF_RUNTYPE_SIZE,    true},
 };
 // clang-format on
 
@@ -83,6 +92,36 @@ void KZHUDService::SetLayoutValueClass(CCSCustomHudLayout *layout, const char *p
 	cache = value;
 }
 
+// Переменная дочерней панели с диф-кэшем: каждый SetDialogVariableString — изменение
+// сетевого состояния сущности, слать одно и то же каждый тик незачем.
+void KZHUDService::SetLayoutVar(CCSCustomHudLayout *layout, const char *panelId, const char *varName, std::string &cache, const char *value)
+{
+	if (cache == value)
+	{
+		return;
+	}
+	cache = value;
+	if (!layout->SetDialogVariableString(panelId, varName, value))
+	{
+		LogHudInternFailure(this->player, panelId, varName);
+	}
+}
+
+// Класс-тумблер (ставится И снимается по значению) с диф-кэшем; -1 в cache — ещё не выставляли.
+void KZHUDService::SetLayoutBoolClass(CCSCustomHudLayout *layout, const char *panelId, const char *className, i32 &cache, bool want)
+{
+	const i32 value = want ? 1 : 0;
+	if (cache == value)
+	{
+		return;
+	}
+	cache = value;
+	if (!layout->SetHasClass(panelId, className, want ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass))
+	{
+		LogHudInternFailure(this->player, panelId, className);
+	}
+}
+
 void KZHUDService::UpdateLayoutElement(CCSCustomHudLayout *layout, LayoutElement element, bool show, const char *text, const Color &color, bool force)
 {
 	const LayoutElementDef &def = LAYOUT_ELEMENTS[(i32)element];
@@ -100,15 +139,23 @@ void KZHUDService::UpdateLayoutElement(CCSCustomHudLayout *layout, LayoutElement
 	// из ключа outlineKey (с миграцией из старого общего hudOutline при первом чтении).
 	style.outline = cached.outline;
 	style.color = color;
-	this->ApplyLayoutLabel(layout, def.panelId, def.varName, this->layoutElements[(i32)element], style, show, text, force);
+	this->ApplyLayoutLabel(layout, def.panelId, def.varName, this->layoutElements[(i32)element], style, show, text, force, def.posPanelId);
 }
 
 // Общая запись одного текстового лейбла panorama-разметки: элементы худа (UpdateLayoutElement,
 // стиль из префов игрока) и строки меню реплея (layout/rpmenu.cpp, стиль задаёт код) идут
 // через ЭТУ функцию — второй копии машинерии классов/переменных быть не должно.
 void KZHUDService::ApplyLayoutLabel(CCSCustomHudLayout *layout, const char *panelId, const char *varName, LayoutElementState &state,
-									const LayoutLabelStyle &style, bool show, const char *text, bool force)
+									const LayoutLabelStyle &style, bool show, const char *text, bool force, const char *posPanelId)
 {
+	// Позиция, прозрачность и hidden — на posPanelId: у таймера это строка mhud_timer_row, и
+	// двигать/гасить надо её целиком, иначе дельта рядом осталась бы на месте и видимой. Ключи
+	// префов (mhudTimerX/Y и т.д.) при этом НЕ меняются: сохранённое значение старого игрока
+	// просто применяется к строке, и таймер остаётся там же, где был.
+	if (!posPanelId)
+	{
+		posPanelId = panelId;
+	}
 	// force — сразу после EnsureOwnedLayout(created=true): свежая сущность у схемы уже
 	// прибита к дефолтным классам разметки, а наш кэш думает, что ничего слать не надо
 	// (совпал с прошлым состоянием прошлой сущности/дефолтом) — форс сбрасывает кэш, чтобы
@@ -121,9 +168,18 @@ void KZHUDService::ApplyLayoutLabel(CCSCustomHudLayout *layout, const char *pane
 	if (state.hidden != !show)
 	{
 		state.hidden = !show;
-		if (!layout->SetHasClass(panelId, "hidden", state.hidden ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass))
+		if (!layout->SetHasClass(posPanelId, "hidden", state.hidden ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass))
 		{
-			LogHudInternFailure(this->player, panelId, "hidden");
+			LogHudInternFailure(this->player, posPanelId, "hidden");
+		}
+		// Старый VPK аддона (клиент ещё не обновился): строки mhud_timer_row в нём нет, а сам
+		// mhud_timer несёт `element hidden`. Дублируем hidden на лейбл, чтобы таймер у такого
+		// клиента хотя бы появлялся (без своей позиции), а не пропадал целиком. На новой
+		// разметке это no-op: лейбл внутри строки и так гаснет вместе с ней. Новых интерн-строк
+		// не добавляет — и id, и класс уже в таблице сущности.
+		if (V_strcmp(posPanelId, panelId) != 0)
+		{
+			layout->SetHasClass(panelId, "hidden", state.hidden ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass);
 		}
 	}
 	// Скрытый элемент не теряет значения — включить его обратно ничего не стоит.
@@ -142,8 +198,8 @@ void KZHUDService::ApplyLayoutLabel(CCSCustomHudLayout *layout, const char *pane
 		}
 	}
 
-	this->SetLayoutValueClass(layout, panelId, state.x, style.x, "x", true);
-	this->SetLayoutValueClass(layout, panelId, state.y, style.y, "y", true);
+	this->SetLayoutValueClass(layout, posPanelId, state.x, style.x, "x", true);
+	this->SetLayoutValueClass(layout, posPanelId, state.y, style.y, "y", true);
 	this->SetLayoutValueClass(layout, panelId, state.fontSize, style.size, "font-size", false);
 
 	const u32 packed = ((u32)style.color.r() << 24) | ((u32)style.color.g() << 16) | ((u32)style.color.b() << 8) | (u32)style.color.a();
@@ -165,12 +221,12 @@ void KZHUDService::ApplyLayoutLabel(CCSCustomHudLayout *layout, const char *pane
 		if (state.opacity != INT_MIN)
 		{
 			V_snprintf(className, sizeof(className), "opacity--%ipct", state.opacity);
-			layout->SetHasClass(panelId, className, k_eHudPanelClassStatus_DoesNotHaveClass);
+			layout->SetHasClass(posPanelId, className, k_eHudPanelClassStatus_DoesNotHaveClass);
 		}
 		V_snprintf(className, sizeof(className), "opacity--%ipct", opacity);
-		if (!layout->SetHasClass(panelId, className, k_eHudPanelClassStatus_HasClass))
+		if (!layout->SetHasClass(posPanelId, className, k_eHudPanelClassStatus_HasClass))
 		{
-			LogHudInternFailure(this->player, panelId, className);
+			LogHudInternFailure(this->player, posPanelId, className);
 		}
 		state.opacity = opacity;
 	}
@@ -315,6 +371,9 @@ void KZHUDService::DestroyOwnedLayout()
 	// выставлен как надо, — крестик молча не появится (тот же баг, что ревью поймало для
 	// клавиш в задаче 6).
 	this->layoutCrosshair = LayoutCrosshairState();
+	// Кэш дочерних панелей полей редактора (ячейки PB/WR, угол showpos, тип рана, дельта) — та
+	// же ловушка: переживший сущность кэш оставил бы новую сущность с дефолтами разметки.
+	this->layoutExtra = LayoutExtraState();
 	// Сами значения cl_crosshair* (и флаг confirmed) здесь НЕ трогаем: это НАСТОЯЩИЕ данные
 	// игрока (не кэш классов ЭТОЙ сущности), и без цели наблюдения/при смене типа худа они
 	// обязаны пережить пересоздание сущности — иначе крестик вернётся только через следующий
