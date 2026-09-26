@@ -33,8 +33,11 @@
 class KZOutboxService
 {
 public:
-	// Лимит тела запроса реплея на стороне api (см. план T4b, Global Constraints).
-	static constexpr size_t maxReplayBytes = 32u * 1024u * 1024u; // 32 МБ
+	// Лимит тела запроса реплея на стороне api (apps/api/src/shared/octet-body.ts,
+	// REPLAY_UPLOAD_MAX_BYTES). Был 32 МБ — реплеи ранов длиннее ~1.5-2 часов не выгружались
+	// вовсе (26.09). Поднимать ТОЛЬКО вместе с api и после его выкатки: старый api отбил бы
+	// крупный аплоад 413, а 4xx уводит мету в dead/ — файл был бы потерян для центра.
+	static constexpr size_t maxReplayBytes = 128u * 1024u * 1024u; // 128 МБ
 
 	// Метаданные центрального реплей-аплоада; сериализуются в <runUUID>.replay.meta
 	// одной строкой JSON.
@@ -53,6 +56,12 @@ public:
 		i32 course {};          // номер курса по конвенции cyber (0 = main, N = bonus N)
 		std::string mode;       // api-режим: ckz/vnl/kzt
 		bool isServerRecord {}; // ран — локальный рекорд сервера (ранг 1) → дополнительно шлём type=wr
+		// Какие PB-строки платформы описывает этот ран. uploadPb — новый NUB(overall)-PB → type=pb;
+		// uploadPro — ран без телепортов и новый PRO-PB → type=pbpro. Pro-ран, ставший и NUB-PB,
+		// несёт оба флага (один файл уходит под оба ключа). Меты старых сборок полей не имеют —
+		// разбор оставляет дефолты: pb=true, pro=false (ровно прежнее поведение).
+		bool uploadPb = true;
+		bool uploadPro = false;
 		// Локальная БД не подтвердила, что ран — новый PB (лежала в момент финиша).
 		// Ретраер перед аплоадом сверяет timeMs с платформенным PB игрока и грузит
 		// только не худшее время; WR-вариант в этой ветке не грузим (ранг без БД не
@@ -107,7 +116,8 @@ public:
 	// POST события в ingest; 2xx → AckEvent, 4xx → dead/, иначе файл остаётся до следующего тика.
 	static void SendEvent(const std::string &runUuid, const std::string &body);
 
-	// Аплоад реплея: POST type=pb, при meta.isServerRecord — следом type=wr; полный успех → AckReplay.
+	// Аплоад реплея: POST type=pb (uploadPb), type=wr (isServerRecord), type=pbpro (uploadPro) —
+	// по очереди; полный успех → AckReplay. Отказ 4xx на pbpro НЕ хоронит мету (см. .cpp).
 	static void SendReplay(const ReplayMeta &meta, const std::vector<char> &buffer);
 
 private:

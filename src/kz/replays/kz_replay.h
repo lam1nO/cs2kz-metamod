@@ -44,6 +44,12 @@ struct RpFlags
 	bool ducking: 1;
 	bool ducked: 1;
 	bool desiresDuck: 1;
+	// Кадр записан в `!prac` (опция replayRecordPrac): лежит внутри паузной пары PAUSE→RESUME,
+	// обычный плейбек его пропускает вместе с паузой, показывает только `!replay … full`.
+	// Разрез AWR и `!lead` видят такой кадр ЗАМОРОЖЕННЫМ в точке входа в prac
+	// (playback::FreezePracFrames) — иначе ноуклип-полёт сшивался бы с телепортами рана.
+	// Старые сборки бит не читают: размер структуры тот же (1 байт), бит для них — ноль.
+	bool prac: 1;
 };
 
 struct RpModeStyleInfo

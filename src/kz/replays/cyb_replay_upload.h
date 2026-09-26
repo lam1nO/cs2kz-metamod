@@ -24,10 +24,12 @@ namespace CybReplayUpload
 	// сконфигурирован, режим не маппится на короткое имя api (кастомный режим),
 	// у рана есть стили, буфер реплея пуст или превышает лимит api (32 МБ),
 	// map/course не проходят валидацию api. Причины отказа — в логе.
+	// Флаги по умолчанию — вариант write-ahead (БД ещё не ответила): pb всегда, pbpro — если
+	// ран без телепортов; онлайн-путь переписывает их результатом локальной БД.
 	bool BuildMeta(const RunSubmission &sub, bool isServerRecord, bool unconfirmedPb, KZOutboxService::ReplayMeta &out);
 
 	// Онлайн-путь (локальная БД подтвердила новый PB): перезаписывает write-ahead
-	// мету подтверждённым вариантом и шлёт type=pb (+type=wr при isServerRecord)
-	// через общую с ретраером функцию отправки.
-	void MaybeUpload(const RunSubmission &sub, bool isServerRecord);
+	// мету подтверждённым вариантом и шлёт type=pb (uploadPb, +type=wr при isServerRecord)
+	// и type=pbpro (uploadPro) через общую с ретраером функцию отправки.
+	void MaybeUpload(const RunSubmission &sub, bool isServerRecord, bool uploadPb, bool uploadPro);
 } // namespace CybReplayUpload

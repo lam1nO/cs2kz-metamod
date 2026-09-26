@@ -221,6 +221,41 @@ namespace KZ::replaysystem::playback
 		return LogDestOffsetViolation(uuid, cut.maxChainDestOffsetMeasured, cut.maxChainDestOffset, cut.maxChainDestOffsetCut, cut.dead.size());
 	}
 
+	void FreezePracFrames(TickData *ticks, u32 tickCount)
+	{
+		if (!ticks)
+		{
+			return;
+		}
+		i64 lastLive = -1;
+		for (u32 i = 0; i < tickCount; i++)
+		{
+			if (!ticks[i].post.replayFlags.prac)
+			{
+				lastLive = i;
+				continue;
+			}
+			if (lastLive < 0)
+			{
+				continue;
+			}
+			const TickData &src = ticks[lastLive];
+			TickData &dst = ticks[i];
+			// Время и номер тика — свои (на них держатся окно рана, паузы и сверка кадров с
+			// таймером); всё, что описывает игрока, — с кадра входа в prac. Бит prac оставляем.
+			dst.pre = src.post;
+			dst.post = src.post;
+			dst.pre.replayFlags.prac = true;
+			dst.post.replayFlags.prac = true;
+			dst.checkpoint = src.checkpoint;
+			dst.modernJump = src.modernJump;
+			dst.forward = 0;
+			dst.left = 0;
+			dst.up = 0;
+			dst.weapon = src.weapon;
+		}
+	}
+
 	awr::CutResult ComputeCutFor(const TickData *ticks, u32 tickCount, const RpEvent *events, u32 numEvents, u64 timeMs)
 	{
 		return ComputeCutForTraced(ticks, tickCount, events, numEvents, timeMs, nullptr);
@@ -249,10 +284,18 @@ namespace KZ::replaysystem::playback
 		// Адаптер TickData→awr::Frame: сам разрез о движке и о нашей раскладке не знает
 		// (awr_cut.h собирается голым компилятором, там host-тесты).
 		std::vector<awr::Frame> frames(tickCount);
+		// Кадр `!prac` читается как замороженный в точке входа (см. FreezePracFrames): данные
+		// игрока — с последнего обычного кадра, serverTick — свой. Вход — const (плейбек режет
+		// по живому g_currentReplay), поэтому здесь только индекс опоры, без копии кадров.
+		i64 lastLive = -1;
 		for (u32 i = 0; i < tickCount; i++)
 		{
-			const TickData &t = ticks[i];
-			frames[i].serverTick = t.serverTick;
+			if (!ticks[i].post.replayFlags.prac)
+			{
+				lastLive = i;
+			}
+			const TickData &t = (ticks[i].post.replayFlags.prac && lastLive >= 0) ? ticks[lastLive] : ticks[i];
+			frames[i].serverTick = ticks[i].serverTick;
 			frames[i].cpIndex = t.checkpoint.index;
 			frames[i].cpCount = t.checkpoint.checkpointCount;
 			frames[i].tpCount = t.checkpoint.teleportCount;
@@ -261,9 +304,11 @@ namespace KZ::replaysystem::playback
 			frames[i].origin[2] = t.post.origin.z;
 			// Оба конца кадра: позиция чекпоинта снята в середине тика и точного совпадения
 			// ни с одним из них не даёт — разрез сопоставляет с допуском (awr_cut.h).
-			frames[i].preOrigin[0] = t.pre.origin.x;
-			frames[i].preOrigin[1] = t.pre.origin.y;
-			frames[i].preOrigin[2] = t.pre.origin.z;
+			// У замороженного кадра обе точки — конец кадра опоры (как в FreezePracFrames).
+			const Vector &preOrigin = (&t != &ticks[i]) ? t.post.origin : t.pre.origin;
+			frames[i].preOrigin[0] = preOrigin.x;
+			frames[i].preOrigin[1] = preOrigin.y;
+			frames[i].preOrigin[2] = preOrigin.z;
 		}
 		// Паузы для разреза — в КАДРАХ: мёртвое время измеряется числом записанных кадров, и
 		// вычитать из него надо кадры, записанные на паузе. Пауза, во время которой кадров не
@@ -283,10 +328,15 @@ namespace KZ::replaysystem::playback
 			return;
 		}
 
-		for (const awr::Interval &iv : PauseIntervalsFromEvents(replay->tickData, replay->tickCount, replay->events, replay->numEvents))
+		// `!replay … full`: паузы (и кадры `!prac` внутри них) проигрываются как записаны.
+		// AWR-вырезы full не отменяет — AWR и есть разрез, в full-режиме его не включают вовсе.
+		if (!replay->fullMode)
 		{
-			// Интервалы включительны, сегменты — полуинтервалы [startTick, endTick).
-			g_pauseSegments.push_back({iv.from, iv.to + 1});
+			for (const awr::Interval &iv : PauseIntervalsFromEvents(replay->tickData, replay->tickCount, replay->events, replay->numEvents))
+			{
+				// Интервалы включительны, сегменты — полуинтервалы [startTick, endTick).
+				g_pauseSegments.push_back({iv.from, iv.to + 1});
+			}
 		}
 
 		// AWR: мёртвые интервалы разреза пропускаются той же машинерией, что паузы —

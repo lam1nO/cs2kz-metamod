@@ -81,6 +81,10 @@ namespace KZ::replaysystem::data
 		// Владелец — сам ReplayPlayback, освобождается в FreeReplayData.
 		std::vector<awr::Interval> *awrDead;
 
+		// `!replay … full`: паузы и кадры `!prac` не пропускаются (playback::BuildSkipSegments).
+		// Ставится колбэком загрузки на каждый запуск, как и awrMode.
+		bool fullMode;
+
 		// Вид запроса, которым запущен этот плейбек (CybReplayDownload::Kind как i32) — для
 		// бейджа PB/WR в шапке карточки меню. Именно i32, а не сам enum: data.h не должен
 		// тянуть заголовок докачки. -1 — запуск мимо резолва (`!replay <uuid>`, локальный

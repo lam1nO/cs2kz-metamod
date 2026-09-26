@@ -26,6 +26,11 @@ namespace KZ::replaysystem::commands
 
 	// Command handlers
 	void LoadReplay(KZPlayer *player, const char *uuid);
+	// `!replay … full`: запрос игрока проиграть ближайший загружаемый им реплей без вырезки
+	// пауз и `!prac`. Ставит/снимает kz_replay на каждый вызов, снимает LoadReplay в момент
+	// старта загрузки (Take* возвращает, был ли запрос).
+	void SetFullRequested(KZPlayer *player, bool full);
+	bool TakeFullRequested(KZPlayer *player);
 	void CheckReplayLoadProgress(KZPlayer *player);
 	void CancelReplayLoad(KZPlayer *player);
 	void JumpToReplayTime(KZPlayer *player, const char *input);
