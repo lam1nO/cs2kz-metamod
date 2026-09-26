@@ -4,7 +4,8 @@
 // обходит KZ::menu::GetTree() и рендерит. Отличия от прежнего рендера под cs2kz/menu.xml:
 //   - Категории верхнего уровня — вкладки tab0..tab5 (без hiddenFromMenu, не больше 6).
 //   - Подкатегории — не второй уровень, а заголовки секций sec{i} внутри вкладки: вкладка =
-//     плоский список «секция + пункты», режется на страницы по KZ_MENU_ROWS (16) строк.
+//     плоский список «секция + пункты» целиком в слотах 0..KZ_MENU_ROWS-1, тело окна листается
+//     на клиенте (прокрутка панели), страниц у сервера нет (отзыв владельца 27.09).
 //   - Каждая строка row{i} — универсальная, вид контрола задаёт класс типа t-toggle|t-seg|t-step|
 //     t-btn|t-color|t-font (Choice с <= 4 вариантами — сегменты, длиннее — список-попап).
 //   - Position/Vector в окне больше не показываются: расположение элементов худа правит
@@ -234,74 +235,24 @@ static_function bool IsHudTab(const KZOptNode *tab)
 	return tab && tab->phraseKey && V_strcmp(tab->phraseKey, KZ_MENU_HUD_CATEGORY) == 0;
 }
 
-// Страницы — по ВЫСОТЕ тела окна, а не по числу строк (options.css): тело 560px, строка 52px,
-// заголовок секции 37px, карточка редактора ~100px с отступами (только первая страница вкладки
-// «Худ»). Заголовок секции страницу не заканчивает — уезжает на следующую вместе с первым
-// пунктом. KZ_MENU_ROWS (16 слотов разметки) — только верхняя граница.
-#define KZ_MENU_BODY_PX    560
-#define KZ_MENU_ROW_PX     52
-#define KZ_MENU_SECTION_PX 37
-#define KZ_MENU_HERO_PX    100
-
-struct MenuPage
-{
-	i32 first {};
-	i32 count {};
-};
-
-static_function void BuildMenuPages(const std::vector<MenuRowBinding> &rows, bool heroOnFirst, std::vector<MenuPage> &pages)
-{
-	pages.clear();
-	const i32 n = (i32)rows.size();
-	i32 i = 0;
-	do
-	{
-		MenuPage page {i, 0};
-		i32 budget = KZ_MENU_BODY_PX - ((heroOnFirst && pages.empty()) ? KZ_MENU_HERO_PX : 0);
-		while (i < n && page.count < KZ_MENU_ROWS)
-		{
-			const bool section = rows[i].isSection;
-			i32 need = section ? KZ_MENU_SECTION_PX : KZ_MENU_ROW_PX;
-			// Секция без своего первого пункта на этой странице — висячий заголовок.
-			if (section && i + 1 < n && !rows[i + 1].isSection)
-			{
-				need += KZ_MENU_ROW_PX;
-			}
-			if (need > budget || (section && page.count + 1 >= KZ_MENU_ROWS))
-			{
-				break;
-			}
-			budget -= section ? KZ_MENU_SECTION_PX : KZ_MENU_ROW_PX;
-			page.count++;
-			i++;
-		}
-		if (page.count == 0 && i < n)
-		{
-			// Строка выше бюджета целиком (не бывает при текущих размерах) — берём её одну,
-			// иначе цикл не сдвинулся бы.
-			page.count = 1;
-			i++;
-		}
-		pages.push_back(page);
-	} while (i < n);
-}
-
-// Строка экрана i страницы page; NULL — строки нет.
-static_function const MenuRowBinding *GetMenuRow(const std::vector<MenuRowBinding> &rows, const std::vector<MenuPage> &pages, i32 page, i32 i)
-{
-	if (page < 0 || page >= (i32)pages.size() || i < 0 || i >= pages[page].count)
-	{
-		return NULL;
-	}
-	return &rows[pages[page].first + i];
-}
-
-// Строки и страницы вкладки — один расчёт для рендера и клика.
-static_function void BuildMenuTab(i32 tab, std::vector<MenuRowBinding> &rows, std::vector<MenuPage> &pages)
+// Строки вкладки — один расчёт для рендера и клика. Все строки вкладки идут в слоты row{i}/sec{i}
+// разом: страниц нет, тело окна листает клиент. Слотов в разметке KZ_MENU_ROWS — лишние строки
+// отрезаются с предупреждением в лог (состав реестра фиксируется на Load, поэтому раз на вкладку).
+static_function void BuildMenuTab(i32 tab, std::vector<MenuRowBinding> &rows)
 {
 	const KZOptNode *node = GetMenuTabNode(tab);
 	BuildMenuRows(node, rows);
-	BuildMenuPages(rows, IsHudTab(node), pages);
+	if ((i32)rows.size() > KZ_MENU_ROWS)
+	{
+		static_persist bool warned[KZ_MENU_TABS] {};
+		if (tab >= 0 && tab < KZ_MENU_TABS && !warned[tab])
+		{
+			warned[tab] = true;
+			KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_menu_rows_truncated reason=slot_limit category=%s rows=%i limit=%i\n",
+						node && node->phraseKey ? node->phraseKey : "?", (i32)rows.size(), KZ_MENU_ROWS);
+		}
+		rows.resize(KZ_MENU_ROWS);
+	}
 }
 
 // Разбор id вида <prefix><a>[_<b>][suffix]: "tab3", "sg2_1", "st4_dec" (suffix "_dec"). Остаток
@@ -775,13 +726,8 @@ void KZHUDService::RenderMenu()
 	this->SetMenuVar(layout, "opt_root", "mode", this->player->modeService ? this->player->modeService->GetModeShortName() : "");
 	this->SetMenuVar(layout, "opt_root", "hint", KZLanguageService::PrepareMessageWithLang(lang, "Options - Hint").c_str());
 
-	// Карточка редактора — только на вкладке «Худ» (§3.2), на её первой странице (бюджет высоты
-	// страниц считает BuildMenuPages с тем же условием).
-	std::vector<MenuRowBinding> rows;
-	std::vector<MenuPage> pages;
-	BuildMenuTab(this->menuCategory, rows, pages);
-	this->menuPage = Clamp(this->menuPage, 0, (i32)pages.size() - 1);
-	const bool heroShown = IsHudTab(tab) && this->menuPage == 0;
+	// Карточка редактора — только на вкладке «Худ» (§3.2), над её строками.
+	const bool heroShown = IsHudTab(tab);
 	if (heroShown)
 	{
 		this->SetMenuVar(layout, "edit_open", "hero_t", KZLanguageService::PrepareMessageWithLang(lang, "Options - Hero Title").c_str());
@@ -844,15 +790,12 @@ static_function const char *GetRowTypeClass(const KZOptItem &it, i32 choiceCount
 void KZHUDService::RenderMenuRows(CCSCustomHudLayout *layout)
 {
 	std::vector<MenuRowBinding> rows;
-	std::vector<MenuPage> pageTable;
-	BuildMenuTab(this->menuCategory, rows, pageTable);
-	const i32 pages = (i32)pageTable.size();
-	this->menuPage = Clamp(this->menuPage, 0, pages - 1);
+	BuildMenuTab(this->menuCategory, rows);
 	const char *lang = this->player->languageService->GetLanguage();
 
 	for (i32 i = 0; i < KZ_MENU_ROWS; i++)
 	{
-		const MenuRowBinding *row = GetMenuRow(rows, pageTable, this->menuPage, i);
+		const MenuRowBinding *row = i < (i32)rows.size() ? &rows[i] : NULL;
 		const bool isSection = row && row->isSection;
 		const bool isItem = row && !row->isSection;
 		if (isSection)
@@ -935,12 +878,6 @@ void KZHUDService::RenderMenuRows(CCSCustomHudLayout *layout)
 		this->SetMenuBoolClass(layout, SecPanel(i), "hidden", this->menuApplied.secHidden[i], !isSection);
 		this->SetMenuBoolClass(layout, RowPanel(i), "hidden", this->menuApplied.rowHidden[i], !isItem);
 	}
-
-	char page[16];
-	V_snprintf(page, sizeof(page), "%i / %i", this->menuPage + 1, pages);
-	this->SetMenuVar(layout, "opt_root", "pg", page);
-	this->SetMenuBoolClass(layout, "pg_prev", "hidden", this->menuApplied.pgPrevHidden, pages <= 1);
-	this->SetMenuBoolClass(layout, "pg_next", "hidden", this->menuApplied.pgNextHidden, pages <= 1);
 }
 
 void KZHUDService::RenderMenuPopups(CCSCustomHudLayout *layout)
@@ -1080,7 +1017,6 @@ void KZHUDService::SelectMenuTab(i32 tab)
 		this->CloseMenuPopup();
 	}
 	this->menuCategory = tab;
-	this->menuPage = 0;
 	this->RenderMenu();
 }
 
@@ -1089,9 +1025,8 @@ void KZHUDService::SelectMenuTab(i32 tab)
 void KZHUDService::MenuRowAction(i32 rowIndex, i32 control, i32 arg)
 {
 	std::vector<MenuRowBinding> rows;
-	std::vector<MenuPage> pages;
-	BuildMenuTab(this->menuCategory, rows, pages);
-	const MenuRowBinding *row = GetMenuRow(rows, pages, this->menuPage, rowIndex);
+	BuildMenuTab(this->menuCategory, rows);
+	const MenuRowBinding *row = rowIndex >= 0 && rowIndex < (i32)rows.size() ? &rows[rowIndex] : NULL;
 	if (!row || row->isSection)
 	{
 		return;
@@ -1460,16 +1395,6 @@ bool KZHUDService::HandleMenuWindowClick(const char *id)
 		this->OpenHudEditor();
 		return true;
 	}
-	if (!V_strcmp(id, "pg_prev") || !V_strcmp(id, "pg_next"))
-	{
-		if (this->menuPopup != MenuPopup::None)
-		{
-			this->CloseMenuPopup();
-		}
-		this->menuPage += id[3] == 'p' ? -1 : 1; // рендер клампит страницу
-		this->RenderMenu();
-		return true;
-	}
 	if (ParseIndexed(id, "tab", a, b) && b < 0)
 	{
 		this->SelectMenuTab(a);
@@ -1530,12 +1455,11 @@ void KZHUDService::OnLayoutMenuClick(uint32 packedHandle, const char *panelId)
 	}
 }
 
-// Вкладка по ключу категории (или подкатегории — тогда страница, на которой стоит её секция).
-// Ключ не найден/NULL — первая вкладка.
-static_function void FindMenuTab(const char *categoryKey, i32 &tab, i32 &page)
+// Вкладка по ключу категории (или подкатегории — тогда вкладка, где стоит её секция; до секции
+// тело листает сам игрок). Ключ не найден/NULL — первая вкладка.
+static_function void FindMenuTab(const char *categoryKey, i32 &tab)
 {
 	tab = 0;
-	page = 0;
 	if (!categoryKey)
 	{
 		return;
@@ -1550,18 +1474,13 @@ static_function void FindMenuTab(const char *categoryKey, i32 &tab, i32 &page)
 			return;
 		}
 		std::vector<MenuRowBinding> rows;
-		std::vector<MenuPage> pages;
-		BuildMenuTab(i, rows, pages);
-		for (i32 p = 0; p < (i32)pages.size(); p++)
+		BuildMenuTab(i, rows);
+		for (const MenuRowBinding &row : rows)
 		{
-			for (i32 r = pages[p].first; r < pages[p].first + pages[p].count; r++)
+			if (row.isSection && row.node->phraseKey && V_strcmp(row.node->phraseKey, categoryKey) == 0)
 			{
-				if (rows[r].isSection && rows[r].node->phraseKey && V_strcmp(rows[r].node->phraseKey, categoryKey) == 0)
-				{
-					tab = i;
-					page = p;
-					return;
-				}
+				tab = i;
+				return;
 			}
 		}
 	}
@@ -1599,7 +1518,7 @@ void KZHUDService::OpenLayoutMenu(const char *categoryKey)
 		return;
 	}
 	this->menuOpen = true;
-	FindMenuTab(categoryKey, this->menuCategory, this->menuPage);
+	FindMenuTab(categoryKey, this->menuCategory);
 	this->menuPopup = MenuPopup::None;
 	this->menuPopupTarget = NULL;
 	this->menuConfirmTarget = NULL;

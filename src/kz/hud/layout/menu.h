@@ -16,7 +16,7 @@
 
 // Ёмкости разметки cyber/options.xml (tools/gen_options_xml.py аддона) — менять только вместе с ней.
 #define KZ_MENU_TABS     6  // tab0..tab5 — категории верхнего уровня
-#define KZ_MENU_ROWS     16 // sec{i}/row{i} — плоский список «секция + пункты» вкладки, страница
+#define KZ_MENU_ROWS     24 // sec{i}/row{i} — плоский список «секция + пункты» вкладки целиком (без страниц)
 #define KZ_MENU_SEGS     4  // sg{i}_0..3 — Choice с <= 4 вариантами рисуется сегментами
 #define KZ_MENU_PRESETS  32 // cp0..cp31 — пресеты попапа цвета
 #define KZ_MENU_HUES     10 // ch0..ch9 — оттенки

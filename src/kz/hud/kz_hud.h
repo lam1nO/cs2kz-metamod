@@ -1120,7 +1120,6 @@ private:
 	i32 menuColorPending {-1}; // выбранный, но ещё не применённый индекс палитры (color_ok применяет)
 	i32 menuColorHue {-1};     // выбранный оттенок сетки ch{i}; -1 — не выбран
 	i32 menuListFamily {};     // семейство шрифтов lf{i} в попапе списка шрифтов
-	i32 menuPage {};           // страница строк вкладки (по KZ_MENU_ROWS)
 	// Защита от двойного клика вложенных кнопок (tg{i} внутри row{i}, et{i} внутри el{i}):
 	// ключ и тик последнего действия. Что движок шлёт на клик по вложенной кнопке — одну
 	// или обе — вживую не проверено; второе действие по той же строке в тот же тик гасится.
@@ -1153,8 +1152,6 @@ private:
 		bool listPopupHidden {true};
 		bool confirmPopupHidden {true};
 		bool editOpenHidden {true};
-		bool pgPrevHidden {};
-		bool pgNextHidden {};
 
 		bool tabHidden[KZ_MENU_TABS] {};
 		bool tabOn[KZ_MENU_TABS] {};
