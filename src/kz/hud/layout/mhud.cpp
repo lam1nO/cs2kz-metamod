@@ -818,6 +818,9 @@ void KZHUDService::ApplyLeadProgressParts(CCSCustomHudLayout *layout, const char
 	// ребёнку не наследуется (как у ячеек PB/WR), а корень элемента — Panel.
 	this->ApplyChildLabelStyle(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "mhud_progress_pct"), extra.progressPct, style.size,
 							   style.fontClass, extra.progressColor.Get(color));
+	// Подпись — тем же стилем: в игре css-дефолт 11px #CFD8DE был нечитаем (отзыв 27.09).
+	this->ApplyChildLabelStyle(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "mhud_progress_cap"), extra.progressCap, style.size,
+							   style.fontClass, extra.progressColor.Get(color));
 }
 
 void KZHUDService::UpdateLeadProgressElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force)

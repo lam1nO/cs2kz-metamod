@@ -947,6 +947,8 @@ private:
 		std::string progressCap {};
 		i32 progressFill {INT_MIN};
 		LayoutChildStyleState progressPct {};
+		// Подпись «ПРОГРЕСС» — те же кегль/шрифт/цвет, что у процента: 11px из css в игре не читались.
+		LayoutChildStyleState progressCap {};
 		ColorClassCache progressColor {};
 		// Бейджи прыжка под престрейфом: полоса mhud_ind и ind_perf/ind_jb/ind_cj (hidden, кегль).
 		i32 indStripHidden {-1};
