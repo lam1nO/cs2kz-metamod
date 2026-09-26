@@ -608,12 +608,14 @@ void KZHUDService::UpdateReplayMenu(KZPlayer *source)
 {
 	// Меню живёт ровно пока игрок наблюдает бота с идущим плейбеком и есть аддон. source —
 	// то, что DrawPanels считает источником данных; для спектатора это наблюдаемый.
-	const bool wanted = source && source != this->player && KZ::replaysystem::IsReplayBot(source) && this->ReplayMenuUnavailableReason() == NULL;
+	// Спрятанное игроком (!rpmenu) меню не рисуется и не читает ввод, пока его не вернут.
+	const bool wanted = source && source != this->player && KZ::replaysystem::IsReplayBot(source) && !this->replayMenuHidden
+						&& this->ReplayMenuUnavailableReason() == NULL;
 	if (!wanted)
 	{
 		if (this->replayMenuOpen)
 		{
-			const char *reason = this->ReplayMenuUnavailableReason();
+			const char *reason = this->replayMenuHidden ? "hidden" : this->ReplayMenuUnavailableReason();
 			this->CloseReplayMenu(reason ? reason : "target_changed");
 		}
 		return;
