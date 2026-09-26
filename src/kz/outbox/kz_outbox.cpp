@@ -442,24 +442,33 @@ static_function void PostReplay(const KZOutboxService::ReplayMeta &meta, const s
 }
 
 // Цепочка POST'ов одного реплея по списку типов, строго по очереди (тело одно, держим одну
-// копию). pb/wr — как раньше: 4xx → dead/ (api отверг сам аплоад, повтор не поможет). pbpro —
+// копию). anyOk — доехал ли хоть один тип (для причины квитанции). pb/wr — как раньше: 4xx →
+// dead/ (api отверг сам аплоад, повтор не поможет). pbpro —
 // иначе: 4xx на нём означает только «api ещё не знает этот тип» (форк выкачен раньше api) либо
 // отказ именно pro-строки, и хоронить из-за этого уже доехавшие pb/wr нельзя — пишем warn и
 // идём дальше. Сеть/5xx на любом типе — мета остаётся в очереди, ретраер пройдёт цепочку
 // заново (pb/pbpro — upsert, повтор безвреден; wr — ещё одна строка истории, как и раньше).
 static_function void SendReplayChain(const KZOutboxService::ReplayMeta &meta, const std::shared_ptr<std::string> &body,
-									 std::shared_ptr<std::vector<const char *>> types, size_t idx, const std::string &fileName)
+									 std::shared_ptr<std::vector<const char *>> types, size_t idx, const std::string &fileName, bool anyOk)
 {
 	if (idx >= types->size())
 	{
 		g_outboxInFlight.erase(fileName);
-		KZOutboxService::AckReplay(meta.runUuid, "upload_2xx");
+		// Ни один тип не доехал (единственный pbpro получил 4xx) — это не «2xx», а отказ.
+		if (anyOk)
+		{
+			KZOutboxService::AckReplay(meta.runUuid, "upload_2xx");
+		}
+		else
+		{
+			KZOutboxService::DropReplay(meta.runUuid, "pro_rejected");
+		}
 		return;
 	}
 	const char *type = (*types)[idx];
 	// clang-format off
 	PostReplay(meta, body, type,
-		[meta, body, types, idx, fileName, type](u32 status)
+		[meta, body, types, idx, fileName, type, anyOk](u32 status)
 		{
 			const bool isPro = KZ_STREQ(type, "pbpro");
 			if (status == 0)
@@ -474,7 +483,7 @@ static_function void SendReplayChain(const KZOutboxService::ReplayMeta &meta, co
 				{
 					KZ_LOG_WARN(LogChannel::Replays, "[cyb_outbox] replay upload rejected type=pbpro status=%u run=%s reason=pro_rejected\n", status,
 								meta.runUuid.c_str());
-					SendReplayChain(meta, body, types, idx + 1, fileName);
+					SendReplayChain(meta, body, types, idx + 1, fileName, anyOk);
 					return;
 				}
 				g_outboxInFlight.erase(fileName);
@@ -487,7 +496,7 @@ static_function void SendReplayChain(const KZOutboxService::ReplayMeta &meta, co
 				KZ_LOG_INFO(LogChannel::Replays, "[cyb_outbox] replay upload (%s) HTTP %u run=%s (stays queued)\n", type, status, meta.runUuid.c_str());
 				return;
 			}
-			SendReplayChain(meta, body, types, idx + 1, fileName);
+			SendReplayChain(meta, body, types, idx + 1, fileName, true);
 		});
 	// clang-format on
 }
@@ -506,21 +515,23 @@ void KZOutboxService::SendReplay(const ReplayMeta &meta, const std::vector<char>
 		return;
 	}
 
-	// Порядок: pb → wr → pbpro. NUB-строка первой — она кормит ленту/лидерборд сайта и `!replay
-	// pb`; pbpro последней, потому что её отказ цепочку не рвёт (см. SendReplayChain). wr — только
-	// вместе с pb: локальный рекорд инстанса (overall ранг 1) без нового NUB-PB не бывает.
+	// Порядок: pb → pbpro → wr. NUB-строка первой — она кормит ленту/лидерборд сайта и `!replay
+	// pb`. wr — последней: это ЕДИНСТВЕННЫЙ не-идемпотентный POST (каждый — новая строка истории),
+	// а ретраер после сбоя проходит цепочку с начала — так повтор upsert'ов pb/pbpro безвреден, а
+	// wr пишется лишь тогда, когда всё до него уже доехало. wr — только вместе с pb: локальный
+	// рекорд инстанса (overall ранг 1) без нового NUB-PB не бывает.
 	auto types = std::make_shared<std::vector<const char *>>();
 	if (meta.uploadPb)
 	{
 		types->push_back("pb");
-		if (meta.isServerRecord)
-		{
-			types->push_back("wr");
-		}
 	}
 	if (meta.uploadPro)
 	{
 		types->push_back("pbpro");
+	}
+	if (meta.uploadPb && meta.isServerRecord)
+	{
+		types->push_back("wr");
 	}
 	if (types->empty())
 	{
@@ -530,7 +541,7 @@ void KZOutboxService::SendReplay(const ReplayMeta &meta, const std::vector<char>
 
 	g_outboxInFlight.insert(fileName);
 	auto body = std::make_shared<std::string>(buffer.begin(), buffer.end());
-	SendReplayChain(meta, body, types, 0, fileName);
+	SendReplayChain(meta, body, types, 0, fileName, false);
 }
 
 // ---------------------------------------------------------------------------

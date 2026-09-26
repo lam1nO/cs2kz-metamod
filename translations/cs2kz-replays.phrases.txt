@@ -329,7 +329,9 @@
 	"Replay - Full Mode"
 	{
 		"en"		"{grey}Full mode: pauses and prac are not cut out."
+		"chi"		"{grey}完整模式: 不剪掉暂停和练习段."
 		"ru"		"{grey}Режим full: паузы и prac не вырезаются."
+		"ua"		"{grey}Режим full: паузи та prac не вирізаються."
 	}
 	"Replay - Bot Crosshair Hint"
 	{

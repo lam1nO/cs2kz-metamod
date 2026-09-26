@@ -804,7 +804,8 @@ cs2kz-linux-builder .`, иначе компилируется КОПИЯ ИЗ О
   `overall.isNewPB` → `pb` (+`wr` при overall-ранге 1), `teleports==0 && pro.isNewPB` →
   `pbpro`; pro-ран, побивший и NUB, уходит под оба ключа (NUB — надмножество PRO, «NUB-PB
   хуже PRO-PB» не бывает). В мете outbox — `uploadPb`/`uploadPro` (у старых мет полей нет →
-  pb=true, pro=false). Порядок POST'ов pb → wr → pbpro; 4xx на pbpro цепочку НЕ рвёт (warn
+  pb=true, pro=false). Порядок POST'ов pb → pbpro → wr (wr — единственный не-идемпотентный,
+  поэтому последним: ретраер проходит цепочку с начала); 4xx на pbpro цепочку НЕ рвёт (warn
   `reason=pro_rejected`, остальное квитируется) — так форк, выкачанный раньше api, не теряет
   pb. Ретраер (БД лежала, `unconfirmed_pb`): платформа отдаёт только NUB-время, поэтому
   неподтверждённый pro грузится, лишь если ран побил и NUB-PB. Резолв `pbpro/wrpro` на api

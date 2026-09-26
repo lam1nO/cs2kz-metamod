@@ -116,7 +116,7 @@ public:
 	// POST события в ingest; 2xx → AckEvent, 4xx → dead/, иначе файл остаётся до следующего тика.
 	static void SendEvent(const std::string &runUuid, const std::string &body);
 
-	// Аплоад реплея: POST type=pb (uploadPb), type=wr (isServerRecord), type=pbpro (uploadPro) —
+	// Аплоад реплея: POST type=pb (uploadPb), type=pbpro (uploadPro), type=wr (isServerRecord) —
 	// по очереди; полный успех → AckReplay. Отказ 4xx на pbpro НЕ хоронит мету (см. .cpp).
 	static void SendReplay(const ReplayMeta &meta, const std::vector<char> &buffer);
 

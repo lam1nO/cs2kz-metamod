@@ -32,7 +32,6 @@
 #include <optional>
 #include <vector>
 #include <string>
-#include <vector>
 extern ReplayWatcher g_ReplayWatcher;
 
 namespace KZ::replaysystem::commands
@@ -1461,18 +1460,19 @@ SCMD(kz_replay, SCFL_REPLAY | SCFL_HELP)
 	}
 	const i32 argc = (i32)argv.size();
 
+	using namespace KZ::replaysystem::commands;
+	using RT = RecordType;
+
+	// Каждый `!replay` (включая голый — с подсказкой) переустанавливает запрос full этого
+	// игрока: иначе full от прошлой неудачной попытки (404, отказ) достался бы следующему
+	// реплею без модификатора.
+	SetFullRequested(player, full);
+
 	if (argc < 2)
 	{
 		player->languageService->PrintChat(true, false, "Replay - Usage Command");
 		return MRES_SUPERCEDE;
 	}
-
-	using namespace KZ::replaysystem::commands;
-	using RT = RecordType;
-
-	// Каждый `!replay` переустанавливает запрос full этого игрока: иначе full от прошлой
-	// неудачной попытки (404, отказ) достался бы следующему реплею без модификатора.
-	SetFullRequested(player, full);
 
 	const char *arg1 = argv[1];
 
