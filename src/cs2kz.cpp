@@ -38,6 +38,7 @@
 #include "kz/recording/kz_recording.h"
 #include "kz/replays/kz_replaysystem.h"
 #include "kz/replays/cyb_awr_backfill.h"
+#include "kz/db/cyb_alias_sync.h"
 #include "kz/racing/kz_racing.h"
 #include "kz/misc/kz_customchangemap.h"
 #include "kz/zones/kz_zones.h"
@@ -193,6 +194,8 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 	// Воркер бэклога AWR: таймер поднимается только при cybAwrBackfillIntervalSec > 0,
 	// команда kz_awr_backfill работает и с выключенным автоподбором.
 	CybAwrBackfill::Init();
+	// Синк актуальных ников платформы в Players.Alias (!maptop, реплей-бот).
+	CybAliasSync::Init();
 	KZRecordingService::Init();
 
 	Msg("[CS2KZ] load: детуры встали\n");
