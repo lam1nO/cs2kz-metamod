@@ -58,7 +58,7 @@ static_global const EditorReplicaDef EDITOR_REPLICA[(i32)LayoutElement::Count] =
 	{"e_prespeed",     "x_mhud_prespeed",     "prespeed",     "tag_prespeed",     "HUD Editor - Element Prespeed"},
 	{"e_keys",         "x_mhud_keys",         "keys",         "tag_keys",         "HUD Editor - Element Keys"},
 	{"e_checkpoint",   "x_mhud_checkpoint",   "checkpoint",   "tag_checkpoint",   "HUD Editor - Element Checkpoint"},
-	{"e_leadprogress", "x_mhud_progress",     "progress",     "tag_leadprogress", "HUD Editor - Element LeadProgress"},
+	{"e_leadprogress", "x_mhud_progress_pct", "progress",     "tag_leadprogress", "HUD Editor - Element LeadProgress"},
 	{"e_pbwr",         "x_mhud_pbwr",         "pbwr",         "tag_pbwr",         "HUD Editor - Element PbWr"},
 	{"e_showpos",      "x_mhud_showpos",      "pos",          "tag_showpos",      "HUD Editor - Element ShowPos"},
 	{"e_course",       "x_mhud_course",       "course",       "tag_course",       "HUD Editor - Element Course"},

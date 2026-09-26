@@ -719,11 +719,12 @@ void KZHUDService::ApplyLeadProgressParts(CCSCustomHudLayout *layout, const char
 										  const MHUDLayoutPrefs::Element &style, const Color &color)
 {
 	char idBuf[64];
-	// Подпись — переменная КОРНЯ (у лейбла подписи в разметке нет id), шлётся раз на сущность:
+	// Подпись — переменная на САМОМ лейбле mhud_progress_cap (не полагаемся на наследование
+	// dialog-переменных от родителя), шлётся раз на сущность:
 	// диф-кэш по тексту фразы, язык игрока меняется редко.
 	const char *lang = this->player->languageService->GetLanguage();
 	const std::string cap = KZLanguageService::PrepareMessageWithLang(lang, "Lead - Hud Progress Caption");
-	this->SetLayoutVar(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "mhud_progress"), "progress_cap", extra.progressCap, cap.c_str());
+	this->SetLayoutVar(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "mhud_progress_cap"), "progress_cap", extra.progressCap, cap.c_str());
 
 	// Ширина заливки — класс w-p--N (mhud.css, 0..100 шагом 1). Интерн-строк за ран — до 101
 	// (по одной на каждый увиденный процент), это в пределах пула сущности худа.

@@ -35,7 +35,7 @@ extern const LayoutElementDef LAYOUT_ELEMENTS[(i32)LayoutElement::Count] =
 	// разметке не было. varName "progress" — переменная процента (лейбл mhud_progress_pct внутри
 	// корня); подпись и ширину полосы пишет UpdateLeadProgressElement. Ключи префов прежние
 	// (mhudLeadProgress*). Дефолт тумблера false: элемент включают явно.
-	{"mhud_progress",   "mhud_progress",   "progress",   "mhudLeadProgress", "mhudLeadProgressX", "mhudLeadProgressY", "mhudLeadProgressSize", "mhudLeadProgressFont", "mhudLeadProgressOutline", "mhudLeadProgressOpacity", LAYOUT_DEF_LEADPROGRESS_X, LAYOUT_DEF_LEADPROGRESS_Y, LAYOUT_DEF_LEADPROGRESS_SIZE, false},
+	{"mhud_progress_pct", "mhud_progress", "progress",   "mhudLeadProgress", "mhudLeadProgressX", "mhudLeadProgressY", "mhudLeadProgressSize", "mhudLeadProgressFont", "mhudLeadProgressOutline", "mhudLeadProgressOpacity", LAYOUT_DEF_LEADPROGRESS_X, LAYOUT_DEF_LEADPROGRESS_Y, LAYOUT_DEF_LEADPROGRESS_SIZE, false},
 	// Поля редактора `!hud` (§4.1 спеки). Корни — Panel (pbwr, showpos) или Label (course,
 	// runtype). У pbwr varName не пишется никогда: текст идёт в переменные ячеек (mhud.cpp).
 	{"mhud_pbwr",       "mhud_pbwr",       "pbwr",       "hudPbWr",       "mhudPbWrX",       "mhudPbWrY",       "mhudPbWrSize",       "mhudPbWrFont",       "mhudPbWrOutline",       "mhudPbWrOpacity",       LAYOUT_DEF_PBWR_X,       LAYOUT_DEF_PBWR_Y,       LAYOUT_DEF_PBWR_SIZE,       true},
