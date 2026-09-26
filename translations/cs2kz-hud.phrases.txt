@@ -1117,6 +1117,55 @@
 		"chi"		"% from center"
 		"ua"		"% від центру"
 	}
+	"HUD Editor - Prop KeysGap"
+	{
+		"en"		"Gap"
+		"ru"		"Интервал"
+		"chi"		"Gap"
+		"ua"		"Інтервал"
+	}
+	"HUD Editor - Prop KeysGapAuto"
+	{
+		"en"		"auto"
+		"ru"		"авто"
+		"chi"		"auto"
+		"ua"		"авто"
+	}
+	"HUD Editor - Prop KeysSquare"
+	{
+		"en"		"Square"
+		"ru"		"Квадратные"
+		"chi"		"Square"
+		"ua"		"Квадратні"
+	}
+	"HUD Editor - Prop KeysAxisOnly"
+	{
+		"en"		"Axis only"
+		"ru"		"Только по оси"
+		"chi"		"Axis only"
+		"ua"		"Лише по осі"
+	}
+	"HUD Editor - Prop KeysIdleShow"
+	{
+		"en"		"Show"
+		"ru"		"Показ"
+		"chi"		"Show"
+		"ua"		"Показ"
+	}
+	"HUD Editor - Prop KeysIdleHide"
+	{
+		"en"		"Hide"
+		"ru"		"Скрыть"
+		"chi"		"Hide"
+		"ua"		"Сховати"
+	}
+	"HUD Editor - Prop KeysIdleUnderscore"
+	{
+		"en"		"_"
+		"ru"		"_"
+		"chi"		"_"
+		"ua"		"_"
+	}
 	"HUD Editor - Element Timer"
 	{
 		"en"		"Timer"

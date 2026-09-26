@@ -521,6 +521,12 @@ void KZHUDService::InitMenuPrefs()
 	KZ::menu::AddColor(keysColors, "HUD - Menu Label OverlapGlowColor", "mhudKeysOverlapGlowColor", MHUD_DEF_KEYS_OVERLAP_GLOW_COLOR);
 	KZ::menu::SetItemSolidOnly(keysColors);
 	KZ::menu::SetItemEnabledBy(keysColors, "hudKeysOverlap");
+	// Интервал клавиш (mhudKeysGap): правит степпер ep_srow редактора, пункт — ради сброса
+	// элемента, обмена худом и белого списка. -1 «авто» входит в диапазон: это не «ноль», а
+	// отсутствие класса key-gap (layout/prefs.cpp). Size по умолчанию хранит Float — читатель
+	// берёт Int, поэтому хранение задано явно, как у прозрачности.
+	KZ::menu::AddSize(keysColors, "HUD Editor - Prop KeysGap", "mhudKeysGap", -1, -1, 24);
+	KZ::menu::SetItemPref(keysColors, "mhudKeysGap", KZOptStorage::Int, -1);
 
 	KZ::menu::AddColor(elementNodes[(i32)LayoutElement::Checkpoint], "HUD - Menu Label Color", "mhudCheckpointColor", MHUD_DEF_BASE_COLOR);
 	// Цвета полей редактора !hud и дельты таймера: пункты в скрытых узлах элементов — их правит

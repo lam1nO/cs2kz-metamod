@@ -210,6 +210,9 @@ struct MHUDLayoutPrefs
 	bool keysGlow {};        // свечение нажатой кнопки
 	bool keysFill {};        // заливка нажатой кнопки
 	i32 keysIdle {};         // 0 show, 1 hide, 2 underscore (см. MHUDKeysIdle апстрима)
+	// Интервал между клавишами, px (mhudKeysGap, 0..24). -1 — «авто»: класса key-gap--N нет, и
+	// работает пропорциональный отступ из keys.css, как до появления настройки.
+	i32 keysGap {-1};
 
 	// Показывать худ так, как его видит наблюдаемый игрок (порт с апстрима, mhudMimicSpec).
 	// Читается ТОЛЬКО из своего набора — никогда из набора того, кого мимикрируем, иначе
@@ -866,6 +869,8 @@ private:
 		i32 noFill {-1};
 		i32 letters {-1};
 		i32 square {-1};
+		// Прошлый MHUDLayoutPrefs::keysGap: INT_MIN — ещё не выставляли, -1 — «авто» (класса нет).
+		i32 gap {INT_MIN};
 		// Индекс палитры key-glow-N (keys.css) на кнопку; -1 — класс ещё не выставлен.
 		i32 glow[KZHUDService::MHUD_KEY_COUNT] {-1, -1, -1, -1, -1, -1};
 		// Класс тонировки конфликтующей оси (keysOverlapAxis) — резолвленный стабильный указатель

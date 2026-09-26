@@ -345,6 +345,24 @@ void KZHUDService::ApplyKeysLook(CCSCustomHudLayout *layout, const char *prefix,
 		SetKeysHasClass(layout, this->player, keysPanel, "keys-square", square != 0);
 		state.square = square;
 	}
+	// Интервал клавиш: один класс key-gap--G на корне (mhud.css), прошлый снимаем. -1 «авто» —
+	// без класса, остаётся пропорциональный отступ keys.css.
+	const i32 gap = prefs.keysGap;
+	if (state.gap != gap)
+	{
+		char gapClass[32];
+		if (state.gap >= 0)
+		{
+			V_snprintf(gapClass, sizeof(gapClass), "key-gap--%i", state.gap);
+			layout->SetHasClass(keysPanel, gapClass, k_eHudPanelClassStatus_DoesNotHaveClass);
+		}
+		if (gap >= 0)
+		{
+			V_snprintf(gapClass, sizeof(gapClass), "key-gap--%i", gap);
+			SetKeysHasClass(layout, this->player, keysPanel, gapClass, true);
+		}
+		state.gap = gap;
+	}
 
 	// key-glow-N (keys.css, 160 записей) — та же палитра, что pal-fg-N/pal-bg-N в
 	// panorama_tables.cpp. Градиентов в keys.css нет: у градиента FindColorEntry отдаёт запись

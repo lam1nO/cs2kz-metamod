@@ -156,6 +156,14 @@ void KZHUDService::RefreshLayoutPrefs()
 	this->layoutPrefs.keysGlow = opts->GetPreferenceBool("mhudKeysGlow", false);
 	this->layoutPrefs.keysFill = opts->GetPreferenceBool("mhudKeysFill", false);
 	this->layoutPrefs.keysIdle = Clamp((i32)opts->GetPreferenceInt("mhudKeysIdle", 2), 0, 2);
+	// -1 «авто» — отдельное значение, а не 0: 0 это «вплотную», авто — пропорциональный отступ
+	// keys.css. Клэмп — преф мог прийти из БД/обмена мимо редактора, а класса key-gap--99 нет.
+	// Нечётное не округляем: классы есть на каждый пиксель 0..24, степпер редактора с нечётного
+	// просто шагает дальше по 2.
+	{
+		const i32 gap = (i32)opts->GetPreferenceInt("mhudKeysGap", -1);
+		this->layoutPrefs.keysGap = gap < 0 ? -1 : Clamp(gap, 0, 24);
+	}
 	this->layoutPrefs.speedPrecise = opts->GetPreferenceBool("mhudSpeedPrecise", false);
 	// Престрейф — три префа апстрима, до этой задачи не читавшиеся вообще (дефолты его же,
 	// origin/master:src/kz/hud/layout/preferences.cpp:46-48).
