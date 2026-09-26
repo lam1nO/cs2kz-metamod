@@ -9,6 +9,8 @@
 #define KZ_HUD_TIMER_STOPPED_GRACE_TIME 3.0f
 #define KZ_HUD_ON_GROUND_THRESHOLD      0.07f
 class CCSCustomHudLayout;
+struct KZOptItem;
+struct KZOptNode;
 
 // Дефолтные цвета — общие для HTML- и panorama-путей худа (Task 5): ключи префов
 // совпадают, поэтому настройки игрока переезжают между путями сами, без миграции.
@@ -177,6 +179,12 @@ struct MHUDLayoutPrefs
 	Color keysPressed {};
 	Color keysOverlapGlow {};
 	Color checkpoint {};
+	// Цвета полей редактора !hud (свой преф у каждого, правится ep_color). У типа рана цвета нет:
+	// бейдж красят классы rt-* (mhud.css), pal-fg их не перебьёт.
+	Color pbwrColor {};
+	Color showPosColor {};
+	Color courseColor {};
+	Color leadProgressColor {};
 
 	bool timerDetailed {};
 	// Элемент PB/WR (редактор `!hud`): четыре независимых ячейки (hudPbNub/hudPbPro/hudWrNub/
@@ -630,6 +638,30 @@ public:
 		return this->menuOpen;
 	}
 
+	// === Редактор `!hud` (спека 2026-09-26-hud-editor-options §4.5, layout/editor.cpp) ======
+	// Живёт на ТОЙ ЖЕ сущности, что и окно !options (ownedMenuLayout, разметка cyber/options.xml):
+	// два корня opt_root/edit_root, режим один в момент времени. Открытие редактора закрывает
+	// окно и наоборот. Захват ввода — тот же, пути снятия те же (CloseLayoutMenu/
+	// DestroyOwnedMenuLayout гасят и редактор), инвариант CheckMenuCaptureInvariant считает
+	// захват законным при menuOpen || editorOpen.
+	void OpenHudEditor();
+	void CloseHudEditor();
+
+	bool IsHudEditorOpen() const
+	{
+		return this->editorOpen;
+	}
+
+	// Открыто окно !options ИЛИ редактор !hud — любое из двух держит курсорный захват.
+	bool IsLayoutUiOpen() const
+	{
+		return this->menuOpen || this->editorOpen;
+	}
+
+	// Такт редактора из DrawPanels: живой плейсхолдер таймера и реальные showpos реплики.
+	// Настоящий худ на время редактора снесён (DrawPanels), после закрытия пересоздаётся с force.
+	void TickHudEditor();
+
 	// Колбэк клика по кнопке меню — зовётся из Hook_ClientSvcUserMessage (utils/hooks.cpp,
 	// свой тип сообщения KZ_UM_CUSTOM_HUD_CLICKED/CKZUsrMsg_CustomHudClicked, НЕ SDK-шный
 	// CS_UM_CustomHudClicked — см. комментарий в hooks.cpp/protobuf/kz_customhud.proto)
@@ -867,6 +899,23 @@ private:
 	// типа рана, дельта таймера). Та же ловушка, что у layoutElements[]/layoutKeys: живёт ТОЛЬКО
 	// вместе с сущностью — обнулять в DestroyOwnedLayout и на force (свежая сущность), иначе
 	// кэш решит, что всё уже выставлено, и ячейки останутся с дефолтами разметки.
+	// Стиль одного дочернего лейбла (ячейка PB/WR, строка showpos): диф-кэш классов кегля/шрифта/цвета.
+	struct LayoutChildStyleState
+	{
+		i32 fontSize {INT_MIN};
+		const char *fontClass {};
+		const char *colorClass {};
+	};
+
+	// Класс цвета палитры по Color с кэшем: поиск ближайшего цвета — только при смене цвета.
+	struct ColorClassCache
+	{
+		u32 packed {};
+		bool valid {};
+		const char *cls {};
+		const char *Get(const Color &c);
+	};
+
 	struct LayoutExtraState
 	{
 		std::string pbwrText[4] {};
@@ -883,12 +932,37 @@ private:
 		const char *deltaColorComputed {};
 		u32 deltaColorPacked {};
 		bool deltaColorValid {};
+		// Стиль лейблов времени pw_t_* (кегль/шрифт/цвет) и кегль подписей pw_c_*.
+		LayoutChildStyleState pwTime[4] {};
+		i32 pwCapSize[4] {INT_MIN, INT_MIN, INT_MIN, INT_MIN};
+		ColorClassCache pwColor {};
+		// Строки showpos mhud_pos/mhud_ang: текст первой (вторая — angText выше) и стиль обеих.
+		std::string posText {};
+		LayoutChildStyleState posLine[2] {};
+		ColorClassCache posColor {};
 	};
 
 	LayoutExtraState layoutExtra {};
 	// Кегль контейнера/кнопок и шрифт глифов блока клавиш — общий для худа и меню реплея
 	// (реализация в layout/mhud.cpp).
-	void ApplyKeysSizing(CCSCustomHudLayout *layout, LayoutKeysState &state, i32 size, const char *fontClass);
+	void ApplyKeysSizing(CCSCustomHudLayout *layout, LayoutKeysState &state, i32 size, const char *fontClass, const char *prefix = "");
+	// Общие для настоящего худа (prefix "") и реплики редактора !hud (prefix "x_") записи дочерних
+	// панелей элементов (layout/mhud.cpp): один код классов на обе сущности, кэши — свои.
+	void ApplyKeysLook(CCSCustomHudLayout *layout, const char *prefix, LayoutKeysState &state, const MHUDLayoutPrefs &prefs,
+					   const bool (&keys)[MHUD_KEY_COUNT], bool overlap, const bool (&overlapped)[MHUD_KEY_COUNT]);
+	void ApplyTimerDelta(CCSCustomHudLayout *layout, const char *prefix, LayoutExtraState &extra, const MHUDLayoutPrefs &prefs, bool show, f64 delta);
+	void ApplyChildLabelStyle(CCSCustomHudLayout *layout, const char *panelId, LayoutChildStyleState &state, i32 size, const char *fontClass,
+							  const char *colorClass);
+	void ApplyPbWrCells(CCSCustomHudLayout *layout, const char *prefix, LayoutExtraState &extra, const char *const (&texts)[4], const bool (&cells)[4],
+						const MHUDLayoutPrefs::Element &style, const Color &color);
+	void BuildPbWrTexts(KZPlayer *source, const KZCourseDescriptor *course, bool detailed, const char *const *placeholders, char (&buf)[4][32],
+						const char *(&texts)[4]);
+	void ApplyShowPosLines(CCSCustomHudLayout *layout, const char *prefix, LayoutExtraState &extra, const char *pos, const char *ang,
+						   const MHUDLayoutPrefs::Element &style, const Color &color);
+	// Запись элемента на ЛЮБЫЕ id и ЛЮБОЙ кэш (реплика редактора: e_*/x_* на сущности меню).
+	// UpdateLayoutElement — её частный случай для настоящего худа (LAYOUT_ELEMENTS, layoutElements).
+	void ApplyLayoutElementTo(CCSCustomHudLayout *layout, const MHUDLayoutPrefs::Element &cached, LayoutElementState &state, const char *panelId,
+							  const char *varName, const char *posPanelId, bool show, const char *text, const Color &color, bool force);
 
 	// === Меню реплея (layout/rpmenu.cpp) — состояние ==================================
 	// Сущность меню реплея ЭТОГО игрока (см. OpenReplayMenu); гасится вместе с остальными.
@@ -1021,11 +1095,38 @@ private:
 		Color, // попап выбора цвета (перенесено с апстрима почти без изменений)
 		Step,  // попап +-1/+-5 для позиции/размера/прозрачности/Vector (апстримный "Step popup")
 		List,  // попап списка (Choice) — строки li%i, наполняется getChoices при каждом рендере
+		Confirm, // подтверждение действия (confirm_popup) — сейчас только «Сбросить всё»
 	};
 
 	MenuPopup menuPopup {MenuPopup::None};
 	i32 menuPopupItem {-1}; // индекс пункта в активной категории, на который открыт попап
 	i32 menuPopupPage {};   // страница попапа (свотчи цвета постранично, как в апстриме)
+	// Пункт реестра, который правит открытый попап (цвет/шрифт/список) или подтверждает
+	// confirm_popup. Указатель, а не индекс строки: редактор !hud открывает те же попапы на
+	// пунктах скрытых узлов элементов (hiddenFromMenu), у которых строки в окне нет. Узлы и их
+	// items собираются один раз на Load и до выгрузки не меняются — указатель стабилен.
+	const KZOptItem *menuPopupTarget {};
+	const KZOptItem *menuConfirmTarget {};
+	i32 menuColorPending {-1}; // выбранный, но ещё не применённый индекс палитры (color_ok применяет)
+	i32 menuColorHue {-1};     // выбранный оттенок сетки ch{i}; -1 — не выбран
+	i32 menuListFamily {};     // семейство шрифтов lf{i} в попапе списка шрифтов
+	i32 menuPage {};           // страница строк вкладки (по KZ_MENU_ROWS)
+	// Защита от двойного клика вложенных кнопок (tg{i} внутри row{i}, et{i} внутри el{i}):
+	// ключ и тик последнего переключения. Что движок шлёт на клик по вложенной кнопке — одну
+	// или обе — вживую не проверено; второе переключение в тот же тик гасится.
+	i32 menuToggleKey {-1};
+	i32 menuToggleTick {-1};
+
+	// === Редактор !hud (layout/editor.cpp) — состояние ===============================
+	bool editorOpen {};
+	i32 editorSelected {-1}; // LayoutElement или -1 — ничего не выбрано
+	i32 editorStep {1};      // шаг стрелок позиции: 1 или 5 процентов
+	f64 editorOpenedAt {};   // curtime открытия — живой плейсхолдер таймера
+	// Диф-кэш реплики худа на сущности меню (x_* панели) — свой, отдельный от кэша настоящего
+	// худа: это другая сущность. Живёт вместе с ownedMenuLayout (сброс в EnsureMenuLayout).
+	LayoutElementState editorElements[(i32)LayoutElement::Count] {};
+	LayoutKeysState editorKeys {};
+	LayoutExtraState editorExtra {};
 
 	// Диф-кэш применённых классов/переменных сущности меню — та же ловушка, что у
 	// layoutElements/layoutKeys/layoutCrosshair: живёт ТОЛЬКО вместе со своей сущностью,
