@@ -134,6 +134,51 @@ struct Recorder
 		return tick < tickShiftFrom ? tickShiftTo : tickShiftTo + (tick - tickShiftFrom);
 	}
 
+	// Сдвиг кадра целиком: кроме serverTick в кадре есть и другие АБСОЛЮТНЫЕ величины той же
+	// шкалы, и плейбек читает их относительно serverTick/gameTime своего кадра
+	// (playback.cpp: `tickcount + modernJump.* - serverTick`, `curtime + jumpPressedTime -
+	// gameTime`), а перемотка считает время как `gameTime - serverTick * интервал`. Сдвинутые
+	// на ту же дельту, они дают те же относительные значения, что до сдвига.
+	void ShiftFrame(TickData &t) const
+	{
+		if (!tickShiftActive)
+		{
+			return;
+		}
+		const u32 shifted = ShiftTick(t.serverTick);
+		const i32 delta = (i32)(shifted - t.serverTick);
+		const f32 deltaTime = (f32)delta * ENGINE_FIXED_TICK_INTERVAL;
+		t.serverTick = shifted;
+		t.gameTime += deltaTime;
+		t.pre.jumpPressedTime += deltaTime;
+		t.post.jumpPressedTime += deltaTime;
+		t.pre.lastDuckTime += deltaTime;
+		t.post.lastDuckTime += deltaTime;
+		t.modernJump.lastActualJumpPressTick += delta;
+		t.modernJump.lastUsableJumpPressTick += delta;
+		t.modernJump.lastLandedTick += delta;
+	}
+
+	void ShiftCmd(CmdData &c) const
+	{
+		if (!tickShiftActive)
+		{
+			return;
+		}
+		const u32 shifted = ShiftTick(c.serverTick);
+		c.gameTime += (f32)(i32)(shifted - c.serverTick) * ENGINE_FIXED_TICK_INTERVAL;
+		c.serverTick = shifted;
+	}
+
+	// Сериализация частей рекордера в формат временного чанка (см. FlushChunkToDisk) — общая с
+	// рабочим потоком склейки (kz/savedrun/kz_partial_replay.cpp пишет кусок рана готовым чанком).
+	static void BuildChunkBuffer(std::vector<char> &buf, const std::vector<TickData> &ticks, const std::vector<u8> &subtickCounts,
+								 const std::vector<SubtickData::RpSubtickMove> &subtickMoves, const std::vector<RpEvent> &events,
+								 const std::vector<RpJumpStats> &jumps, const std::vector<CmdData> &cmds, const std::vector<u8> &cmdSubtickCounts,
+								 const std::vector<SubtickData::RpSubtickMove> &cmdSubtickMoves);
+	// Путь к чанку номер index рекордера с этим uuid (относительно csgo/).
+	static std::string ChunkBasePath(const UUID_t &uuid);
+
 	// Flush in-memory recording data to a temp chunk file on disk, then clear in-memory vectors.
 	void FlushChunkToDisk();
 	// Read all flushed chunks from disk back into vectors, appending the current in-memory remainder.
@@ -167,7 +212,7 @@ struct Recorder
 		if constexpr (std::is_same<T, TickData>::value)
 		{
 			tickData.push_back(data);
-			tickData.back().serverTick = ShiftTick(data.serverTick);
+			ShiftFrame(tickData.back());
 			totalTicksRecorded++;
 			if (tickData.size() >= FLUSH_INTERVAL_TICKS)
 			{
@@ -204,7 +249,7 @@ struct Recorder
 		else if constexpr (std::is_same<T, CmdData>::value)
 		{
 			cmdData.push_back(data);
-			cmdData.back().serverTick = ShiftTick(data.serverTick);
+			ShiftCmd(cmdData.back());
 		}
 		else
 		{

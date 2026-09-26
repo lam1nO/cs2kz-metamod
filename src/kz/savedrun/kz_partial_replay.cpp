@@ -119,7 +119,7 @@ namespace
 	}
 
 	// Разобранный кусок. Сабтики сразу упакованы так, как их хранит Recorder (счётчики + плоский
-	// массив ходов): разбор идёт на рабочем потоке, а главному остаётся только переставить векторы.
+	// массив ходов): вся тяжёлая работа — на рабочих потоках, главному остаются O(живых данных).
 	struct Parsed
 	{
 		bool ok = false;
@@ -135,6 +135,9 @@ namespace
 		std::vector<CmdData> cmds;
 		std::vector<u8> cmdSubtickCounts;
 		std::vector<SubtickData::RpSubtickMove> cmdSubtickMoves;
+		// Файл, докачанный из api: копия на диск этого сервера пишется только после того, как
+		// главный поток подтвердил, что ран ещё ждёт кусок (иначе инвалидированный кусок воскрес бы).
+		std::shared_ptr<std::vector<char>> raw;
 	};
 
 	void Pack(const std::vector<SubtickData> &in, std::vector<u8> &outCounts, std::vector<SubtickData::RpSubtickMove> &outMoves)
@@ -216,6 +219,23 @@ namespace
 				return;
 			}
 		}
+		// Хвосты куска бывают ПОЗЖЕ его последнего кадра: прыжки в !prac (кадры prac по умолчанию не
+		// пишутся), команды из наблюдателей (RecordCommand пишет и без пешки), событие паузы входа в
+		// prac. Живое продолжение ляжет на тик «последний кадр + 1», поэтому хвосты прижимаем к
+		// последнему кадру — иначе порядок по serverTick (на нём держатся курсоры плейбека) сломался бы.
+		const u32 lastTick = out.ticks.back().serverTick;
+		for (RpEvent &e : out.events)
+		{
+			e.serverTick = MIN(e.serverTick, lastTick);
+		}
+		for (RpJumpStats &j : out.jumps)
+		{
+			j.overall.serverTick = MIN(j.overall.serverTick, lastTick);
+		}
+		for (CmdData &c : out.cmds)
+		{
+			c.serverTick = MIN(c.serverTick, lastTick);
+		}
 		Pack(subticks, out.subtickCounts, out.subtickMoves);
 		std::vector<SubtickData>().swap(subticks);
 		Pack(cmdSubticks, out.cmdSubtickCounts, out.cmdSubtickMoves);
@@ -255,6 +275,10 @@ namespace
 		KZPartialReplay::Key key;
 		std::string partialId;
 		f64 restoredTime {};
+		// Стояла ли пауза восстановления (ForcePause в ApplySnapshot) в момент заведения рекордера.
+		// Снимается ТОГДА, а не при склейке: кусок едет секунды, и игрок успевает снять паузу —
+		// её RESUME уже живым событием лежит в рекордере.
+		bool pausedAtRestore = true;
 	};
 
 	KZPlayer *FindPlayer(const SpliceContext &ctx)
@@ -269,11 +293,16 @@ namespace
 
 	// Живой рекордер этой склейки (ещё ждёт кусок) либо nullptr: ран могли остановить или
 	// закончить, пока кусок ехал.
-	RunRecorder *FindPendingRecorder(KZPlayer *player, const UUID_t &uuid)
+	RunRecorder *FindPendingRecorder(const SpliceContext &ctx)
 	{
+		KZPlayer *player = FindPlayer(ctx);
+		if (!player)
+		{
+			return nullptr;
+		}
 		for (RunRecorder &rec : player->recordingService->runRecorders)
 		{
-			if (rec.splicePending && rec.desiredStopTime < 0.0f && rec.uuid == uuid)
+			if (rec.splicePending && rec.desiredStopTime < 0.0f && rec.uuid == ctx.recorderUuid)
 			{
 				return &rec;
 			}
@@ -303,21 +332,48 @@ namespace
 		}
 	}
 
-	void Apply(const SpliceContext &ctx, Parsed &p, const char *source)
+	// Шаг 3 (главный поток): кусок уже лежит временным чанком рекордера — рекордер подхватывает его
+	// как свою первую сброшенную часть (LoadFlushedChunks читает чанки раньше памяти, то есть кусок
+	// окажется в начале файла). O(1) на главном потоке при любой длине рана.
+	void Attach(const SpliceContext &ctx, const std::string &chunkPath, bool written, size_t frames, const char *source)
+	{
+		RunRecorder *rec = FindPendingRecorder(ctx);
+		if (!rec || !written || rec->numFlushedChunks > 0)
+		{
+			if (LocalFileExists(chunkPath))
+			{
+				utils::RemoveFile(chunkPath.c_str());
+			}
+			if (!rec)
+			{
+				KZ_LOG_INFO(LogChannel::Replays, "[cyb] partial_replay_splice_skipped steam_id=%llu partial=%s reason=run_gone\n",
+							(unsigned long long)ctx.steamId64, ctx.partialId.c_str());
+				return;
+			}
+			Abort(ctx, !written ? "chunk_write_failed" : "recorder_flushed");
+			return;
+		}
+		rec->tempFileBase = Recorder::ChunkBasePath(rec->uuid);
+		rec->numFlushedChunks = 1;
+		rec->totalTicksRecorded += (u32)frames;
+		rec->splicePending = false;
+		KZ_LOG_INFO(LogChannel::Replays, "[cyb] partial_replay_spliced steam_id=%llu key=%s partial=%s source=%s frames=%zu\n",
+					(unsigned long long)ctx.steamId64, Stem(ctx.key).c_str(), ctx.partialId.c_str(), source, frames);
+	}
+
+	// Шаг 2 (главный поток): сверки, стык и сдвиг живого продолжения. Тяжёлое (переписать оружие в
+	// кадрах куска и сложить его временным чанком) уходит обратно на рабочий поток.
+	void Prepare(const SpliceContext &ctx, std::shared_ptr<Parsed> p, const char *source)
 	{
 		KZPlayer *player = FindPlayer(ctx);
-		if (!player)
-		{
-			return; // ушёл — рекордер умер вместе с ним
-		}
-		RunRecorder *rec = FindPendingRecorder(player, ctx.recorderUuid);
-		if (!rec)
+		RunRecorder *rec = FindPendingRecorder(ctx);
+		if (!player || !rec)
 		{
 			KZ_LOG_INFO(LogChannel::Replays, "[cyb] partial_replay_splice_skipped steam_id=%llu partial=%s reason=run_gone\n",
 						(unsigned long long)ctx.steamId64, ctx.partialId.c_str());
 			return;
 		}
-		// Живые кадры уже ушли на диск частями (15 минут ожидания куска) — вставить кусок в начало
+		// Живые кадры уже ушли на диск частями (15 минут ожидания куска) — вставить кусок ПЕРЕД ними
 		// нечем. Практически недостижимо, но склеивать «через» сброшенные части нельзя.
 		if (rec->numFlushedChunks > 0)
 		{
@@ -331,9 +387,9 @@ namespace
 			return;
 		}
 		// Кусок обязан быть записью ЭТОГО рана: тип, игрок, курс и режим — те же.
-		if (p.header.type() != cs2kz::replay::RP_RUN || p.header.player().steamid64() != ctx.steamId64
-			|| p.header.run().course_name() != rec->replayHeader.run().course_name()
-			|| p.header.run().mode().short_name() != rec->replayHeader.run().mode().short_name())
+		if (p->header.type() != cs2kz::replay::RP_RUN || p->header.player().steamid64() != ctx.steamId64
+			|| p->header.run().course_name() != rec->replayHeader.run().course_name()
+			|| p->header.run().mode().short_name() != rec->replayHeader.run().mode().short_name())
 		{
 			Abort(ctx, "header_mismatch");
 			return;
@@ -344,9 +400,9 @@ namespace
 		// сверяет пару START/END по id, а на другом сервере/после ребилда карты id мог сдвинуться
 		// (восстановление ищет курс по cyber-номеру, а не по id).
 		i64 startEvent = -1;
-		for (i64 i = (i64)p.events.size() - 1; i >= 0; i--)
+		for (i64 i = (i64)p->events.size() - 1; i >= 0; i--)
 		{
-			const RpEvent &e = p.events[i];
+			const RpEvent &e = p->events[i];
 			if (e.type == RPEVENT_TIMER_EVENT && e.data.timer.type == RpEvent::RpEventData::TimerEvent::TIMER_START)
 			{
 				startEvent = i;
@@ -358,12 +414,12 @@ namespace
 			Abort(ctx, "no_timer_start");
 			return;
 		}
-		p.events[startEvent].data.timer.index = course->id;
+		p->events[startEvent].data.timer.index = course->id;
 
 		// Пауза на конце куска: выход из паузы или из prac (там кусок кончается открытой парой
 		// PAUSE) — вторую паузу не открываем, её закроет RESUME восстановленного рана.
 		bool pausedAtEnd = false;
-		for (const RpEvent &e : p.events)
+		for (const RpEvent &e : p->events)
 		{
 			if (e.type != RPEVENT_TIMER_EVENT)
 			{
@@ -385,10 +441,11 @@ namespace
 			}
 		}
 
-		// Оружие: индексы в кадрах куска — индексы списка ТОЙ сессии; перекладываем в список этой.
+		// Оружие: индексы в кадрах куска — индексы списка ТОЙ сессии. Список этой сессии живёт на
+		// главном потоке — здесь только таблица соответствия, переписывает кадры рабочий поток.
 		KZRecordingService *rs = player->recordingService;
-		std::unordered_map<i32, i32> weaponRemap;
-		for (const auto &entry : p.weapons)
+		auto weaponRemap = std::make_shared<std::unordered_map<i32, i32>>();
+		for (const auto &entry : p->weapons)
 		{
 			i32 mapped = -1;
 			for (i32 i = 0; i < (i32)rs->weapons.size(); i++)
@@ -404,25 +461,18 @@ namespace
 				rs->weapons.push_back(entry.second);
 				mapped = (i32)rs->weapons.size() - 1;
 			}
-			weaponRemap[entry.first] = mapped;
-		}
-		for (TickData &t : p.ticks)
-		{
-			if (t.weapon >= 0)
-			{
-				auto it = weaponRemap.find(t.weapon);
-				t.weapon = it != weaponRemap.end() ? it->second : -1;
-			}
+			(*weaponRemap)[entry.first] = mapped;
 		}
 
-		// Стык: живые тики ложатся сразу за последним кадром куска.
-		p.ticks.back().post.replayFlags.splice = true;
-		const u32 spliceTick = p.ticks.back().serverTick + 1;
+		// Стык: живые тики ложатся сразу за последним кадром куска. Уже записанное с момента
+		// восстановления (секунды) сдвигаем здесь, дальнейшее сдвинет PushData.
+		const u32 spliceTick = p->ticks.back().serverTick + 1;
+		p->ticks.back().post.replayFlags.splice = true;
 		rec->tickShiftTo = spliceTick;
 		rec->tickShiftActive = true;
 		for (TickData &t : rec->tickData)
 		{
-			t.serverTick = rec->ShiftTick(t.serverTick);
+			rec->ShiftFrame(t);
 		}
 		for (RpEvent &e : rec->rpEvents)
 		{
@@ -434,62 +484,65 @@ namespace
 		}
 		for (CmdData &c : rec->cmdData)
 		{
-			c.serverTick = rec->ShiftTick(c.serverTick);
+			rec->ShiftCmd(c);
 		}
 
-		// Кусок — в начало, живое — следом. Векторы куска переезжают целиком, копируется только
-		// то, что рекордер успел записать с момента восстановления (секунды).
-		const size_t partialFrames = p.ticks.size();
-		p.ticks.insert(p.ticks.end(), rec->tickData.begin(), rec->tickData.end());
-		rec->tickData.swap(p.ticks);
-		p.subtickCounts.insert(p.subtickCounts.end(), rec->subtickCounts.begin(), rec->subtickCounts.end());
-		rec->subtickCounts.swap(p.subtickCounts);
-		p.subtickMoves.insert(p.subtickMoves.end(), rec->subtickMoves.begin(), rec->subtickMoves.end());
-		rec->subtickMoves.swap(p.subtickMoves);
-
+		// Пара стыка. PAUSE — на первом тике продолжения (восстановленный ран стоит на ForcePause,
+		// её RESUME придёт живым событием, когда игрок продолжит). Если паузы восстановления не было
+		// (вето листенера) — закрываем пару сразу, иначе вся запись после стыка считалась бы паузой.
+		RpEvent junction = {};
+		junction.type = RPEVENT_TIMER_EVENT;
+		junction.serverTick = spliceTick;
+		junction.data.timer.index = -1;
+		junction.data.timer.time = (f32)ctx.restoredTime;
 		if (!pausedAtEnd)
 		{
-			// Пауза стыка: восстановленный ран стоит на ForcePause (ApplySnapshot), и её RESUME
-			// придёт живым событием, когда игрок продолжит. Время — время рана из снапшота.
-			RpEvent pause = {};
-			pause.type = RPEVENT_TIMER_EVENT;
-			pause.serverTick = spliceTick;
-			pause.data.timer.type = RpEvent::RpEventData::TimerEvent::TIMER_PAUSE;
-			pause.data.timer.index = -1;
-			pause.data.timer.time = (f32)ctx.restoredTime;
-			p.events.push_back(pause);
-			// ForcePause не поставил паузу (вето листенера) — стык всё равно обязан быть парой,
-			// иначе вся запись после него считалась бы паузой.
-			if (!player->timerService->GetPaused())
-			{
-				RpEvent resume = pause;
-				resume.serverTick = spliceTick + 1;
-				resume.data.timer.type = RpEvent::RpEventData::TimerEvent::TIMER_RESUME;
-				p.events.push_back(resume);
-			}
+			junction.data.timer.type = RpEvent::RpEventData::TimerEvent::TIMER_PAUSE;
+			p->events.push_back(junction);
 		}
-		p.events.insert(p.events.end(), rec->rpEvents.begin(), rec->rpEvents.end());
-		rec->rpEvents.swap(p.events);
-		p.jumps.insert(p.jumps.end(), rec->jumps.begin(), rec->jumps.end());
-		rec->jumps.swap(p.jumps);
-		p.cmds.insert(p.cmds.end(), rec->cmdData.begin(), rec->cmdData.end());
-		rec->cmdData.swap(p.cmds);
-		p.cmdSubtickCounts.insert(p.cmdSubtickCounts.end(), rec->cmdSubtickCounts.begin(), rec->cmdSubtickCounts.end());
-		rec->cmdSubtickCounts.swap(p.cmdSubtickCounts);
-		p.cmdSubtickMoves.insert(p.cmdSubtickMoves.end(), rec->cmdSubtickMoves.begin(), rec->cmdSubtickMoves.end());
-		rec->cmdSubtickMoves.swap(p.cmdSubtickMoves);
+		if (!ctx.pausedAtRestore)
+		{
+			junction.data.timer.type = RpEvent::RpEventData::TimerEvent::TIMER_RESUME;
+			p->events.push_back(junction);
+		}
 
-		rec->totalTicksRecorded += (u32)partialFrames;
-		rec->splicePending = false;
-		KZ_LOG_INFO(LogChannel::Replays, "[cyb] partial_replay_spliced steam_id=%llu key=%s partial=%s source=%s frames=%zu paused_at_end=%d\n",
-					(unsigned long long)ctx.steamId64, Stem(ctx.key).c_str(), ctx.partialId.c_str(), source, partialFrames, (int)pausedAtEnd);
+		if (!KZRecordingService::fileWriter)
+		{
+			Abort(ctx, "no_file_writer");
+			return;
+		}
+		const std::string chunkPath = Recorder::ChunkBasePath(rec->uuid) + "_0.chunk";
+		const std::string localPath = LocalPath(ctx.key);
+		std::string sourceName = source;
+		KZRecordingService::fileWriter->QueueTask(
+			[ctx, p, weaponRemap, chunkPath, localPath, sourceName]() -> std::function<void()>
+			{
+				for (TickData &t : p->ticks)
+				{
+					if (t.weapon >= 0)
+					{
+						auto it = weaponRemap->find(t.weapon);
+						t.weapon = it != weaponRemap->end() ? it->second : -1;
+					}
+				}
+				std::vector<char> chunk;
+				Recorder::BuildChunkBuffer(chunk, p->ticks, p->subtickCounts, p->subtickMoves, p->events, p->jumps, p->cmds, p->cmdSubtickCounts,
+										   p->cmdSubtickMoves);
+				const bool written = utils::WriteBufferToFile(chunkPath.c_str(), chunk);
+				if (written && p->raw)
+				{
+					// Докачанный кусок — копией на диск этого сервера (повторный выход/возврат сюда же).
+					utils::WriteBufferToFile(localPath.c_str(), *p->raw);
+				}
+				const size_t frames = p->ticks.size();
+				return [ctx, chunkPath, written, frames, sourceName]() { Attach(ctx, chunkPath, written, frames, sourceName.c_str()); };
+			});
 	}
 
-	void OnLoaded(const SpliceContext &ctx, Parsed &p, bool fromLocal);
+	void OnLoaded(const SpliceContext &ctx, std::shared_ptr<Parsed> p, bool fromLocal);
 
-	// Разбор буфера на рабочем потоке и склейка на главном. writeLocal — кусок только что
-	// докачан: заодно положить его на диск этого сервера (повторный выход/возврат сюда же).
-	void ParseAsync(const SpliceContext &ctx, std::shared_ptr<std::vector<char>> buffer, bool fromLocal, bool writeLocal)
+	// Шаг 1 (рабочий поток): чтение и разбор куска. buffer == nullptr — читать локальный файл.
+	void ParseAsync(const SpliceContext &ctx, std::shared_ptr<std::vector<char>> buffer, bool fromLocal)
 	{
 		if (!KZRecordingService::fileWriter)
 		{
@@ -498,7 +551,7 @@ namespace
 		}
 		const std::string relPath = LocalPath(ctx.key);
 		KZRecordingService::fileWriter->QueueTask(
-			[ctx, buffer, fromLocal, writeLocal, relPath]() -> std::function<void()>
+			[ctx, buffer, fromLocal, relPath]() -> std::function<void()>
 			{
 				auto parsed = std::make_shared<Parsed>();
 				if (!buffer)
@@ -516,18 +569,23 @@ namespace
 				else
 				{
 					ParseContainer(buffer->data(), buffer->size(), *parsed);
-					if (parsed->ok && writeLocal)
+					if (parsed->ok)
 					{
-						utils::WriteBufferToFile(relPath.c_str(), *buffer);
+						parsed->raw = buffer;
 					}
 				}
-				return [ctx, parsed, fromLocal]() { OnLoaded(ctx, *parsed, fromLocal); };
+				return [ctx, parsed, fromLocal]() { OnLoaded(ctx, parsed, fromLocal); };
 			});
 	}
 
 	// Докачка куска из api: GET /replays/v1/partial (сверка id на стороне api) → публичный URL.
 	void LoadRemote(const SpliceContext &ctx)
 	{
+		// Ран уже остановлен/закончен, пока читался локальный файл, — качать незачем.
+		if (!FindPendingRecorder(ctx))
+		{
+			return;
+		}
 		std::string apiMode;
 		if (!ApiEligible(ctx.key, apiMode))
 		{
@@ -584,7 +642,7 @@ namespace
 							Abort(ctx, "download_bad_body");
 							return;
 						}
-						ParseAsync(ctx, std::make_shared<std::vector<char>>(std::move(*raw)), false, true);
+						ParseAsync(ctx, std::make_shared<std::vector<char>>(std::move(*raw)), false);
 					},
 					[ctx]() { Abort(ctx, "download_network_error"); });
 			},
@@ -592,26 +650,26 @@ namespace
 		// clang-format on
 	}
 
-	void OnLoaded(const SpliceContext &ctx, Parsed &p, bool fromLocal)
+	void OnLoaded(const SpliceContext &ctx, std::shared_ptr<Parsed> p, bool fromLocal)
 	{
-		if (p.ok && p.id == ctx.partialId)
+		if (p->ok && p->id == ctx.partialId)
 		{
-			Apply(ctx, p, fromLocal ? "local" : "remote");
+			Prepare(ctx, p, fromLocal ? "local" : "remote");
 			return;
 		}
 		if (fromLocal)
 		{
 			// Локального куска нет или он чужой (устарел: ран с этим ключом потом бежал на другом
 			// сервере) — идём в api.
-			if (p.ok)
+			if (p->ok)
 			{
 				KZ_LOG_INFO(LogChannel::Replays, "[cyb] partial_replay_local_stale steam_id=%llu partial=%s local=%s\n",
-							(unsigned long long)ctx.steamId64, ctx.partialId.c_str(), p.id.c_str());
+							(unsigned long long)ctx.steamId64, ctx.partialId.c_str(), p->id.c_str());
 			}
 			LoadRemote(ctx);
 			return;
 		}
-		Abort(ctx, p.ok ? "remote_id_mismatch" : p.reason);
+		Abort(ctx, p->ok ? "remote_id_mismatch" : p->reason);
 	}
 } // namespace
 
@@ -639,12 +697,13 @@ void KZPartialReplay::SaveOnDisconnect(KZPlayer *player, const Key &key, std::st
 {
 	outPartialId.clear();
 	KZRecordingService *rs = player->recordingService;
-	auto it = rs->runRecorders.begin();
-	for (; it != rs->runRecorders.end(); ++it)
+	// Живой рекордер рана — САМЫЙ ПОЗДНИЙ из живых: он и принадлежит текущему рану.
+	auto it = rs->runRecorders.end();
+	for (auto candidate = rs->runRecorders.begin(); candidate != rs->runRecorders.end(); ++candidate)
 	{
-		if (it->desiredStopTime < 0.0f)
+		if (candidate->desiredStopTime < 0.0f)
 		{
-			break;
+			it = candidate;
 		}
 	}
 	if (it == rs->runRecorders.end())
@@ -769,11 +828,12 @@ void KZPartialReplay::ResumeAfterRestore(KZPlayer *player, const Key &key, const
 	ctx.key = key;
 	ctx.partialId = partialId;
 	ctx.restoredTime = restoredTime;
+	ctx.pausedAtRestore = player->timerService->GetPaused();
 	KZ_LOG_INFO(LogChannel::Replays, "[cyb] partial_replay_resume steam_id=%llu key=%s partial=%s local=%d\n", (unsigned long long)ctx.steamId64,
 				Stem(key).c_str(), partialId.c_str(), (int)LocalFileExists(LocalPath(key)));
 	if (LocalFileExists(LocalPath(key)))
 	{
-		ParseAsync(ctx, nullptr, true, false);
+		ParseAsync(ctx, nullptr, true);
 	}
 	else
 	{

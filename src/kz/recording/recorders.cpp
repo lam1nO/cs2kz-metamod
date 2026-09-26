@@ -288,20 +288,60 @@ Recorder::~Recorder()
 //   u8[numCmds] (cmd subtick counts)
 //   RpSubtickMove[numCmdSubtickMoves]
 
+std::string Recorder::ChunkBasePath(const UUID_t &uuid)
+{
+	std::string uuidStr = uuid.ToString();
+	char path[512];
+	V_snprintf(path, sizeof(path), "%s/.tmp_%s", KZ_REPLAY_PATH, uuidStr.c_str());
+	return path;
+}
+
 void Recorder::FlushChunkToDisk()
 {
 	if (tempFileBase.empty())
 	{
-		std::string uuidStr = this->uuid.ToString();
-		char path[512];
-		V_snprintf(path, sizeof(path), "%s/.tmp_%s", KZ_REPLAY_PATH, uuidStr.c_str());
-		tempFileBase = path;
+		tempFileBase = Recorder::ChunkBasePath(this->uuid);
 	}
 
 	char chunkPath[512];
 	V_snprintf(chunkPath, sizeof(chunkPath), "%s_%u.chunk", tempFileBase.c_str(), numFlushedChunks);
 
 	std::vector<char> buf;
+	Recorder::BuildChunkBuffer(buf, tickData, subtickCounts, subtickMoves, rpEvents, jumps, cmdData, cmdSubtickCounts, cmdSubtickMoves);
+
+	KZ_LOG_DEBUG(LogChannel::Recording, "Queuing chunk %u write: path='%s' bufSize=%zu\n", numFlushedChunks, chunkPath, buf.size());
+
+	if (g_asyncFileIO)
+	{
+		g_asyncFileIO->QueueWriteBuffer(chunkPath, std::move(buf));
+	}
+	else
+	{
+		if (!utils::WriteBufferToFile(chunkPath, buf))
+		{
+			KZ_LOG_WARN(LogChannel::Recording, "Failed to flush chunk %u to disk (sync)\n", numFlushedChunks);
+			return;
+		}
+	}
+
+	numFlushedChunks++;
+
+	// Clear in-memory data
+	tickData.clear();
+	subtickCounts.clear();
+	subtickMoves.clear();
+	rpEvents.clear();
+	jumps.clear();
+	cmdData.clear();
+	cmdSubtickCounts.clear();
+	cmdSubtickMoves.clear();
+}
+
+void Recorder::BuildChunkBuffer(std::vector<char> &buf, const std::vector<TickData> &tickData, const std::vector<u8> &subtickCounts,
+								const std::vector<SubtickData::RpSubtickMove> &subtickMoves, const std::vector<RpEvent> &rpEvents,
+								const std::vector<RpJumpStats> &jumps, const std::vector<CmdData> &cmdData, const std::vector<u8> &cmdSubtickCounts,
+								const std::vector<SubtickData::RpSubtickMove> &cmdSubtickMoves)
+{
 	u32 numTicks = (u32)tickData.size();
 	u32 numSubtickMovesTotal = (u32)subtickMoves.size();
 	u32 numEvents = (u32)rpEvents.size();
@@ -355,33 +395,6 @@ void Recorder::FlushChunkToDisk()
 	appendRaw(cmdSubtickCounts.data(), numCmds * sizeof(u8));
 	// Cmd subtick moves
 	appendRaw(cmdSubtickMoves.data(), numCmdSubtickMovesTotal * sizeof(SubtickData::RpSubtickMove));
-
-	KZ_LOG_DEBUG(LogChannel::Recording, "Queuing chunk %u write: path='%s' bufSize=%zu\n", numFlushedChunks, chunkPath, buf.size());
-
-	if (g_asyncFileIO)
-	{
-		g_asyncFileIO->QueueWriteBuffer(chunkPath, std::move(buf));
-	}
-	else
-	{
-		if (!utils::WriteBufferToFile(chunkPath, buf))
-		{
-			KZ_LOG_WARN(LogChannel::Recording, "Failed to flush chunk %u to disk (sync)\n", numFlushedChunks);
-			return;
-		}
-	}
-
-	numFlushedChunks++;
-
-	// Clear in-memory data
-	tickData.clear();
-	subtickCounts.clear();
-	subtickMoves.clear();
-	rpEvents.clear();
-	jumps.clear();
-	cmdData.clear();
-	cmdSubtickCounts.clear();
-	cmdSubtickMoves.clear();
 }
 
 void Recorder::LoadFlushedChunks(std::vector<TickData> &outTick, std::vector<u8> &outSubtickCounts,

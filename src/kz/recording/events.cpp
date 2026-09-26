@@ -132,6 +132,19 @@ void KZRecordingService::OnTimerStart()
 		return;
 	}
 
+	// Новый ран поверх восстановленного, чей кусок из бэкапа ещё не вставлен
+	// (kz/savedrun/kz_partial_replay.cpp): восстановленный ран кончился, его рекордер — тоже.
+	for (auto it = this->runRecorders.begin(); it != this->runRecorders.end();)
+	{
+		if (it->desiredStopTime < 0.0f && it->splicePending)
+		{
+			it = this->runRecorders.erase(it);
+		}
+		else
+		{
+			++it;
+		}
+	}
 	this->runRecorders.push_back(RunRecorder(this->player));
 	KZ_LOG_DEBUG(LogChannel::Recording, "Timer start\n");
 	this->InsertTimerEvent(RpEvent::RpEventData::TimerEvent::TIMER_START, this->player->timerService->GetTime(),

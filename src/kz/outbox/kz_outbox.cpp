@@ -218,25 +218,35 @@ static_function bool ParsePartialMeta(const std::string &content, KZOutboxServic
 	return ok && (out.op == "put" || out.op == "delete");
 }
 
-// Квитанция куска: снимаем файл намерения, только если в нём всё ещё ТО ЖЕ намерение. Пока
-// летел запрос, намерение могли перезаписать (put → delete после финиша, put → новый put
-// после повторного выхода) — ответ на старый запрос его не касается.
-static_function void FinishPartialIfSame(const std::string &stem, const KZOutboxService::PartialMeta &sent, const char *verb, const char *reason)
+// Лежит ли в файле намерения ВСЁ ЕЩЁ то, что мы отправляли. Пока летел запрос, намерение могли
+// перезаписать (put → delete после финиша, put → новый put после повторного выхода) — ответ на
+// старый запрос его не касается: ни квитанция, ни перенос в dead/.
+static_function bool PartialIntentIsCurrent(const std::string &stem, const KZOutboxService::PartialMeta &sent)
 {
 	std::string name = stem + ".partial.meta";
 	std::vector<char> buffer;
 	if (!QueueFileExists(name) || !utils::ReadBufferFromFile(QueueRelPath(name).c_str(), buffer))
 	{
-		return;
+		return false;
 	}
 	KZOutboxService::PartialMeta current;
 	if (ParsePartialMeta(std::string(buffer.begin(), buffer.end()), current) && (current.op != sent.op || current.partialId != sent.partialId))
 	{
 		KZ_LOG_INFO(LogChannel::General, "[cyb_outbox] partial ack skipped key=%s op=%s partial=%s reason=superseded\n", stem.c_str(),
 					sent.op.c_str(), sent.partialId.c_str());
+		return false;
+	}
+	return true;
+}
+
+// Квитанция куска: снимаем файл намерения, только если в нём всё ещё ТО ЖЕ намерение.
+static_function void FinishPartialIfSame(const std::string &stem, const KZOutboxService::PartialMeta &sent, const char *verb, const char *reason)
+{
+	if (!PartialIntentIsCurrent(stem, sent))
+	{
 		return;
 	}
-	utils::RemoveFile(QueueRelPath(name).c_str());
+	utils::RemoveFile(QueueRelPath(stem + ".partial.meta").c_str());
 	KZ_LOG_INFO(LogChannel::General, "[cyb_outbox] %s kind=partial key=%s op=%s partial=%s reason=%s\n", verb, stem.c_str(), sent.op.c_str(),
 				sent.partialId.c_str(), reason);
 }
@@ -662,7 +672,10 @@ void KZOutboxService::SendPartial(const std::string &stem, const PartialMeta &me
 			}
 			else if (resp.status >= 400 && resp.status < 500)
 			{
-				MoveToDead("partial", meta.partialId, fileName, put ? "rejected" : "delete_rejected", resp.status);
+				if (PartialIntentIsCurrent(stem, meta))
+				{
+					MoveToDead("partial", meta.partialId, fileName, put ? "rejected" : "delete_rejected", resp.status);
+				}
 			}
 			else
 			{
@@ -713,6 +726,17 @@ void KZOutboxService::RetryPartialFile(const std::string &name, const std::strin
 									 // Файла куска больше нет — ран инвалидирован на этом сервере (тогда
 									 // намерение уже delete) либо снесён TTL: выгружать нечего.
 									 FinishPartialIfSame(stem, meta, "drop", "file_missing");
+									 return;
+								 }
+								 // Файл уже перезаписан НОВЫМ куском (повторный выход), а его мета ещё
+								 // не легла: тело нового куска под старым id api всё равно отвергнет —
+								 // старое намерение снимаем, новое придёт своей метой.
+								 static constexpr char magic[] = "KZPART01";
+								 const size_t prefix = sizeof(magic) - 1;
+								 if (file.size() < prefix + meta.partialId.size() || memcmp(file.data(), magic, prefix) != 0
+									 || memcmp(file.data() + prefix, meta.partialId.data(), meta.partialId.size()) != 0)
+								 {
+									 FinishPartialIfSame(stem, meta, "drop", "file_superseded");
 									 return;
 								 }
 								 SendPartial(stem, meta, std::make_shared<std::vector<char>>(std::move(file)));
