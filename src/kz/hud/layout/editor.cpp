@@ -400,6 +400,12 @@ void KZHUDService::RenderEditor()
 		this->SetMenuBoolClass(layout, ElPanel(i), "on", this->menuApplied.elOn[i], prefs.crosshair);
 		this->SetMenuBoolClass(layout, EtPanel(i), "on", this->menuApplied.etOn[i], prefs.crosshair);
 	}
+	// sel — строка выбранного (элемента или прицела), on — по-прежнему «включён»: это разные
+	// состояния, у выключенного элемента выбранной строка быть может.
+	for (i32 i = 0; i < KZ_EDITOR_LIST_ROWS; i++)
+	{
+		this->SetMenuBoolClass(layout, ElPanel(i), "sel", this->menuApplied.elSel[i], i == this->editorSelected);
+	}
 
 	// Панель свойств — только при выбранном элементе или прицеле.
 	const i32 sel = this->editorSelected;

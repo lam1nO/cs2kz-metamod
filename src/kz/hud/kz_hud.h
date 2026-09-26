@@ -1181,6 +1181,7 @@ private:
 		// Редактор: список элементов, выбор на реплике, панель свойств.
 		bool elOn[KZ_EDITOR_LIST_ROWS] {};
 		bool etOn[KZ_EDITOR_LIST_ROWS] {};
+		bool elSel[KZ_EDITOR_LIST_ROWS] {};
 		bool eSel[KZ_EDITOR_ITEMS] {};
 		bool propsHidden {true};
 		bool propsFlip {};
