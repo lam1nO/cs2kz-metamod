@@ -102,6 +102,7 @@ void KZHUDService::ApplyHudDefaults()
 			{"mhudPrespeedPrecise", false},     // престрейф с двумя знаками
 			{"mhudPrespeedBrackets", false},    // престрейф в скобках
 			{"mhudPrespeedHideWalkOff", false}, // не показывать престрейф при уходе с края
+			{"hudIndicators", true},            // бейджи PERF/JB/CJ под престрейфом
 			{"mhudCrosshair", true},            // реплика прицела игрока панелями худа
 			{"hudPbNub", true},                 // ячейка PB NUB элемента PB/WR
 			{"hudPbPro", true},                 // ячейка PB PRO

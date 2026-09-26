@@ -341,6 +341,8 @@ SpeedInfo KZHUDService::GetSpeedInfo()
 	// origin/master:src/kz/hud/kz_hud.cpp:113). Как и crouchJump, осмыслен только на взлёте:
 	// вне hasPrespeed престрейф всё равно скрыт, но false здесь честнее нулевого поля.
 	info.walkedOff = info.hasPrespeed && !src->jumped && !src->takeoffFromLadder;
+	info.takeoffTime = src->takeoffTime;
+	info.onGround = (src->GetPlayerPawn()->m_fFlags() & FL_ONGROUND) != 0;
 	return info;
 }
 

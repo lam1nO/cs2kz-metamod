@@ -137,6 +137,29 @@ static_global const EditorKeysToggleDef EDITOR_KEYS_TOGGLES[] =
 // clang-format on
 static_assert(KZ_ARRAYSIZE(EDITOR_KEYS_TOGGLES) <= KZ_EDITOR_TROWS, "строк ep_trow в разметке восемь");
 
+// Престрейф: бейджи PERF/JB/CJ (решение владельца 26.09) — тем же тумблером ep_trow1.
+static_global const EditorKeysToggleDef EDITOR_PRESPEED_TOGGLES[] =
+{
+	{"hudIndicators", "HUD Editor - Prop Indicators", true, NULL},
+};
+
+// Тумблеры панели свойств выбранного элемента; у остальных элементов строк ep_trow нет.
+static_function const EditorKeysToggleDef *GetEditorToggles(i32 element, i32 &count)
+{
+	switch ((LayoutElement)element)
+	{
+		case LayoutElement::Keys:
+			count = (i32)KZ_ARRAYSIZE(EDITOR_KEYS_TOGGLES);
+			return EDITOR_KEYS_TOGGLES;
+		case LayoutElement::Prespeed:
+			count = (i32)KZ_ARRAYSIZE(EDITOR_PRESPEED_TOGGLES);
+			return EDITOR_PRESPEED_TOGGLES;
+		default:
+			count = 0;
+			return NULL;
+	}
+}
+
 // Порядок сегментов = значение mhudKeysIdle (0 показ, 1 скрыть, 2 подчёркивание).
 static_global const char *const EDITOR_KEYS_IDLE_PHRASES[3] = {"HUD Editor - Prop KeysIdleShow", "HUD Editor - Prop KeysIdleHide",
 															  "HUD Editor - Prop KeysIdleUnderscore"};
@@ -330,9 +353,11 @@ void KZHUDService::RenderEditor()
 			this->SetMenuBoolClass(layout, EDITOR_XROW_IDS[k], "hidden", this->menuApplied.epXrowHidden[k], xc.prefKey == NULL);
 		}
 		const bool isKeys = sel == (i32)LayoutElement::Keys;
+		i32 toggleCount = 0;
+		const EditorKeysToggleDef *toggles = GetEditorToggles(sel, toggleCount);
 		for (i32 k = 0; k < KZ_EDITOR_TROWS; k++)
 		{
-			const EditorKeysToggleDef *t = isKeys && k < (i32)KZ_ARRAYSIZE(EDITOR_KEYS_TOGGLES) ? &EDITOR_KEYS_TOGGLES[k] : NULL;
+			const EditorKeysToggleDef *t = k < toggleCount ? &toggles[k] : NULL;
 			if (t)
 			{
 				this->SetMenuVar(layout, "edit_props", EDITOR_TROW_VARS[k], phrase(t->phraseKey).c_str());
@@ -431,6 +456,10 @@ void KZHUDService::RenderEditorReplica(CCSCustomHudLayout *layout, bool tickOnly
 	apply(LayoutElement::Speed, true, prefs.speedPrecise ? "327.00" : "327", prefs.speed);
 	const char *prespeed = prefs.prespeedBrackets ? (prefs.prespeedPrecise ? "(291.00)" : "(291)") : (prefs.prespeedPrecise ? "291.00" : "291");
 	apply(LayoutElement::Prespeed, true, prespeed, prefs.prespeed);
+	// Плейсхолдер бейджей: горят PERF и CJ — оба вида (перф/джамбаг и присед) видны сразу.
+	const bool indLit[3] = {true, false, true};
+	this->ApplyJumpIndicators(layout, "x_", this->editorExtra, prefs.elements[(i32)LayoutElement::Prespeed].enabled && prefs.indicators, indLit,
+							  prefs.elements[(i32)LayoutElement::Prespeed].size);
 
 	// Клавиши: нажаты W, A, J (порядок C W J A S D, как KEY_PANELS в mhud.cpp).
 	apply(LayoutElement::Keys, true, NULL, prefs.keys);
@@ -601,15 +630,18 @@ void KZHUDService::EditorResetSelected()
 	this->RenderEditor();
 }
 
-// Вид клавиш (строки ep_trow*/ep_srow/ep_grow): преф пишется сразу, реплика перерисовывается
-// тем же RenderEditor. Вне элемента Keys строк не видно — клик по устаревшему кадру игнорируем.
+// Тумблеры панели свойств (строки ep_trow*; у клавиш ещё ep_srow/ep_grow): преф пишется сразу,
+// реплика перерисовывается тем же RenderEditor. Строки нет у выбранного элемента — клик по
+// устаревшему кадру игнорируем.
 void KZHUDService::EditorToggleKeysPref(i32 row)
 {
-	if (this->editorSelected != (i32)LayoutElement::Keys || row < 0 || row >= (i32)KZ_ARRAYSIZE(EDITOR_KEYS_TOGGLES))
+	i32 toggleCount = 0;
+	const EditorKeysToggleDef *toggles = this->editorSelected >= 0 ? GetEditorToggles(this->editorSelected, toggleCount) : NULL;
+	if (!toggles || row < 0 || row >= toggleCount)
 	{
 		return;
 	}
-	const EditorKeysToggleDef &t = EDITOR_KEYS_TOGGLES[row];
+	const EditorKeysToggleDef &t = toggles[row];
 	if (t.gate && !this->player->optionService->GetPreferenceBool(t.gate, true))
 	{
 		return;

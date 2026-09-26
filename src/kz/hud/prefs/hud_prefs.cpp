@@ -490,6 +490,9 @@ void KZHUDService::InitMenuPrefs()
 	KZ::menu::AddColor(prespeed, "HUD - Menu Label Color", "mhudPrespeedColor", MHUD_DEF_BASE_COLOR);
 	KZ::menu::AddColor(prespeed, "HUD - Menu Label PerfColor", "mhudPrespeedPerfColor", MHUD_DEF_PERF_COLOR);
 	KZ::menu::AddColor(prespeed, "HUD - Menu Label JumpbugColor", "mhudPrespeedJumpbugColor", MHUD_DEF_JUMPBUG_COLOR);
+	// Бейджи PERF/JB/CJ правит панель свойств редактора (ep_trow1 у престрейфа); пункт в узле
+	// элемента — ради обмена худом, сброса элемента и белого списка префов.
+	KZ::menu::AddToggle(prespeed, "HUD Editor - Prop Indicators", "hudIndicators", true);
 
 	// Клавиши: вид (тумблеры, «в покое», интервал) и цвета — всё в узле элемента, правит панель
 	// свойств редактора (ep_trow*/ep_grow/ep_srow/ep_xrow*). Ключи и дефолты — те же, что читает

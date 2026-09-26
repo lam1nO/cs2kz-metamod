@@ -1138,6 +1138,13 @@
 		"chi"		"Square"
 		"ua"		"Квадратні"
 	}
+	"HUD Editor - Prop Indicators"
+	{
+		"en"		"PERF/JB/CJ indicators"
+		"ru"		"Индикаторы PERF/JB/CJ"
+		"chi"		"PERF/JB/CJ indicators"
+		"ua"		"Індикатори PERF/JB/CJ"
+	}
 	"HUD Editor - Prop KeysAxisOnly"
 	{
 		"en"		"Axis only"

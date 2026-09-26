@@ -188,7 +188,7 @@ void KZHUDService::UpdateSpeedElement(CCSCustomHudLayout *layout, const SpeedInf
 	this->UpdateLayoutElement(layout, LayoutElement::Speed, show, text, color, force);
 }
 
-void KZHUDService::UpdatePrespeedElement(CCSCustomHudLayout *layout, const SpeedInfo &info, bool force)
+void KZHUDService::UpdatePrespeedElement(CCSCustomHudLayout *layout, KZPlayer *source, const SpeedInfo &info, bool force)
 {
 	// Точность/скобки/скрытие при уходе с края — порт с апстрима один-в-один
 	// (origin/master:src/kz/hud/layout/mhud.cpp:63-84): свои префы mhudPrespeedPrecise/
@@ -215,7 +215,50 @@ void KZHUDService::UpdatePrespeedElement(CCSCustomHudLayout *layout, const Speed
 	// вместо прыжка: с mhudPrespeedHideWalkOff такой «престрейф» не показываем (апстрим:
 	// origin/master:src/kz/hud/layout/mhud.cpp:82).
 	const bool show = this->IsLayoutElementEnabled(LayoutElement::Prespeed) && info.hasPrespeed && !(prefs.prespeedHideWalkOff && info.walkedOff);
+
+	// Бейджи PERF/JB/CJ живут ровно столько же, сколько число престрейфа их взлёта. perfing
+	// (inPerf) и jumpbug (fromDuckbug) сбрасываются на приземлении, а престрейф висит ещё
+	// KZ_HUD_ON_GROUND_THRESHOLD — поэтому флаги защёлкиваются: новый взлёт (другой takeoffTime
+	// или другой источник при спектейте) берёт их заново, в воздухе они обновляются (KZT
+	// выставляет перф сам и не обязательно в тик отрыва), на земле — заморожены. JB важнее PERF,
+	// как и в цвете престрейфа выше: одновременно горят максимум два (JB/PERF + CJ).
+	LayoutExtraState &extra = this->layoutExtra;
+	const i32 slot = source->GetPlayerSlot().Get();
+	if (!show)
+	{
+		extra.indLatchValid = false;
+	}
+	else if (!extra.indLatchValid || extra.indLatchSlot != slot || extra.indLatchTakeoff != info.takeoffTime || !info.onGround)
+	{
+		extra.indLatchValid = true;
+		extra.indLatchSlot = slot;
+		extra.indLatchTakeoff = info.takeoffTime;
+		extra.indLatch[0] = info.perfing && !info.jumpbug;
+		extra.indLatch[1] = info.jumpbug;
+		extra.indLatch[2] = info.crouchJump;
+	}
+	this->ApplyJumpIndicators(layout, "", extra, show && prefs.indicators, extra.indLatch, prefs.elements[(i32)LayoutElement::Prespeed].size);
 	this->UpdateLayoutElement(layout, LayoutElement::Prespeed, show, text, color, force);
+}
+
+// Общая для худа (prefix "") и реплики редактора ("x_") запись бейджей прыжка: hidden на каждом
+// бейдже и на полосе mhud_ind (пустая полоса не должна держать место под престрейфом), кегль
+// элемента — на каждом бейдже (font-size ребёнку через класс корня не наследуется). Без анимаций:
+// бейдж появляется и гаснет в тот же тик, что и число.
+static_global const char *const JUMP_IND_IDS[3] = {"ind_perf", "ind_jb", "ind_cj"};
+
+void KZHUDService::ApplyJumpIndicators(CCSCustomHudLayout *layout, const char *prefix, LayoutExtraState &extra, bool show, const bool (&lit)[3], i32 size)
+{
+	char idBuf[64];
+	bool any = false;
+	for (i32 i = 0; i < 3; i++)
+	{
+		const char *id = PrefixLayoutId(idBuf, sizeof(idBuf), prefix, JUMP_IND_IDS[i]);
+		this->SetLayoutValueClass(layout, id, extra.indSize[i], size, "font-size", false);
+		this->SetLayoutBoolClass(layout, id, "hidden", extra.indHidden[i], !(show && lit[i]));
+		any |= show && lit[i];
+	}
+	this->SetLayoutBoolClass(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "mhud_ind"), "hidden", extra.indStripHidden, !any);
 }
 
 // Порядок соответствует кнопкам в mhud.vxml (наш аддон, путь и содержимое общие с апстримом
@@ -852,7 +895,7 @@ bool KZHUDService::UpdateHudLayout(KZPlayer *source)
 	const SpeedInfo info = source->hudService->GetSpeedInfo();
 	this->UpdateTimerElement(layout, source, force);
 	this->UpdateSpeedElement(layout, info, force);
-	this->UpdatePrespeedElement(layout, info, force);
+	this->UpdatePrespeedElement(layout, source, info, force);
 	this->UpdateKeysElement(layout, source, force);
 	this->UpdateCheckpointElement(layout, source, force);
 	this->UpdatePbWrElement(layout, source, force);

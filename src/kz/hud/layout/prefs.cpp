@@ -170,6 +170,7 @@ void KZHUDService::RefreshLayoutPrefs()
 	this->layoutPrefs.prespeedPrecise = opts->GetPreferenceBool("mhudPrespeedPrecise", false);
 	this->layoutPrefs.prespeedBrackets = opts->GetPreferenceBool("mhudPrespeedBrackets", false);
 	this->layoutPrefs.prespeedHideWalkOff = opts->GetPreferenceBool("mhudPrespeedHideWalkOff", false);
+	this->layoutPrefs.indicators = opts->GetPreferenceBool("hudIndicators", true);
 	// mimicSpec — из СВОЕГО набора и только отсюда: GetLayoutPrefs его не мимикрирует
 	// (origin/master:src/kz/hud/kz_hud.h:127, preferences.cpp:61).
 	this->layoutPrefs.mimicSpec = opts->GetPreferenceBool("mhudMimicSpec", false);

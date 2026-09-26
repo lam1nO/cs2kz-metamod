@@ -122,6 +122,11 @@ struct SpeedInfo
 	// Ушёл с края, а не отпрыгнул (и не с лестницы) — апстримный walkedOff. Валиден только
 	// вместе с hasPrespeed; читает его mhudPrespeedHideWalkOff (см. UpdatePrespeedElement).
 	bool walkedOff {};
+	// Ключ взлёта для бейджей PERF/JB/CJ (UpdatePrespeedElement): perfing и jumpbug гаснут на
+	// приземлении, а престрейф ещё висит KZ_HUD_ON_GROUND_THRESHOLD — флаги защёлкиваются на
+	// взлёт, узнаваемый по takeoffTime, и обновляются только пока игрок в воздухе.
+	f32 takeoffTime {};
+	bool onGround {};
 };
 
 // Собственные cl_crosshair* значения игрока (Task 10): дефолты игры, пока не ответит клиент
@@ -206,6 +211,7 @@ struct MHUDLayoutPrefs
 	bool prespeedPrecise {};     // %.2f вместо %.0f
 	bool prespeedBrackets {};    // «(784)» вместо «784»
 	bool prespeedHideWalkOff {}; // не показывать, когда игрок ушёл с края, а не отпрыгнул
+	bool indicators {};          // hudIndicators: бейджи PERF/JB/CJ под престрейфом
 	bool keysOverlapEnabled {};
 	// Клавиши (Task 5, транш "клавиши"): опции апстрима, ранее не заводившиеся — см. mhud.cpp.
 	bool keysOverlapAxis {}; // красить только пару клавиш конфликтующей оси, не весь контейнер
@@ -940,6 +946,15 @@ private:
 		i32 progressFill {INT_MIN};
 		LayoutChildStyleState progressPct {};
 		ColorClassCache progressColor {};
+		// Бейджи прыжка под престрейфом: полоса mhud_ind и ind_perf/ind_jb/ind_cj (hidden, кегль).
+		i32 indStripHidden {-1};
+		i32 indHidden[3] {-1, -1, -1};
+		i32 indSize[3] {INT_MIN, INT_MIN, INT_MIN};
+		// Защёлка флагов взлёта (см. SpeedInfo::takeoffTime): чей взлёт и какой.
+		bool indLatchValid {};
+		i32 indLatchSlot {-1};
+		f32 indLatchTakeoff {};
+		bool indLatch[3] {};
 	};
 
 	LayoutExtraState layoutExtra {};
@@ -959,6 +974,8 @@ private:
 						const char *(&texts)[4]);
 	void ApplyShowPosLines(CCSCustomHudLayout *layout, const char *prefix, LayoutExtraState &extra, const char *pos, const char *ang,
 						   const MHUDLayoutPrefs::Element &style, const Color &color);
+	// Бейджи PERF/JB/CJ престрейфа (lit: perf, jb, cj); show=false гасит полосу целиком.
+	void ApplyJumpIndicators(CCSCustomHudLayout *layout, const char *prefix, LayoutExtraState &extra, bool show, const bool (&lit)[3], i32 size);
 	void ApplyLeadProgressParts(CCSCustomHudLayout *layout, const char *prefix, LayoutExtraState &extra, i32 percent,
 								const MHUDLayoutPrefs::Element &style, const Color &color);
 	// Запись элемента на ЛЮБЫЕ id и ЛЮБОЙ кэш (реплика редактора: e_*/x_* на сущности меню).
@@ -1060,7 +1077,7 @@ private:
 	// BuildVersionCHud/UpdateBottomPanel).
 	void UpdateTimerElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force);
 	void UpdateSpeedElement(CCSCustomHudLayout *layout, const SpeedInfo &info, bool force);
-	void UpdatePrespeedElement(CCSCustomHudLayout *layout, const SpeedInfo &info, bool force);
+	void UpdatePrespeedElement(CCSCustomHudLayout *layout, KZPlayer *source, const SpeedInfo &info, bool force);
 	void UpdateKeysElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force);
 	void UpdateCheckpointElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force);
 	// Поля редактора `!hud` (спека 2026-09-26-hud-editor-options, §4.2), тот же контракт source.
