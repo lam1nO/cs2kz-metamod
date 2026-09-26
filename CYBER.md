@@ -926,6 +926,15 @@ cs2kz-linux-builder .`, иначе компилируется КОПИЯ ИЗ О
   Ожидание: `awr_cut: all tests passed`. Тесты выражают спеку — при расхождении правится
   алгоритм, не тест.
 
+- **Форматирование худа (Δ/showpos/курс/сетка редактора)** — `src/kz/hud/hud_format.{h,cpp}`,
+  тот же приём: чистые функции без SDK, host-тест `tests/hud_format_test.cpp`:
+
+  ```bash
+  clang++ -std=c++17 -O1 -Wall tests/hud_format_test.cpp src/kz/hud/hud_format.cpp -o /tmp/hud_format_test && /tmp/hud_format_test
+  ```
+
+  Ожидание: `hud_format: all tests passed`.
+
 - **`!awr` (`kz_awr`)** — время AWR текущего ключа и его автор одной строкой в чат, без
   открытия реплея (запрос владельца серверов 12.09). Код: `src/kz/replays/cyb_awr_info.{h,cpp}`.
   - **Ничего не качает**: резолв только метаданных (`CybReplayDownload::RequestInfo` — третий

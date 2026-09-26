@@ -132,6 +132,7 @@ def configure_main(sdk_target, sdk, cxx):
     os.path.join(builder.sourcePath, 'src', 'kz', 'global', 'replays.cpp'),
     
     os.path.join(builder.sourcePath, 'src', 'kz', 'hud', 'kz_hud.cpp'),
+    os.path.join(builder.sourcePath, 'src', 'kz', 'hud', 'hud_format.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'hud', 'prefs', 'hud_prefs.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'hud', 'share', 'hud_share.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'hud', 'share', 'hud_share_commands.cpp'),
