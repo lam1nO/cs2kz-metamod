@@ -144,6 +144,8 @@ void KZHUDService::ApplyHudDefaults()
 			{"mhudKeysPressedColor", &MHUD_DEF_KEYS_PRESSED_COLOR},
 			{"mhudKeysOverlapGlowColor", &MHUD_DEF_KEYS_OVERLAP_GLOW_COLOR},
 			{"mhudCheckpointColor", &MHUD_DEF_BASE_COLOR},
+			{"mhudDeltaAheadColor", &MHUD_DEF_DELTA_AHEAD_COLOR},
+			{"mhudDeltaBehindColor", &MHUD_DEF_DELTA_BEHIND_COLOR},
 		};
 
 		for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(kColors); i++)

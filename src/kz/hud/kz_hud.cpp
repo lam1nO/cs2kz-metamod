@@ -48,6 +48,10 @@ const Color MHUD_DEF_TIMER_STOPPED_COLOR(0xFF, 0xA0, 0xA0, 0xFF);
 const Color MHUD_DEF_KEYS_OVERLAP_COLOR(0xFF, 0x00, 0x00, 0xFF);
 const Color MHUD_DEF_KEYS_PRESSED_COLOR(0x3B, 0xED, 0xA0, 0xFF);
 const Color MHUD_DEF_KEYS_OVERLAP_GLOW_COLOR(0xFF, 0x40, 0x40, 0xFF);
+// Дельта таймера к PB/WR (спека редактора §3.1): впереди #4CC38A, позади #FF5C5C — те же
+// значения, что у классов .delta.d-ahead/.d-behind в mhud.css аддона (см. UpdateTimerElement).
+const Color MHUD_DEF_DELTA_AHEAD_COLOR(76, 195, 138, 255);
+const Color MHUD_DEF_DELTA_BEHIND_COLOR(255, 92, 92, 255);
 
 // Формат времени для худа: mm:ss.cc (сотые), как у кибершока. Отдельно от utils::FormatTime
 // (тысячные) — тот нужен другим местам (чат/сабмишен/реплеи), его формат не трогаем.

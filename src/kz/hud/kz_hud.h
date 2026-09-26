@@ -27,6 +27,8 @@ extern const Color MHUD_DEF_KEYS_OVERLAP_COLOR;
 // Задача 5 (транш "клавиши"): дефолты те же, что в апстриме (значения не менялись).
 extern const Color MHUD_DEF_KEYS_PRESSED_COLOR;
 extern const Color MHUD_DEF_KEYS_OVERLAP_GLOW_COLOR;
+extern const Color MHUD_DEF_DELTA_AHEAD_COLOR;
+extern const Color MHUD_DEF_DELTA_BEHIND_COLOR;
 
 // Элементы panorama-худа (сущность custom_hud_layout, Task 4).
 enum class LayoutElement
@@ -173,6 +175,16 @@ struct MHUDLayoutPrefs
 	Color checkpoint {};
 
 	bool timerDetailed {};
+	// Элемент PB/WR (редактор `!hud`): четыре независимых ячейки (hudPbNub/hudPbPro/hudWrNub/
+	// hudWrPro). Все четыре выключены — элемент гаснет целиком, даже при включённом hudPbWr.
+	bool pbNub {};
+	bool pbPro {};
+	bool wrNub {};
+	bool wrPro {};
+	// Дельта в строке таймера (hudTimerCompare): 0 выкл, 1 к PB, 2 к WR (AWR-путь `!lead`).
+	i32 timerCompare {};
+	Color deltaAhead {};
+	Color deltaBehind {};
 	bool speedPrecise {};
 	// Престрейф (порт с апстрима, origin/master:src/kz/hud/layout/preferences.cpp:46-48):
 	// читаются в UpdatePrespeedElement — точность, скобки и скрытие при уходе с края.
