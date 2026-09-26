@@ -68,6 +68,11 @@
 // съедала бы квоту первым же случаем и молчала бы про все следующие — другой природы и на
 // другой карте. Живёт здесь, потому что дросселей два и второй — в kz_quiet.cpp.
 #define KZ_LEAD_WARN_THROTTLE_SEC 60.0
+// Метка «у вершины нет времени рана» (Vertex::runTick/liveRunTick): в файле не нашлась пара
+// TIMER_START/TIMER_END, и путь построен по файлу целиком — с предзаписью до старта. Лучу это
+// не мешает (он показывает траекторию), а дельте таймера — мешает: отсчёт шёл бы от начала
+// записи, а не от старта рана, и число было бы враньём на ~5 с. Такой путь дельте не годится.
+#define KZ_LEAD_NO_RUN_TICK 0xFFFFFFFFu
 
 class KZLeadService : public KZBaseService
 {
@@ -83,6 +88,18 @@ public:
 		// разреза — по сырым индексам кадров там был бы прыжок на тысячи тиков и окно
 		// вырождалось бы в один отрезок.
 		u32 tickIdx;
+		// Время ТАЙМЕРА рекордсмена в этой вершине, в тиках от старта рана (кадр TIMER_START =
+		// 0). Нужны только дельте таймера (GetCompareDeltaSeconds), луч их не читает. Считаются в
+		// КАДРАХ, а не по serverTick, как tickIdx: таймер тикает при `alive && running &&
+		// !paused`, рекордер пишет кадр при `alive && !prac`, то есть «записанные НЕ паузные
+		// кадры от старта» — ровно тиковый счёт таймера (то же тождество, на котором стоит
+		// сверка timerFrames в awr_cut.h). tickIdx для этого не годится: в нём сидят паузы и
+		// неписаные промежутки serverTick.
+		//   runTick     — со ВСЕМИ телепорт-петлями рана: время обычного таймера (PB/WR).
+		//   liveRunTick — без вырезанных петель (awr::CutResult::dead): время по шкале AWR.
+		// KZ_LEAD_NO_RUN_TICK — окна рана в файле нет (см. метку).
+		u32 runTick;
+		u32 liveRunTick;
 	};
 
 	// Разбор файла на рабочем потоке. Живёт на shared_ptr: игрок может уйти (сервис
@@ -152,12 +169,27 @@ public:
 	void OnFileReady(u32 gen, std::string &&filePath);
 	// Готовый путь с рабочего потока (зовётся с ГЛАВНОГО потока, из PollPending).
 	void OnPathLoaded(std::vector<Vertex> &&newPath);
+
+	// Путь СРАВНЕНИЯ под дельту таймера (спека §4.3) — третий потребитель, независимый от луча
+	// и процента: свой слот (compare), свои ключ, защёлка и пауза. Зовётся из худа на каждом
+	// обновлении таймера, поэтому идемпотентен: повтор тех же аргументов — no-op.
+	// wanted=false освобождает путь СРАВНЕНИЯ (путь луча/процента не трогает). Смена kind —
+	// другой вопрос («к PB» против «к AWR»): старый путь сравнения освобождается, защёлка снята.
+	// Загрузка всегда молчаливая: ни строки в чат, элемент просто скрыт.
+	void SetCompareWanted(bool wanted, CybReplayDownload::Kind kind);
+	// Отставание от записи в секундах (+ = позади, - = впереди): время нашего таймера минус
+	// время таймера записи в ближайшей вершине. true — только если путь сравнения загружен
+	// под ТЕКУЩИЙ курс+режим, таймер идёт и ближайшая вершина уже посчитана.
+	bool GetCompareDeltaSeconds(f64 &outSeconds) const;
 	void OnPhysicsSimulatePost();
 
 	void OnTeleport()
 	{
 		// Телепорт рвёт непрерывность движения — ближайшую вершину ищем заново по всему пути.
 		this->resync = true;
+		// У пути сравнения — то же. Дельта до его прохода (<=32 тика) держит прежнюю вершину:
+		// прятать её на каждый телепорт значило бы мигать элементом весь NUB-ран.
+		this->compare.resync = true;
 	}
 
 	// Владеет ли игрок этой энтити-отрезком. Имя без «particle»: примитивов теперь два
@@ -213,6 +245,30 @@ private:
 	void UpdateProgress();
 	void UpdateWindow();
 	void UpdateNearest(const Vector &origin);
+	// Поиск ближайшей вершины — ОБЩИЙ для луча/процента и пути сравнения. Тело прежнего
+	// UpdateNearest дословно, поля слота переданы параметрами: beamBound=true — граница прямого
+	// скана = конец окна луча (windowTo), false — режим «без луча» (накопленная длина).
+	static u32 FindNearest(const std::vector<Vertex> &path, const std::vector<f32> &cumLen, u32 nearest, bool resync, bool beamBound,
+						   u32 windowTo, const Vector &origin);
+	// Кумулятивные длины: общий расчёт для обоих слотов, возвращает полную длину.
+	static f32 ComputeCumulativeLengths(const std::vector<Vertex> &path, std::vector<f32> &cumLen);
+
+	// === Путь сравнения (compare) ===
+	// Тиковая ветка слота: свой дроссель в 32 тика, своя пауза/защёлка, UpdateNearest в режиме
+	// «без луча». Зовётся из OnPhysicsSimulatePost ДО гейта луча/процента: дельте путь нужен и
+	// при выключенных луче и проценте.
+	void UpdateCompare();
+	void ArmComparePath();
+	void RequestComparePath();
+	void OnCompareFileReady(u32 gen, std::string &&filePath);
+	void PollComparePending();
+	// Защёлка отказа сравнения ПО КЛЮЧУ (курс+режим) — те же правила, что у OnLoadFailed, но
+	// без чата вовсе (просил не игрок, а элемент худа).
+	void LatchCompareFailure(i32 course, const char *mode, bool retryable);
+	// Освободить путь сравнения (желание, вид и защёлку не трогает). Незавершённая загрузка
+	// протухает по поколению слота.
+	void ReleaseCompare();
+	bool ComparePathKeyMatchesCurrent() const;
 	void ApplyWindow(u32 newFrom, u32 newTo);
 	void ClearSegments(bool keepEntities);
 	void RebuildOwnedIndex();
@@ -295,4 +351,45 @@ private:
 	u32 generation = 0;
 	// Имя режима, под который построен путь (модель «путь режим-зависим»).
 	char modeName[64] {};
+	// Вид записи УХОДЯЩЕГО запроса и ГОТОВОГО пути луча/процента. Нужны только слоту сравнения:
+	// если луч уже держит тот же вид под тем же ключом, сравнение берёт его вершины копией
+	// вместо второй докачки и второго разбора (см. ArmComparePath). Поведение луча не меняют.
+	CybReplayDownload::Kind requestKind = CybReplayDownload::Kind::AWR;
+	CybReplayDownload::Kind pathKind = CybReplayDownload::Kind::AWR;
+
+	// Слот пути СРАВНЕНИЯ. Отдельная структура, а не общий PathSlot на оба пути: весь код луча
+	// (окно, пересборка, бюджет, Toggle/Disable) остаётся на прежних полях дословно, а
+	// сравнению из него нужны только загрузка, ключ, защёлка и ближайшая вершина. Пересборки под
+	// cyb_lead_rdp у сравнения нет: густота вершин на дельту почти не влияет, а бюджет
+	// пересборок (KZ_LEAD_REBUILD_BUDGET) остаётся целиком за лучом и процентом.
+	struct CompareSlot
+	{
+		// Хочет ли худ дельту (SetCompareWanted) и к какой записи.
+		bool wanted = false;
+		CybReplayDownload::Kind kind = CybReplayDownload::Kind::PB;
+		std::vector<Vertex> path;
+		std::vector<f32> cumLen;
+		u32 nearest = 0;
+		bool resync = true;
+		// Ближайшая хоть раз посчитана под ЭТОТ путь: до первого прохода nearest == 0, и дельта
+		// по нему была бы «наше время минус ноль» — мусор. Телепорт её не сбрасывает (см. OnTeleport).
+		bool nearestReady = false;
+		// Ключ готового пути и уходящего запроса — та же модель, что pathCourse/modeName и
+		// requestCourse/requestMode у луча.
+		i32 pathCourse = -1;
+		char modeName[64] {};
+		i32 requestCourse = -1;
+		char requestMode[64] {};
+		bool loading = false;
+		std::shared_ptr<PendingLoad> pending;
+		u32 generation = 0;
+		// Защёлка отказа и пауза — СВОИ, но с теми же правилами и константами, что у луча:
+		// отказ PB-записи новичка не имеет права гасить AWR-процент, и наоборот.
+		i32 failedCourse = -1;
+		char failedMode[64] {};
+		i32 failRetriesLeft = 0;
+		i32 armCooldown = 0;
+		u32 ticksSinceUpdate = 0;
+	};
+	CompareSlot compare;
 };
