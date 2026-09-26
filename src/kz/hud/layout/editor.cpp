@@ -539,8 +539,10 @@ void KZHUDService::RenderEditorReplica(CCSCustomHudLayout *layout, bool tickOnly
 	auto apply = [&](LayoutElement e, bool show, const char *text, const Color &color)
 	{
 		const EditorReplicaDef &r = EDITOR_REPLICA[(i32)e];
+		// Строки реплики, которым нужен кегль элемента, — как у худа (UpdateLayoutElement).
+		const char *sizeRow = e == LayoutElement::Timer ? "x_mhud_timer_row" : (e == LayoutElement::Prespeed ? "x_mhud_prespeed_row" : NULL);
 		this->ApplyLayoutElementTo(layout, prefs.elements[(i32)e], this->editorElements[(i32)e], r.labelId, r.varName, r.buttonId,
-								   show && prefs.elements[(i32)e].enabled, text, color, false);
+								   show && prefs.elements[(i32)e].enabled, text, color, false, sizeRow);
 	};
 
 	char timer[64];

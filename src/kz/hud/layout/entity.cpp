@@ -120,8 +120,11 @@ void KZHUDService::SetLayoutBoolClass(CCSCustomHudLayout *layout, const char *pa
 void KZHUDService::UpdateLayoutElement(CCSCustomHudLayout *layout, LayoutElement element, bool show, const char *text, const Color &color, bool force)
 {
 	const LayoutElementDef &def = LAYOUT_ELEMENTS[(i32)element];
+	// Кегль на строку — только таймеру и престрейфу (отзыв 5): у «Прогресса» posPanelId тоже
+	// свой, но его строке кегль не нужен — подпись и полоса пишутся отдельно.
+	const bool sizeRow = element == LayoutElement::Timer || element == LayoutElement::Prespeed;
 	this->ApplyLayoutElementTo(layout, this->GetLayoutPrefs().elements[(i32)element], this->layoutElements[(i32)element], def.panelId, def.varName,
-							   def.posPanelId, show, text, color, force);
+							   def.posPanelId, show, text, color, force, sizeRow ? def.posPanelId : NULL);
 }
 
 // Запись элемента худа на произвольные id и кэш: настоящий худ (UpdateLayoutElement выше) и
@@ -129,7 +132,7 @@ void KZHUDService::UpdateLayoutElement(CCSCustomHudLayout *layout, LayoutElement
 // идут через ОДИН код, чтобы реплика выглядела ровно как худ.
 void KZHUDService::ApplyLayoutElementTo(CCSCustomHudLayout *layout, const MHUDLayoutPrefs::Element &cached, LayoutElementState &state,
 										const char *panelId, const char *varName, const char *posPanelId, bool show, const char *text,
-										const Color &color, bool force)
+										const Color &color, bool force, const char *sizeRowId)
 {
 	LayoutLabelStyle style;
 	style.x = cached.x;
@@ -145,6 +148,14 @@ void KZHUDService::ApplyLayoutElementTo(CCSCustomHudLayout *layout, const MHUDLa
 	style.outline = cached.outline;
 	style.color = color;
 	this->ApplyLayoutLabel(layout, panelId, varName, state, style, show, text, force, posPanelId);
+	// Строке — тот же кегль, что лейблу: font-size через класс предка ребёнку в panorama не
+	// наследуется, а аддону он нужен на самой строке (отступы дельты/бейджей в em). Скрытому
+	// элементу не шлём — как и прочие классы, ApplyLayoutLabel выходит до них. force уже
+	// обнулил rowFontSize вместе с state.
+	if (sizeRowId && show)
+	{
+		this->SetLayoutValueClass(layout, sizeRowId, state.rowFontSize, cached.size, "font-size", false);
+	}
 }
 
 const char *KZHUDService::ColorClassCache::Get(const Color &c)

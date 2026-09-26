@@ -83,7 +83,7 @@ for name in ("KEY_PANELS", "KEY_GLYPHS", "PBWR_CELL_IDS", "PBWR_TIME_IDS", "PBWR
     if not ids:
         sys.exit(f"{name} not found in mhud.cpp")
     panels.update("x_" + i for i in ids)
-panels.update("x_" + i for i in ("mhud_keys", "mhud_delta", "mhud_pos", "mhud_ang", "pw_nub", "pw_pro", "mhud_progress_pct",
+panels.update("x_" + i for i in ("mhud_timer_row", "mhud_prespeed_row", "mhud_keys", "mhud_delta", "mhud_pos", "mhud_ang", "pw_nub", "pw_pro", "mhud_progress_pct",
                                   "mhud_progress_fill"))
 vars_.update(array("PBWR_VARS") + ["delta", "pos", "ang", "progress_cap"])
 for m in re.finditer(r"\{\"(e_\w+)\",\s*\"(x_\w+)\",\s*\"(\w+)\",\s*\"(tag_\w+)\"", editor):

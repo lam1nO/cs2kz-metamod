@@ -823,6 +823,8 @@ private:
 		const char *fontClass {};
 		const char *bgClass {};
 		i32 fontSize {-1};
+		// font-size--N на строке элемента (sizeRowId в ApplyLayoutElementTo), свой диф-кэш.
+		i32 rowFontSize {INT_MIN};
 		i32 x {INT_MIN};
 		i32 y {INT_MIN};
 		bool hidden {true};
@@ -980,8 +982,11 @@ private:
 								const MHUDLayoutPrefs::Element &style, const Color &color);
 	// Запись элемента на ЛЮБЫЕ id и ЛЮБОЙ кэш (реплика редактора: e_*/x_* на сущности меню).
 	// UpdateLayoutElement — её частный случай для настоящего худа (LAYOUT_ELEMENTS, layoutElements).
+	// sizeRowId — строка элемента (mhud_timer_row/mhud_prespeed_row и x_-реплики), которой нужен
+	// тот же font-size--N, что и лейблу: по нему аддон считает отступы строки. NULL — не нужна.
 	void ApplyLayoutElementTo(CCSCustomHudLayout *layout, const MHUDLayoutPrefs::Element &cached, LayoutElementState &state, const char *panelId,
-							  const char *varName, const char *posPanelId, bool show, const char *text, const Color &color, bool force);
+							  const char *varName, const char *posPanelId, bool show, const char *text, const Color &color, bool force,
+							  const char *sizeRowId = NULL);
 
 	// === Меню реплея (layout/rpmenu.cpp) — состояние ==================================
 	// Сущность меню реплея ЭТОГО игрока (см. OpenReplayMenu); гасится вместе с остальными.
