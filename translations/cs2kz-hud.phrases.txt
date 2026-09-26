@@ -949,4 +949,278 @@
 		"en"		"{grey}Position display {darkred}disabled{grey}."
 		"ru"		"{grey}Показ координат {darkred}выключен{grey}."
 	}
+	// Окно !options (cyber/options.xml) и редактор !hud (спека 2026-09-26-hud-editor-options).
+	"Options - Subtitle"
+	{
+		"en"		"Settings are saved to your profile instantly"
+		"ru"		"Настройки сохраняются в профиль сразу"
+		"chi"		"Settings are saved to your profile instantly"
+		"ua"		"Налаштування зберігаються в профіль одразу"
+	}
+	"Options - Brand Sub"
+	{
+		"en"		"KZ SETTINGS"
+		"ru"		"НАСТРОЙКИ KZ"
+		"chi"		"KZ SETTINGS"
+		"ua"		"НАЛАШТУВАННЯ KZ"
+	}
+	"Options - Hint"
+	{
+		"en"		"Click a row to change it  ·  !options to close"
+		"ru"		"Клик по строке — изменить  ·  !options — закрыть"
+		"chi"		"Click a row to change it  ·  !options to close"
+		"ua"		"Клік по рядку — змінити  ·  !options — закрити"
+	}
+	"Options - Hero Title"
+	{
+		"en"		"HUD editor"
+		"ru"		"Редактор худа"
+		"chi"		"HUD editor"
+		"ua"		"Редактор худу"
+	}
+	"Options - Hero Sub"
+	{
+		"en"		"Position, size, font and color of every element — right on screen"
+		"ru"		"Позиция, размер, шрифт и цвет каждого элемента — прямо на экране"
+		"chi"		"Position, size, font and color of every element — right on screen"
+		"ua"		"Позиція, розмір, шрифт і колір кожного елемента — просто на екрані"
+	}
+	"Options - Hero Button"
+	{
+		"en"		"Open editor"
+		"ru"		"Открыть редактор"
+		"chi"		"Open editor"
+		"ua"		"Відкрити редактор"
+	}
+	"Options - Button Go"
+	{
+		"en"		"Run"
+		"ru"		"Выполнить"
+		"chi"		"Run"
+		"ua"		"Виконати"
+	}
+	"Options - Button Reset"
+	{
+		"en"		"Reset"
+		"ru"		"Сбросить"
+		"chi"		"Reset"
+		"ua"		"Скинути"
+	}
+	"Options - Color Reset"
+	{
+		"en"		"Default"
+		"ru"		"По умолчанию"
+		"chi"		"Default"
+		"ua"		"За замовчуванням"
+	}
+	"Confirm - ResetAll Title"
+	{
+		"en"		"Reset the whole HUD?"
+		"ru"		"Сбросить весь худ?"
+		"chi"		"Reset the whole HUD?"
+		"ua"		"Скинути весь худ?"
+	}
+	"Confirm - ResetAll Body"
+	{
+		"en"		"Positions, sizes, fonts and colors of all elements return to defaults. You can undo it with !hudundo."
+		"ru"		"Позиции, размеры, шрифты и цвета всех элементов вернутся к стандартным. Откатить можно через !hudundo."
+		"chi"		"Positions, sizes, fonts and colors of all elements return to defaults. You can undo it with !hudundo."
+		"ua"		"Позиції, розміри, шрифти й кольори всіх елементів повернуться до стандартних. Відкотити можна через !hudundo."
+	}
+	"Confirm - ResetAll No"
+	{
+		"en"		"Cancel"
+		"ru"		"Отмена"
+		"chi"		"Cancel"
+		"ua"		"Скасувати"
+	}
+	"Confirm - ResetAll Yes"
+	{
+		"en"		"Reset"
+		"ru"		"Сбросить"
+		"chi"		"Reset"
+		"ua"		"Скинути"
+	}
+	"HUD Editor - Title"
+	{
+		"en"		"HUD elements"
+		"ru"		"Элементы худа"
+		"chi"		"HUD elements"
+		"ua"		"Елементи худу"
+	}
+	"HUD Editor - Reset"
+	{
+		"en"		"Reset all"
+		"ru"		"Сбросить всё"
+		"chi"		"Reset all"
+		"ua"		"Скинути все"
+	}
+	"HUD Editor - Done"
+	{
+		"en"		"Done"
+		"ru"		"Готово"
+		"chi"		"Done"
+		"ua"		"Готово"
+	}
+	"HUD Editor - Hint"
+	{
+		"en"		"Click an element to select it  ·  click the grid to move it there  ·  !hud to close"
+		"ru"		"Клик по элементу — выбрать  ·  клик по сетке — перенести туда  ·  !hud — закрыть"
+		"chi"		"Click an element to select it  ·  click the grid to move it there  ·  !hud to close"
+		"ua"		"Клік по елементу — вибрати  ·  клік по сітці — перенести туди  ·  !hud — закрити"
+	}
+	"HUD Editor - Prop Position"
+	{
+		"en"		"Position"
+		"ru"		"Позиция"
+		"chi"		"Position"
+		"ua"		"Позиція"
+	}
+	"HUD Editor - Prop Step"
+	{
+		"en"		"Step"
+		"ru"		"Шаг"
+		"chi"		"Step"
+		"ua"		"Крок"
+	}
+	"HUD Editor - Prop Size"
+	{
+		"en"		"Size"
+		"ru"		"Размер"
+		"chi"		"Size"
+		"ua"		"Розмір"
+	}
+	"HUD Editor - Prop Font"
+	{
+		"en"		"Font"
+		"ru"		"Шрифт"
+		"chi"		"Font"
+		"ua"		"Шрифт"
+	}
+	"HUD Editor - Prop Color"
+	{
+		"en"		"Color"
+		"ru"		"Цвет"
+		"chi"		"Color"
+		"ua"		"Колір"
+	}
+	"HUD Editor - Prop Delta"
+	{
+		"en"		"Δ ahead / behind"
+		"ru"		"Δ впереди / позади"
+		"chi"		"Δ ahead / behind"
+		"ua"		"Δ попереду / позаду"
+	}
+	"HUD Editor - Prop Opacity"
+	{
+		"en"		"Opacity"
+		"ru"		"Прозрачность"
+		"chi"		"Opacity"
+		"ua"		"Прозорість"
+	}
+	"HUD Editor - Prop Outline"
+	{
+		"en"		"Outline"
+		"ru"		"Обводка"
+		"chi"		"Outline"
+		"ua"		"Обведення"
+	}
+	"HUD Editor - Prop Reset"
+	{
+		"en"		"Reset element"
+		"ru"		"Сбросить элемент"
+		"chi"		"Reset element"
+		"ua"		"Скинути елемент"
+	}
+	"HUD Editor - Prop Hint"
+	{
+		"en"		"% from center"
+		"ru"		"% от центра"
+		"chi"		"% from center"
+		"ua"		"% від центру"
+	}
+	"HUD Editor - Element Timer"
+	{
+		"en"		"Timer"
+		"ru"		"Таймер"
+		"chi"		"Timer"
+		"ua"		"Таймер"
+	}
+	"HUD Editor - Element Speed"
+	{
+		"en"		"Speed"
+		"ru"		"Скорость"
+		"chi"		"Speed"
+		"ua"		"Швидкість"
+	}
+	"HUD Editor - Element Prespeed"
+	{
+		"en"		"Prespeed"
+		"ru"		"Престрейф"
+		"chi"		"Prespeed"
+		"ua"		"Престрейф"
+	}
+	"HUD Editor - Element Keys"
+	{
+		"en"		"Keys"
+		"ru"		"Клавиши"
+		"chi"		"Keys"
+		"ua"		"Клавіші"
+	}
+	"HUD Editor - Element Checkpoint"
+	{
+		"en"		"CP / TP"
+		"ru"		"CP / TP"
+		"chi"		"CP / TP"
+		"ua"		"CP / TP"
+	}
+	"HUD Editor - Element LeadProgress"
+	{
+		"en"		"Progress"
+		"ru"		"Прогресс"
+		"chi"		"Progress"
+		"ua"		"Прогрес"
+	}
+	"HUD Editor - Element PbWr"
+	{
+		"en"		"PB / WR"
+		"ru"		"PB / WR"
+		"chi"		"PB / WR"
+		"ua"		"PB / WR"
+	}
+	"HUD Editor - Element ShowPos"
+	{
+		"en"		"Position"
+		"ru"		"Координаты"
+		"chi"		"Position"
+		"ua"		"Координати"
+	}
+	"HUD Editor - Element Course"
+	{
+		"en"		"Course"
+		"ru"		"Курс"
+		"chi"		"Course"
+		"ua"		"Курс"
+	}
+	"HUD Editor - Element RunType"
+	{
+		"en"		"Run type"
+		"ru"		"Тип рана"
+		"chi"		"Run type"
+		"ua"		"Тип рану"
+	}
+	"HUD - Menu Label DeltaAheadColor"
+	{
+		"en"		"Delta ahead color"
+		"ru"		"Цвет дельты «впереди»"
+		"chi"		"Delta ahead color"
+		"ua"		"Колір дельти «попереду»"
+	}
+	"HUD - Menu Label DeltaBehindColor"
+	{
+		"en"		"Delta behind color"
+		"ru"		"Цвет дельты «позади»"
+		"chi"		"Delta behind color"
+		"ua"		"Колір дельти «позаду»"
+	}
 }
