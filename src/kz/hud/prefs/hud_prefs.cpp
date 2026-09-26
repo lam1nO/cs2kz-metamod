@@ -106,14 +106,13 @@ static_global KZOptNode *s_resettableNodes[(i32)LayoutElement::Count + 2] {};
 static constexpr i32 RPMENU_RESET_SLOT = (i32)LayoutElement::Count + 1;
 
 // Узлы, которые «Сбросить всё» накрывает сверх s_resettableNodes и General: после ужатия
-// раздела пункты одной бывшей страницы разъехались по двум узлам (вид клавиш остался в меню,
-// их цвета ушли в скрытый узел элемента; позиция карточки реплея — в скрытый узел), а новые
+// раздела пункты одной бывшей страницы разъехались по двум узлам (позиция карточки реплея —
+// в скрытый узел; вид клавиш с 26.09 живёт в узле элемента и слота не требует), а новые
 // тумблеры PB/WR живут на своей странице без кнопки сброса. Без этих слотов Reset All молча
 // перестал бы трогать часть того, что сбрасывал до переезда.
 enum HudExtraResetSlot
 {
-	EXTRA_RESET_KEYS_LOOK = 0,
-	EXTRA_RESET_PBWR,
+	EXTRA_RESET_PBWR = 0,
 	EXTRA_RESET_RPMENU_POS,
 	EXTRA_RESET_SPEED,
 	EXTRA_RESET_COUNT
@@ -331,8 +330,8 @@ void KZHUDService::InitMenuPrefs()
 	// Раздел ужат (план hud-editor-options, Task 8; спека §4.4): расположение, размер, шрифт,
 	// обводка, прозрачность и цвета каждого элемента переехали в редактор !hud, где их двигают
 	// по сетке и видят сразу на реплике худа. В окне остаются только настройки, у которых нет
-	// «места на экране»: тип худа, сравнение таймера, ячейки PB/WR, вид клавиш, прицел, меню
-	// реплея, обмен. Пункты элементов НЕ удалены из реестра — они в скрытой подкатегории
+	// «места на экране»: тип худа, сравнение таймера, ячейки PB/WR, прицел, меню реплея, обмен.
+	// Вид клавиш с 26.09 тоже в редакторе (панель свойств элемента Keys). Пункты элементов НЕ удалены из реестра — они в скрытой подкатегории
 	// HiddenElements ниже (почему именно подкатегория «Худ», а не своя категория — там же).
 	KZOptNode *hud = KZ::menu::AddCategory("HUD - Menu Cat Hud");
 
@@ -401,28 +400,10 @@ void KZHUDService::InitMenuPrefs()
 	KZ::menu::AddToggle(speedLook, "HUD - Menu Label PrespeedHideWalkOff", "mhudPrespeedHideWalkOff", false);
 	KZ::menu::SetItemSubtext(speedLook, "HUD - Menu Label PrespeedHideWalkOff Sub");
 
-	// Клавиши: в окне остался только ВИД (буквы, квадрат, рамка, свечение, заливка, перекрытие,
-	// ненажатая клавиша) — это стиль, а не место на экране, и на реплике редактора его не
-	// поправить. Тумблер элемента, позиция, размер, шрифт, обводка, прозрачность и все цвета
-	// клавиш — в скрытом узле элемента (ниже), их правит редактор.
-	KZOptNode *keys = KZ::menu::AddSub(hud, "HUD - Menu Cat Keys");
-	s_extraResetNodes[EXTRA_RESET_KEYS_LOOK] = keys;
-	// hudKeysOverlap читался кодом (layout/prefs.cpp) ещё до этой задачи, но пункта в меню у
-	// него не было — одна из шести находок транша "клавиши" (без пункта/команды у игрока).
-	// Дефолт true — тот же, что уже читает GetPreferenceBool на этом ключе.
-	KZ::menu::AddToggle(keys, "HUD - Menu Label Overlap", "hudKeysOverlap", true);
-	// Осевой режим: тонировать только конфликтующую пару клавиш вместо всего контейнера.
-	KZ::menu::AddToggle(keys, "HUD - Menu Label OverlapAxisOnly", "mhudKeysOverlapAxis", false);
-	KZ::menu::SetItemEnabledBy(keys, "hudKeysOverlap");
-	// Дефолты пяти тумблеров ниже синхронизированы с текущими настройками игрока (задача
-	// hud-defaults) — те же значения читает layout/prefs.cpp:RefreshLayoutPrefs.
-	KZ::menu::AddToggle(keys, "HUD - Menu Label Letters", "mhudKeysLetters", true);
-	KZ::menu::AddToggle(keys, "HUD - Menu Label Square", "mhudKeysSquare", true);
-	KZ::menu::AddToggle(keys, "HUD - Menu Label Border", "mhudKeysBorder", false);
-	KZ::menu::AddToggle(keys, "HUD - Menu Label Glow", "mhudKeysGlow", false);
-	KZ::menu::AddToggle(keys, "HUD - Menu Label Fill", "mhudKeysFill", false);
-	KZ::menu::AddChoice(keys, "HUD - Menu Label Idle", &GetKeysIdleChoices, &GetKeysIdleCurrent, &OnKeysIdlePick);
-	KZ::menu::SetItemPref(keys, "mhudKeysIdle", KZOptStorage::Int, 2);
+	// Страницы «Клавиши» в окне больше нет (решение владельца 26.09): вид клавиш правит панель
+	// свойств редактора !hud, где его видно на реплике сразу. Пункты — в узле элемента Keys в
+	// скрытой подкатегории ниже: так их по-прежнему накрывают обмен худом, «Сбросить всё» и
+	// сброс элемента в редакторе.
 
 	KZOptNode *crosshair = KZ::menu::AddSub(hud, "HUD - Menu Cat Crosshair");
 	// Дефолт true синхронизирован с текущими настройками игрока (задача hud-defaults).
@@ -510,9 +491,22 @@ void KZHUDService::InitMenuPrefs()
 	KZ::menu::AddColor(prespeed, "HUD - Menu Label PerfColor", "mhudPrespeedPerfColor", MHUD_DEF_PERF_COLOR);
 	KZ::menu::AddColor(prespeed, "HUD - Menu Label JumpbugColor", "mhudPrespeedJumpbugColor", MHUD_DEF_JUMPBUG_COLOR);
 
-	// Цвета клавиш — здесь, вид (тумблеры) — на видимой странице Keys выше. Гейты enabledBy на
-	// hudKeysOverlap сохранены: преф один на оба узла, редактор читает их так же, как окно.
+	// Клавиши: вид (тумблеры, «в покое», интервал) и цвета — всё в узле элемента, правит панель
+	// свойств редактора (ep_trow*/ep_grow/ep_srow/ep_xrow*). Ключи и дефолты — те же, что читает
+	// RefreshLayoutPrefs (layout/prefs.cpp); гейты enabledBy на hudKeysOverlap сохранены.
 	KZOptNode *keysColors = elementNodes[(i32)LayoutElement::Keys];
+	// hudKeysOverlap: дефолт true — тот же, что читает GetPreferenceBool на этом ключе.
+	KZ::menu::AddToggle(keysColors, "HUD - Menu Label Overlap", "hudKeysOverlap", true);
+	// Осевой режим: тонировать только конфликтующую пару клавиш вместо всего контейнера.
+	KZ::menu::AddToggle(keysColors, "HUD - Menu Label OverlapAxisOnly", "mhudKeysOverlapAxis", false);
+	KZ::menu::SetItemEnabledBy(keysColors, "hudKeysOverlap");
+	KZ::menu::AddToggle(keysColors, "HUD - Menu Label Letters", "mhudKeysLetters", true);
+	KZ::menu::AddToggle(keysColors, "HUD - Menu Label Square", "mhudKeysSquare", true);
+	KZ::menu::AddToggle(keysColors, "HUD - Menu Label Border", "mhudKeysBorder", false);
+	KZ::menu::AddToggle(keysColors, "HUD - Menu Label Glow", "mhudKeysGlow", false);
+	KZ::menu::AddToggle(keysColors, "HUD - Menu Label Fill", "mhudKeysFill", false);
+	KZ::menu::AddChoice(keysColors, "HUD - Menu Label Idle", &GetKeysIdleChoices, &GetKeysIdleCurrent, &OnKeysIdlePick);
+	KZ::menu::SetItemPref(keysColors, "mhudKeysIdle", KZOptStorage::Int, 2);
 	KZ::menu::AddColor(keysColors, "HUD - Menu Label Color", "mhudKeysColor", MHUD_DEF_BASE_COLOR);
 	KZ::menu::AddColor(keysColors, "HUD - Menu Label OverlapColor", "mhudKeysOverlapColor", MHUD_DEF_KEYS_OVERLAP_COLOR);
 	KZ::menu::SetItemEnabledBy(keysColors, "hudKeysOverlap");
