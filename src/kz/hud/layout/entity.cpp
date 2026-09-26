@@ -40,8 +40,8 @@ extern const LayoutElementDef LAYOUT_ELEMENTS[(i32)LayoutElement::Count] =
 	// runtype). У pbwr varName не пишется никогда: текст идёт в переменные ячеек (mhud.cpp).
 	{"mhud_pbwr",       "mhud_pbwr",       "pbwr",       "hudPbWr",       "mhudPbWrX",       "mhudPbWrY",       "mhudPbWrSize",       "mhudPbWrFont",       "mhudPbWrOutline",       "mhudPbWrOpacity",       LAYOUT_DEF_PBWR_X,       LAYOUT_DEF_PBWR_Y,       LAYOUT_DEF_PBWR_SIZE,       true, LAYOUT_DEFAULT_FONT},
 	{"mhud_showpos",    "mhud_showpos",    "pos",        "hudShowPos",    "mhudShowPosX",    "mhudShowPosY",    "mhudShowPosSize",    "mhudShowPosFont",    "mhudShowPosOutline",    "mhudShowPosOpacity",    LAYOUT_DEF_SHOWPOS_X,    LAYOUT_DEF_SHOWPOS_Y,    LAYOUT_DEF_SHOWPOS_SIZE,    false, "stratum2-mono"},
-	{"mhud_course",     "mhud_course",     "course",     "hudCourse",     "mhudCourseX",     "mhudCourseY",     "mhudCourseSize",     "mhudCourseFont",     "mhudCourseOutline",     "mhudCourseOpacity",     LAYOUT_DEF_COURSE_X,     LAYOUT_DEF_COURSE_Y,     LAYOUT_DEF_COURSE_SIZE,     true, LAYOUT_DEFAULT_FONT},
-	{"mhud_runtype",    "mhud_runtype",    "runtype",    "hudRunType",    "mhudRunTypeX",    "mhudRunTypeY",    "mhudRunTypeSize",    "mhudRunTypeFont",    "mhudRunTypeOutline",    "mhudRunTypeOpacity",    LAYOUT_DEF_RUNTYPE_X,    LAYOUT_DEF_RUNTYPE_Y,    LAYOUT_DEF_RUNTYPE_SIZE,    true, LAYOUT_DEFAULT_FONT},
+	{"mhud_course",     "mhud_course",     "course",     "hudCourse",     "mhudCourseX",     "mhudCourseY",     "mhudCourseSize",     "mhudCourseFont",     "mhudCourseOutline",     "mhudCourseOpacity",     LAYOUT_DEF_COURSE_X,     LAYOUT_DEF_COURSE_Y,     LAYOUT_DEF_COURSE_SIZE,     true, "stratum2-bold"},
+	{"mhud_runtype",    "mhud_runtype",    "runtype",    "hudRunType",    "mhudRunTypeX",    "mhudRunTypeY",    "mhudRunTypeSize",    "mhudRunTypeFont",    "mhudRunTypeOutline",    "mhudRunTypeOpacity",    LAYOUT_DEF_RUNTYPE_X,    LAYOUT_DEF_RUNTYPE_Y,    LAYOUT_DEF_RUNTYPE_SIZE,    true, "stratum2-bold"},
 };
 // clang-format on
 
