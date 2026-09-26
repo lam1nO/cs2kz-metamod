@@ -819,7 +819,7 @@ void KZHUDService::ApplyLeadProgressParts(CCSCustomHudLayout *layout, const char
 	this->ApplyChildLabelStyle(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "mhud_progress_pct"), extra.progressPct, style.size,
 							   style.fontClass, extra.progressColor.Get(color));
 	// Подпись — тем же стилем: в игре css-дефолт 11px #CFD8DE был нечитаем (отзыв 27.09).
-	this->ApplyChildLabelStyle(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "mhud_progress_cap"), extra.progressCap, style.size,
+	this->ApplyChildLabelStyle(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "mhud_progress_cap"), extra.progressCapStyle, style.size,
 							   style.fontClass, extra.progressColor.Get(color));
 }
 
