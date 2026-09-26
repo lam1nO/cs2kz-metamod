@@ -12,6 +12,7 @@
 #include "vendor/sql_mm/src/public/sql_mm.h"
 
 #include <cstdlib>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -40,6 +41,9 @@ namespace
 	// так после рестарта плагина мы переигрываем недавние смены — UPDATE идемпотентен.
 	std::string g_cursor;
 	bool g_requestInFlight = false;
+	// Поколение запроса: ответ, опоздавший после сброса «потерянного» запроса, отбрасывается —
+	// иначе он откатил бы курсор назад, а два ответа в полёте гонялись бы за него.
+	u32 g_requestGen = 0;
 	bool g_catchUp = false;
 	// Шагов с прошлого запроса; стартует «просроченным», чтобы первый запрос ушёл сразу.
 	u32 g_ticksSinceRequest = ALIAS_SYNC_PERIOD_TICKS;
@@ -62,6 +66,14 @@ namespace
 		return text;
 	}
 
+	std::string BuildUpdate(ISQLConnection *db, u64 steamId64, const std::string &name)
+	{
+		std::string escaped = db->Escape(TruncateUtf8(name, ALIAS_MAX_CHARS).c_str());
+		char query[1024];
+		V_snprintf(query, sizeof(query), sql_players_update_alias, escaped.c_str(), (i64)steamId64);
+		return query;
+	}
+
 	void ApplyNames(const std::vector<std::pair<u64, std::string>> &names)
 	{
 		ISQLConnection *db = KZDatabaseService::GetDatabaseConnection();
@@ -73,22 +85,47 @@ namespace
 		{
 			Transaction txn;
 			size_t end = start + ALIAS_SYNC_TXN_CHUNK < names.size() ? start + ALIAS_SYNC_TXN_CHUNK : names.size();
-			for (size_t i = start; i < end; i++)
+			// Копия пачки — для построчного повтора, если транзакция упадёт целиком.
+			auto chunk = std::make_shared<std::vector<std::pair<u64, std::string>>>(names.begin() + start, names.begin() + end);
+			for (const auto &entry : *chunk)
 			{
-				std::string escaped = db->Escape(TruncateUtf8(names[i].second, ALIAS_MAX_CHARS).c_str());
-				char query[1024];
-				V_snprintf(query, sizeof(query), sql_players_update_alias, escaped.c_str(), (i64)names[i].first);
-				txn.queries.push_back(query);
+				txn.queries.push_back(BuildUpdate(db, entry.first, entry.second));
 			}
-			u32 count = (u32)(end - start);
-			auto onFailure = [count](std::string error, int failIndex)
-			{ KZ_LOG_WARN(LogChannel::DB, "[cyb] alias_sync_fail reason=db_txn rows=%u at=%d error=%s\n", count, failIndex, error.c_str()); };
+			// Ник, который БД не приняла (напр. 4-байтный символ при utf8mb3), не должен уносить
+			// с собой остальные 49: повторяем пачку по строке, падает только он сам.
+			auto onFailure = [chunk](std::string error, int failIndex)
+			{
+				KZ_LOG_WARN(LogChannel::DB, "[cyb] alias_sync_fail reason=db_txn rows=%u at=%d error=%s\n", (u32)chunk->size(), failIndex,
+							error.c_str());
+				ISQLConnection *conn = KZDatabaseService::GetDatabaseConnection();
+				if (!conn)
+				{
+					return;
+				}
+				for (const auto &entry : *chunk)
+				{
+					Transaction single;
+					single.queries.push_back(BuildUpdate(conn, entry.first, entry.second));
+					u64 steamId64 = entry.first;
+					conn->ExecuteTransaction(
+						single, [](std::vector<ISQLQuery *>) {},
+						[steamId64](std::string rowError, int)
+						{
+							KZ_LOG_WARN(LogChannel::DB, "[cyb] alias_sync_fail reason=db_row steam_id=%llu error=%s\n", steamId64,
+										rowError.c_str());
+						});
+				}
+			};
 			db->ExecuteTransaction(txn, [](std::vector<ISQLQuery *>) {}, onFailure);
 		}
 	}
 
-	void OnResponse(HTTP::Response response)
+	void OnResponse(u32 gen, HTTP::Response response)
 	{
+		if (gen != g_requestGen)
+		{
+			return; // запрос уже списан как потерянный, курсор ведёт следующий
+		}
 		g_requestInFlight = false;
 		if (response.status < 200 || response.status >= 300)
 		{
@@ -177,9 +214,14 @@ namespace
 		g_requestInFlight = true;
 		g_catchUp = false;
 		g_ticksSinceRequest = 0;
-		request.Send(OnResponse,
-					 []()
+		u32 gen = ++g_requestGen;
+		request.Send([gen](HTTP::Response response) { OnResponse(gen, std::move(response)); },
+					 [gen]()
 					 {
+						 if (gen != g_requestGen)
+						 {
+							 return;
+						 }
 						 g_requestInFlight = false;
 						 KZ_LOG_WARN(LogChannel::DB, "[cyb] alias_sync_fail reason=network\n");
 					 });
