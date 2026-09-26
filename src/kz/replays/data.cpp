@@ -4,6 +4,7 @@
 #include "utils/utils.h"
 #include "utils/uuid.h"
 #include "compression.h"
+#include "playback.h"
 #include <thread>
 #include <mutex>
 #include <atomic>
@@ -378,6 +379,10 @@ namespace KZ::replaysystem::data
 		{
 			return out;
 		}
+
+		// Кадры `!prac` — замороженными (позиции/счётчики точки входа): разрез и луч `!lead`
+		// обязаны видеть prac как обычную паузу, а не ноуклип-полёт (playback.h).
+		playback::FreezePracFrames(out.ticks.data(), (u32)out.ticks.size());
 
 		out.valid = true;
 		return out;

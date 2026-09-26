@@ -147,6 +147,8 @@ static_function std::string SerializeReplayMeta(const KZOutboxService::ReplayMet
 	json.Set("mode", meta.mode);
 	json.Set("type", std::string("pb"));
 	json.Set("isServerRecord", meta.isServerRecord);
+	json.Set("uploadPb", meta.uploadPb);
+	json.Set("uploadPro", meta.uploadPro);
 	json.Set("unconfirmed_pb", meta.unconfirmedPb);
 	json.Set("timeMs", meta.timeMs);
 	json.Set("replayPath", meta.replayPath);
@@ -174,6 +176,9 @@ static_function bool ParseReplayMeta(const std::string &content, KZOutboxService
 		&& json.Get("replayPath", out.replayPath);
 	// clang-format on
 	out.course = (i32)course;
+	// Необязательные (меты сборок до pbpro их не пишут): отсутствие оставляет дефолты структуры.
+	json.Get("uploadPb", out.uploadPb);
+	json.Get("uploadPro", out.uploadPro);
 	return ok;
 }
 
@@ -436,6 +441,66 @@ static_function void PostReplay(const KZOutboxService::ReplayMeta &meta, const s
 	req.Send([done](HTTP::Response resp) { done((u32)resp.status); }, [done]() { done(0); });
 }
 
+// Цепочка POST'ов одного реплея по списку типов, строго по очереди (тело одно, держим одну
+// копию). anyOk — доехал ли хоть один тип (для причины квитанции). pb/wr — как раньше: 4xx →
+// dead/ (api отверг сам аплоад, повтор не поможет). pbpro —
+// иначе: 4xx на нём означает только «api ещё не знает этот тип» (форк выкачен раньше api) либо
+// отказ именно pro-строки, и хоронить из-за этого уже доехавшие pb/wr нельзя — пишем warn и
+// идём дальше. Сеть/5xx на любом типе — мета остаётся в очереди, ретраер пройдёт цепочку
+// заново (pb/pbpro — upsert, повтор безвреден; wr — ещё одна строка истории, как и раньше).
+static_function void SendReplayChain(const KZOutboxService::ReplayMeta &meta, const std::shared_ptr<std::string> &body,
+									 std::shared_ptr<std::vector<const char *>> types, size_t idx, const std::string &fileName, bool anyOk)
+{
+	if (idx >= types->size())
+	{
+		g_outboxInFlight.erase(fileName);
+		// Ни один тип не доехал (единственный pbpro получил 4xx) — это не «2xx», а отказ.
+		if (anyOk)
+		{
+			KZOutboxService::AckReplay(meta.runUuid, "upload_2xx");
+		}
+		else
+		{
+			KZOutboxService::DropReplay(meta.runUuid, "pro_rejected");
+		}
+		return;
+	}
+	const char *type = (*types)[idx];
+	// clang-format off
+	PostReplay(meta, body, type,
+		[meta, body, types, idx, fileName, type, anyOk](u32 status)
+		{
+			const bool isPro = KZ_STREQ(type, "pbpro");
+			if (status == 0)
+			{
+				g_outboxInFlight.erase(fileName);
+				KZ_LOG_INFO(LogChannel::Replays, "[cyb_outbox] replay upload (%s) network error run=%s (stays queued)\n", type, meta.runUuid.c_str());
+				return;
+			}
+			if (status >= 400 && status < 500)
+			{
+				if (isPro)
+				{
+					KZ_LOG_WARN(LogChannel::Replays, "[cyb_outbox] replay upload rejected type=pbpro status=%u run=%s reason=pro_rejected\n", status,
+								meta.runUuid.c_str());
+					SendReplayChain(meta, body, types, idx + 1, fileName, anyOk);
+					return;
+				}
+				g_outboxInFlight.erase(fileName);
+				MoveToDead("replay", meta.runUuid, fileName, KZ_STREQ(type, "wr") ? "rejected_wr" : "rejected", status);
+				return;
+			}
+			if (status < 200 || status >= 300)
+			{
+				g_outboxInFlight.erase(fileName);
+				KZ_LOG_INFO(LogChannel::Replays, "[cyb_outbox] replay upload (%s) HTTP %u run=%s (stays queued)\n", type, status, meta.runUuid.c_str());
+				return;
+			}
+			SendReplayChain(meta, body, types, idx + 1, fileName, true);
+		});
+	// clang-format on
+}
+
 void KZOutboxService::SendReplay(const ReplayMeta &meta, const std::vector<char> &buffer)
 {
 	std::string fileName = meta.runUuid + ".replay.meta";
@@ -449,62 +514,34 @@ void KZOutboxService::SendReplay(const ReplayMeta &meta, const std::vector<char>
 	{
 		return;
 	}
-	g_outboxInFlight.insert(fileName);
 
+	// Порядок: pb → pbpro → wr. NUB-строка первой — она кормит ленту/лидерборд сайта и `!replay
+	// pb`. wr — последней: это ЕДИНСТВЕННЫЙ не-идемпотентный POST (каждый — новая строка истории),
+	// а ретраер после сбоя проходит цепочку с начала — так повтор upsert'ов pb/pbpro безвреден, а
+	// wr пишется лишь тогда, когда всё до него уже доехало. wr — только вместе с pb: локальный
+	// рекорд инстанса (overall ранг 1) без нового NUB-PB не бывает.
+	auto types = std::make_shared<std::vector<const char *>>();
+	if (meta.uploadPb)
+	{
+		types->push_back("pb");
+	}
+	if (meta.uploadPro)
+	{
+		types->push_back("pbpro");
+	}
+	if (meta.uploadPb && meta.isServerRecord)
+	{
+		types->push_back("wr");
+	}
+	if (types->empty())
+	{
+		DropReplay(meta.runUuid, "nothing_to_upload");
+		return;
+	}
+
+	g_outboxInFlight.insert(fileName);
 	auto body = std::make_shared<std::string>(buffer.begin(), buffer.end());
-	// clang-format off
-	PostReplay(meta, body, "pb",
-		[meta, body, fileName](u32 status)
-		{
-			if (status == 0)
-			{
-				g_outboxInFlight.erase(fileName);
-				KZ_LOG_INFO(LogChannel::Replays, "[cyb_outbox] replay upload (pb) network error run=%s (stays queued)\n", meta.runUuid.c_str());
-				return;
-			}
-			if (status >= 400 && status < 500)
-			{
-				g_outboxInFlight.erase(fileName);
-				MoveToDead("replay", meta.runUuid, fileName, "rejected", status);
-				return;
-			}
-			if (status < 200 || status >= 300)
-			{
-				g_outboxInFlight.erase(fileName);
-				KZ_LOG_INFO(LogChannel::Replays, "[cyb_outbox] replay upload (pb) HTTP %u run=%s (stays queued)\n", status, meta.runUuid.c_str());
-				return;
-			}
-			if (!meta.isServerRecord)
-			{
-				g_outboxInFlight.erase(fileName);
-				AckReplay(meta.runUuid, "upload_2xx");
-				return;
-			}
-			// WR — дополнительный независимый POST для локального рекордсмена сервера.
-			// pb уже доехал; при ретрае pb перезальётся (upsert по тому же ключу) — безвредно.
-			PostReplay(meta, body, "wr",
-				[meta, fileName](u32 status)
-				{
-					g_outboxInFlight.erase(fileName);
-					if (status == 0)
-					{
-						KZ_LOG_INFO(LogChannel::Replays, "[cyb_outbox] replay upload (wr) network error run=%s (stays queued)\n", meta.runUuid.c_str());
-						return;
-					}
-					if (status >= 400 && status < 500)
-					{
-						MoveToDead("replay", meta.runUuid, fileName, "rejected_wr", status);
-						return;
-					}
-					if (status < 200 || status >= 300)
-					{
-						KZ_LOG_INFO(LogChannel::Replays, "[cyb_outbox] replay upload (wr) HTTP %u run=%s (stays queued)\n", status, meta.runUuid.c_str());
-						return;
-					}
-					AckReplay(meta.runUuid, "upload_2xx");
-				});
-		});
-	// clang-format on
+	SendReplayChain(meta, body, types, 0, fileName, false);
 }
 
 // ---------------------------------------------------------------------------
@@ -727,12 +764,20 @@ void KZOutboxService::RetryReplayFile(const std::string &name, const std::string
 				{
 					continue;
 				}
-				// Платформа уже знает время лучше нашего — этот реплей устарел, грузить нечего.
+				// Платформа уже знает NUB-время лучше нашего — pb/wr этого рана устарели.
 				if (rec.pbTimeMs.has_value() && (f64)meta.timeMs > *rec.pbTimeMs + 0.5)
 				{
-					g_outboxInFlight.erase(name);
-					DropReplay(meta.runUuid, "superseded");
-					return;
+					adjusted.uploadPb = false;
+					adjusted.isServerRecord = false;
+					// PRO-время платформа здесь не отдаёт. Подтверждённая pro-мета (локальная БД
+					// сказала «новый PRO-PB») остаётся: pro-ран медленнее NUB-PB — её нормальный
+					// случай. Неподтверждённую (БД лежала) проверить нечем — не грузим, чтобы не
+					// перетереть более быстрый pro-файл. Ран, побивший NUB-PB, заведомо и PRO-PB,
+					// поэтому до этой ветки он не доходит и pro у него сохраняется.
+					if (adjusted.unconfirmedPb)
+					{
+						adjusted.uploadPro = false;
+					}
 				}
 				// WR на платформе свежее нашего — pb грузим, wr не перетираем.
 				if (adjusted.isServerRecord && rec.wrTimeMs.has_value() && (f64)meta.timeMs > *rec.wrTimeMs + 0.5)
@@ -740,6 +785,12 @@ void KZOutboxService::RetryReplayFile(const std::string &name, const std::string
 					adjusted.isServerRecord = false;
 				}
 				break;
+			}
+			if (!adjusted.uploadPb && !adjusted.uploadPro)
+			{
+				g_outboxInFlight.erase(name);
+				DropReplay(meta.runUuid, "superseded");
+				return;
 			}
 			RetryReplayRead(adjusted);
 		},

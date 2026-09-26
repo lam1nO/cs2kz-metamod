@@ -7,6 +7,7 @@
 #include "kz/language/kz_language.h"
 #include "kz/spec/kz_spec.h"
 #include "kz/prac/kz_prac.h"
+#include "kz/option/kz_option.h"
 #include "utils/simplecmds.h"
 
 #include "sdk/cskeletoninstance.h"
@@ -196,10 +197,12 @@ void KZRecordingService::RecordTickData_SetupMove(PlayerCommand *pc)
 
 void KZRecordingService::RecordTickData_PhysicsSimulatePost()
 {
-	// В prac игрок летает в ноуклипе минутами: писать эти тики бессмысленно — при
-	// воспроизведении отрезок между TIMER_PAUSE и TIMER_RESUME всё равно пропускается,
-	// а файл распухает (10 минут на 128 тик ≈ 77k тиков).
-	if (this->player->pracService && this->player->pracService->IsInPrac())
+	// В prac игрок летает в ноуклипе минутами. Обычный плейбек этот отрезок (он внутри пары
+	// TIMER_PAUSE→TIMER_RESUME) всё равно пропускает, поэтому по умолчанию кадры prac не пишем
+	// вовсе — файл не распухает. С опцией replayRecordPrac кадры пишутся с битом prac ТОЛЬКО
+	// в реплей рана — для `!replay … full` (RecordPracTick).
+	const bool inPrac = this->player->pracService && this->player->pracService->IsInPrac();
+	if (inPrac && !KZOptionService::GetOptionInt("replayRecordPrac", 0))
 	{
 		return;
 	}
@@ -224,12 +227,41 @@ void KZRecordingService::RecordTickData_PhysicsSimulatePost()
 	this->currentTickData.post.entityFlags = this->player->GetPlayerPawn()->m_fFlags();
 	this->currentTickData.post.moveType = this->player->GetPlayerPawn()->m_nActualMoveType;
 	this->currentTickData.weapon = this->currentWeaponID;
+	if (inPrac)
+	{
+		this->RecordPracTick();
+		return;
+	}
 	// Push the tick data to the circular buffer and recorders.
 	this->circularRecording->tickData->Write(this->currentTickData);
 	this->PushToRecorders(this->currentTickData, RecorderType::Both);
 
 	this->circularRecording->subtickData->Write(this->currentSubtickData);
 	this->PushToRecorders<Recorder::Vec::Tick>(this->currentSubtickData, RecorderType::Both);
+}
+
+void KZRecordingService::RecordPracTick()
+{
+	// Дефолт 15 минут prac на один ран: дальше кадры не пишем (в full-плейбеке остаётся разрыв,
+	// как у старых файлов), иначе долгая тренировка посреди рана вытолкнула бы реплей за кап
+	// выгрузки (KZOutboxService::maxReplayBytes) и ран остался бы без центрального файла вовсе.
+	const i64 maxSeconds = KZOptionService::GetOptionInt("replayPracMaxSeconds", 15 * 60);
+	const u32 maxTicks = maxSeconds <= 0 ? 0u : (u32)MIN(maxSeconds * 64, (i64)0xFFFFFFFF);
+
+	this->currentTickData.pre.replayFlags.prac = true;
+	this->currentTickData.post.replayFlags.prac = true;
+	for (auto &recorder : this->runRecorders)
+	{
+		// Только живой рекордер рана: у закрытого (desiredStopTime >= 0) ран уже кончился, это
+		// «брезер» прошлого рана, и prac-кадры туда не относятся.
+		if (recorder.desiredStopTime >= 0.0f || recorder.pracTicksRecorded >= maxTicks)
+		{
+			continue;
+		}
+		recorder.PushData(this->currentTickData);
+		recorder.PushData<Recorder::Vec::Tick>(this->currentSubtickData);
+		recorder.pracTicksRecorded++;
+	}
 }
 
 void KZRecordingService::RecordCommand(PlayerCommand *cmds, i32 numCmds)

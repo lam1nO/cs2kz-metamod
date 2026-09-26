@@ -31,8 +31,8 @@
 #include <algorithm>
 #include <functional>
 #include <optional>
-#include <string>
 #include <vector>
+#include <string>
 extern ReplayWatcher g_ReplayWatcher;
 
 namespace KZ::replaysystem::commands
@@ -295,6 +295,40 @@ namespace KZ::replaysystem::commands
 		// clang-format on
 	}
 
+	// Ожидающие запросы `full` (userid подключения). Список, а не одно значение: пока у одного
+	// игрока идёт резолв/докачка, свой `!replay` может дать другой.
+	static_global std::vector<i32> g_fullRequests;
+
+	void SetFullRequested(KZPlayer *player, bool full)
+	{
+		if (!player || !player->GetClient())
+		{
+			return;
+		}
+		const i32 id = player->GetClient()->GetUserID().Get();
+		g_fullRequests.erase(std::remove(g_fullRequests.begin(), g_fullRequests.end(), id), g_fullRequests.end());
+		if (full)
+		{
+			g_fullRequests.push_back(id);
+		}
+	}
+
+	bool TakeFullRequested(KZPlayer *player)
+	{
+		if (!player || !player->GetClient())
+		{
+			return false;
+		}
+		const i32 id = player->GetClient()->GetUserID().Get();
+		auto it = std::find(g_fullRequests.begin(), g_fullRequests.end(), id);
+		if (it == g_fullRequests.end())
+		{
+			return false;
+		}
+		g_fullRequests.erase(it);
+		return true;
+	}
+
 	void LoadReplay(KZPlayer *player, const char *uuid)
 	{
 		if (!player)
@@ -357,6 +391,11 @@ namespace KZ::replaysystem::commands
 		// Show loading message
 		player->languageService->PrintChat(true, false, "Replay - Loading");
 
+		// Запрос `full` снимаем здесь, где загрузка РЕАЛЬНО начинается: сюда же приходят
+		// докачка центрального реплея и выбор из меню поиска — full из исходной команды
+		// доезжает до них через этот запрос игрока.
+		const bool fullRequested = TakeFullRequested(player);
+
 		// Get player user ID for thread-safe callback access
 		CPlayerUserId playerUserID = player->GetClient()->GetUserID();
 		// UUID именно этой загрузки — по нему колбэк забирает ожидание AWR (оно привязано к
@@ -368,7 +407,7 @@ namespace KZ::replaysystem::commands
 		data::LoadReplayAsync(
 			replayPath,
 			// Success callback (runs on main thread via ProcessAsyncLoadCompletion)
-			data::LoadSuccessCallback([playerUserID, loadedUuid]() {
+			data::LoadSuccessCallback([playerUserID, loadedUuid, fullRequested]() {
 				// Вид записи (AWR-режим и метка PB/WR) доносит сюда одноразовое ожидание резолва —
 				// путь загрузки общий для всех видов и донести его иначе нечем. Ожидание
 				// привязано к uuid, поэтому чужой реплей его не подберёт; забираем всё равно
@@ -424,6 +463,13 @@ namespace KZ::replaysystem::commands
 				// сегменты уже с учётом awrMode/awrDead.
 				replay->awrMode = pendingAwr;
 				replay->awrMs = pendingAwrMs;
+				// AWR — это и есть вырезка; `full` к нему не применяется (иначе вырезы
+				// петель остались бы, а паузы нет — ни то, ни другое время).
+				replay->fullMode = fullRequested && !pendingAwr;
+				if (replay->fullMode)
+				{
+					player->languageService->PrintChat(true, false, "Replay - Full Mode");
+				}
 				// Вид запроса — бейджу шапки карточки меню реплея. -1 = запуск мимо резолва
 				// (`!replay <uuid>`, локальный файл): в самом файле типа записи нет.
 				replay->badgeKind = pending.hasKind ? (i32)pending.kind : -1;
@@ -1402,16 +1448,39 @@ SCMD(kz_replay, SCFL_REPLAY | SCFL_HELP)
 		return MRES_SUPERCEDE;
 	}
 
-	if (args->ArgC() < 2)
+	// `full` — необязательный модификатор в любом месте ПОСЛЕ вида (`!replay pb full`,
+	// `!replay pb <ник> full`, `!replay <uuid> full`): проиграть без вырезки пауз и `!prac`.
+	// Вырезаем его из аргументов, чтобы разбор цели/курса ниже его не видел. Первым
+	// аргументом он не распознаётся: `!replay full` — это поиск игрока с таким ником.
+	bool full = false;
+	std::vector<const char *> argv;
+	argv.push_back(args->Arg(0));
+	for (i32 i = 1; i < args->ArgC(); i++)
+	{
+		if (i >= 2 && KZ_STREQI(args->Arg(i), "full"))
+		{
+			full = true;
+			continue;
+		}
+		argv.push_back(args->Arg(i));
+	}
+	const i32 argc = (i32)argv.size();
+
+	using namespace KZ::replaysystem::commands;
+	using RT = RecordType;
+
+	// Каждый `!replay` (включая голый — с подсказкой) переустанавливает запрос full этого
+	// игрока: иначе full от прошлой неудачной попытки (404, отказ) достался бы следующему
+	// реплею без модификатора.
+	SetFullRequested(player, full);
+
+	if (argc < 2)
 	{
 		player->languageService->PrintChat(true, false, "Replay - Usage Command");
 		return MRES_SUPERCEDE;
 	}
 
-	using namespace KZ::replaysystem::commands;
-	using RT = RecordType;
-
-	const char *arg1 = args->Arg(1);
+	const char *arg1 = argv[1];
 
 	// Cyber-платформа: центральное (кросс-серверное) хранилище через api, ПОДМЕНЯЕТ
 	// upstream-обработку шести ключевых слов — `pb`, `wr`, `wrpro`, `pbpro`, `gpb`,
@@ -1432,14 +1501,14 @@ SCMD(kz_replay, SCFL_REPLAY | SCFL_HELP)
 		// Без цели — PB наблюдаемого (у реплей-бота — владельца записи), иначе свой.
 		u64 targetSteamId64 = player->specService->GetInfoSubject().steamId64;
 		// До завершения Steam-auth свой steamid == 0 — честный отказ вместо api-400.
-		if (targetSteamId64 == 0 && args->ArgC() < 3)
+		if (targetSteamId64 == 0 && argc < 3)
 		{
 			player->languageService->PrintChat(true, false, "Error Message (Player Not Found)", player->GetName());
 			return MRES_SUPERCEDE;
 		}
-		if (args->ArgC() >= 3)
+		if (argc >= 3)
 		{
-			const char *targetArg = args->Arg(2);
+			const char *targetArg = argv[2];
 			KZPlayer *target = FindOnlinePlayerByName(targetArg);
 			if (target)
 			{
@@ -1496,7 +1565,7 @@ SCMD(kz_replay, SCFL_REPLAY | SCFL_HELP)
 	{
 		if (KZ_STREQI(arg1, kw.keyword))
 		{
-			LoadReplayForRecord(player, kw.type, args->ArgC() >= 3 ? args->Arg(2) : "", args->ArgC() >= 4 ? args->Arg(3) : "");
+			LoadReplayForRecord(player, kw.type, argc >= 3 ? argv[2] : "", argc >= 4 ? argv[3] : "");
 			return MRES_SUPERCEDE;
 		}
 	}

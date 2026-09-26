@@ -57,6 +57,14 @@ namespace KZ::replaysystem::playback
 	bool RunWindowFromEvents(const TickData *ticks, u32 tickCount, const RpEvent *events, u32 numEvents, u32 &outStart, u32 &outEnd,
 							 i32 &outCourseId);
 
+	// Кадры `!prac` (бит RpFlags::prac, опция replayRecordPrac) — «заморозить» в точке входа
+	// в prac: позиция, скорость, углы, счётчики чекпоинтов и флаги берутся с последнего
+	// обычного кадра перед ними, serverTick/время — свои. Для разреза AWR и `!lead` такой
+	// кадр неотличим от кадра обычной паузы (игрок стоит), а без заморозки ноуклип-полёт
+	// сшивался бы с телепортами рана (скан назад ищет точку назначения по позиции) и рисовал
+	// бы луч сквозь стены. Кадры до первого обычного не трогаются (не на что опереться).
+	void FreezePracFrames(TickData *ticks, u32 tickCount);
+
 	// Разрез AWR по уже разобранным данным реплея (адаптер TickData→awr::Frame внутри).
 	awr::CutResult ComputeCutFor(const TickData *ticks, u32 tickCount, const RpEvent *events, u32 numEvents, u64 timeMs);
 

@@ -63,19 +63,23 @@ bool CybReplayUpload::BuildMeta(const RunSubmission &sub, bool isServerRecord, b
 	out.course = sub.course.number;
 	out.mode = modeStr;
 	out.isServerRecord = isServerRecord;
+	out.uploadPb = true;
+	out.uploadPro = sub.teleports == 0;
 	out.unconfirmedPb = unconfirmedPb;
 	out.timeMs = (u64)(sub.time * 1000.0 + 0.5);
 	out.replayPath = std::string(KZ_REPLAY_PATH "/") + out.replayUuid + ".replay";
 	return true;
 }
 
-void CybReplayUpload::MaybeUpload(const RunSubmission &sub, bool isServerRecord)
+void CybReplayUpload::MaybeUpload(const RunSubmission &sub, bool isServerRecord, bool uploadPb, bool uploadPro)
 {
 	KZOutboxService::ReplayMeta meta;
 	if (!BuildMeta(sub, isServerRecord, false, meta))
 	{
 		return; // причина в логе BuildMeta; write-ahead меты для такого рана и не писался
 	}
+	meta.uploadPb = uploadPb;
+	meta.uploadPro = uploadPro && sub.teleports == 0;
 	// Переход unconfirmed → confirmed: перезаписываем write-ahead (OnReplayReady писал
 	// вариант без подтверждения PB), затем отправляем той же функцией, что и ретраер.
 	KZOutboxService::EnqueueReplayMeta(meta);

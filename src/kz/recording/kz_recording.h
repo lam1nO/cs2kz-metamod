@@ -88,6 +88,9 @@ struct Recorder
 	std::vector<std::pair<i32, EconInfo>> weaponTable;
 
 	std::vector<RpJumpStats> jumps;
+	// Сколько prac-кадров уже записано (см. KZRecordingService::RecordPracTick) — потолок
+	// replayPracMaxSeconds держится на рекордер, чтобы час ноуклипа не раздул файл за кап выгрузки.
+	u32 pracTicksRecorded = 0;
 	// Как этот рекордер принимает прыжки. Оба поля фиксируются в конструкторе, единственный
 	// источник решения — PushData: один реплей пишется по одному порогу, даже если серверный
 	// конфиг перечитают посреди рана.
@@ -357,6 +360,9 @@ public:
 	void RecordTickData_PhysicsSimulate();
 	void RecordTickData_SetupMove(PlayerCommand *pc);
 	void RecordTickData_PhysicsSimulatePost();
+	// Кадр prac (опция replayRecordPrac): только в ЖИВЫЕ рекордеры рана, с битом prac, с потолком
+	// replayPracMaxSeconds на рекордер. Кольцевой буфер и джамп-реплеи prac не получают.
+	void RecordPracTick();
 
 	// Record ALL commands as received by the server.
 	void RecordCommand(PlayerCommand *cmds, i32 numCmds);

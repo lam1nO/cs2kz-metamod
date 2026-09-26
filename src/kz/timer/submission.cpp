@@ -685,7 +685,13 @@ void RunSubmission::TryUploadCentralReplay()
 	{
 		return;
 	}
-	if (!localResponse.overall.isNewPB)
+	// Реплей нужен платформе, если ран — новый PB хотя бы одного борда. NUB(overall) — надмножество
+	// PRO, поэтому NUB-PB «хуже PRO-PB» не бывает: pro-ран, побивший NUB, несёт оба флага и уходит
+	// под оба ключа; TP-ран — только pb; pro-ран медленнее NUB-PB (его держит TP-ран), но лучше
+	// прошлого PRO — только pbpro. До pbpro последний случай терялся: файл писался лишь на NUB-PB.
+	const bool uploadPb = localResponse.overall.isNewPB;
+	const bool uploadPro = teleports == 0 && localResponse.pro.isNewPB;
+	if (!uploadPb && !uploadPro)
 	{
 		// Не новый личный рекорд — в центральное хранилище не шлём; write-ahead
 		// мету снимаем, чтобы ретраер не гонял заведомо ненужную сверку.
@@ -695,7 +701,8 @@ void RunSubmission::TryUploadCentralReplay()
 	}
 
 	centralReplayUploadAttempted = true;
-	CybReplayUpload::MaybeUpload(*this, localResponse.overall.rank == 1);
+	// Локальный рекорд инстанса (type=wr) — только overall-ранг и только вместе с pb.
+	CybReplayUpload::MaybeUpload(*this, uploadPb && localResponse.overall.rank == 1, uploadPb, uploadPro);
 }
 
 // ---------------------------------------------------------------------------
