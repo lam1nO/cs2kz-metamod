@@ -425,8 +425,9 @@ void KZHUDService::RenderEditor()
 		{
 			const LayoutElementDef &def = LAYOUT_ELEMENTS[sel];
 			const MHUDLayoutPrefs::Element &el = prefs.elements[sel];
-			// Позиция — в хранимом виде (проценты от центра), как её видят !hud share и БД.
-			V_snprintf(buf, sizeof(buf), "%i \xC2\xB7 %i", el.x, el.y);
+			// Позиция — проценты от центра, как её видят !hud share и БД, но прижатая к видимой
+			// области: так же стоит и реплика (EditorClampStoredPos).
+			V_snprintf(buf, sizeof(buf), "%i \xC2\xB7 %i", KZ::hudfmt::ClampEditorPos(el.x), KZ::hudfmt::ClampEditorPos(el.y));
 			this->SetMenuVar(layout, "edit_props", "xy", buf);
 			this->SetMenuBoolClass(layout, "ep_step1", "on", this->menuApplied.epStep1, this->editorStep == 1);
 			this->SetMenuBoolClass(layout, "ep_step5", "on", this->menuApplied.epStep5, this->editorStep == 5);
@@ -508,7 +509,8 @@ void KZHUDService::RenderEditor()
 		}
 		this->SetMenuBoolClass(layout, "ep_srow", "hidden", this->menuApplied.epSrowHidden, !HasEditorStepper(sel));
 		this->SetMenuBoolClass(layout, "ep_grow", "hidden", this->menuApplied.epGrowHidden, seg == NULL);
-		const bool flip = isElement && prefs.elements[sel].x > KZ_EDITOR_FLIP_FROM && prefs.elements[sel].y > KZ_EDITOR_FLIP_FROM;
+		const bool flip = isElement && KZ::hudfmt::ClampEditorPos(prefs.elements[sel].x) > KZ_EDITOR_FLIP_FROM
+						  && KZ::hudfmt::ClampEditorPos(prefs.elements[sel].y) > KZ_EDITOR_FLIP_FROM;
 		this->SetMenuBoolClass(layout, "edit_props", "flip", this->menuApplied.propsFlip, flip);
 	}
 	this->SetMenuBoolClass(layout, "edit_props", "hidden", this->menuApplied.propsHidden, !hasSel);
@@ -541,8 +543,13 @@ void KZHUDService::RenderEditorReplica(CCSCustomHudLayout *layout, bool tickOnly
 		const EditorReplicaDef &r = EDITOR_REPLICA[(i32)e];
 		// Строки реплики, которым нужен кегль элемента, — как у худа (UpdateLayoutElement).
 		const char *sizeRow = e == LayoutElement::Timer ? "x_mhud_timer_row" : (e == LayoutElement::Prespeed ? "x_mhud_prespeed_row" : NULL);
-		this->ApplyLayoutElementTo(layout, prefs.elements[(i32)e], this->editorElements[(i32)e], r.labelId, r.varName, r.buttonId,
-								   show && prefs.elements[(i32)e].enabled, text, color, false, sizeRow);
+		// Позиция вне -50..50 (старое окно, ±100) увела бы рамку за край экрана — на реплике
+		// прижимаем; сохранённое перепишет первая правка элемента (EditorClampStoredPos).
+		MHUDLayoutPrefs::Element view = prefs.elements[(i32)e];
+		view.x = KZ::hudfmt::ClampEditorPos(view.x);
+		view.y = KZ::hudfmt::ClampEditorPos(view.y);
+		this->ApplyLayoutElementTo(layout, view, this->editorElements[(i32)e], r.labelId, r.varName, r.buttonId, show && view.enabled, text, color,
+								   false, sizeRow);
 	};
 
 	char timer[64];
@@ -644,6 +651,30 @@ void KZHUDService::TickHudEditor()
 
 // === Правки выбранного элемента ================================================================
 
+// Позиция за видимой областью (старое окно позволяло ±100) редактор показывает прижатой к краю
+// (RenderEditor/RenderEditorReplica). Сохранённое значение переписываем прижатым на первой же
+// правке этого элемента, а не на открытии: просто посмотреть в редактор — не повод менять
+// настройки игрока, а после правки показанное и сохранённое обязаны совпасть.
+void KZHUDService::EditorClampStoredPos(i32 element)
+{
+	if (!IsEditorElement(element))
+	{
+		return;
+	}
+	const MHUDLayoutPrefs::Element &el = this->GetOwnLayoutPrefs().elements[element];
+	const i32 x = KZ::hudfmt::ClampEditorPos(el.x);
+	const i32 y = KZ::hudfmt::ClampEditorPos(el.y);
+	if (x == el.x && y == el.y)
+	{
+		return;
+	}
+	const LayoutElementDef &def = LAYOUT_ELEMENTS[element];
+	// Float — тот же тип, что читает RefreshLayoutPrefs (layout/prefs.cpp).
+	this->player->optionService->SetPreferenceFloat(def.xKey, (f64)x);
+	this->player->optionService->SetPreferenceFloat(def.yKey, (f64)y);
+	this->RefreshLayoutPrefs();
+}
+
 void KZHUDService::EditorSetPos(i32 element, i32 x, i32 y)
 {
 	if (element < 0 || element >= (i32)LayoutElement::Count)
@@ -666,8 +697,9 @@ void KZHUDService::EditorNudge(i32 dx, i32 dy)
 	{
 		return;
 	}
+	// От видимой (ограниченной) позиции: из сохранённой -51 шаг вправо ведёт в -49, а не в -50.
 	const MHUDLayoutPrefs::Element &el = this->GetOwnLayoutPrefs().elements[this->editorSelected];
-	this->EditorSetPos(this->editorSelected, el.x + dx, el.y + dy);
+	this->EditorSetPos(this->editorSelected, KZ::hudfmt::ClampEditorPos(el.x) + dx, KZ::hudfmt::ClampEditorPos(el.y) + dy);
 }
 
 void KZHUDService::EditorStepSize(i32 delta)
@@ -676,6 +708,7 @@ void KZHUDService::EditorStepSize(i32 delta)
 	{
 		return;
 	}
+	this->EditorClampStoredPos(this->editorSelected);
 	const LayoutElementDef &def = LAYOUT_ELEMENTS[this->editorSelected];
 	const i32 size = this->GetOwnLayoutPrefs().elements[this->editorSelected].size;
 	this->player->optionService->SetPreferenceFloat(def.sizeKey, (f64)panorama::SnapToStep(size + delta, LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX));
@@ -689,6 +722,7 @@ void KZHUDService::EditorStepOpacity(i32 delta)
 	{
 		return;
 	}
+	this->EditorClampStoredPos(this->editorSelected);
 	const LayoutElementDef &def = LAYOUT_ELEMENTS[this->editorSelected];
 	const i32 opacity = this->GetOwnLayoutPrefs().elements[this->editorSelected].opacity;
 	// Int — тот же тип, что читает RefreshLayoutPrefs.
@@ -703,6 +737,7 @@ void KZHUDService::EditorToggleOutline()
 	{
 		return;
 	}
+	this->EditorClampStoredPos(this->editorSelected);
 	const LayoutElement e = (LayoutElement)this->editorSelected;
 	// Как OutlineOnActivate (hud_prefs.cpp): читает с миграцией старого общего hudOutline.
 	this->player->optionService->SetPreferenceBool(LAYOUT_ELEMENTS[this->editorSelected].outlineKey, !this->GetElementOutlinePref(e));
@@ -724,6 +759,7 @@ void KZHUDService::EditorToggleElement(i32 element)
 	{
 		return;
 	}
+	this->EditorClampStoredPos(element);
 	const LayoutElementDef &def = LAYOUT_ELEMENTS[element];
 	this->player->optionService->SetPreferenceBool(def.enabledKey, !this->GetOwnLayoutPrefs().elements[element].enabled);
 	this->RefreshLayoutPrefs();
@@ -773,6 +809,7 @@ void KZHUDService::EditorTogglePref(i32 row)
 	{
 		return;
 	}
+	this->EditorClampStoredPos(this->editorSelected);
 	this->player->optionService->SetPreferenceBool(t.prefKey, !this->player->optionService->GetPreferenceBool(t.prefKey, t.def));
 	this->RefreshLayoutPrefs();
 	this->RenderEditor();
@@ -804,6 +841,7 @@ void KZHUDService::EditorStepPref(i32 dir)
 	{
 		return;
 	}
+	this->EditorClampStoredPos(this->editorSelected);
 	const i32 gap = prefs.keysGap;
 	i32 next = gap;
 	if (dir > 0)
@@ -831,6 +869,7 @@ void KZHUDService::EditorPickSeg(i32 k)
 	{
 		return;
 	}
+	this->EditorClampStoredPos(this->editorSelected);
 	this->player->optionService->SetPreferenceInt(seg->prefKey, seg->values[k]);
 	this->RefreshLayoutPrefs();
 	this->RenderEditor();
@@ -933,6 +972,7 @@ bool KZHUDService::HandleEditorClick(const char *id)
 	{
 		if (IsEditorElement(this->editorSelected))
 		{
+			this->EditorClampStoredPos(this->editorSelected);
 			this->OpenMenuPopup(MenuPopup::List, KZMenuFindItemByPref(LAYOUT_ELEMENTS[this->editorSelected].fontKey));
 		}
 	}
@@ -942,6 +982,7 @@ bool KZHUDService::HandleEditorClick(const char *id)
 		const char *key = IsEditorElement(this->editorSelected) ? GetElementColorKey((LayoutElement)this->editorSelected, def) : NULL;
 		if (key)
 		{
+			this->EditorClampStoredPos(this->editorSelected);
 			this->OpenMenuPopup(MenuPopup::Color, KZMenuFindItemByPref(key));
 		}
 	}
@@ -949,6 +990,7 @@ bool KZHUDService::HandleEditorClick(const char *id)
 	{
 		if (this->editorSelected == (i32)LayoutElement::Timer)
 		{
+			this->EditorClampStoredPos(this->editorSelected);
 			this->OpenMenuPopup(MenuPopup::Color, KZMenuFindItemByPref(id[8] == 'a' ? "mhudDeltaAheadColor" : "mhudDeltaBehindColor"));
 		}
 	}
@@ -958,6 +1000,7 @@ bool KZHUDService::HandleEditorClick(const char *id)
 		const char *key = IsEditorElement(this->editorSelected) ? EDITOR_EXTRA_COLORS[this->editorSelected][k].prefKey : NULL;
 		if (key)
 		{
+			this->EditorClampStoredPos(this->editorSelected);
 			this->OpenMenuPopup(MenuPopup::Color, KZMenuFindItemByPref(key));
 		}
 	}

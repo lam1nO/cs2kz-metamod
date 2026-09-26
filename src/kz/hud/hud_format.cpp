@@ -115,6 +115,11 @@ namespace KZ::hudfmt
 		return true;
 	}
 
+	int ClampEditorPos(int pct)
+	{
+		return pct < -50 ? -50 : (pct > 50 ? 50 : pct);
+	}
+
 	const char *NoTimePlaceholder(bool detailed)
 	{
 		return detailed ? "--:--.---" : "--:--.--";

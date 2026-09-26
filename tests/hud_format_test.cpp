@@ -45,6 +45,8 @@ int main()
 	assert(!GridCellToPercent("g64_0", 64, 36, x, y));
 	assert(!GridCellToPercent("e_timer", 64, 36, x, y));
 	assert(!GridCellToPercent("g1", 64, 36, x, y));
+	assert(ClampEditorPos(-51) == -50 && ClampEditorPos(-100) == -50 && ClampEditorPos(100) == 50);
+	assert(ClampEditorPos(0) == 0 && ClampEditorPos(-50) == -50 && ClampEditorPos(50) == 50 && ClampEditorPos(17) == 17);
 	assert(!strcmp(NoTimePlaceholder(true), "--:--.---"));
 	assert(!strcmp(NoTimePlaceholder(false), "--:--.--"));
 	assert(!DeltaVisible(true, false, true, 1));

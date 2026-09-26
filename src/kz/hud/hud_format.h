@@ -9,6 +9,9 @@ namespace KZ::hudfmt
 	// Строка CP/TP panorama-худа: «CP 3 · TP 2» (U+00B7), teleports < 0 — «CP 3 · AWR».
 	void FormatCheckpointLine(int cpIndex, int teleports, char *out, size_t outLen);
 	bool GridCellToPercent(const char *buttonId, int cols, int rows, int &xPct, int &yPct);
+	// Позиция элемента в редакторе (проценты от центра) — в видимую область -50..50. Старое окно
+	// позволяло ±100: сохранённое (-51,-51) уводит элемент за край экрана и из-под сетки.
+	int ClampEditorPos(int pct);
 	const char *NoTimePlaceholder(bool detailed);
 	// Видимость дельты к PB/WR в таймере: нужен идущий таймер, загруженный путь `!lead`,
 	// совпадение ключа (карта/курс/режим/стиль) и включённый режим сравнения (0 = Off).

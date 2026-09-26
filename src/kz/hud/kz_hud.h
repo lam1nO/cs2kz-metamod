@@ -1255,6 +1255,8 @@ private:
 	void RenderEditor();
 	void RenderEditorReplica(CCSCustomHudLayout *layout, bool tickOnly);
 	bool HandleEditorClick(const char *panelId);
+	// Записать прижатую к -50..50 позицию элемента, если сохранённая вне (см. editor.cpp).
+	void EditorClampStoredPos(i32 element);
 	void EditorSetPos(i32 element, i32 x, i32 y);
 	void EditorNudge(i32 dx, i32 dy);
 	void EditorStepSize(i32 delta);
