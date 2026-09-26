@@ -7,6 +7,8 @@
 #include "kz/mappingapi/kz_mappingapi.h"
 #include "kz/option/kz_option.h"
 #include "kz/timer/kz_timer.h"
+// DeltaVisible — общий гейт видимости дельты (он же в host-тесте hud_format_test.cpp).
+#include "kz/hud/hud_format.h"
 #include "kz/replays/awr_cut.h"
 #include "kz/replays/data.h"
 #include "kz/replays/playback.h"
@@ -824,6 +826,8 @@ namespace
 				u32 runStart = 0, runEnd = count - 1;
 				u32 wStart = 0, wEnd = 0;
 				i32 runCourseId = -1;
+				// Нашлось ли окно рана: только тогда у вершин есть время таймера (Vertex::runTick).
+				bool runTimed = false;
 				// Возврат читаем именно как bool: RunWindowFromEvents умеет вернуть false
 				// УЖЕ записав вырожденное окно (outStart >= outEnd), и брать его нельзя.
 				if (playback::RunWindowFromEvents(src.ticks.data(), count, events, numEvents, wStart, wEnd, runCourseId)
@@ -831,6 +835,7 @@ namespace
 				{
 					runStart = wStart;
 					runEnd = wEnd;
+					runTimed = true;
 				}
 
 				const u64 timeMs =
@@ -847,6 +852,52 @@ namespace
 					// показывает маршрут, а отказ оставил бы новичка вообще без подсказки.
 					cutWarn = cut.reason;
 					live.push_back({0, count - 1});
+				}
+
+				// Время таймера рекордсмена по кадрам (см. Vertex::runTick) — для дельты таймера,
+				// луч его не читает. Начало отсчёта — кадр TIMER_START (runStart): это и есть
+				// «0.000» на таймере записи, как у нашего игрока старт таймера. Паузы (TIMER_PAUSE
+				// → TIMER_RESUME) таймер не считает — не считаем и мы; мёртвые петли разреза
+				// вычитаются только из шкалы AWR (liveRunTick). Без окна рана отсчитывать не от
+				// чего — метка KZ_LEAD_NO_RUN_TICK, путь сравнению не годится.
+				std::vector<u32> runTicks, liveRunTicks;
+				if (runTimed)
+				{
+					runTicks.assign(count, KZ_LEAD_NO_RUN_TICK);
+					liveRunTicks.assign(count, KZ_LEAD_NO_RUN_TICK);
+					std::vector<bool> paused(count, false), dead(count, false);
+					for (const awr::Interval &p : playback::PauseIntervalsFromEvents(src.ticks.data(), count, events, numEvents))
+					{
+						for (u32 i = p.from; i <= p.to && i < count; i++)
+						{
+							paused[i] = true;
+						}
+					}
+					if (cut.ok)
+					{
+						for (const awr::Interval &d : cut.dead)
+						{
+							for (u32 i = d.from; i <= d.to && i < count; i++)
+							{
+								dead[i] = true;
+							}
+						}
+					}
+					u32 timerTicks = 0, liveTimerTicks = 0;
+					for (u32 i = runStart; i <= runEnd; i++)
+					{
+						// Значение ДО учёта кадра: кадр старта — ровно 0.
+						runTicks[i] = timerTicks;
+						liveRunTicks[i] = liveTimerTicks;
+						if (!paused[i])
+						{
+							timerTicks++;
+							if (!dead[i])
+							{
+								liveTimerTicks++;
+							}
+						}
+					}
 				}
 
 				// Эффективный тик: мёртвые интервалы времени не занимают, поэтому окно
@@ -879,6 +930,10 @@ namespace
 						v.pos = src.ticks[i].post.origin;
 						v.onGround = (src.ticks[i].post.entityFlags & FL_ONGROUND) != 0;
 						v.tickIdx = effBase + (src.ticks[i].serverTick - baseTick);
+						// Вершины берутся только из окна рана (iv пересечён с [runStart, runEnd]),
+						// поэтому при runTimed индекс внутри массивов всегда заполнен.
+						v.runTick = runTimed ? runTicks[i] : KZ_LEAD_NO_RUN_TICK;
+						v.liveRunTick = runTimed ? liveRunTicks[i] : KZ_LEAD_NO_RUN_TICK;
 						raw.push_back(v);
 					}
 					effBase += src.ticks[iv.to].serverTick - baseTick + 1;
@@ -951,6 +1006,9 @@ void KZLeadService::Reset()
 	// новый владелец не должен унаследовать включённый процент прошлого (тот же класс улики,
 	// что layoutPrefs в KZHUDService::Reset). Своё значение ему принесёт RefreshLayoutPrefs.
 	this->progress = false;
+	// Желание дельты — тоже настройка игрока (преф hudTimerCompare), и по той же причине гасится
+	// здесь: новый владелец слота получит своё значение с первым обновлением таймера в худе.
+	this->compare.wanted = false;
 }
 
 void KZLeadService::OnMapChanged()
@@ -990,6 +1048,16 @@ void KZLeadService::ResetState(bool keepEntities)
 	// процент включён, ушли бы резолвить и качать ОДИН файл в одном тике (кэш downloads/ пуст,
 	// дедупа запросов в полёте нет) — N докачек до 32 МБ и N потоков разбора вместо одной.
 	this->armCooldown = this->player->GetPlayerSlot().Get() % KZ_LEAD_ARM_COOLDOWN_CYCLES;
+	// Путь сравнения — ровно так же: освободить (мир/режим/курс могли смениться), защёлку
+	// снять (карта в ключ не входит), паузу разбросать по слоту. +1 проход сверх паузы луча:
+	// если процент ждёт тот же AWR под тот же ключ, пусть луч заведёт загрузку первым, а
+	// сравнение возьмёт его вершины копией (ArmComparePath), а не качает и разбирает второй раз.
+	// Желание (compare.wanted) переживает карту, как и преф прогресса.
+	this->ReleaseCompare();
+	this->compare.failedCourse = -1;
+	this->compare.failedMode[0] = '\0';
+	this->compare.failRetriesLeft = 0;
+	this->compare.armCooldown = this->player->GetPlayerSlot().Get() % KZ_LEAD_ARM_COOLDOWN_CYCLES + 1;
 	// Преф прогресса здесь НЕ трогаем: OnMapChanged зовёт этот метод на смене карты, а
 	// настройка игрока карту переживает — иначе элемент худа молча умирал бы до следующего
 	// захода в меню. Гасит его только Reset() (дисконнект, слот освободился).
@@ -1301,6 +1369,8 @@ void KZLeadService::RequestPath(CybReplayDownload::Kind kind, bool fromPlayer)
 {
 	this->loading = true;
 	this->beamOnLoad = fromPlayer;
+	// Вид записи — только для слота сравнения (переиспользование вершин, ArmComparePath).
+	this->requestKind = kind;
 	// Ключ запоминаем СЕЙЧАС: под него уходит резолв (CybReplayDownload::BuildKey читает те же
 	// курс и режим), и именно им будет подписан пришедший путь.
 	this->requestCourse = this->CurrentCourseKey();
@@ -1382,15 +1452,21 @@ void KZLeadService::BuildCumulativeLengths()
 	// 500 из 1000» серединой маршрута не является. По времени тоже нельзя: это был бы процент
 	// времени ЧУЖОГО рана, а не доля пройденного игроком пути.
 	// Один проход на загрузку (главный поток, PollPending) — в тике не считается ничего.
-	const size_t count = this->path.size();
-	this->cumLen.assign(count, 0.0f);
+	this->totalLen = ComputeCumulativeLengths(this->path, this->cumLen);
+}
+
+f32 KZLeadService::ComputeCumulativeLengths(const std::vector<Vertex> &path, std::vector<f32> &cumLen)
+{
+	// Тело прежнего BuildCumulativeLengths дословно — теперь общее для луча и сравнения.
+	const size_t count = path.size();
+	cumLen.assign(count, 0.0f);
 	f32 sum = 0.0f;
 	for (size_t i = 1; i < count; i++)
 	{
-		sum += (this->path[i].pos - this->path[i - 1].pos).Length();
-		this->cumLen[i] = sum;
+		sum += (path[i].pos - path[i - 1].pos).Length();
+		cumLen[i] = sum;
 	}
-	this->totalLen = sum;
+	return sum;
 }
 
 void KZLeadService::UpdateProgress()
@@ -1578,6 +1654,9 @@ void KZLeadService::OnPathLoaded(std::vector<Vertex> &&newPath)
 	// на смену режима посреди загрузки: путь чужого режима будет снят тиком с сообщением.
 	this->pathCourse = this->requestCourse;
 	V_strncpy(this->modeName, this->requestMode, sizeof(this->modeName));
+	// Вид — тот же, что у запроса (как и ключ): по нему сравнение решает, можно ли взять
+	// эти вершины себе копией.
+	this->pathKind = this->requestKind;
 	// УСПЕХ снимает пометку отказа: под этим ключом путь ЕСТЬ, и прошлые (сетевые) отказы о нём
 	// больше ничего не говорят. Без этого исчерпанный счётчик оставался бы висеть на ключе, и
 	// когда путь под ним понадобится заново — main → бонус → main, где на смене курса при
@@ -1638,6 +1717,16 @@ void KZLeadService::OnPhysicsSimulatePost()
 	if (this->pending)
 	{
 		this->PollPending();
+	}
+	// Путь сравнения (дельта таймера) — ДО гейта луча/процента ниже: он живёт и без них. Стоит
+	// после PollPending: путь луча, приземлившийся в этом тике, сравнение может сразу взять копией.
+	if (this->compare.pending)
+	{
+		this->PollComparePending();
+	}
+	if (this->compare.wanted)
+	{
+		this->UpdateCompare();
 	}
 	// Путь нужен, если включён ЛУЧ или процент в худе — оба потребителя ведут одну и ту же
 	// ближайшую вершину, поэтому и дросселирование у них общее.
@@ -1753,11 +1842,21 @@ void KZLeadService::OnPhysicsSimulatePost()
 
 void KZLeadService::UpdateNearest(const Vector &origin)
 {
-	const u32 count = (u32)this->path.size();
-	u32 bestIdx = this->nearest < count ? this->nearest : 0;
+	// Луч/процент: граница скана — по лучу (beamBound = this->beam), как и была.
+	this->nearest = FindNearest(this->path, this->cumLen, this->nearest, this->resync, this->beam, this->windowTo, origin);
+	this->resync = false;
+}
+
+u32 KZLeadService::FindNearest(const std::vector<Vertex> &path, const std::vector<f32> &cumLen, u32 nearest, bool resync, bool beamBound,
+							   u32 windowTo, const Vector &origin)
+{
+	// Тело прежнего UpdateNearest ДОСЛОВНО: this->path/cumLen/nearest/resync/beam/windowTo
+	// заменены параметрами, логика и границы не тронуты.
+	const u32 count = (u32)path.size();
+	u32 bestIdx = nearest < count ? nearest : 0;
 	f32 best = FLT_MAX;
 
-	if (!this->resync)
+	if (!resync)
 	{
 		// Вперёд от прошлой ближайшей: игрок идёт по маршруту, полный скан пути (десятки
 		// тысяч вершин) каждые полсекунды не нужен.
@@ -1780,14 +1879,14 @@ void KZLeadService::UpdateNearest(const Vector &origin)
 		// Исключение — ветка луча: там сохранена ПРЕЖНЯЯ формула дословно (её нельзя менять),
 		// а индексами cumLen она не пользуется вовсе, и цикл всё равно ограничен `i < count`.
 		u32 to = bestIdx;
-		if (this->beam)
+		if (beamBound)
 		{
-			to = this->windowTo > this->nearest ? this->windowTo : this->nearest;
+			to = windowTo > nearest ? windowTo : nearest;
 		}
-		else if (this->cumLen.size() == (size_t)count)
+		else if (cumLen.size() == (size_t)count)
 		{
-			const f32 limit = this->cumLen[bestIdx] + KZ_LEAD_SCAN_UNITS;
-			while (to + 1 < count && this->cumLen[to + 1] <= limit && to - bestIdx < KZ_LEAD_SCAN_MAX_VERTS)
+			const f32 limit = cumLen[bestIdx] + KZ_LEAD_SCAN_UNITS;
+			while (to + 1 < count && cumLen[to + 1] <= limit && to - bestIdx < KZ_LEAD_SCAN_MAX_VERTS)
 			{
 				to++;
 			}
@@ -1800,7 +1899,7 @@ void KZLeadService::UpdateNearest(const Vector &origin)
 		}
 		for (u32 i = bestIdx; i <= to && i < count; i++)
 		{
-			const f32 d = (this->path[i].pos - origin).LengthSqr();
+			const f32 d = (path[i].pos - origin).LengthSqr();
 			if (d < best)
 			{
 				best = d;
@@ -1809,13 +1908,13 @@ void KZLeadService::UpdateNearest(const Vector &origin)
 		}
 	}
 
-	if (this->resync || best > KZ_LEAD_RESEARCH_DIST * KZ_LEAD_RESEARCH_DIST)
+	if (resync || best > KZ_LEAD_RESEARCH_DIST * KZ_LEAD_RESEARCH_DIST)
 	{
 		// Сошёл с маршрута (или только включил / телепортировался) — ищем по всему пути.
 		best = FLT_MAX;
 		for (u32 i = 0; i < count; i++)
 		{
-			const f32 d = (this->path[i].pos - origin).LengthSqr();
+			const f32 d = (path[i].pos - origin).LengthSqr();
 			if (d < best)
 			{
 				best = d;
@@ -1824,8 +1923,7 @@ void KZLeadService::UpdateNearest(const Vector &origin)
 		}
 	}
 
-	this->nearest = bestIdx;
-	this->resync = false;
+	return bestIdx;
 }
 
 void KZLeadService::UpdateWindow()
@@ -1945,6 +2043,370 @@ void KZLeadService::ApplyWindow(u32 newFrom, u32 newTo)
 	this->windowFrom = newFrom;
 	this->windowTo = newTo;
 	this->RebuildOwnedIndex();
+}
+
+// === Путь сравнения: дельта таймера к PB/WR (спека §4.3) ===================================
+//
+// Устройство — отдельный слот (CompareSlot), а не общий PathSlot на оба пути: код луча
+// (окно, пересборка, бюджет, Toggle/Disable, OnFileReady/PollPending) остаётся на прежних полях
+// дословно, а общее у слотов — только разбор файла (BuildPathWorker), поиск ближайшей
+// (FindNearest) и накопленные длины (ComputeCumulativeLengths). Правила ключа, защёлки и паузы —
+// те же, что у молчаливой загрузки процента (ArmProgressPath/OnLoadFailed/OnPathLoaded), с теми
+// же константами, но на СВОИХ полях: отказ PB-записи не должен гасить AWR-процент.
+
+void KZLeadService::SetCompareWanted(bool wanted, CybReplayDownload::Kind kind)
+{
+	if (!wanted)
+	{
+		if (!this->compare.wanted)
+		{
+			return;
+		}
+		this->compare.wanted = false;
+		this->ReleaseCompare();
+		// Пауза на повторное включение: зовётся из худа на каждом обновлении таймера, и если
+		// вызывающий когда-нибудь начнёт мигать wanted (off/on по видимости элемента), каждое
+		// включение иначе означало бы новый резолв и докачку. Так — не чаще раза в паузу.
+		if (this->compare.armCooldown < KZ_LEAD_ARM_COOLDOWN_CYCLES)
+		{
+			this->compare.armCooldown = KZ_LEAD_ARM_COOLDOWN_CYCLES;
+		}
+		return;
+	}
+	if (this->compare.wanted && this->compare.kind == kind)
+	{
+		// Идемпотентность: худ зовёт это на каждом обновлении таймера.
+		return;
+	}
+	if (this->compare.kind != kind)
+	{
+		// Другой вид записи — другой вопрос: путь прошлого вида врал бы про дельту, а защёлка
+		// «у новичка нет PB» ничего не говорит про AWR. Смена вида — действие игрока в меню.
+		this->ReleaseCompare();
+		this->compare.failedCourse = -1;
+		this->compare.failedMode[0] = '\0';
+		this->compare.failRetriesLeft = 0;
+		this->compare.armCooldown = 0;
+	}
+	// Включение того же вида защёлку НЕ снимает (в отличие от SetProgressWanted): тумблер
+	// дельты худ дёргает сам, а не игрок командой, и снятие на каждом включении дало бы
+	// новичку без PB-реплея повторные резолвы при каждом мигании (Review Focus 3).
+	this->compare.wanted = true;
+	this->compare.kind = kind;
+	// Не раньше следующего прохода дросселированной ветки: здесь, на загрузке префов, у игрока
+	// может не быть ни пешки, ни курса (та же причина, что в SetProgressWanted).
+	if (this->compare.armCooldown < 1)
+	{
+		this->compare.armCooldown = 1;
+	}
+}
+
+void KZLeadService::ReleaseCompare()
+{
+	CompareSlot &c = this->compare;
+	c.path.clear();
+	c.path.shrink_to_fit();
+	c.cumLen.clear();
+	c.cumLen.shrink_to_fit();
+	c.nearest = 0;
+	c.resync = true;
+	c.nearestReady = false;
+	c.pathCourse = -1;
+	c.modeName[0] = '\0';
+	c.loading = false;
+	// Незавершённая загрузка протухает: её результат отбросит проверка поколения слота.
+	c.generation++;
+	c.pending.reset();
+}
+
+bool KZLeadService::ComparePathKeyMatchesCurrent() const
+{
+	return this->compare.pathCourse == this->CurrentCourseKey() && KZ_STREQI(this->compare.modeName, this->CurrentModeName());
+}
+
+void KZLeadService::UpdateCompare()
+{
+	CompareSlot &c = this->compare;
+	// Свой дроссель, та же единица (32 тика), что у луча/процента: и пауза armCooldown, и
+	// поиск ближайшей считаются в этих проходах.
+	if (++c.ticksSinceUpdate < KZ_LEAD_UPDATE_TICKS)
+	{
+		return;
+	}
+	c.ticksSinceUpdate = 0;
+	if (c.armCooldown > 0)
+	{
+		c.armCooldown--;
+	}
+	// Путь режим- И курс-зависим: дельта по маршруту чужого курса/режима — враньё. Отпускаем и
+	// перезапрашиваем под новый ключ (как процент при выключенном луче). Защёлка ключевана и
+	// отказу прошлого ключа не мешает; мигающий ключ во время загрузки гасит пауза в
+	// PollComparePending (path_dropped).
+	if (!c.path.empty() && !this->ComparePathKeyMatchesCurrent())
+	{
+		this->ReleaseCompare();
+		return;
+	}
+	if (!this->player->GetPlayerPawn())
+	{
+		// Мёртв/спектейт — ничего не двигаем, вернётся сам.
+		return;
+	}
+	if (c.path.empty())
+	{
+		this->ArmComparePath();
+		return;
+	}
+	Vector origin = vec3_invalid;
+	this->player->GetOrigin(&origin);
+	if (origin == vec3_invalid)
+	{
+		return;
+	}
+	// Режим «без луча»: у сравнения окна нет, граница прямого скана — по накопленной длине.
+	c.nearest = FindNearest(c.path, c.cumLen, c.nearest, c.resync, false, 0, origin);
+	c.resync = false;
+	c.nearestReady = true;
+}
+
+void KZLeadService::ArmComparePath()
+{
+	CompareSlot &c = this->compare;
+	if (c.loading || c.pending || c.armCooldown > 0)
+	{
+		return;
+	}
+	const i32 course = this->CurrentCourseKey();
+	const char *mode = this->CurrentModeName();
+
+	// Одна загрузка на оба слота: луч/процент уже держит ТОТ ЖЕ вид записи под ТЕКУЩИМ ключом —
+	// берём его вершины КОПИЕЙ (а не общим владением): у луча путь живёт своей жизнью —
+	// пересборка под cyb_lead_rdp подменяет вектор на месте, Disable/смена курса его отпускают,
+	// — и индекс nearest сравнения по чужому вектору разъехался бы с ним молча. Копия — один
+	// проход по памяти раз на ключ; второй вектор вершин спека считает допустимым (§4.3), а
+	// сэкономлены именно дорогие части: резолв, докачка до 32 МБ и поток разбора.
+	if (!this->path.empty() && this->pathKind == c.kind && this->PathKeyMatchesCurrent())
+	{
+		if (this->path.front().runTick == KZ_LEAD_NO_RUN_TICK)
+		{
+			// Путь без окна рана — времени у вершин нет, и свой разбор ТОГО ЖЕ файла дал бы то
+			// же. Защёлкиваем ключ сразу, без повторов. Уже защёлкнутый — молча: эта ветка стоит
+			// ДО проверки своей защёлки (копия с луча важнее прошлых своих отказов), и без этого
+			// гейта лог получал бы строку на каждую паузу.
+			if (c.failedCourse == course && KZ_STREQI(c.failedMode, mode) && c.failRetriesLeft <= 0)
+			{
+				return;
+			}
+			KZ_LOG_DEBUG(LogChannel::Replays, "[lead] compare_load_failed reason=no_run_window source=beam course=%i mode=%s steam_id=%llu\n",
+						 course, mode, (unsigned long long)this->player->GetSteamId64());
+			this->LatchCompareFailure(course, mode, /* retryable */ false);
+			return;
+		}
+		c.path = this->path;
+		c.cumLen = this->cumLen;
+		c.pathCourse = this->pathCourse;
+		V_strncpy(c.modeName, this->modeName, sizeof(c.modeName));
+		c.nearest = 0;
+		c.resync = true;
+		c.nearestReady = false;
+		c.failedCourse = -1;
+		c.failedMode[0] = '\0';
+		c.failRetriesLeft = 0;
+		// Ближайшая — на ближайшем же тике, а не через полсекунды.
+		c.ticksSinceUpdate = KZ_LEAD_UPDATE_TICKS;
+		KZ_LOG_DEBUG(LogChannel::Replays, "[lead] compare_path_shared verts=%i course=%i mode=%s steam_id=%llu\n", (int)c.path.size(), course,
+					 mode, (unsigned long long)this->player->GetSteamId64());
+		return;
+	}
+	// Луч/процент УЖЕ грузит тот же вид под текущий ключ — ждём его и возьмём копией
+	// следующим проходом. Пересборка (pendingIsRebuild) не в счёт: путь при ней уже есть.
+	if ((this->loading || (this->pending && !this->pendingIsRebuild)) && this->requestKind == c.kind && this->RequestKeyMatchesCurrent())
+	{
+		return;
+	}
+	// Луч/процент уже защёлкнул ТОТ ЖЕ вид под этим ключом — записи нет, идти за ней второй раз
+	// незачем (новичок без записи не должен давать лишних резолвов, Review Focus 3).
+	if (this->failedCourse == course && KZ_STREQI(this->failedMode, mode) && this->failRetriesLeft <= 0 && this->requestKind == c.kind)
+	{
+		return;
+	}
+	// Своя защёлка — ПО КЛЮЧУ, с теми же повторами, что у процента (см. ArmProgressPath).
+	if (c.failedCourse == course && KZ_STREQI(c.failedMode, mode))
+	{
+		if (c.failRetriesLeft <= 0)
+		{
+			return;
+		}
+		c.failRetriesLeft--;
+	}
+	this->RequestComparePath();
+}
+
+void KZLeadService::RequestComparePath()
+{
+	CompareSlot &c = this->compare;
+	c.loading = true;
+	// Ключ — СЕЙЧАС, под него уходит резолв (см. RequestPath).
+	c.requestCourse = this->CurrentCourseKey();
+	V_strncpy(c.requestMode, this->CurrentModeName(), sizeof(c.requestMode));
+	const u32 gen = ++c.generation;
+	// PB — свой рекорд игрока: steamId обязателен (см. RequestFile), для AWR он игнорируется.
+	CybReplayDownload::RequestFile(this->player, c.kind, this->player->GetSteamId64(),
+								   [gen](CPlayerUserId userID, std::string filePath)
+								   {
+									   KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
+									   if (!player || !player->leadService)
+									   {
+										   return;
+									   }
+									   player->leadService->OnCompareFileReady(gen, std::move(filePath));
+								   });
+}
+
+void KZLeadService::OnCompareFileReady(u32 gen, std::string &&filePath)
+{
+	CompareSlot &c = this->compare;
+	if (gen != c.generation)
+	{
+		// Протух (выключили, сменили вид, карту) — флаг loading уже не этого запроса.
+		return;
+	}
+	if (filePath.empty())
+	{
+		c.loading = false;
+		// Как у процента: reason=no_file (404 и сеть неотличимы), DEBUG — «у новичка нет PB»
+		// ожидаемое состояние, а не отказ нашего кода. Ни строки в чат.
+		KZ_LOG_DEBUG(LogChannel::Replays, "[lead] compare_load_failed reason=no_file course=%i mode=%s steam_id=%llu\n", c.requestCourse,
+					 c.requestMode, (unsigned long long)this->player->GetSteamId64());
+		this->LatchCompareFailure(c.requestCourse, c.requestMode, /* retryable */ true);
+		return;
+	}
+	c.pending = std::make_shared<PendingLoad>();
+	c.pending->generation = gen;
+	// Снимок допуска на главном потоке (см. PendingLoad::rdpTolerance). Бюджет пересборок НЕ
+	// занимаем: это первичная загрузка, её разносит сеть (rebuildBudget остаётся false).
+	c.pending->rdpTolerance = cyb_lead_rdp.Get();
+	c.loading = false;
+	std::thread(BuildPathWorker, std::move(filePath), c.pending).detach();
+}
+
+void KZLeadService::LatchCompareFailure(i32 course, const char *mode, bool retryable)
+{
+	CompareSlot &c = this->compare;
+	// Те же правила, что у OnLoadFailed: новый ключ получает KZ_LEAD_FAIL_RETRIES повторов
+	// (404 и сетевая рябь неотличимы), отказ разбора защёлкивается сразу, пауза — всегда.
+	if (!(c.failedCourse == course && KZ_STREQI(c.failedMode, mode)))
+	{
+		c.failedCourse = course;
+		V_strncpy(c.failedMode, mode, sizeof(c.failedMode));
+		c.failRetriesLeft = KZ_LEAD_FAIL_RETRIES;
+	}
+	if (!retryable)
+	{
+		c.failRetriesLeft = 0;
+	}
+	c.armCooldown = KZ_LEAD_ARM_COOLDOWN_CYCLES;
+	// Чата нет НИКОГДА: дельту просил элемент худа, не игрок. Он просто остаётся скрытым.
+}
+
+void KZLeadService::PollComparePending()
+{
+	CompareSlot &c = this->compare;
+	if (!c.pending->done)
+	{
+		return;
+	}
+	std::shared_ptr<PendingLoad> load = c.pending;
+	c.pending.reset();
+	if (load->generation != c.generation)
+	{
+		return;
+	}
+	std::vector<Vertex> loaded;
+	const char *failReason = nullptr;
+	const char *cutWarn = nullptr;
+	{
+		std::lock_guard<std::mutex> lock(load->mu);
+		loaded = std::move(load->path);
+		failReason = load->failReason;
+		cutWarn = load->cutWarn;
+	}
+	if (!failReason && (loaded.empty() || loaded.front().runTick == KZ_LEAD_NO_RUN_TICK))
+	{
+		// Путь есть, но без окна рана: отсчёт шёл бы от начала записи — дельте не годится.
+		failReason = "no_run_window";
+	}
+	if (failReason)
+	{
+		KZ_LOG_WARN(LogChannel::Replays, "[lead] compare_load_failed reason=%s course=%i mode=%s steam_id=%llu\n", failReason, c.requestCourse,
+					c.requestMode, (unsigned long long)this->player->GetSteamId64());
+		// Файл скачан — причина в нём самом, повторять нечего.
+		this->LatchCompareFailure(c.requestCourse, c.requestMode, /* retryable */ false);
+		return;
+	}
+	if (cutWarn && cutWarn[0])
+	{
+		// Разрез не сошёлся: вершины без вырезки, liveRunTick == runTick. Для PB это ничего не
+		// меняет, для AWR — дельта по шкале обычного таймера. Лучше, чем никакой.
+		KZ_LOG_DEBUG(LogChannel::Replays, "[lead] compare_cut_failed detail=%s steam_id=%llu\n", cutWarn,
+					 (unsigned long long)this->player->GetSteamId64());
+	}
+	if (c.requestCourse != this->CurrentCourseKey() || !KZ_STREQI(c.requestMode, this->CurrentModeName()))
+	{
+		// Пока шли резолв/докачка/разбор, игрок сменил курс или режим — путь чужой. Не берём и
+		// ставим паузу против мигающего ключа (как path_dropped у процента).
+		KZ_LOG_DEBUG(LogChannel::Replays, "[lead] compare_path_dropped reason=key_changed course=%i mode=%s steam_id=%llu\n", c.requestCourse,
+					 c.requestMode, (unsigned long long)this->player->GetSteamId64());
+		c.armCooldown = KZ_LEAD_ARM_COOLDOWN_CYCLES;
+		return;
+	}
+	c.path = std::move(loaded);
+	ComputeCumulativeLengths(c.path, c.cumLen);
+	c.nearest = 0;
+	c.resync = true;
+	c.nearestReady = false;
+	c.pathCourse = c.requestCourse;
+	V_strncpy(c.modeName, c.requestMode, sizeof(c.modeName));
+	// Успех снимает защёлку ключа (см. OnPathLoaded — почему).
+	c.failedCourse = -1;
+	c.failedMode[0] = '\0';
+	c.failRetriesLeft = 0;
+	c.ticksSinceUpdate = KZ_LEAD_UPDATE_TICKS;
+}
+
+bool KZLeadService::GetCompareDeltaSeconds(f64 &outSeconds) const
+{
+	const CompareSlot &c = this->compare;
+	const bool pathLoaded = c.wanted && !c.path.empty() && c.nearestReady && c.nearest < c.path.size();
+	const bool keyMatches = pathLoaded && this->ComparePathKeyMatchesCurrent();
+	const bool timerRunning = this->player->timerService && this->player->timerService->GetTimerRunning();
+	// compareMode = 1: сюда доходим только при включённом сравнении (c.wanted выше), вид записи
+	// DeltaVisible не различает.
+	if (!KZ::hudfmt::DeltaVisible(timerRunning, pathLoaded, keyMatches, 1))
+	{
+		return false;
+	}
+	// НАЧАЛО ОТСЧЁТА. tickIdx вершины для дельты не годится: он отсчитан по serverTick от
+	// первого живого кадра, то есть содержит паузы и неписаные промежутки, а при отсутствии
+	// окна рана — ещё и ~5 с предзаписи. Поэтому у вершины есть своё время таймера записи
+	// (Vertex::runTick/liveRunTick, BuildPathWorker): записанные НЕ паузные кадры от кадра
+	// TIMER_START (= 0) последней пары START/END файла (RunWindowFromEvents) — у AWR и у
+	// PB-файла одинаково, отдельного startTick в шапке не нужно. Шкала — по виду записи:
+	//   PB  — runTick: обычный таймер, со всеми телепорт-петлями рана до этой точки (петли
+	//         разрез из геометрии пути убрал, но их время в таймере рекорда было);
+	//   AWR — liveRunTick: время рекорда по шкале AWR, петли вычтены (так и считается awrMs).
+	// Тик -> секунды — ENGINE_FIXED_TICK_INTERVAL (1/64 с): это те же «эффективные серверные
+	// тики 64/с», в которых kz_lead меряет окно луча (KZ_LEAD_BACK_TICKS/AHEAD_TICKS).
+	const Vertex &v = c.path[c.nearest];
+	const u32 recordTicks = c.kind == CybReplayDownload::Kind::AWR ? v.liveRunTick : v.runTick;
+	if (recordTicks == KZ_LEAD_NO_RUN_TICK)
+	{
+		return false;
+	}
+	const f64 recordTime = (f64)recordTicks * (f64)ENGINE_FIXED_TICK_INTERVAL;
+	// + = позади записи (наш таймер показывает больше, чем был у рекорда в этой точке).
+	outSeconds = this->player->timerService->GetTime() - recordTime;
+	return true;
 }
 
 // Ручной рычаг к колбэкам конваров: перерисовать отрезки всем, у кого луч включён. Нужен, если
