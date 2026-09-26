@@ -9,6 +9,7 @@
 #include "kz/option/kz_option.h"
 #include "kz/db/kz_db.h"
 #include "kz/timer/kz_timer.h"
+#include "kz/spec/kz_spec.h"
 #include "kz/mappingapi/kz_mappingapi.h" // GetCourseByCourseID — сверка курса окна рана с шапкой
 #include "commands.h"
 #include "data.h"
@@ -124,16 +125,18 @@ namespace KZ::replaysystem::commands
 		// Курс и режим — ключ поиска и одновременно невидимый для игрока фильтр: оба обязаны
 		// попасть в отказ, иначе «никто не подходит» читается как «такого ника нет»
 		// (kz_angina_x 17.09).
-		const i32 courseNumber = KZ::course::GetCyberCourseNumber(player->timerService->GetCourse());
+		// У наблюдающего — курс и режим наблюдаемого (KZInfoSubject).
+		const KZInfoSubject subject = player->specService->GetInfoSubject();
+		const i32 courseNumber = KZ::course::GetCyberCourseNumber(subject.course);
 		const std::string courseText = CybReplayCommon::CourseText(courseNumber);
 
 		// Режим — в api-нотацию общим маппингом; кастовый режим сверх ckz/vnl/kzt
 		// центральное хранилище не знает, PB-реплеев там нет по определению.
-		const char *mode = CybReplayCommon::MapMode(player->modeService->GetModeShortName());
+		const char *mode = CybReplayCommon::MapMode(subject.player->modeService->GetModeShortName());
 		if (!mode || mode[0] == '\0')
 		{
 			player->languageService->PrintChat(true, false, "Replay - Search No Matches", query.c_str(), courseText.c_str(),
-											   player->modeService->GetModeShortName());
+											   subject.player->modeService->GetModeShortName());
 			return;
 		}
 
@@ -1177,7 +1180,8 @@ namespace KZ::replaysystem::commands
 
 	static void LoadSPBReplay(KZPlayer *player, bool isPro, const RecordContext &ctx)
 	{
-		u64 steamID64 = player->GetSteamId64();
+		// У наблюдающего — серверный PB наблюдаемого (курс/режим ctx взяты от него же).
+		u64 steamID64 = player->specService->GetInfoSubject().steamId64;
 		// clang-format off
 		auto onSuccess = [userID = ctx.playerUserID, isPro](std::vector<ISQLQuery *> queries)
 		{
@@ -1325,9 +1329,11 @@ namespace KZ::replaysystem::commands
 		{
 			course = KZ::course::GetCourse(courseArg, false, true);
 		}
+		// У наблюдающего курс/режим по умолчанию — наблюдаемого (KZInfoSubject).
+		const KZInfoSubject subject = player->specService->GetInfoSubject();
 		if (!course)
 		{
-			course = player->timerService->GetCourse();
+			course = subject.course;
 		}
 		if (!course)
 		{
@@ -1346,7 +1352,7 @@ namespace KZ::replaysystem::commands
 		}
 		else
 		{
-			modeInfo = KZ::mode::GetModeInfo(player->modeService);
+			modeInfo = KZ::mode::GetModeInfo(subject.player->modeService);
 		}
 		if (modeInfo.id == -2)
 		{
@@ -1423,7 +1429,8 @@ SCMD(kz_replay, SCFL_REPLAY | SCFL_HELP)
 	const bool isPbProKind = KZ_STREQI(arg1, "pbpro") || KZ_STREQI(arg1, "gpbpro");
 	if (isPbKind || isPbProKind)
 	{
-		u64 targetSteamId64 = player->GetSteamId64();
+		// Без цели — PB наблюдаемого (у реплей-бота — владельца записи), иначе свой.
+		u64 targetSteamId64 = player->specService->GetInfoSubject().steamId64;
 		// До завершения Steam-auth свой steamid == 0 — честный отказ вместо api-400.
 		if (targetSteamId64 == 0 && args->ArgC() < 3)
 		{

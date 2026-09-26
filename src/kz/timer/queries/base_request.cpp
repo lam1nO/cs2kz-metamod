@@ -4,6 +4,7 @@
 #include "kz/timer/kz_timer.h"
 #include "kz/mode/kz_mode.h"
 #include "kz/style/kz_style.h"
+#include "kz/spec/kz_spec.h"
 #include "utils/ctimer.h"
 
 #include "vendor/sql_mm/src/public/sql_mm.h"
@@ -182,8 +183,8 @@ void BaseRequest::SetupCourse(CUtlString courseName)
 	// If it's the current map...
 	if (this->mapName == currentMap)
 	{
-		// Try to get the player's current course.
-		const KZCourseDescriptor *course = callingPlayer->timerService->GetCourse();
+		// Try to get the player's current course (у наблюдающего — курс наблюдаемого).
+		const KZCourseDescriptor *course = callingPlayer->specService->GetInfoSubject().course;
 		if (!course)
 		{
 			// No course? Take the map's first course.
@@ -254,10 +255,12 @@ void BaseRequest::SetupPlayer(CUtlString playerName)
 	// Otherwise, players that are currently in the server is prioritized.
 	// If there is no player matching the name in the server, first query the local database to get the player's SteamID.
 	// If there's no local database/player is not found, query the global API to get the player's maptop.
+	// У наблюдающего цель по умолчанию — наблюдаемый (у реплей-бота — владелец записи).
 	if (playerName.IsEmpty())
 	{
-		this->targetPlayerName = callingPlayer->GetName();
-		this->targetSteamID64 = callingPlayer->GetSteamId64();
+		KZInfoSubject subject = callingPlayer->specService->GetInfoSubject();
+		this->targetPlayerName = subject.name;
+		this->targetSteamID64 = subject.steamId64;
 		return;
 	}
 	for (u32 i = 1; i < MAXPLAYERS + 1; i++)
@@ -342,7 +345,8 @@ void BaseRequest::SetupMode(CUtlString modeName)
 
 	if (modeName.IsEmpty())
 	{
-		KZModeManager::ModePluginInfo modeInfo = KZ::mode::GetModeInfo(callingPlayer->modeService);
+		// У наблюдающего — режим наблюдаемого.
+		KZModeManager::ModePluginInfo modeInfo = KZ::mode::GetModeInfo(callingPlayer->specService->GetInfoSubject().player->modeService);
 
 		if (modeInfo.id == -2)
 		{
@@ -389,13 +393,14 @@ void BaseRequest::SetupStyles(CUtlString styleNames)
 		return;
 	}
 
-	// If the style name is empty, take the calling player's styles.
+	// If the style name is empty, take the calling player's styles (у наблюдающего — стили наблюдаемого).
 	if (styleNames.IsEmpty())
 	{
 		this->localStyleIDs = 0;
-		FOR_EACH_VEC(callingPlayer->styleServices, i)
+		KZPlayer *stylesOwner = callingPlayer->specService->GetInfoSubject().player;
+		FOR_EACH_VEC(stylesOwner->styleServices, i)
 		{
-			KZStyleManager::StylePluginInfo info = KZ::style::GetStyleInfo(callingPlayer->styleServices[i]);
+			KZStyleManager::StylePluginInfo info = KZ::style::GetStyleInfo(stylesOwner->styleServices[i]);
 			if (info.databaseID < 0)
 			{
 				this->localStatus = ResponseStatus::DISABLED;

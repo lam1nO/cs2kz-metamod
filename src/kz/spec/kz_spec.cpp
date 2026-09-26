@@ -5,6 +5,8 @@
 #include "kz/language/kz_language.h"
 #include "utils/simplecmds.h"
 #include "utils/ctimer.h"
+#include "kz/replays/kz_replaysystem.h"
+#include "kz/replays/data.h"
 
 static_global class KZTimerServiceEventListener_Spec : public KZTimerServiceEventListener
 {
@@ -227,6 +229,53 @@ KZPlayer *KZSpecService::GetSpectatedPlayer()
 	CBasePlayerPawn *target = (CBasePlayerPawn *)obsService->m_hObserverTarget().Get();
 	// If the player is spectating their own corpse, consider that as not spectating anyone.
 	return target == pawn ? nullptr : g_pKZPlayerManager->ToPlayer(target);
+}
+
+KZInfoSubject KZSpecService::GetInfoSubject()
+{
+	KZInfoSubject subject;
+	subject.player = this->player;
+	KZPlayer *target = this->GetSpectatedPlayer();
+	if (target && target != this->player)
+	{
+		subject.player = target;
+		subject.spectated = true;
+		subject.replayBot = KZ::replaysystem::IsReplayBot(target);
+	}
+
+	if (!subject.replayBot)
+	{
+		subject.course = subject.player->timerService->GetCourse();
+		subject.steamId64 = subject.player->GetSteamId64();
+		subject.name = subject.player->GetName();
+		return subject;
+	}
+
+	// Реплей-бот: курс — из идущего рана записи (ставится событием старта таймера), до старта —
+	// из шапки ран-реплея; владелец — из шапки. Чего нет — от вызывающего.
+	KZ::replaysystem::data::ReplayPlayback *replay = KZ::replaysystem::data::GetCurrentReplay();
+	if (replay && replay->valid)
+	{
+		if (replay->courseName[0] != '\0')
+		{
+			subject.course = KZ::course::GetCourse(replay->courseName, false);
+		}
+		if (!subject.course && replay->header.has_run() && replay->header.run().has_course_name())
+		{
+			subject.course = KZ::course::GetCourse(replay->header.run().course_name().c_str(), false);
+		}
+		if (replay->header.has_player() && replay->header.player().steamid64() != 0)
+		{
+			subject.steamId64 = replay->header.player().steamid64();
+			subject.name = replay->header.player().name().c_str();
+		}
+	}
+	if (subject.steamId64 == 0)
+	{
+		subject.steamId64 = this->player->GetSteamId64();
+		subject.name = this->player->GetName();
+	}
+	return subject;
 }
 
 KZPlayer *KZSpecService::GetNextSpectator(KZPlayer *current)
