@@ -115,6 +115,7 @@ enum HudExtraResetSlot
 	EXTRA_RESET_KEYS_LOOK = 0,
 	EXTRA_RESET_PBWR,
 	EXTRA_RESET_RPMENU_POS,
+	EXTRA_RESET_SPEED,
 	EXTRA_RESET_COUNT
 };
 static_global KZOptNode *s_extraResetNodes[EXTRA_RESET_COUNT] {};
@@ -386,6 +387,20 @@ void KZHUDService::InitMenuPrefs()
 	KZ::menu::AddToggle(pbwr, "HUD - Menu Label WrNub", "hudWrNub", true);
 	KZ::menu::AddToggle(pbwr, "HUD - Menu Label WrPro", "hudWrPro", true);
 
+	// Скорость и престрейф: точность, скобки и скрытие при сходе с края — это ПОВЕДЕНИЕ элемента
+	// (что и когда показывать), а не место на экране, и на реплике редактора их не поправить. При
+	// ужатии раздела они ушли в скрытые узлы элементов вместе с цветами — и у игрока пропал
+	// способ их включить; здесь они снова видны. Ключи и дефолты — те, что читает
+	// RefreshLayoutPrefs (layout/prefs.cpp). Узел элемента их больше не держит, поэтому сброс
+	// элемента в редакторе их не трогает, а «Сбросить всё» накрывает страницу своим слотом.
+	KZOptNode *speedLook = KZ::menu::AddSub(hud, "HUD - Menu Cat SpeedPrespeed");
+	s_extraResetNodes[EXTRA_RESET_SPEED] = speedLook;
+	KZ::menu::AddToggle(speedLook, "HUD - Menu Label SpeedDecimal", "mhudSpeedPrecise", false);
+	KZ::menu::AddToggle(speedLook, "HUD - Menu Label PrespeedDecimal", "mhudPrespeedPrecise", false);
+	KZ::menu::AddToggle(speedLook, "HUD - Menu Label PrespeedBrackets", "mhudPrespeedBrackets", false);
+	KZ::menu::AddToggle(speedLook, "HUD - Menu Label PrespeedHideWalkOff", "mhudPrespeedHideWalkOff", false);
+	KZ::menu::SetItemSubtext(speedLook, "HUD - Menu Label PrespeedHideWalkOff Sub");
+
 	// Клавиши: в окне остался только ВИД (буквы, квадрат, рамка, свечение, заливка, перекрытие,
 	// ненажатая клавиша) — это стиль, а не место на экране, и на реплике редактора его не
 	// поправить. Тумблер элемента, позиция, размер, шрифт, обводка, прозрачность и все цвета
@@ -485,19 +500,12 @@ void KZHUDService::InitMenuPrefs()
 	KZ::menu::AddColor(timer, "HUD - Menu Label StoppedColor", "mhudTimerStoppedColor", MHUD_DEF_TIMER_STOPPED_COLOR);
 
 	KZOptNode *speed = elementNodes[(i32)LayoutElement::Speed];
-	// mhudSpeedPrecise — "%.2f" вместо "%.0f" (layout/prefs.cpp:121, применяется в
-	// layout/mhud.cpp:UpdateSpeedElement).
-	KZ::menu::AddToggle(speed, "HUD - Menu Label Decimal", "mhudSpeedPrecise", false);
+	// mhudSpeedPrecise — на видимой странице «Скорость и престрейф» выше.
 	KZ::menu::AddColor(speed, "HUD - Menu Label Color", "mhudSpeedColor", MHUD_DEF_BASE_COLOR);
 	KZ::menu::AddColor(speed, "HUD - Menu Label CjColor", "mhudSpeedCjColor", MHUD_DEF_CJ_COLOR);
 
 	KZOptNode *prespeed = elementNodes[(i32)LayoutElement::Prespeed];
-	// Три префа престрейфа (layout/prefs.cpp:124-126, применяются в
-	// layout/mhud.cpp:UpdatePrespeedElement) — дефолты те же, что там читаются.
-	KZ::menu::AddToggle(prespeed, "HUD - Menu Label Decimal", "mhudPrespeedPrecise", false);
-	KZ::menu::AddToggle(prespeed, "HUD - Menu Label PrespeedBrackets", "mhudPrespeedBrackets", false);
-	KZ::menu::AddToggle(prespeed, "HUD - Menu Label PrespeedHideWalkOff", "mhudPrespeedHideWalkOff", false);
-	KZ::menu::SetItemSubtext(prespeed, "HUD - Menu Label PrespeedHideWalkOff Sub");
+	// Три тумблера престрейфа — на видимой странице «Скорость и престрейф» выше.
 	KZ::menu::AddColor(prespeed, "HUD - Menu Label Color", "mhudPrespeedColor", MHUD_DEF_BASE_COLOR);
 	KZ::menu::AddColor(prespeed, "HUD - Menu Label PerfColor", "mhudPrespeedPerfColor", MHUD_DEF_PERF_COLOR);
 	KZ::menu::AddColor(prespeed, "HUD - Menu Label JumpbugColor", "mhudPrespeedJumpbugColor", MHUD_DEF_JUMPBUG_COLOR);

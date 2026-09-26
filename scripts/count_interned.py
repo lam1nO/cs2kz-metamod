@@ -87,6 +87,12 @@ panels.update("x_" + i for i in ("mhud_keys", "mhud_delta", "mhud_pos", "mhud_an
 vars_.update(array("PBWR_VARS") + ["delta", "pos", "ang"])
 for m in re.finditer(r"\{\"(e_\w+)\",\s*\"(x_\w+)\",\s*\"(\w+)\",\s*\"(tag_\w+)\"", editor):
     panels.update([m.group(1), m.group(2)]); vars_.update([m.group(3), m.group(4)])
+# Доп. строки цветов панели свойств (EDITOR_XROW_IDS/EDITOR_XC_IDS/EDITOR_XROW_VARS в editor.cpp).
+for name, target in (("EDITOR_XROW_IDS", panels), ("EDITOR_XC_IDS", panels), ("EDITOR_XROW_VARS", vars_)):
+    m = re.search(name + r"\[[^=]*=\s*\{([^}]*)\}", editor)
+    if not m:
+        sys.exit(f"{name} not found in editor.cpp")
+    target.update(re.findall(r"\"([\w]+)\"", m.group(1)))
 classes.update(["hidden", "outline", "pressed", "d-ahead", "d-behind", "hide-idle", "keys-underscore", "keys-noborder",
                 "keys-noglow", "keys-nofill", "keys-letters", "keys-square"])
 

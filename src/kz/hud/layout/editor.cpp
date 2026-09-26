@@ -68,6 +68,39 @@ static_global const EditorReplicaDef EDITOR_REPLICA[(i32)LayoutElement::Count] =
 
 static_assert(KZ_ARRAYSIZE(EDITOR_REPLICA) == KZ_EDITOR_ITEMS, "el{i}/et{i} разметки — по одному на LayoutElement");
 
+// Доп. цвета элемента в панели свойств: строки ep_xrow1..3 (подпись {s:px1..3}, свотч ep_xc1..3).
+// Это состояния элемента, у которых свой цвет помимо основного (ep_color): таймер с ТП/на
+// паузе/остановлен, скорость на кроуч-джампе, престрейф perf/jumpbug, клавиши при перекрытии и
+// нажатые. До редактора их правила страница элемента в окне; после ужатия раздела пункты
+// остались только в скрытых узлах — без этих строк у игрока не было способа их поменять.
+// Клик открывает тот же попап цвета, что ep_color/ep_dcol_* (цель — пункт реестра по ключу).
+struct EditorExtraColorDef
+{
+	const char *prefKey;
+	const char *phraseKey;
+	const Color *def;
+};
+
+static_global const char *const EDITOR_XROW_IDS[3] = {"ep_xrow1", "ep_xrow2", "ep_xrow3"};
+static_global const char *const EDITOR_XROW_VARS[3] = {"px1", "px2", "px3"};
+static_global const char *const EDITOR_XC_IDS[3] = {"ep_xc1", "ep_xc2", "ep_xc3"};
+
+// clang-format off
+static_global const EditorExtraColorDef EDITOR_EXTRA_COLORS[(i32)LayoutElement::Count][3] =
+{
+	/* Timer */      {{"mhudTimerTpColor", "HUD - Menu Label TpColor", &MHUD_DEF_TIMER_TP_COLOR},
+	                  {"mhudTimerPausedColor", "HUD - Menu Label PausedColor", &MHUD_DEF_TIMER_PAUSED_COLOR},
+	                  {"mhudTimerStoppedColor", "HUD - Menu Label StoppedColor", &MHUD_DEF_TIMER_STOPPED_COLOR}},
+	/* Speed */      {{"mhudSpeedCjColor", "HUD - Menu Label CjColor", &MHUD_DEF_CJ_COLOR}},
+	/* Prespeed */   {{"mhudPrespeedPerfColor", "HUD - Menu Label PerfColor", &MHUD_DEF_PERF_COLOR},
+	                  {"mhudPrespeedJumpbugColor", "HUD - Menu Label JumpbugColor", &MHUD_DEF_JUMPBUG_COLOR}},
+	/* Keys */       {{"mhudKeysOverlapColor", "HUD - Menu Label OverlapColor", &MHUD_DEF_KEYS_OVERLAP_COLOR},
+	                  {"mhudKeysPressedColor", "HUD - Menu Label PressedColor", &MHUD_DEF_KEYS_PRESSED_COLOR},
+	                  {"mhudKeysOverlapGlowColor", "HUD - Menu Label OverlapGlowColor", &MHUD_DEF_KEYS_OVERLAP_GLOW_COLOR}},
+	/* Checkpoint, LeadProgress, PbWr, ShowPos, Course, RunType — доп. цветов нет */
+};
+// clang-format on
+
 // Видимая область экрана в процентах от центра (см. шапку).
 #define KZ_EDITOR_POS_MIN (-50)
 #define KZ_EDITOR_POS_MAX 50
@@ -243,6 +276,17 @@ void KZHUDService::RenderEditor()
 		{
 			this->SetMenuSwapClass(layout, "ep_dcol_ahead", this->menuApplied.epDAhead, panorama::ResolveSwatchClass(prefs.deltaAhead));
 			this->SetMenuSwapClass(layout, "ep_dcol_behind", this->menuApplied.epDBehind, panorama::ResolveSwatchClass(prefs.deltaBehind));
+		}
+		for (i32 k = 0; k < 3; k++)
+		{
+			const EditorExtraColorDef &xc = EDITOR_EXTRA_COLORS[sel][k];
+			if (xc.prefKey)
+			{
+				this->SetMenuVar(layout, "edit_props", EDITOR_XROW_VARS[k], phrase(xc.phraseKey).c_str());
+				this->SetMenuSwapClass(layout, EDITOR_XC_IDS[k], this->menuApplied.epXc[k],
+									   panorama::ResolveSwatchClass(this->GetMHUDColorPref(xc.prefKey, *xc.def)));
+			}
+			this->SetMenuBoolClass(layout, EDITOR_XROW_IDS[k], "hidden", this->menuApplied.epXrowHidden[k], xc.prefKey == NULL);
 		}
 		V_snprintf(buf, sizeof(buf), "%i%%", el.opacity);
 		this->SetMenuVar(layout, "edit_props", "op", buf);
@@ -578,6 +622,15 @@ bool KZHUDService::HandleEditorClick(const char *id)
 		if (this->editorSelected == (i32)LayoutElement::Timer)
 		{
 			this->OpenMenuPopup(MenuPopup::Color, KZMenuFindItemByPref(id[8] == 'a' ? "mhudDeltaAheadColor" : "mhudDeltaBehindColor"));
+		}
+	}
+	else if (!V_strncmp(id, "ep_xc", 5) && id[5] >= '1' && id[5] <= '3' && id[6] == '\0')
+	{
+		const i32 k = id[5] - '1';
+		const char *key = this->editorSelected >= 0 ? EDITOR_EXTRA_COLORS[this->editorSelected][k].prefKey : NULL;
+		if (key)
+		{
+			this->OpenMenuPopup(MenuPopup::Color, KZMenuFindItemByPref(key));
 		}
 	}
 	else if (!V_strcmp(id, "ep_reset"))

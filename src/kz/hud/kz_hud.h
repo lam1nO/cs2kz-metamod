@@ -1180,6 +1180,9 @@ private:
 		const char *epColor {};
 		const char *epDAhead {};
 		const char *epDBehind {};
+		// Доп. строки цветов панели свойств (ep_xrow1..3): разметка заводит их скрытыми.
+		bool epXrowHidden[3] {true, true, true};
+		const char *epXc[3] {};
 
 		MenuAppliedState();
 	};

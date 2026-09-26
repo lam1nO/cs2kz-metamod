@@ -811,26 +811,40 @@
 		"ua"		"Елементи худу"
 	}
 	// Один ключ на два пункта — Speed и Prespeed (как "HUD - Menu Label Color" на четыре).
-	"HUD - Menu Label Decimal"
+	"HUD - Menu Cat SpeedPrespeed"
 	{
-		"en"		"Decimal places"
-		"ru"		"Доли после запятой"
-		"chi"		"小数位"
-		"ua"		"Частки після коми"
+		"en"		"Speed & prestrafe"
+		"ru"		"Скорость и престрейф"
+		"chi"		"速度与起跳前速度"
+		"ua"		"Швидкість і престрейф"
+	}
+	"HUD - Menu Label SpeedDecimal"
+	{
+		"en"		"Speed: decimal places"
+		"ru"		"Скорость: доли после запятой"
+		"chi"		"速度：小数位"
+		"ua"		"Швидкість: частки після коми"
+	}
+	"HUD - Menu Label PrespeedDecimal"
+	{
+		"en"		"Prestrafe: decimal places"
+		"ru"		"Престрейф: доли после запятой"
+		"chi"		"起跳前速度：小数位"
+		"ua"		"Престрейф: частки після коми"
 	}
 	"HUD - Menu Label PrespeedBrackets"
 	{
-		"en"		"Parentheses"
-		"ru"		"Круглые скобки"
-		"chi"		"圆括号"
-		"ua"		"Круглі дужки"
+		"en"		"Prestrafe in parentheses"
+		"ru"		"Престрейф в скобках"
+		"chi"		"起跳前速度加圆括号"
+		"ua"		"Престрейф у дужках"
 	}
 	"HUD - Menu Label PrespeedHideWalkOff"
 	{
-		"en"		"Hide when walking off"
-		"ru"		"Скрывать при сходе с края"
-		"chi"		"走下边缘时隐藏"
-		"ua"		"Ховати при сході з краю"
+		"en"		"Hide prestrafe when walking off"
+		"ru"		"Скрывать престрейф при сходе с края"
+		"chi"		"走下边缘时隐藏起跳前速度"
+		"ua"		"Ховати престрейф при сході з краю"
 	}
 	"HUD - Menu Label PrespeedHideWalkOff Sub"
 	{
