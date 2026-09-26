@@ -14,9 +14,9 @@ int main()
 	FormatDelta(75.5, true, b, sizeof(b));   assert(!strcmp(b, "+1:15.500"));
 	FormatPos(1284.314f, -512.06f, 64.03f, b, sizeof(b)); assert(!strcmp(b, "1284.31 -512.06 64.03"));
 	FormatAng(12.4f, -87.13f, b, sizeof(b)); assert(!strcmp(b, "12.40 -87.13"));
-	const char *st[] = {"ABH", "LG"};
-	FormatCourseLine("main", "CKZ", st, 2, b, sizeof(b)); assert(!strcmp(b, "MAIN \xC2\xB7 CKZ \xC2\xB7 ABH \xC2\xB7 LG"));
-	FormatCourseLine("Bonus 1", "VNL", nullptr, 0, b, sizeof(b)); assert(!strcmp(b, "BONUS 1 \xC2\xB7 VNL \xC2\xB7 NRM"));
+	const char *st[] = {"AutoBhop", "LegacyJump"};
+	FormatCourseLine("main", "CKZ", st, 2, b, sizeof(b)); assert(!strcmp(b, "MAIN \xC2\xB7 CKZ \xC2\xB7 AUTOBHOP \xC2\xB7 LEGACYJUMP"));
+	FormatCourseLine("Bonus 1", "VNL", nullptr, 0, b, sizeof(b)); assert(!strcmp(b, "BONUS 1 \xC2\xB7 VNL \xC2\xB7 NORMAL"));
 	// Длинное имя курса в маленький буфер: обрезка без выхода за буфер (n зажимается после snprintf).
 	{
 		char small[12];

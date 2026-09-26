@@ -61,14 +61,21 @@ namespace KZ::hudfmt
 		}
 		out[n] = 0;
 		n = ClampWritten(n, snprintf(out + n, outLen - n, " \xC2\xB7 %s", modeShort ? modeShort : ""), outLen);
+		// Дизайн: без стилей — «NORMAL» целиком, стили — полными именами (GetStyleName) в верхнем
+		// регистре, как и имя курса; режим остаётся коротким (CKZ/VNL/KZT).
 		if (styleCount <= 0)
 		{
-			snprintf(out + n, outLen - n, " \xC2\xB7 NRM");
+			snprintf(out + n, outLen - n, " \xC2\xB7 NORMAL");
 			return;
 		}
 		for (int i = 0; i < styleCount && n + 1 < outLen; i++)
 		{
-			n = ClampWritten(n, snprintf(out + n, outLen - n, " \xC2\xB7 %s", styles[i]), outLen);
+			n = ClampWritten(n, snprintf(out + n, outLen - n, " \xC2\xB7 "), outLen);
+			for (const char *p = styles[i] ? styles[i] : ""; *p && n + 1 < outLen; p++)
+			{
+				out[n++] = (char)toupper((unsigned char)*p);
+			}
+			out[n] = 0;
 		}
 	}
 

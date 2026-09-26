@@ -474,7 +474,7 @@ void KZHUDService::RenderEditorReplica(CCSCustomHudLayout *layout, bool tickOnly
 	i32 styleCount = 0;
 	for (i32 i = 0; i < this->player->styleServices.Count() && styleCount < (i32)KZ_ARRAYSIZE(styles); i++)
 	{
-		styles[styleCount++] = this->player->styleServices[i]->GetStyleShortName();
+		styles[styleCount++] = this->player->styleServices[i]->GetStyleName();
 	}
 	KZ::hudfmt::FormatCourseLine(course ? course->name : "Main", this->player->modeService ? this->player->modeService->GetModeShortName() : "CKZ",
 								 styles, styleCount, line, sizeof(line));

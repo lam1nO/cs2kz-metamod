@@ -680,12 +680,12 @@ void KZHUDService::UpdateCourseElement(CCSCustomHudLayout *layout, KZPlayer *sou
 	char line[128] = "";
 	if (course)
 	{
-		// Короткие имена стилей (ABH, LGJ): строка одна на весь экран, полные имена её раздули бы.
+		// Полные имена стилей (AutoBhop, LegacyJump) — по дизайну; FormatCourseLine поднимает регистр.
 		const char *styles[8];
 		i32 styleCount = 0;
 		for (i32 i = 0; i < source->styleServices.Count() && styleCount < (i32)KZ_ARRAYSIZE(styles); i++)
 		{
-			styles[styleCount++] = source->styleServices[i]->GetStyleShortName();
+			styles[styleCount++] = source->styleServices[i]->GetStyleName();
 		}
 		KZ::hudfmt::FormatCourseLine(course->name, source->modeService->GetModeShortName(), styles, styleCount, line, sizeof(line));
 	}
