@@ -1173,6 +1173,14 @@ private:
 		// Доп. строки цветов панели свойств (ep_xrow1..3): разметка заводит их скрытыми.
 		bool epXrowHidden[3] {true, true, true};
 		const char *epXc[3] {};
+		// Строки вида клавиш (только у элемента Keys): тумблеры ep_trow1..8/ep_tg1..8, степпер
+		// интервала ep_srow, сегменты «в покое» ep_grow/ep_sg0..2. Разметка заводит строки скрытыми.
+		bool epTrowHidden[8] {true, true, true, true, true, true, true, true};
+		bool epTrowDis[8] {};
+		bool epTgOn[8] {};
+		bool epSrowHidden {true};
+		bool epGrowHidden {true};
+		bool epSgOn[3] {};
 
 		MenuAppliedState();
 	};
@@ -1222,6 +1230,9 @@ private:
 	void EditorToggleOutline();
 	void EditorToggleElement(i32 element);
 	void EditorResetSelected();
+	void EditorToggleKeysPref(i32 row);
+	void EditorStepKeysGap(i32 dir);
+	void EditorPickKeysIdle(i32 idle);
 
 	void SetMenuClass(CCSCustomHudLayout *layout, const char *panelId, const char *className, bool on);
 	void SetMenuBoolClass(CCSCustomHudLayout *layout, const char *panelId, const char *className, bool &cache, bool want);
