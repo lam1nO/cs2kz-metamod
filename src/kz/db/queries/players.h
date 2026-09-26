@@ -56,6 +56,14 @@ constexpr char sql_players_set_prefs[] = R"(
         WHERE SteamID64=%lld
 )";
 
+// [cyb] Актуальный ник с платформы (db/cyb_alias_sync.cpp). Только UPDATE: игрока, которого
+// эта БД не знает, заводит его первый заход (SetupClient), не синк.
+constexpr char sql_players_update_alias[] = R"(
+    UPDATE Players 
+        SET Alias='%s' 
+        WHERE SteamID64=%lld
+)";
+
 constexpr char sql_players_getalias[] = R"(
     SELECT Alias 
         FROM Players 

@@ -5,6 +5,8 @@
 #include "data.h"
 #include "item.h"
 #include "kz/spec/kz_spec.h"
+#include "kz/db/kz_db.h"
+#include "vendor/sql_mm/src/public/sql_mm.h"
 #include "utils/ctimer.h"
 
 static_global CHandle<CCSPlayerController> g_replayBot;
@@ -153,6 +155,44 @@ namespace KZ::replaysystem::bot
 		return g_pKZPlayerManager->ToPlayer(bot);
 	}
 
+	// [cyb] В шапке файла — ник на момент ЗАПИСИ рана: игрок, сменивший его после, крутился бы
+	// под старым именем. Актуальный ник — `Players.Alias` общей БД (его пишет заход на сервер и
+	// синк ников с платформы, db/cyb_alias_sync.cpp). Запрос асинхронный: бот сначала встаёт с
+	// ником из шапки, потом переименовывается; ник подменяется и в шапке текущего реплея, чтобы
+	// карточка меню показывала тот же. Ответ, опоздавший к другому реплею, отбрасывается по uuid.
+	static void RefreshBotNameFromDatabase(u64 steamId64)
+	{
+		data::ReplayPlayback *replay = data::GetCurrentReplay();
+		if (steamId64 == 0 || !replay || !KZDatabaseService::IsReady())
+		{
+			return;
+		}
+		const UUID_t uuid = replay->uuid;
+		auto onSuccess = [uuid, steamId64](std::vector<ISQLQuery *> queries)
+		{
+			ISQLResult *result = (!queries.empty() && queries[0]) ? queries[0]->GetResultSet() : nullptr;
+			if (!result || result->GetRowCount() == 0 || !result->FetchRow())
+			{
+				return;
+			}
+			const char *alias = result->GetString(0);
+			data::ReplayPlayback *current = data::GetCurrentReplay();
+			if (!alias || !alias[0] || !current || !(current->uuid == uuid) || !current->header.has_player()
+				|| current->header.player().steamid64() != steamId64 || current->header.player().name() == alias)
+			{
+				return;
+			}
+			current->header.mutable_player()->set_name(alias);
+			KZPlayer *botPlayer = GetBotPlayer();
+			if (botPlayer)
+			{
+				botPlayer->SetName(alias);
+			}
+		};
+		// Отказ БД — остаётся ник из шапки; саму ошибку печатает слой БД.
+		KZDatabaseService::FindAliasBySteamID64(steamId64, onSuccess, [](std::string, int) {});
+	}
+
 	void InitializeBotForReplay(const ReplayHeader &header)
 	{
 		MakeBotAlive();
@@ -165,6 +205,7 @@ namespace KZ::replaysystem::bot
 		if (header.has_player())
 		{
 			player->SetName(header.player().name().c_str());
+			RefreshBotNameFromDatabase(header.player().steamid64());
 		}
 		if (kz_replay_playback_skins_enable.Get())
 		{
