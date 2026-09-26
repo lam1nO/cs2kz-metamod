@@ -146,6 +146,10 @@ void KZHUDService::ApplyHudDefaults()
 			{"mhudCheckpointColor", &MHUD_DEF_BASE_COLOR},
 			{"mhudDeltaAheadColor", &MHUD_DEF_DELTA_AHEAD_COLOR},
 			{"mhudDeltaBehindColor", &MHUD_DEF_DELTA_BEHIND_COLOR},
+			{"mhudPbWrColor", &MHUD_DEF_BASE_COLOR},
+			{"mhudShowPosColor", &MHUD_DEF_BASE_COLOR},
+			{"mhudCourseColor", &MHUD_DEF_BASE_COLOR},
+			{"mhudLeadProgressColor", &MHUD_DEF_BASE_COLOR},
 		};
 
 		for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(kColors); i++)

@@ -125,7 +125,17 @@ void KZHUDService::SetLayoutBoolClass(CCSCustomHudLayout *layout, const char *pa
 void KZHUDService::UpdateLayoutElement(CCSCustomHudLayout *layout, LayoutElement element, bool show, const char *text, const Color &color, bool force)
 {
 	const LayoutElementDef &def = LAYOUT_ELEMENTS[(i32)element];
-	const MHUDLayoutPrefs::Element &cached = this->GetLayoutPrefs().elements[(i32)element];
+	this->ApplyLayoutElementTo(layout, this->GetLayoutPrefs().elements[(i32)element], this->layoutElements[(i32)element], def.panelId, def.varName,
+							   def.posPanelId, show, text, color, force);
+}
+
+// Запись элемента худа на произвольные id и кэш: настоящий худ (UpdateLayoutElement выше) и
+// реплика редактора !hud (layout/editor.cpp — e_* несёт позицию/показ, x_mhud_* — текст/стиль)
+// идут через ОДИН код, чтобы реплика выглядела ровно как худ.
+void KZHUDService::ApplyLayoutElementTo(CCSCustomHudLayout *layout, const MHUDLayoutPrefs::Element &cached, LayoutElementState &state,
+										const char *panelId, const char *varName, const char *posPanelId, bool show, const char *text,
+										const Color &color, bool force)
+{
 	LayoutLabelStyle style;
 	style.x = cached.x;
 	style.y = cached.y;
@@ -139,7 +149,19 @@ void KZHUDService::UpdateLayoutElement(CCSCustomHudLayout *layout, LayoutElement
 	// из ключа outlineKey (с миграцией из старого общего hudOutline при первом чтении).
 	style.outline = cached.outline;
 	style.color = color;
-	this->ApplyLayoutLabel(layout, def.panelId, def.varName, this->layoutElements[(i32)element], style, show, text, force, def.posPanelId);
+	this->ApplyLayoutLabel(layout, panelId, varName, state, style, show, text, force, posPanelId);
+}
+
+const char *KZHUDService::ColorClassCache::Get(const Color &c)
+{
+	const u32 p = ((u32)c.r() << 24) | ((u32)c.g() << 16) | ((u32)c.b() << 8) | (u32)c.a();
+	if (!this->valid || this->packed != p)
+	{
+		this->valid = true;
+		this->packed = p;
+		this->cls = panorama::ResolveColorClass(c);
+	}
+	return this->cls;
 }
 
 // Общая запись одного текстового лейбла panorama-разметки: элементы худа (UpdateLayoutElement,

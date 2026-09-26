@@ -515,6 +515,15 @@ void KZHUDService::InitMenuPrefs()
 	KZ::menu::SetItemEnabledBy(keysColors, "hudKeysOverlap");
 
 	KZ::menu::AddColor(elementNodes[(i32)LayoutElement::Checkpoint], "HUD - Menu Label Color", "mhudCheckpointColor", MHUD_DEF_BASE_COLOR);
+	// Цвета полей редактора !hud и дельты таймера: пункты в скрытых узлах элементов — их правит
+	// попап цвета редактора (ep_color/ep_dcol_*), сбрасывает ResetNode элемента, переносит обмен
+	// худом. Ключи — те же, что читает RefreshLayoutPrefs (layout/prefs.cpp).
+	KZ::menu::AddColor(timer, "HUD - Menu Label DeltaAheadColor", "mhudDeltaAheadColor", MHUD_DEF_DELTA_AHEAD_COLOR);
+	KZ::menu::AddColor(timer, "HUD - Menu Label DeltaBehindColor", "mhudDeltaBehindColor", MHUD_DEF_DELTA_BEHIND_COLOR);
+	KZ::menu::AddColor(elementNodes[(i32)LayoutElement::LeadProgress], "HUD - Menu Label Color", "mhudLeadProgressColor", MHUD_DEF_BASE_COLOR);
+	KZ::menu::AddColor(elementNodes[(i32)LayoutElement::PbWr], "HUD - Menu Label Color", "mhudPbWrColor", MHUD_DEF_BASE_COLOR);
+	KZ::menu::AddColor(elementNodes[(i32)LayoutElement::ShowPos], "HUD - Menu Label Color", "mhudShowPosColor", MHUD_DEF_BASE_COLOR);
+	KZ::menu::AddColor(elementNodes[(i32)LayoutElement::Course], "HUD - Menu Label Color", "mhudCourseColor", MHUD_DEF_BASE_COLOR);
 	// У «Прогресса» своего цвета нет (в дизайне не просили) — только общие поля.
 
 	// Позиция карточки меню реплея — см. комментарий у видимой страницы ReplayMenu выше. Классы

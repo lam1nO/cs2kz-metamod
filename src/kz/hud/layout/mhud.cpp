@@ -114,9 +114,17 @@ void KZHUDService::UpdateTimerElement(CCSCustomHudLayout *layout, KZPlayer *sour
 	// Нет пути (новичок без PB-реплея, идёт загрузка, путь другого курса/режима) — дельта просто
 	// скрыта: ни прочерка, ни сообщения (Review Focus 3).
 	const bool showDelta = KZ::hudfmt::DeltaVisible(running, gotDelta, gotDelta, prefs.timerCompare);
-	const char *const deltaPanel = "mhud_delta";
-	LayoutExtraState &extra = this->layoutExtra;
-	if (showDelta)
+	this->ApplyTimerDelta(layout, "", this->layoutExtra, prefs, showDelta, delta);
+}
+
+// Дельта в строке таймера — общая для настоящего худа (prefix "") и реплики редактора !hud
+// (prefix "x_", свой кэш extra): один код цвета/кегля/показа на оба.
+void KZHUDService::ApplyTimerDelta(CCSCustomHudLayout *layout, const char *prefix, LayoutExtraState &extra, const MHUDLayoutPrefs &prefs, bool show,
+								   f64 delta)
+{
+	char idBuf[64];
+	const char *deltaPanel = PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "mhud_delta");
+	if (show)
 	{
 		char deltaText[24];
 		KZ::hudfmt::FormatDelta(delta, prefs.timerDetailed, deltaText, sizeof(deltaText));
@@ -151,7 +159,7 @@ void KZHUDService::UpdateTimerElement(CCSCustomHudLayout *layout, KZPlayer *sour
 		this->SetLayoutValueClass(layout, deltaPanel, extra.deltaFontSize, Clamp(timerSize / 2, LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX), "font-size", false);
 	}
 	// hidden — последним: сначала текст/цвет/кегль, потом показ, чтобы не мелькнул прошлый кадр.
-	this->SetLayoutBoolClass(layout, deltaPanel, "hidden", extra.deltaHidden, !showDelta);
+	this->SetLayoutBoolClass(layout, deltaPanel, "hidden", extra.deltaHidden, !show);
 }
 
 void KZHUDService::UpdateSpeedElement(CCSCustomHudLayout *layout, const SpeedInfo &info, bool force)
@@ -265,47 +273,61 @@ void KZHUDService::UpdateKeysElement(CCSCustomHudLayout *layout, KZPlayer *sourc
 	{
 		return;
 	}
+	this->ApplyKeysLook(layout, "", this->layoutKeys, prefs, keys, overlap, overlapped);
+}
 
-	const char *const keysPanel = LAYOUT_ELEMENTS[(i32)LayoutElement::Keys].panelId;
+// Вид блока клавиш (тумблеры контейнера, свечение/тонировка, «нажато», кегль и шрифт) — общий
+// для настоящего худа (prefix "") и реплики редактора !hud (prefix "x_", свой кэш state).
+void KZHUDService::ApplyKeysLook(CCSCustomHudLayout *layout, const char *prefix, LayoutKeysState &state, const MHUDLayoutPrefs &prefs,
+								 const bool (&keys)[MHUD_KEY_COUNT], bool overlap, const bool (&overlapped)[MHUD_KEY_COUNT])
+{
+	char idBuf[64];
+	const char *const keysPanel = PrefixLayoutId(idBuf, sizeof(idBuf), prefix, LAYOUT_ELEMENTS[(i32)LayoutElement::Keys].panelId);
+	char keyIds[MHUD_KEY_COUNT][48];
+	const char *keyPanels[MHUD_KEY_COUNT];
+	for (i32 i = 0; i < MHUD_KEY_COUNT; i++)
+	{
+		keyPanels[i] = PrefixLayoutId(keyIds[i], sizeof(keyIds[i]), prefix, KEY_PANELS[i]);
+	}
 
 	// Тумблеры на весь контейнер клавиш — каждый ставится И снимается по значению префа
 	// (залипание оформления при выключении уже ловилось ревью на другом месте, см. брифинг).
 	const i32 idle = prefs.keysIdle;
-	if (this->layoutKeys.idle != idle)
+	if (state.idle != idle)
 	{
 		SetKeysHasClass(layout, this->player, keysPanel, "hide-idle", idle == 1);
 		SetKeysHasClass(layout, this->player, keysPanel, "keys-underscore", idle == 2);
-		this->layoutKeys.idle = idle;
+		state.idle = idle;
 	}
 	const i32 noBorder = prefs.keysBorder ? 0 : 1;
-	if (this->layoutKeys.noBorder != noBorder)
+	if (state.noBorder != noBorder)
 	{
 		SetKeysHasClass(layout, this->player, keysPanel, "keys-noborder", noBorder != 0);
-		this->layoutKeys.noBorder = noBorder;
+		state.noBorder = noBorder;
 	}
 	const i32 noGlow = prefs.keysGlow ? 0 : 1;
-	if (this->layoutKeys.noGlow != noGlow)
+	if (state.noGlow != noGlow)
 	{
 		SetKeysHasClass(layout, this->player, keysPanel, "keys-noglow", noGlow != 0);
-		this->layoutKeys.noGlow = noGlow;
+		state.noGlow = noGlow;
 	}
 	const i32 noFill = prefs.keysFill ? 0 : 1;
-	if (this->layoutKeys.noFill != noFill)
+	if (state.noFill != noFill)
 	{
 		SetKeysHasClass(layout, this->player, keysPanel, "keys-nofill", noFill != 0);
-		this->layoutKeys.noFill = noFill;
+		state.noFill = noFill;
 	}
 	const i32 letters = prefs.keysLetters ? 1 : 0;
-	if (this->layoutKeys.letters != letters)
+	if (state.letters != letters)
 	{
 		SetKeysHasClass(layout, this->player, keysPanel, "keys-letters", letters != 0);
-		this->layoutKeys.letters = letters;
+		state.letters = letters;
 	}
 	const i32 square = prefs.keysSquare ? 1 : 0;
-	if (this->layoutKeys.square != square)
+	if (state.square != square)
 	{
 		SetKeysHasClass(layout, this->player, keysPanel, "keys-square", square != 0);
-		this->layoutKeys.square = square;
+		state.square = square;
 	}
 
 	// key-glow-N (keys.css, 160 записей) — та же палитра, что pal-fg-N/pal-bg-N в
@@ -321,58 +343,60 @@ void KZHUDService::UpdateKeysElement(CCSCustomHudLayout *layout, KZPlayer *sourc
 	const i32 glow = resolveGlowIndex(prefs.keysPressed, MHUD_DEF_KEYS_PRESSED_COLOR);
 	const i32 glowOverlap = overlap ? resolveGlowIndex(prefs.keysOverlapGlow, MHUD_DEF_KEYS_OVERLAP_GLOW_COLOR) : glow;
 	const char *overlapClass = prefs.keysOverlapAxis ? panorama::ResolveColorClass(prefs.keysOverlap) : NULL;
-	for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(KEY_PANELS); i++)
+	for (i32 i = 0; i < MHUD_KEY_COUNT; i++)
 	{
 		// Цвет контейнера наследуется детьми — класс здесь его переопределяет для одной кнопки.
-		this->SetLayoutClass(layout, KEY_PANELS[i], this->layoutKeys.overlapClass[i], overlapped[i] ? overlapClass : NULL);
+		this->SetLayoutClass(layout, keyPanels[i], state.overlapClass[i], overlapped[i] ? overlapClass : NULL);
 
 		const i32 wanted = overlapped[i] ? glowOverlap : glow;
-		if (this->layoutKeys.glow[i] == wanted)
+		if (state.glow[i] == wanted)
 		{
 			continue;
 		}
 		char glowClass[32];
-		if (this->layoutKeys.glow[i] >= 0)
+		if (state.glow[i] >= 0)
 		{
-			V_snprintf(glowClass, sizeof(glowClass), "key-glow-%i", this->layoutKeys.glow[i]);
-			layout->SetHasClass(KEY_PANELS[i], glowClass, k_eHudPanelClassStatus_DoesNotHaveClass);
+			V_snprintf(glowClass, sizeof(glowClass), "key-glow-%i", state.glow[i]);
+			layout->SetHasClass(keyPanels[i], glowClass, k_eHudPanelClassStatus_DoesNotHaveClass);
 		}
 		V_snprintf(glowClass, sizeof(glowClass), "key-glow-%i", wanted);
-		if (!layout->SetHasClass(KEY_PANELS[i], glowClass, k_eHudPanelClassStatus_HasClass))
+		if (!layout->SetHasClass(keyPanels[i], glowClass, k_eHudPanelClassStatus_HasClass))
 		{
-			KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_hud_class_dropped reason=intern_limit panel=%s class=%s slot=%i\n", KEY_PANELS[i],
+			KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_hud_class_dropped reason=intern_limit panel=%s class=%s slot=%i\n", keyPanels[i],
 						glowClass, this->player->GetPlayerSlot().Get());
 		}
-		this->layoutKeys.glow[i] = wanted;
+		state.glow[i] = wanted;
 	}
 
-	for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(KEY_PANELS); i++)
+	for (i32 i = 0; i < MHUD_KEY_COUNT; i++)
 	{
-		if (this->layoutKeys.pressed[i] == keys[i])
+		if (state.pressed[i] == keys[i])
 		{
 			continue;
 		}
-		this->layoutKeys.pressed[i] = keys[i];
-		if (!layout->SetHasClass(KEY_PANELS[i], "pressed", keys[i] ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass))
+		state.pressed[i] = keys[i];
+		if (!layout->SetHasClass(keyPanels[i], "pressed", keys[i] ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass))
 		{
 			KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_hud_class_dropped reason=intern_limit panel=%s class=pressed slot=%i\n",
-						KEY_PANELS[i], this->player->GetPlayerSlot().Get());
+						keyPanels[i], this->player->GetPlayerSlot().Get());
 		}
 	}
 
 	// Размер элемента (уже clamped/snapped к LAYOUT_SIZE_MIN/MAX в RefreshLayoutPrefs) и шрифт
 	// глифов — общим хелпером с меню реплея (layout/rpmenu.cpp).
 	const MHUDLayoutPrefs::Element &cached = prefs.elements[(i32)LayoutElement::Keys];
-	this->ApplyKeysSizing(layout, this->layoutKeys, cached.size, cached.fontClass);
+	this->ApplyKeysSizing(layout, state, cached.size, cached.fontClass, prefix);
 }
 
 // Кегль блока клавиш — на контейнер (масштаб кнопок, key-size--N) и на каждую кнопку отдельно
 // (масштаб глифа, font-size--Npx): в panorama font-size не наследуется детьми через класс
 // родителя, апстрим тоже дублирует явно. Шрифт-класс — на глифы (см. KEY_GLYPHS). state —
-// диф-кэш ТОЙ сущности, на которую пишем (layoutKeys у худа).
-void KZHUDService::ApplyKeysSizing(CCSCustomHudLayout *layout, LayoutKeysState &state, i32 size, const char *fontClass)
+// диф-кэш ТОЙ сущности, на которую пишем (layoutKeys у худа, editorKeys у реплики редактора).
+void KZHUDService::ApplyKeysSizing(CCSCustomHudLayout *layout, LayoutKeysState &state, i32 size, const char *fontClass, const char *prefix)
 {
-	const char *const keysPanel = LAYOUT_ELEMENTS[(i32)LayoutElement::Keys].panelId;
+	char idBuf[64];
+	const char *const keysPanel = PrefixLayoutId(idBuf, sizeof(idBuf), prefix, LAYOUT_ELEMENTS[(i32)LayoutElement::Keys].panelId);
+	char keyBuf[48];
 
 	if (state.boxSize != size)
 	{
@@ -396,16 +420,17 @@ void KZHUDService::ApplyKeysSizing(CCSCustomHudLayout *layout, LayoutKeysState &
 		char className[32];
 		for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(KEY_PANELS); i++)
 		{
+			const char *keyPanel = PrefixLayoutId(keyBuf, sizeof(keyBuf), prefix, KEY_PANELS[i]);
 			if (state.fontSize != INT_MIN)
 			{
 				V_snprintf(className, sizeof(className), "font-size--%ipx", state.fontSize);
-				layout->SetHasClass(KEY_PANELS[i], className, k_eHudPanelClassStatus_DoesNotHaveClass);
+				layout->SetHasClass(keyPanel, className, k_eHudPanelClassStatus_DoesNotHaveClass);
 			}
 			V_snprintf(className, sizeof(className), "font-size--%ipx", size);
-			if (!layout->SetHasClass(KEY_PANELS[i], className, k_eHudPanelClassStatus_HasClass))
+			if (!layout->SetHasClass(keyPanel, className, k_eHudPanelClassStatus_HasClass))
 			{
-				KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_hud_class_dropped reason=intern_limit panel=%s class=%s slot=%i\n",
-							KEY_PANELS[i], className, this->player->GetPlayerSlot().Get());
+				KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_hud_class_dropped reason=intern_limit panel=%s class=%s slot=%i\n", keyPanel,
+							className, this->player->GetPlayerSlot().Get());
 			}
 		}
 		state.fontSize = size;
@@ -417,14 +442,15 @@ void KZHUDService::ApplyKeysSizing(CCSCustomHudLayout *layout, LayoutKeysState &
 	{
 		for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(KEY_GLYPHS); i++)
 		{
+			const char *glyph = PrefixLayoutId(keyBuf, sizeof(keyBuf), prefix, KEY_GLYPHS[i]);
 			if (state.fontClass)
 			{
-				layout->SetHasClass(KEY_GLYPHS[i], state.fontClass, k_eHudPanelClassStatus_DoesNotHaveClass);
+				layout->SetHasClass(glyph, state.fontClass, k_eHudPanelClassStatus_DoesNotHaveClass);
 			}
-			if (!layout->SetHasClass(KEY_GLYPHS[i], fontClass, k_eHudPanelClassStatus_HasClass))
+			if (!layout->SetHasClass(glyph, fontClass, k_eHudPanelClassStatus_HasClass))
 			{
-				KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_hud_class_dropped reason=intern_limit panel=%s class=%s slot=%i\n",
-							KEY_GLYPHS[i], fontClass, this->player->GetPlayerSlot().Get());
+				KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_hud_class_dropped reason=intern_limit panel=%s class=%s slot=%i\n", glyph,
+							fontClass, this->player->GetPlayerSlot().Get());
 			}
 		}
 		state.fontClass = fontClass;
@@ -447,7 +473,18 @@ void KZHUDService::UpdateCheckpointElement(CCSCustomHudLayout *layout, KZPlayer 
 // Курс, по которому показываем PB/WR и строку курса: активный, а до входа в старт-зону (только
 // зашёл, стоит вне зоны) — главный курс карты (cyber 0). Тот же выбор, что у строки PB/WR
 // HTML-худа (kz_hud.cpp, pbwrCourse): показания двух путей худа не должны расходиться.
-static_function const KZCourseDescriptor *GetHudDisplayCourse(KZPlayer *source)
+// Строки showpos игрока: «x y z» и «pitch yaw» (форматтеры — host-тест tests/hud_format_test.cpp).
+void FormatShowPos(KZPlayer *source, char *pos, u32 posLen, char *ang, u32 angLen)
+{
+	Vector origin;
+	QAngle angles;
+	source->GetOrigin(&origin);
+	source->GetAngles(&angles);
+	KZ::hudfmt::FormatPos(origin.x, origin.y, origin.z, pos, posLen);
+	KZ::hudfmt::FormatAng(angles.x, angles.y, ang, angLen);
+}
+
+const KZCourseDescriptor *GetHudDisplayCourse(KZPlayer *source)
 {
 	const KZCourseDescriptor *course = source->timerService->GetCourse();
 	return course ? course : KZ::course::GetCourseByCyberNumber(0);
@@ -468,12 +505,51 @@ static_function void FormatHudRecordTime(f64 time, bool detailed, char *out, u32
 	}
 }
 
+// Стиль дочернего лейбла элемента (ячейки PB/WR, строки showpos): font-size/шрифт/цвет ставятся
+// на САМ лейбл — в panorama font-size через класс предка ребёнку не наследуется (как у клавиш), а
+// разметка больше не задаёт им размер/цвет/шрифт в css. colorClass NULL — класс цвета снят
+// (подписи PB/WR держат свой статичный цвет из css).
+void KZHUDService::ApplyChildLabelStyle(CCSCustomHudLayout *layout, const char *panelId, LayoutChildStyleState &state, i32 size, const char *fontClass,
+										const char *colorClass)
+{
+	this->SetLayoutValueClass(layout, panelId, state.fontSize, size, "font-size", false);
+	this->SetLayoutClass(layout, panelId, state.fontClass, fontClass);
+	this->SetLayoutClass(layout, panelId, state.colorClass, colorClass);
+}
+
+// Порядок ячеек: PB NUB, PB PRO, WR NUB, WR PRO — i < 2 это PB, нечётный индекс — PRO.
+static_global const char *const PBWR_CELL_IDS[4] = {"pw_pb_nub", "pw_pb_pro", "pw_wr_nub", "pw_wr_pro"};
+static_global const char *const PBWR_TIME_IDS[4] = {"pw_t_pb_nub", "pw_t_pb_pro", "pw_t_wr_nub", "pw_t_wr_pro"};
+static_global const char *const PBWR_CAP_IDS[4] = {"pw_c_pb_nub", "pw_c_pb_pro", "pw_c_wr_nub", "pw_c_wr_pro"};
+static_global const char *const PBWR_VARS[4] = {"pb_nub", "pb_pro", "wr_nub", "wr_pro"};
+
+// Ячейки PB/WR — общая запись для настоящего худа (prefix "") и реплики редактора (prefix "x_").
+// texts[i] — готовое время ячейки; cells[i] — включена ли ячейка.
+void KZHUDService::ApplyPbWrCells(CCSCustomHudLayout *layout, const char *prefix, LayoutExtraState &extra, const char *const (&texts)[4],
+								  const bool (&cells)[4], const MHUDLayoutPrefs::Element &style, const Color &color)
+{
+	char idBuf[64];
+	const char *colorClass = extra.pwColor.Get(color);
+	for (i32 i = 0; i < 4; i++)
+	{
+		// Переменная — на самом лейбле времени (у лейблов с 26.09 есть id pw_t_*), без расчёта на
+		// наследование переменных от предка.
+		const char *timeId = PrefixLayoutId(idBuf, sizeof(idBuf), prefix, PBWR_TIME_IDS[i]);
+		this->SetLayoutVar(layout, timeId, PBWR_VARS[i], extra.pbwrText[i], texts[i]);
+		this->ApplyChildLabelStyle(layout, timeId, extra.pwTime[i], style.size, style.fontClass, colorClass);
+		// Подпись PB/WR: только кегль — цвет статичный из css (WR — янтарный), шрифт — бейджевый.
+		const char *capId = PrefixLayoutId(idBuf, sizeof(idBuf), prefix, PBWR_CAP_IDS[i]);
+		this->SetLayoutValueClass(layout, capId, extra.pwCapSize[i], style.size, "font-size", false);
+		this->SetLayoutBoolClass(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, PBWR_CELL_IDS[i]), "hidden", extra.pbwrCellHidden[i], !cells[i]);
+	}
+	// Строка гаснет, когда обе её ячейки выключены: иначе от неё остался бы бейдж NUB/PRO.
+	this->SetLayoutBoolClass(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "pw_nub"), "hidden", extra.pbwrRowHidden[0], !(cells[0] || cells[2]));
+	this->SetLayoutBoolClass(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "pw_pro"), "hidden", extra.pbwrRowHidden[1], !(cells[1] || cells[3]));
+}
+
 void KZHUDService::UpdatePbWrElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force)
 {
 	const MHUDLayoutPrefs &prefs = this->GetLayoutPrefs();
-	// Порядок ячеек: PB NUB, PB PRO, WR NUB, WR PRO — i < 2 это PB, нечётный индекс — PRO.
-	static const char *const cellIds[4] = {"pw_pb_nub", "pw_pb_pro", "pw_wr_nub", "pw_wr_pro"};
-	static const char *const varNames[4] = {"pb_nub", "pb_pro", "wr_nub", "wr_pro"};
 	const bool cells[4] = {prefs.pbNub, prefs.pbPro, prefs.wrNub, prefs.wrPro};
 	// Все четыре ячейки выключены — элемент гаснет целиком (Review Focus 5), иначе на экране
 	// висела бы пустая рамка элемента, а в редакторе — пустышка, которую нечем наполнить.
@@ -484,32 +560,49 @@ void KZHUDService::UpdatePbWrElement(CCSCustomHudLayout *layout, KZPlayer *sourc
 	const bool show = course != NULL;
 	if (show)
 	{
-		const bool detailed = prefs.timerDetailed;
-		for (i32 i = 0; i < 4; i++)
-		{
-			f64 time = 0.0;
-			const bool pro = (i & 1) != 0;
-			const bool has = i < 2 ? source->timerService->GetHudPBTime(time, course, pro) : source->timerService->GetHudWorldRecordTime(time, course, pro);
-			char text[32];
-			if (has)
-			{
-				FormatHudRecordTime(time, detailed, text, sizeof(text));
-			}
-			else
-			{
-				V_strncpy(text, KZ::hudfmt::NoTimePlaceholder(detailed), sizeof(text));
-			}
-			// Переменная — на корне элемента: у лейблов времени в разметке нет id, они читают
-			// {s:pb_nub}… из переменных предка.
-			this->SetLayoutVar(layout, LAYOUT_ELEMENTS[(i32)LayoutElement::PbWr].panelId, varNames[i], this->layoutExtra.pbwrText[i], text);
-			this->SetLayoutBoolClass(layout, cellIds[i], "hidden", this->layoutExtra.pbwrCellHidden[i], !cells[i]);
-		}
-		// Строка гаснет, когда обе её ячейки выключены: иначе от неё остался бы бейдж NUB/PRO.
-		this->SetLayoutBoolClass(layout, "pw_nub", "hidden", this->layoutExtra.pbwrRowHidden[0], !(cells[0] || cells[2]));
-		this->SetLayoutBoolClass(layout, "pw_pro", "hidden", this->layoutExtra.pbwrRowHidden[1], !(cells[1] || cells[3]));
+		char buf[4][32];
+		const char *texts[4];
+		this->BuildPbWrTexts(source, course, prefs.timerDetailed, NULL, buf, texts);
+		this->ApplyPbWrCells(layout, "", this->layoutExtra, texts, cells, prefs.elements[(i32)LayoutElement::PbWr], prefs.pbwrColor);
 	}
 	// text = NULL: у корня (Panel) своей переменной нет, всё содержимое — в ячейках выше.
-	this->UpdateLayoutElement(layout, LayoutElement::PbWr, show, NULL, MHUD_DEF_BASE_COLOR, force);
+	this->UpdateLayoutElement(layout, LayoutElement::PbWr, show, NULL, prefs.pbwrColor, force);
+}
+
+// Тексты четырёх ячеек PB/WR. Нет времени — placeholders[i] (редактор) или прочерк нужной ширины.
+void KZHUDService::BuildPbWrTexts(KZPlayer *source, const KZCourseDescriptor *course, bool detailed, const char *const *placeholders,
+								  char (&buf)[4][32], const char *(&texts)[4])
+{
+	for (i32 i = 0; i < 4; i++)
+	{
+		f64 time = 0.0;
+		const bool pro = (i & 1) != 0;
+		const bool has = source && course
+						 && (i < 2 ? source->timerService->GetHudPBTime(time, course, pro) : source->timerService->GetHudWorldRecordTime(time, course, pro));
+		if (has)
+		{
+			FormatHudRecordTime(time, detailed, buf[i], sizeof(buf[i]));
+		}
+		else
+		{
+			V_strncpy(buf[i], placeholders ? placeholders[i] : KZ::hudfmt::NoTimePlaceholder(detailed), sizeof(buf[i]));
+		}
+		texts[i] = buf[i];
+	}
+}
+
+// Обе строки showpos (позиция и углы) — переменные и стиль на самих лейблах mhud_pos/mhud_ang.
+void KZHUDService::ApplyShowPosLines(CCSCustomHudLayout *layout, const char *prefix, LayoutExtraState &extra, const char *pos, const char *ang,
+									 const MHUDLayoutPrefs::Element &style, const Color &color)
+{
+	char idBuf[64];
+	const char *colorClass = extra.posColor.Get(color);
+	const char *posId = PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "mhud_pos");
+	this->SetLayoutVar(layout, posId, "pos", extra.posText, pos);
+	this->ApplyChildLabelStyle(layout, posId, extra.posLine[0], style.size, style.fontClass, colorClass);
+	const char *angId = PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "mhud_ang");
+	this->SetLayoutVar(layout, angId, "ang", extra.angText, ang);
+	this->ApplyChildLabelStyle(layout, angId, extra.posLine[1], style.size, style.fontClass, colorClass);
 }
 
 void KZHUDService::UpdateShowPosElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force)
@@ -517,20 +610,16 @@ void KZHUDService::UpdateShowPosElement(CCSCustomHudLayout *layout, KZPlayer *so
 	// Тумблер — настройка получателя (эффективный набор), координаты — наблюдаемого (source),
 	// как у строк !showpos HTML-худа.
 	const bool show = this->IsLayoutElementEnabled(LayoutElement::ShowPos);
-	char pos[64] = "";
+	const MHUDLayoutPrefs &prefs = this->GetLayoutPrefs();
 	if (show)
 	{
-		Vector origin;
-		QAngle angles;
-		source->GetOrigin(&origin);
-		source->GetAngles(&angles);
-		KZ::hudfmt::FormatPos(origin.x, origin.y, origin.z, pos, sizeof(pos));
+		char pos[64];
 		char ang[48];
-		KZ::hudfmt::FormatAng(angles.x, angles.y, ang, sizeof(ang));
-		// Вторая строка (mhud_ang) читает {s:ang} из переменных корня, как и первая {s:pos}.
-		this->SetLayoutVar(layout, LAYOUT_ELEMENTS[(i32)LayoutElement::ShowPos].panelId, "ang", this->layoutExtra.angText, ang);
+		FormatShowPos(source, pos, sizeof(pos), ang, sizeof(ang));
+		this->ApplyShowPosLines(layout, "", this->layoutExtra, pos, ang, prefs.elements[(i32)LayoutElement::ShowPos], prefs.showPosColor);
 	}
-	this->UpdateLayoutElement(layout, LayoutElement::ShowPos, show, show ? pos : NULL, MHUD_DEF_BASE_COLOR, force);
+	// text = NULL: строки пишутся в свои лейблы выше, корень — только позиция/показ.
+	this->UpdateLayoutElement(layout, LayoutElement::ShowPos, show, NULL, prefs.showPosColor, force);
 }
 
 void KZHUDService::UpdateCourseElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force)
@@ -550,7 +639,7 @@ void KZHUDService::UpdateCourseElement(CCSCustomHudLayout *layout, KZPlayer *sou
 		}
 		KZ::hudfmt::FormatCourseLine(course->name, source->modeService->GetModeShortName(), styles, styleCount, line, sizeof(line));
 	}
-	this->UpdateLayoutElement(layout, LayoutElement::Course, course != NULL, course ? line : NULL, MHUD_DEF_BASE_COLOR, force);
+	this->UpdateLayoutElement(layout, LayoutElement::Course, course != NULL, course ? line : NULL, this->GetLayoutPrefs().courseColor, force);
 }
 
 // PRAC / PRO / NUB — тот же критерий, что у метки слева от времени в HTML-худе (kz_hud.cpp):
@@ -680,9 +769,8 @@ void KZHUDService::UpdateLeadProgressElement(KZPlayer *source)
 	this->leadProgressFailLogged = false;
 	const char *language = this->player->languageService->GetLanguage();
 	const std::string text = KZLanguageService::PrepareMessageWithLang(language, "Lead - Hud Progress", percent);
-	// Своего цвета у элемента нет (в дизайне его не просили) — базовый белый, как у скорости
-	// и чекпоинта по умолчанию.
-	this->UpdateLayoutElement(layout, LayoutElement::LeadProgress, true, text.c_str(), MHUD_DEF_BASE_COLOR, created);
+	// Цвет — свой преф элемента (mhudLeadProgressColor, правится в редакторе !hud), дефолт белый.
+	this->UpdateLayoutElement(layout, LayoutElement::LeadProgress, true, text.c_str(), this->GetLayoutPrefs().leadProgressColor, created);
 }
 
 bool KZHUDService::UpdateHudLayout(KZPlayer *source)

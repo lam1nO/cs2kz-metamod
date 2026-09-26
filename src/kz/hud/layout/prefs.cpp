@@ -127,6 +127,10 @@ void KZHUDService::RefreshLayoutPrefs()
 	this->layoutPrefs.keysPressed = this->GetMHUDColorPref("mhudKeysPressedColor", MHUD_DEF_KEYS_PRESSED_COLOR);
 	this->layoutPrefs.keysOverlapGlow = this->GetMHUDColorPref("mhudKeysOverlapGlowColor", MHUD_DEF_KEYS_OVERLAP_GLOW_COLOR);
 	this->layoutPrefs.checkpoint = this->GetMHUDColorPref("mhudCheckpointColor", MHUD_DEF_BASE_COLOR);
+	this->layoutPrefs.pbwrColor = this->GetMHUDColorPref("mhudPbWrColor", MHUD_DEF_BASE_COLOR);
+	this->layoutPrefs.showPosColor = this->GetMHUDColorPref("mhudShowPosColor", MHUD_DEF_BASE_COLOR);
+	this->layoutPrefs.courseColor = this->GetMHUDColorPref("mhudCourseColor", MHUD_DEF_BASE_COLOR);
+	this->layoutPrefs.leadProgressColor = this->GetMHUDColorPref("mhudLeadProgressColor", MHUD_DEF_BASE_COLOR);
 
 	this->layoutPrefs.timerDetailed = opts->GetPreferenceBool("hudTimerDetail", true);
 	// Поля редактора `!hud`. Дефолты — те же, что пишет ApplyHudDefaults (layout/defaults.cpp)
@@ -201,4 +205,36 @@ bool KZHUDService::IsLayoutElementEnabled(LayoutElement element)
 	// цвета/раскладка брались бы у наблюдаемого, а ВИДИМОСТЬ элементов — своя (апстрим зовёт
 	// GetPrefs, origin/master:src/kz/hud/layout/preferences.cpp:96-99).
 	return this->GetLayoutPrefs().elements[(i32)element].enabled;
+}
+
+// Основной цвет элемента для ep_color редактора !hud. Ключи — те же, что читает RefreshLayoutPrefs
+// выше, и те же, что зарегистрированы пунктами Color в скрытых узлах элементов (hud_prefs.cpp):
+// попап цвета редактора правит именно эти пункты реестра.
+const char *GetElementColorKey(LayoutElement element, Color &def)
+{
+	def = MHUD_DEF_BASE_COLOR;
+	switch (element)
+	{
+		case LayoutElement::Timer:
+			def = MHUD_DEF_TIMER_PRO_COLOR;
+			return "mhudTimerProColor";
+		case LayoutElement::Speed:
+			return "mhudSpeedColor";
+		case LayoutElement::Prespeed:
+			return "mhudPrespeedColor";
+		case LayoutElement::Keys:
+			return "mhudKeysColor";
+		case LayoutElement::Checkpoint:
+			return "mhudCheckpointColor";
+		case LayoutElement::LeadProgress:
+			return "mhudLeadProgressColor";
+		case LayoutElement::PbWr:
+			return "mhudPbWrColor";
+		case LayoutElement::ShowPos:
+			return "mhudShowPosColor";
+		case LayoutElement::Course:
+			return "mhudCourseColor";
+		default:
+			return NULL;
+	}
 }

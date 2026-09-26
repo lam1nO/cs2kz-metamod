@@ -106,3 +106,24 @@ i32 SnapReplayMenuScale(i32 percent);
 // Отказ SetHasClass/SetDialogVariableString по упору в HUD_LAYOUT_MAX_INTERNED_STRINGS —
 // общий лог для entity.cpp и rpmenu.cpp (реализация в entity.cpp).
 void LogHudInternFailure(KZPlayer *player, const char *panelId, const char *className);
+
+// id панели с префиксом: "" — как есть (настоящий худ), "x_" — реплика в редакторе !hud
+// (cyber/options.xml повторяет mhud.xml под теми же id с префиксом). buf — буфер вызывающего:
+// SetHasClass/SetDialogVariableString копируют строку в свою интерн-таблицу.
+inline const char *PrefixLayoutId(char *buf, size_t len, const char *prefix, const char *id)
+{
+	if (!prefix || !prefix[0])
+	{
+		return id;
+	}
+	V_snprintf(buf, len, "%s%s", prefix, id);
+	return buf;
+}
+
+// Курс для PB/WR и строки курса: активный, а до старт-зоны — главный курс карты (layout/mhud.cpp).
+const KZCourseDescriptor *GetHudDisplayCourse(KZPlayer *source);
+// Строки showpos «x y z» / «pitch yaw» игрока source (layout/mhud.cpp).
+void FormatShowPos(KZPlayer *source, char *pos, u32 posLen, char *ang, u32 angLen);
+// Преф основного цвета элемента (ep_color редактора) и его дефолт; NULL — у элемента своего цвета
+// нет (тип рана — бейдж красят классы rt-*). Реализация — layout/prefs.cpp.
+const char *GetElementColorKey(LayoutElement element, Color &def);
