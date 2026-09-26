@@ -20,7 +20,9 @@ public:
 
 	// Task 2: сериализует текущее состояние таймера/чекпоинтов игрока в JSON-снапшот (формат v=1,
 	// см. docs/superpowers/sdd/t3-task-2-brief.md). Не мутирует состояние игрока.
-	std::string SerializeSnapshot();
+	// partialId — id куска реплея этого рана (kz_partial_replay.h), уходит опциональным полем "rp";
+	// пусто — куска нет, поле не пишется.
+	std::string SerializeSnapshot(const std::string &partialId = std::string());
 
 	// Styles-подпись игрока для ключа SavedRuns (короткие имена стилей через запятую, в порядке
 	// styleServices). Единая точка построения: upsert (save_savedrun.cpp), fetch + сверка после
@@ -45,9 +47,15 @@ public:
 	// Применение снапшота происходит прямо в колбэке этого fetch'а (не ждём следующий спаун —
 	// он может не случиться до конца карты); повторные спауны, пока fetch летит, no-op.
 	bool fetchStarted {};
+	// id куска реплея, из которого восстановлен текущий ран (поле "rp" снапшота): по нему
+	// инвалидация удаляет строку api (kz_partial_replay.h). Пусто — ран не восстанавливали или
+	// куска не было.
+	std::string restoredPartialId;
+
 	void Reset()
 	{
 		restoreAttempted = false;
 		fetchStarted = false;
+		restoredPartialId.clear();
 	}
 };

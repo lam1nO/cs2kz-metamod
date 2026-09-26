@@ -241,12 +241,18 @@ namespace KZ::replaysystem::playback
 			}
 			const TickData &src = ticks[lastLive];
 			TickData &dst = ticks[i];
+			// Бит стыка склейки — свойство САМОГО кадра (последний кадр куска рана из бэкапа
+			// бывает prac-кадром: выход с сервера из !prac), с кадра опоры его не берём.
+			const bool splicePre = dst.pre.replayFlags.splice;
+			const bool splicePost = dst.post.replayFlags.splice;
 			// Время и номер тика — свои (на них держатся окно рана, паузы и сверка кадров с
 			// таймером); всё, что описывает игрока, — с кадра входа в prac. Бит prac оставляем.
 			dst.pre = src.post;
 			dst.post = src.post;
 			dst.pre.replayFlags.prac = true;
 			dst.post.replayFlags.prac = true;
+			dst.pre.replayFlags.splice = splicePre;
+			dst.post.replayFlags.splice = splicePost;
 			dst.checkpoint = src.checkpoint;
 			dst.modernJump = src.modernJump;
 			dst.forward = 0;
@@ -288,6 +294,14 @@ namespace KZ::replaysystem::playback
 		// игрока — с последнего обычного кадра, serverTick — свой. Вход — const (плейбек режет
 		// по живому g_currentReplay), поэтому здесь только индекс опоры, без копии кадров.
 		i64 lastLive = -1;
+		// Стык склейки рана из бэкапа (бит RpFlags::splice на последнем кадре куска): восстановление
+		// вернуло игрока на чекпоинт (или в точку prac), то есть для разреза это ПРИБЫТИЕ телепорта
+		// — ровно на единицу счётчика. Сам счётчик на стыке растёт не всегда: восстановленный ран
+		// несёт tpCount с момента выхода (+1 только у рана без единого ТП, см. SavedRuns), — поэтому
+		// кадр после стыка получает «предыдущий + 1», а сдвиг держится до конца файла, чтобы
+		// инвариант «прибытия по кадрам == прирост счётчика за окно» сходился. Стыков может быть
+		// несколько (ран восстанавливали не раз) — сдвиг копится.
+		i64 spliceTpShift = 0;
 		for (u32 i = 0; i < tickCount; i++)
 		{
 			if (!ticks[i].post.replayFlags.prac)
@@ -298,7 +312,11 @@ namespace KZ::replaysystem::playback
 			frames[i].serverTick = ticks[i].serverTick;
 			frames[i].cpIndex = t.checkpoint.index;
 			frames[i].cpCount = t.checkpoint.checkpointCount;
-			frames[i].tpCount = t.checkpoint.teleportCount;
+			if (i > 0 && ticks[i - 1].post.replayFlags.splice)
+			{
+				spliceTpShift = (i64)frames[i - 1].tpCount + 1 - (i64)t.checkpoint.teleportCount;
+			}
+			frames[i].tpCount = (i32)((i64)t.checkpoint.teleportCount + spliceTpShift);
 			frames[i].origin[0] = t.post.origin.x;
 			frames[i].origin[1] = t.post.origin.y;
 			frames[i].origin[2] = t.post.origin.z;

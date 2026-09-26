@@ -111,6 +111,29 @@ struct Recorder
 	u32 totalTicksRecorded = 0; // Total across all flushed chunks + in-memory
 	std::string tempFileBase;   // Set on first flush; empty means no flushing has occurred
 
+	// --- Склейка с куском рана из бэкапа (SavedRuns, kz/savedrun/kz_partial_replay.h) ---
+	// Рекордер восстановленного рана заводится сразу при восстановлении, а кусок (кадры до выхода
+	// игрока) приезжает асинхронно — с диска или из api. Пока он не вставлен в начало,
+	// splicePending = true: такой рекордер не имеет права стать файлом (в нём нет старта рана).
+	bool splicePending = false;
+	// id куска, который ждёт этот рекордер: повторный выход ДО вставки оставляет в SavedRuns его же.
+	std::string splicePartialId;
+	// Кадры продолжения идут в файле СРАЗУ за кадрами куска: живой tickcount сдвигается так, чтобы
+	// тик tickShiftFrom лёг на tickShiftTo (первый тик после куска). Тики раньше tickShiftFrom
+	// прижимаются к tickShiftTo — serverTick в файле обязан не убывать (бинарные поиски плейбека).
+	bool tickShiftActive = false;
+	u32 tickShiftFrom = 0;
+	u32 tickShiftTo = 0;
+
+	u32 ShiftTick(u32 tick) const
+	{
+		if (!tickShiftActive)
+		{
+			return tick;
+		}
+		return tick < tickShiftFrom ? tickShiftTo : tickShiftTo + (tick - tickShiftFrom);
+	}
+
 	// Flush in-memory recording data to a temp chunk file on disk, then clear in-memory vectors.
 	void FlushChunkToDisk();
 	// Read all flushed chunks from disk back into vectors, appending the current in-memory remainder.
@@ -144,6 +167,7 @@ struct Recorder
 		if constexpr (std::is_same<T, TickData>::value)
 		{
 			tickData.push_back(data);
+			tickData.back().serverTick = ShiftTick(data.serverTick);
 			totalTicksRecorded++;
 			if (tickData.size() >= FLUSH_INTERVAL_TICKS)
 			{
@@ -153,6 +177,7 @@ struct Recorder
 		else if constexpr (std::is_same<T, RpEvent>::value)
 		{
 			rpEvents.push_back(data);
+			rpEvents.back().serverTick = ShiftTick(data.serverTick);
 		}
 		else if constexpr (std::is_same<T, RpJumpStats>::value)
 		{
@@ -169,14 +194,17 @@ struct Recorder
 				jumps.emplace_back();
 				RpJumpStats &slim = jumps.back();
 				slim.overall = data.overall;
+				slim.overall.serverTick = ShiftTick(data.overall.serverTick);
 				slim.strafes = data.strafes;
 				return;
 			}
 			jumps.push_back(data);
+			jumps.back().overall.serverTick = ShiftTick(data.overall.serverTick);
 		}
 		else if constexpr (std::is_same<T, CmdData>::value)
 		{
 			cmdData.push_back(data);
+			cmdData.back().serverTick = ShiftTick(data.serverTick);
 		}
 		else
 		{
@@ -259,6 +287,11 @@ public:
 
 	// Spawn a thread to write recorder to disk; calls onSuccess/onFailure on the main thread (both optional).
 	void QueueWriteToFile(std::unique_ptr<Recorder> recorder, DiskWriteSuccessCallback onSuccess = nullptr, WriteFailureCallback onFailure = nullptr);
+
+	// Произвольная тяжёлая работа на отдельном потоке (разбор куска рана из бэкапа —
+	// kz/savedrun/kz_partial_replay.cpp): work выполняется на потоке и возвращает колбэк, который
+	// зовётся на ГЛАВНОМ потоке из RunFrame (пустой колбэк допустим). Stop() ждёт и эти потоки.
+	void QueueTask(std::function<std::function<void()>()> work);
 
 	// Invoke pending callbacks — call once per game frame from the main thread.
 	void RunFrame();

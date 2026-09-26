@@ -215,6 +215,23 @@ void KZRecordingService::OnTimerEnd()
 	this->InsertTimerEvent(RpEvent::RpEventData::TimerEvent::TIMER_END, this->player->timerService->GetTime(),
 						   this->player->timerService->GetCourse()->id);
 
+	// Рекордер восстановленного рана, в который кусок из бэкапа ещё не вставлен (финиш за секунды
+	// после восстановления, кусок ещё едет — kz/savedrun/kz_partial_replay.cpp): в нём нет старта
+	// рана, и файлом PB он стать не имеет права. Ран остаётся без реплея — как до склейки.
+	for (auto it = this->runRecorders.begin(); it != this->runRecorders.end();)
+	{
+		if (it->desiredStopTime < 0.0f && it->splicePending)
+		{
+			KZ_LOG_WARN(LogChannel::Recording, "[cyb] partial_replay_splice_failed steam_id=%llu reason=finished_before_splice\n",
+						this->player->GetSteamId64(false));
+			it = this->runRecorders.erase(it);
+		}
+		else
+		{
+			++it;
+		}
+	}
+
 	for (auto &recorder : this->runRecorders)
 	{
 		if (recorder.desiredStopTime < 0.0f)

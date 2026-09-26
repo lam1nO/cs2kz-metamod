@@ -1,5 +1,6 @@
 #include "../kz.h"
 #include "kz_savedrun.h"
+#include "kz_partial_replay.h"
 #include "kz/checkpoint/kz_checkpoint.h"
 #include "kz/db/kz_db.h"
 #include "kz/language/kz_language.h"
@@ -12,6 +13,7 @@
 #include "kz/trigger/kz_trigger.h"
 #include "utils/json.h"
 #include "utils/utils.h"
+#include "utils/uuid.h"
 
 #include <cmath>
 
@@ -94,7 +96,7 @@ CUtlString KZSavedRunService::BuildStylesString(KZPlayer *player)
 	return styles;
 }
 
-std::string KZSavedRunService::SerializeSnapshot()
+std::string KZSavedRunService::SerializeSnapshot(const std::string &partialId)
 {
 	KZTimerService *timerService = this->player->timerService;
 	KZCheckpointService *checkpointService = this->player->checkpointService;
@@ -153,6 +155,12 @@ std::string KZSavedRunService::SerializeSnapshot()
 	{
 		std::vector<f64> pos = {frozen.origin.x, frozen.origin.y, frozen.origin.z, frozen.angles.x, frozen.angles.y, frozen.angles.z};
 		json.Set("pos", pos);
+	}
+	// Опциональное поле того же рода, что pos: id куска реплея (kz_partial_replay.h). Старый
+	// сервер его не читает и восстанавливает ран без реплея — как до склейки.
+	if (!partialId.empty())
+	{
+		json.Set("rp", partialId);
 	}
 
 	return json.ToString();
@@ -214,6 +222,14 @@ bool KZSavedRunService::ApplySnapshot(i32 course, u32 tpCount, const std::string
 				break;
 			}
 		}
+	}
+
+	// id куска реплея этого рана (поле "rp", kz_partial_replay.h). Необязательное: у строк старых
+	// сборок и у ранов без рекордера его нет. Битое значение — ран восстанавливаем без реплея.
+	std::string partialId;
+	if (json.HasValue("rp") && (!json.Get("rp", partialId) || !UUID_t::FromString(partialId.c_str())))
+	{
+		partialId.clear();
 	}
 
 	if (version != 1)
@@ -350,6 +366,18 @@ bool KZSavedRunService::ApplySnapshot(i32 course, u32 tpCount, const std::string
 	utils::FormatTime(parsed.time, timeText, sizeof(timeText));
 	this->player->languageService->PrintChat(true, false, "Run Restored", timeText);
 
+	// Реплей рана: рекордер заводится ПОСЛЕ ForcePause (её TIMER_PAUSE в запись не нужен — паузу
+	// стыка ставит склейка), кусок до выхода игрока вставляется в его начало асинхронно.
+	this->restoredPartialId = partialId;
+	if (!partialId.empty())
+	{
+		KZPartialReplay::Key key;
+		if (KZPartialReplay::MakeKey(this->player, course, key))
+		{
+			KZPartialReplay::ResumeAfterRestore(this->player, key, partialId, parsed.time);
+		}
+	}
+
 	return true;
 }
 
@@ -381,9 +409,24 @@ void KZSavedRunService::SaveOnDisconnect()
 		return;
 	}
 
+	// Кусок реплея рана (kz_partial_replay.h): забираем живой рекордер ДО TimerStop (тот его убил
+	// бы) и пишем асинхронно; id куска уходит в снапшот. Без готовой БД строки SavedRuns не будет
+	// (SaveRun выйдет) — и кусок некому было бы найти.
+	std::string partialId;
+	if (KZDatabaseService::IsReady())
+	{
+		const KZCourseDescriptor *partialCourse =
+			fromPrac ? KZ::course::GetCourse(this->player->pracService->GetFrozenRun().courseGUID) : timerService->GetCourse();
+		KZPartialReplay::Key key;
+		if (partialCourse && KZPartialReplay::MakeKey(this->player, KZ::course::GetCyberCourseNumber(partialCourse), key))
+		{
+			KZPartialReplay::SaveOnDisconnect(this->player, key, partialId);
+		}
+	}
+
 	// Сериализация читает только сервисные поля (timerService/checkpointService), pawn не трогает —
 	// у вышедшего игрока pawn уже может быть невалиден/уничтожен.
-	std::string snapshot = this->SerializeSnapshot();
+	std::string snapshot = this->SerializeSnapshot(partialId);
 	// Живые timerService/checkpointService не отражают prac-заморозку (currentTime не тикает после
 	// TimerStop, tpCount не бампается prac-телепортами — см. KZPracService::EnterPrac/DoTpToPoint) —
 	// берём runTime/tpCount из frozen той же вилкой, что и SerializeSnapshot, иначе штраф NUB
@@ -580,10 +623,23 @@ void KZSavedRunService::InvalidateCurrent(const char *reason)
 	KZ_LOG_DEBUG(LogChannel::DB, "[SavedRuns] Invalidating saved run for %s (reason: %s).\n", this->player->GetName(), reason);
 
 	KZDatabaseService::DeleteSavedRun(this->player->GetSteamId64(), mapName, courseNumber, modeInfo.shortModeName, styles);
+
+	// Кусок реплея — туда же, куда строка: локальный файл ключа и строка api (по id куска, если
+	// этот ран из него восстановлен).
+	KZPartialReplay::Key key;
+	key.steamId64 = this->player->GetSteamId64();
+	key.map = mapName.Get();
+	key.course = courseNumber;
+	key.mode = modeInfo.shortModeName.Get();
+	key.styles = styles.Get();
+	KZPartialReplay::Invalidate(key, this->restoredPartialId, reason);
+	this->restoredPartialId.clear();
 }
 
 void KZSavedRunService::PurgeExpired()
 {
 	// Раз на загрузку карты, fire-and-forget (см. вызов рядом с SetupLocalCourses в kz_timer.cpp).
 	KZDatabaseService::PurgeExpiredSavedRuns();
+	// Куски реплеев живут столько же, сколько строки (kz_partial_replay.h).
+	KZPartialReplay::PurgeExpiredLocal();
 }

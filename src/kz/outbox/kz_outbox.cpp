@@ -182,6 +182,65 @@ static_function bool ParseReplayMeta(const std::string &content, KZOutboxService
 	return ok;
 }
 
+static_function std::string SerializePartialMeta(const KZOutboxService::PartialMeta &meta)
+{
+	Json json;
+	json.Set("op", meta.op);
+	json.Set("partialId", meta.partialId);
+	json.Set("steamId64", meta.steamId64);
+	json.Set("map", meta.map);
+	json.Set("course", (u64)meta.course);
+	json.Set("mode", meta.mode);
+	json.Set("styles", meta.styles);
+	json.Set("path", meta.path);
+	return json.ToString();
+}
+
+static_function bool ParsePartialMeta(const std::string &content, KZOutboxService::PartialMeta &out)
+{
+	Json json(content);
+	if (!json.IsValid())
+	{
+		return false;
+	}
+	u64 course = 0;
+	// clang-format off
+	bool ok = json.Get("op", out.op)
+		&& json.Get("partialId", out.partialId)
+		&& json.Get("steamId64", out.steamId64)
+		&& json.Get("map", out.map)
+		&& json.Get("course", course)
+		&& json.Get("mode", out.mode)
+		&& json.Get("styles", out.styles)
+		&& json.Get("path", out.path);
+	// clang-format on
+	out.course = (i32)course;
+	return ok && (out.op == "put" || out.op == "delete");
+}
+
+// Квитанция куска: снимаем файл намерения, только если в нём всё ещё ТО ЖЕ намерение. Пока
+// летел запрос, намерение могли перезаписать (put → delete после финиша, put → новый put
+// после повторного выхода) — ответ на старый запрос его не касается.
+static_function void FinishPartialIfSame(const std::string &stem, const KZOutboxService::PartialMeta &sent, const char *verb, const char *reason)
+{
+	std::string name = stem + ".partial.meta";
+	std::vector<char> buffer;
+	if (!QueueFileExists(name) || !utils::ReadBufferFromFile(QueueRelPath(name).c_str(), buffer))
+	{
+		return;
+	}
+	KZOutboxService::PartialMeta current;
+	if (ParsePartialMeta(std::string(buffer.begin(), buffer.end()), current) && (current.op != sent.op || current.partialId != sent.partialId))
+	{
+		KZ_LOG_INFO(LogChannel::General, "[cyb_outbox] partial ack skipped key=%s op=%s partial=%s reason=superseded\n", stem.c_str(),
+					sent.op.c_str(), sent.partialId.c_str());
+		return;
+	}
+	utils::RemoveFile(QueueRelPath(name).c_str());
+	KZ_LOG_INFO(LogChannel::General, "[cyb_outbox] %s kind=partial key=%s op=%s partial=%s reason=%s\n", verb, stem.c_str(), sent.op.c_str(),
+				sent.partialId.c_str(), reason);
+}
+
 // Одна запись из GET /ingest/v1/kz/records (тот же контракт, что читает cyb_records в kz_timer.cpp).
 struct PlatformRecordJson
 {
@@ -283,6 +342,15 @@ void KZOutboxService::EnqueueReplayMeta(const ReplayMeta &meta)
 	{
 		KZ_LOG_INFO(LogChannel::General, "[cyb_outbox] enqueue kind=replay run=%s unconfirmed_pb=%d server_record=%d\n", meta.runUuid.c_str(),
 					(int)meta.unconfirmedPb, (int)meta.isServerRecord);
+	}
+}
+
+void KZOutboxService::EnqueuePartial(const std::string &stem, const PartialMeta &meta)
+{
+	if (WriteQueueFile(stem + ".partial.meta", SerializePartialMeta(meta)))
+	{
+		KZ_LOG_INFO(LogChannel::General, "[cyb_outbox] enqueue kind=partial key=%s op=%s partial=%s\n", stem.c_str(), meta.op.c_str(),
+					meta.partialId.c_str());
 	}
 }
 
@@ -545,6 +613,113 @@ void KZOutboxService::SendReplay(const ReplayMeta &meta, const std::vector<char>
 }
 
 // ---------------------------------------------------------------------------
+// Отправка: кусок реплея незавершённого рана (kz/savedrun/kz_partial_replay.h)
+// ---------------------------------------------------------------------------
+
+void KZOutboxService::SendPartial(const std::string &stem, const PartialMeta &meta, std::shared_ptr<std::vector<char>> body)
+{
+	std::string fileName = stem + ".partial.meta";
+	const bool put = meta.op == "put";
+	if (put && (!body || body->empty()))
+	{
+		return;
+	}
+	if (put && body->size() >= KZOutboxService::maxReplayBytes)
+	{
+		FinishPartialIfSame(stem, meta, "drop", "too_large");
+		return;
+	}
+	std::string url = ApiUrl("/replays/v1/partial");
+	if (url.empty())
+	{
+		return;
+	}
+	g_outboxInFlight.insert(fileName);
+
+	HTTP::Request req(put ? HTTP::Method::POST : HTTP::Method::DELETE_, url);
+	req.SetQuery("steamId64", std::to_string(meta.steamId64));
+	req.SetQuery("map", meta.map);
+	req.SetQuery("course", std::to_string(meta.course));
+	req.SetQuery("mode", meta.mode);
+	req.SetQuery("styles", meta.styles);
+	req.SetQuery("partialId", meta.partialId);
+	SetAuthHeader(req);
+	if (put)
+	{
+		req.SetHeader("Content-Type", "application/octet-stream");
+		req.SetBody(std::string(body->begin(), body->end()));
+	}
+
+	// clang-format off
+	req.Send(
+		[stem, meta, fileName, put](HTTP::Response resp)
+		{
+			g_outboxInFlight.erase(fileName);
+			// 404 на удаление — строки уже нет (или она чужая, id другой): удалять нечего.
+			if ((resp.status >= 200 && resp.status < 300) || (!put && resp.status == 404))
+			{
+				FinishPartialIfSame(stem, meta, "flush", put ? "upload_2xx" : "delete_2xx");
+			}
+			else if (resp.status >= 400 && resp.status < 500)
+			{
+				MoveToDead("partial", meta.partialId, fileName, put ? "rejected" : "delete_rejected", resp.status);
+			}
+			else
+			{
+				KZ_LOG_INFO(LogChannel::General, "[cyb_outbox] partial %s HTTP %u key=%s (stays queued)\n", meta.op.c_str(), (unsigned)resp.status,
+							stem.c_str());
+			}
+		},
+		[stem, meta, fileName]()
+		{
+			g_outboxInFlight.erase(fileName);
+			KZ_LOG_INFO(LogChannel::General, "[cyb_outbox] partial %s network error key=%s (stays queued)\n", meta.op.c_str(), stem.c_str());
+		});
+	// clang-format on
+}
+
+void KZOutboxService::RetryPartialFile(const std::string &name, const std::string &stem)
+{
+	std::vector<char> buffer;
+	if (!utils::ReadBufferFromFile(QueueRelPath(name).c_str(), buffer) || buffer.empty())
+	{
+		return;
+	}
+	PartialMeta meta;
+	if (!ParsePartialMeta(std::string(buffer.begin(), buffer.end()), meta))
+	{
+		MoveToDead("partial", stem, name, "bad_meta", 0);
+		return;
+	}
+	KZ_LOG_INFO(LogChannel::General, "[cyb_outbox] retry kind=partial key=%s op=%s partial=%s\n", stem.c_str(), meta.op.c_str(),
+				meta.partialId.c_str());
+	if (meta.op == "delete")
+	{
+		SendPartial(stem, meta, nullptr);
+		return;
+	}
+	if (!g_asyncFileIO)
+	{
+		return;
+	}
+	// Чтение файла куска — на потоке AsyncFileIO, как у реплеев (RetryReplayRead).
+	g_outboxInFlight.insert(name);
+	g_asyncFileIO->QueueRead(meta.path,
+							 [meta, stem, name](bool success, std::vector<char> &&file)
+							 {
+								 g_outboxInFlight.erase(name);
+								 if (!success || file.empty())
+								 {
+									 // Файла куска больше нет — ран инвалидирован на этом сервере (тогда
+									 // намерение уже delete) либо снесён TTL: выгружать нечего.
+									 FinishPartialIfSame(stem, meta, "drop", "file_missing");
+									 return;
+								 }
+								 SendPartial(stem, meta, std::make_shared<std::vector<char>>(std::move(file)));
+							 });
+}
+
+// ---------------------------------------------------------------------------
 // Ретраер
 // ---------------------------------------------------------------------------
 
@@ -601,6 +776,10 @@ void KZOutboxService::ProcessQueue()
 		{
 			kind = "replay";
 		}
+		else if (HasSuffix(name, ".partial.meta"))
+		{
+			kind = "partial";
+		}
 		else
 		{
 			continue; // чужой файл — не трогаем
@@ -654,6 +833,11 @@ void KZOutboxService::ProcessQueue()
 		else if (KZ_STREQ(kind, "sql"))
 		{
 			RetrySqlFile(name, runUuid);
+		}
+		else if (KZ_STREQ(kind, "partial"))
+		{
+			// Для куска «runUuid» — ключ SavedRuns (имя файла до первой точки, точек в ключе нет).
+			RetryPartialFile(name, runUuid);
 		}
 		else
 		{
