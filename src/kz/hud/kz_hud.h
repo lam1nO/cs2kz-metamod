@@ -45,12 +45,22 @@ enum class LayoutElement
 	// (LayoutElementDef), не по индексу, — сохранённые настройки игроков от добавления
 	// элемента не страдают.
 	LeadProgress,
+	// Поля редактора `!hud` (спека 2026-09-26-hud-editor-options, §3.1/§4.1): свои панели в
+	// mhud.xml аддона GYMSTRIKE-KZ, пишутся в основную сущность худа (ownedLayout).
+	PbWr,
+	ShowPos,
+	Course,
+	RunType,
 	Count
 };
 
 struct LayoutElementDef
 {
 	const char *panelId;    // id панели в mhud.vxml аддона
+	// Панель, на которую идут X/Y/прозрачность и класс hidden. У таймера это строка
+	// mhud_timer_row (таймер + дельта едут вместе), у остальных совпадает с panelId.
+	// Шрифт/кегль/цвет/обводка/текст остаются на panelId.
+	const char *posPanelId;
 	const char *varName;    // имя dialog-переменной панели
 	const char *enabledKey; // НАШ общий тумблер элемента (hudTimer и т.п.)
 	const char *xKey;
@@ -791,9 +801,10 @@ private:
 	CPlayerSlot layoutMimicSource {-1};
 
 	// Единственная машинерия записи текстового лейбла (hidden/текст/позиция/кегль/цвет/
-	// шрифт/прозрачность/обводка) с диф-кэшем state — см. entity.cpp.
+	// шрифт/прозрачность/обводка) с диф-кэшем state — см. entity.cpp. posPanelId — панель под
+	// позицию/прозрачность/hidden (LayoutElementDef::posPanelId); NULL — та же, что panelId.
 	void ApplyLayoutLabel(CCSCustomHudLayout *layout, const char *panelId, const char *varName, LayoutElementState &state,
-						  const LayoutLabelStyle &style, bool show, const char *text, bool force);
+						  const LayoutLabelStyle &style, bool show, const char *text, bool force, const char *posPanelId = NULL);
 
 	// Кэш префов (Task 5 наполняет); объявление поля — здесь, чтобы UpdateLayoutElement (Task 4)
 	// уже мог читать this->GetLayoutPrefs().

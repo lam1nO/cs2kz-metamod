@@ -103,6 +103,10 @@ void KZHUDService::ApplyHudDefaults()
 			{"mhudPrespeedBrackets", false},    // престрейф в скобках
 			{"mhudPrespeedHideWalkOff", false}, // не показывать престрейф при уходе с края
 			{"mhudCrosshair", true},            // реплика прицела игрока панелями худа
+			{"hudPbNub", true},                 // ячейка PB NUB элемента PB/WR
+			{"hudPbPro", true},                 // ячейка PB PRO
+			{"hudWrNub", true},                 // ячейка WR NUB
+			{"hudWrPro", true},                 // ячейка WR PRO
 		};
 
 		for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(kBools); i++)
@@ -111,11 +115,13 @@ void KZHUDService::ApplyHudDefaults()
 			written++;
 		}
 
-		// Целочисленные ключи худа: чем показывать ненажатую клавишу (0/1/2) и масштаб
-		// прицела в процентах.
+		// Целочисленные ключи худа: чем показывать ненажатую клавишу (0/1/2), масштаб
+		// прицела в процентах и режим дельты таймера.
 		opts->SetPreferenceInt("mhudKeysIdle", 2);
 		opts->SetPreferenceInt("mhudCrosshairScale", 100);
-		written += 2;
+		// Дельта таймера: 0 выкл / 1 к PB / 2 к WR (§4.1 спеки редактора).
+		opts->SetPreferenceInt("hudTimerCompare", 1);
+		written += 3;
 
 		// Цвета: тот же упакованный int, что читает GetMHUDColorPref, — пишем через
 		// SetMHUDColorPref, чтобы упаковка была ровно одна на оба направления.
