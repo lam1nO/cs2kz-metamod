@@ -481,7 +481,8 @@ void KZHUDService::OnRoundStart()
 		// menuOpen-флаг на KZPlayer) — CloseLayoutMenu() безопасен и без валидной сущности
 		// (см. её тело), но обязан быть вызван явно, иначе следующий Toggle() решит, что меню
 		// всё ещё открыто, и попытается его "закрыть" вместо открытия.
-		if (player->hudService->IsLayoutMenuOpen())
+		// Редактор !hud живёт на той же сущности и закрывается тем же CloseLayoutMenu.
+		if (player->hudService->IsLayoutUiOpen())
 		{
 			player->hudService->CloseLayoutMenu();
 		}
@@ -2162,12 +2163,9 @@ SCMD(kz_panel, SCFL_HUD)
 	return MRES_SUPERCEDE;
 }
 
-// !hud — команда осталась от particle-пути (спека §4: "!hud остаётся как есть", §8 снимает
-// только `!mhud *`), но её определение жило в particles.cpp и уехало вместе с ним (задача 12).
-// Возвращаем ровно две живые роли: без аргументов — открыть настройки худа (те же, что !hudmenu:
-// категория HUD реестра, layout/menu.cpp), `panel` — диагностика вместимости центральной
-// HTML-панели. Остальные субкоманды particle-эпохи (offset/scale/*color/font/reset) не
-// возвращаем: настройки, которые они правили, теперь пункты меню, а particle-худа больше нет.
+// !hud — без аргументов открывает/закрывает редактор худа (спека 2026-09-26-hud-editor-options
+// §4.5, layout/editor.cpp); `panel` — диагностика вместимости центральной HTML-панели. Открытое
+// окно !options редактор закрывает сам (одна сущность — один режим).
 SCMD(kz_hud, SCFL_HUD | SCFL_PREFERENCE)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
@@ -2177,13 +2175,13 @@ SCMD(kz_hud, SCFL_HUD | SCFL_PREFERENCE)
 	}
 	if (args->ArgC() < 2)
 	{
-		if (player->hudService->IsLayoutMenuOpen())
+		if (player->hudService->IsHudEditorOpen())
 		{
-			player->hudService->CloseLayoutMenu();
+			player->hudService->CloseHudEditor();
 		}
 		else
 		{
-			player->hudService->OpenLayoutMenu("HUD - Menu Cat General");
+			player->hudService->OpenHudEditor();
 		}
 		return MRES_SUPERCEDE;
 	}

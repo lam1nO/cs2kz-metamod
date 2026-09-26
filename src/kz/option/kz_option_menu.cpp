@@ -61,6 +61,8 @@ SCMD(kz_options, SCFL_PLAYER | SCFL_PREFERENCE | SCFL_HELP)
 	{
 		return MRES_SUPERCEDE;
 	}
+	// Открытый редактор !hud окно не «переключает», а сменяет: OpenLayoutMenu сам закрывает
+	// редактор (одна сущность — один режим, §4.5).
 	if (player->hudService->IsLayoutMenuOpen())
 	{
 		player->hudService->CloseLayoutMenu();
