@@ -1930,6 +1930,18 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	// пока игрок наблюдает бота; само же закрывается, когда player перестал быть ботом.
 	cfg->UpdateReplayMenu(player);
 
+	// Редактор !hud (layout/editor.cpp): на месте худа стоит его реплика, настоящий худ снесён и
+	// не рисуется ни panorama, ни HTML. После закрытия первый же такт пересоздаёт сущность худа
+	// (created → force), то есть все классы уходят заново по свежим префам.
+	if (cfg->IsHudEditorOpen())
+	{
+		cfg->DestroyOwnedLayout();
+		cfg->DestroyOwnedLeadProgressLayout();
+		cfg->ClearBottomPanel();
+		cfg->TickHudEditor();
+		return;
+	}
+
 	bool available = KZHUDService::IsMHUDAvailable();
 	// hudType: 0 = Standard (HTML-панель), 2 = Off (ничего), 3 = Panorama (custom_hud_layout
 	// сущность). 1 (particle-оверлей апстрима) удалён в задаче 12 — апстрим вычистил
