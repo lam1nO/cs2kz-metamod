@@ -187,10 +187,11 @@ private:
 	// значит «под какой курс/режим построен путь», сверяется этим ключом и ничем другим.
 	i32 CurrentCourseKey() const;
 	const char *CurrentModeName() const;
-	// Совпадает ли с текущим ключом игрока ключ ГОТОВОГО пути (pathCourse/modeName)...
-	bool PathKeyMatchesCurrent() const;
-	// ...и ключ УХОДЯЩЕГО запроса (requestCourse/requestMode).
-	bool RequestKeyMatchesCurrent() const;
+	// Совпадает ли с текущим ключом игрока и запрошенным видом записи ключ ГОТОВОГО пути
+	// (pathCourse/modeName/pathKind)...
+	bool PathKeyMatchesCurrent(CybReplayDownload::Kind kind) const;
+	// ...и ключ УХОДЯЩЕГО запроса (requestCourse/requestMode/requestKind).
+	bool RequestKeyMatchesCurrent(CybReplayDownload::Kind kind) const;
 	// Освободить путь и всё посчитанное из него (луч снимает вызывающий). Незавершённая
 	// загрузка протухает — её результат отбросит проверка поколения.
 	void ReleasePath();
@@ -246,12 +247,18 @@ private:
 	// вершины main оказались бы помечены курсом бонуса.
 	i32 requestCourse = -1;
 	char requestMode[64] {};
+	// Вид записи уходящего запроса (PB/WR/AWR…) — часть ключа наравне с курсом и режимом, см.
+	// PathKeyMatchesCurrent.
+	CybReplayDownload::Kind requestKind = CybReplayDownload::Kind::AWR;
 	// Защёлка отказа, КЛЮЧЕВАННАЯ (курс+режим): без ключа она гасила бы процент до конца карты
 	// и там, где запись есть (у main нет AWR → отказ → игрок ушёл на бонус, а процента нет).
 	// -1 в failedCourse = защёлки нет. «Снять по смене ключа» иначе нечем: при пустом пути
 	// pathCourse равен -1, и текущий курс нигде не хранится.
 	i32 failedCourse = -1;
 	char failedMode[64] {};
+	// Вид записи отказа — тоже часть ключа (см. PathKeyMatchesCurrent): отказ `!lead pb` у
+	// новичка без PB-реплея не должен защёлкивать молчаливую AWR-загрузку процента на том же курсе.
+	CybReplayDownload::Kind failedKind = CybReplayDownload::Kind::AWR;
 	// Сколько ещё раз отказ под этим ключом считается РЕТРАЕБЕЛЬНЫМ. RequestFile отдаёт пустой
 	// путь и на «записи нет» (404), и на сетевую ошибку — различить их здесь нечем, поэтому
 	// первые попытки трактуем как возможную сетевую рябь (пауза + повтор), а исчерпав их,
@@ -266,6 +273,8 @@ private:
 	// ключ, которым резолвится реплей). -1 — пути нет. Сменился курс — путь чужой: процент по
 	// нему показывал бы долю другого маршрута.
 	i32 pathCourse = -1;
+	// Вид записи, из которой построен путь (подписывается ключом запроса в OnPathLoaded).
+	CybReplayDownload::Kind pathKind = CybReplayDownload::Kind::AWR;
 	// Процент пройденного маршрута, -1 — нет пути (см. GetProgressPercent).
 	i32 progressPct = -1;
 	// Сетевая фаза: резолв/докачка уже идут, пути ещё нет. Без этого гейта каждый

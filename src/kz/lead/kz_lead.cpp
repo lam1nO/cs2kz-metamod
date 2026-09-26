@@ -1213,7 +1213,11 @@ void KZLeadService::Disable(const char *reason)
 	this->ClearSegments(false);
 	// Путь освобождаем ТОЛЬКО когда его больше некому держать: при включённом проценте он
 	// остаётся, и повторный `!lead` поднимет луч по тем же вершинам, без резолва и докачки.
-	if (!this->progress)
+	// Исключение — путь (или идущая загрузка) не AWR: процент без луча считается по AWR
+	// (ArmProgressPath), и PB/WR-путь после `!lead pb` + `!lead off` подменял бы ему маршрут.
+	// Отпускаем — тик перезапросит AWR молча.
+	const CybReplayDownload::Kind heldKind = this->path.empty() ? this->requestKind : this->pathKind;
+	if (!this->progress || heldKind != CybReplayDownload::Kind::AWR)
 	{
 		this->ReleasePath();
 	}
@@ -1237,10 +1241,11 @@ void KZLeadService::Toggle(CybReplayDownload::Kind kind)
 	this->armCooldown = 0;
 	if (!this->path.empty())
 	{
-		if (this->PathKeyMatchesCurrent())
+		if (this->PathKeyMatchesCurrent(kind))
 		{
 			// Путь уже жив (его держит элемент «Прогресс» худа) и построен под ТЕКУЩИЙ
-			// курс+режим — луч поднимается по тем же вершинам, без резолва и докачки.
+			// курс+режим И под запрошенный вид записи — луч поднимается по тем же вершинам, без
+			// резолва и докачки.
 			this->beam = true;
 			this->resync = true;
 			// Окно строится на ближайшем же тике, а не через полсекунды.
@@ -1248,14 +1253,15 @@ void KZLeadService::Toggle(CybReplayDownload::Kind kind)
 			this->player->languageService->PrintChat(true, false, "Lead - Enabled", (int)this->path.size());
 			return;
 		}
-		// Путь чужого ключа (его держит процент, а игрок уже ушёл на другой курс): показать по
-		// нему луч и отчитаться «включён» значило бы нарисовать маршрут ДРУГОГО курса. `!lead`
-		// до этой задачи ВСЕГДА резолвил под текущий ключ — это поведение обязано остаться.
+		// Путь чужого ключа (его держит процент, а игрок уже ушёл на другой курс, или путь
+		// другого вида — процент молча держит AWR, а игрок просит `!lead pb`): показать по нему
+		// луч и отчитаться «включён» значило бы нарисовать ДРУГОЙ маршрут. `!lead` до этой
+		// задачи ВСЕГДА резолвил под текущий ключ — это поведение обязано остаться.
 		this->ReleasePath();
 	}
 	if (this->loading || this->pending)
 	{
-		if (this->RequestKeyMatchesCurrent())
+		if (this->RequestKeyMatchesCurrent(kind))
 		{
 			// Загрузка уже идёт (сеть или разбор) под ТЕКУЩИЙ ключ — второй запрос ничего не
 			// ускорит, но завёл бы ещё один резолв, ещё одну докачку и ещё один поток. Если её
@@ -1287,14 +1293,18 @@ const char *KZLeadService::CurrentModeName() const
 	return mode ? mode : "";
 }
 
-bool KZLeadService::PathKeyMatchesCurrent() const
+// Вид записи (kind) — ЧАСТЬ КЛЮЧА, наравне с курсом и режимом. Баг 26.09.2026: ключ был только
+// курс+режим, и `!lead pb` / `!lead wr` поднимали луч по уже живому AWR-пути (его молча держит
+// элемент «Прогресс» худа или оставил прошлый `!lead`) либо подхватывали идущую AWR-загрузку —
+// игрок просил PB, а видел маршрут AWR. Сверка без kind вернёт этот баг.
+bool KZLeadService::PathKeyMatchesCurrent(CybReplayDownload::Kind kind) const
 {
-	return this->pathCourse == this->CurrentCourseKey() && KZ_STREQI(this->modeName, this->CurrentModeName());
+	return this->pathKind == kind && this->pathCourse == this->CurrentCourseKey() && KZ_STREQI(this->modeName, this->CurrentModeName());
 }
 
-bool KZLeadService::RequestKeyMatchesCurrent() const
+bool KZLeadService::RequestKeyMatchesCurrent(CybReplayDownload::Kind kind) const
 {
-	return this->requestCourse == this->CurrentCourseKey() && KZ_STREQI(this->requestMode, this->CurrentModeName());
+	return this->requestKind == kind && this->requestCourse == this->CurrentCourseKey() && KZ_STREQI(this->requestMode, this->CurrentModeName());
 }
 
 void KZLeadService::RequestPath(CybReplayDownload::Kind kind, bool fromPlayer)
@@ -1305,6 +1315,7 @@ void KZLeadService::RequestPath(CybReplayDownload::Kind kind, bool fromPlayer)
 	// курс и режим), и именно им будет подписан пришедший путь.
 	this->requestCourse = this->CurrentCourseKey();
 	V_strncpy(this->requestMode, this->CurrentModeName(), sizeof(this->requestMode));
+	this->requestKind = kind;
 	const u32 gen = ++this->generation;
 	CybReplayDownload::RequestFile(this->player, kind, this->player->GetSteamId64(),
 								   [gen](CPlayerUserId userID, std::string filePath)
@@ -1332,7 +1343,8 @@ void KZLeadService::ArmProgressPath()
 	}
 	// Защёлка отказа сверяется ПО КЛЮЧУ: отказ на main ничего не говорит о бонусе, куда игрок
 	// может уйти через минуту (иначе процент умирал бы до конца карты).
-	if (this->failedCourse == this->CurrentCourseKey() && KZ_STREQI(this->failedMode, this->CurrentModeName()))
+	if (this->failedKind == CybReplayDownload::Kind::AWR && this->failedCourse == this->CurrentCourseKey()
+		&& KZ_STREQI(this->failedMode, this->CurrentModeName()))
 	{
 		if (this->failRetriesLeft <= 0)
 		{
@@ -1444,10 +1456,11 @@ void KZLeadService::OnLoadFailed(bool retryable)
 	// Защёлка — ВСЕГДА, кто бы ни просил, и ПО КЛЮЧУ ЗАПРОСА (курс+режим): под ним пути нет, и
 	// проверка раз в 32 тика иначе ходила бы в сеть до конца карты; на другом курсе она
 	// снимется сама (см. ArmProgressPath), а успешная загрузка снимает её совсем (OnPathLoaded).
-	if (!(this->failedCourse == this->requestCourse && KZ_STREQI(this->failedMode, this->requestMode)))
+	if (!(this->failedKind == this->requestKind && this->failedCourse == this->requestCourse && KZ_STREQI(this->failedMode, this->requestMode)))
 	{
 		this->failedCourse = this->requestCourse;
 		V_strncpy(this->failedMode, this->requestMode, sizeof(this->failedMode));
+		this->failedKind = this->requestKind;
 		// Пустой путь приходит и на «записи нет», и на сетевую ошибку, а различить их нечем
 		// (см. reason=no_file в OnFileReady) — такому отказу даём KZ_LEAD_FAIL_RETRIES повторов
 		// с паузой: сетевая рябь лечится сама, а курс без AWR-записи защёлкнётся, исчерпав их
@@ -1578,6 +1591,7 @@ void KZLeadService::OnPathLoaded(std::vector<Vertex> &&newPath)
 	// на смену режима посреди загрузки: путь чужого режима будет снят тиком с сообщением.
 	this->pathCourse = this->requestCourse;
 	V_strncpy(this->modeName, this->requestMode, sizeof(this->modeName));
+	this->pathKind = this->requestKind;
 	// УСПЕХ снимает пометку отказа: под этим ключом путь ЕСТЬ, и прошлые (сетевые) отказы о нём
 	// больше ничего не говорят. Без этого исчерпанный счётчик оставался бы висеть на ключе, и
 	// когда путь под ним понадобится заново — main → бонус → main, где на смене курса при
