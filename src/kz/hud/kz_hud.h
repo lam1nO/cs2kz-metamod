@@ -1129,7 +1129,7 @@ private:
 
 	// === Редактор !hud (layout/editor.cpp) — состояние ===============================
 	bool editorOpen {};
-	i32 editorSelected {-1}; // LayoutElement или -1 — ничего не выбрано
+	i32 editorSelected {-1}; // LayoutElement, KZ_EDITOR_CROSSHAIR_ROW (панель прицела) или -1 — ничего не выбрано
 	i32 editorStep {1};      // шаг стрелок позиции: 1 или 5 процентов
 	f64 editorOpenedAt {};   // curtime открытия — живой плейсхолдер таймера
 	// Диф-кэш реплики худа на сущности меню (e_*/x_* панели) — свой, отдельный от кэша настоящего
@@ -1182,8 +1182,8 @@ private:
 		bool lfOn[KZ_MENU_FAMILIES] {};
 
 		// Редактор: список элементов, выбор на реплике, панель свойств.
-		bool elOn[KZ_EDITOR_ITEMS] {};
-		bool etOn[KZ_EDITOR_ITEMS] {};
+		bool elOn[KZ_EDITOR_LIST_ROWS] {};
+		bool etOn[KZ_EDITOR_LIST_ROWS] {};
 		bool eSel[KZ_EDITOR_ITEMS] {};
 		bool propsHidden {true};
 		bool propsFlip {};
@@ -1205,6 +1205,9 @@ private:
 		bool epTrowDis[8] {};
 		bool epTgOn[8] {};
 		bool epSrowHidden {true};
+		// Строки позиции/шага/кегля/шрифта/цвета/прозрачности/обводки (ep_prow_*): разметка
+		// заводит их видимыми, прячет их только панель прицела.
+		bool epStdRowHidden[7] {};
 		bool epGrowHidden {true};
 		bool epSgOn[3] {};
 
@@ -1256,9 +1259,10 @@ private:
 	void EditorToggleOutline();
 	void EditorToggleElement(i32 element);
 	void EditorResetSelected();
-	void EditorToggleKeysPref(i32 row);
-	void EditorStepKeysGap(i32 dir);
-	void EditorPickKeysIdle(i32 idle);
+	// Общие строки панели свойств: тумблеры ep_trow*, степпер ep_srow, сегменты ep_grow.
+	void EditorTogglePref(i32 row);
+	void EditorStepPref(i32 dir);
+	void EditorPickSeg(i32 k);
 
 	void SetMenuClass(CCSCustomHudLayout *layout, const char *panelId, const char *className, bool on);
 	void SetMenuBoolClass(CCSCustomHudLayout *layout, const char *panelId, const char *className, bool &cache, bool want);

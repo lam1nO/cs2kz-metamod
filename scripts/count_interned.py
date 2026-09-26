@@ -58,7 +58,7 @@ slot_caps = {
     "fn%i": cap["KZ_MENU_ROWS"], "f%i": cap["KZ_MENU_ROWS"],
     "cp%i": cap["KZ_MENU_PRESETS"], "ch%i": cap["KZ_MENU_HUES"], "cv%i": cap["KZ_MENU_LUMS"],
     "li%i": cap["KZ_MENU_LIST_ROWS"], "lf%i": cap["KZ_MENU_FAMILIES"],
-    "el%i": cap["KZ_EDITOR_ITEMS"], "et%i": cap["KZ_EDITOR_ITEMS"], "en%i": cap["KZ_EDITOR_ITEMS"],
+    "el%i": cap["KZ_EDITOR_LIST_ROWS"], "et%i": cap["KZ_EDITOR_LIST_ROWS"], "en%i": cap["KZ_EDITOR_LIST_ROWS"],
 }
 var_slots = {"t%i", "s%i", "l%i", "d%i", "v%i", "b%i", "f%i", "en%i"}
 for m in re.finditer(r"SLOT_ID\(\w+,\s*\"([^\"]+)\"\)", src):
@@ -89,7 +89,9 @@ vars_.update(array("PBWR_VARS") + ["delta", "pos", "ang", "progress_cap"])
 for m in re.finditer(r"\{\"(e_\w+)\",\s*\"(x_\w+)\",\s*\"(\w+)\",\s*\"(tag_\w+)\"", editor):
     panels.update([m.group(1), m.group(2)]); vars_.update([m.group(3), m.group(4)])
 # Доп. строки цветов панели свойств (EDITOR_XROW_IDS/EDITOR_XC_IDS/EDITOR_XROW_VARS в editor.cpp).
-for name, target in (("EDITOR_XROW_IDS", panels), ("EDITOR_XC_IDS", panels), ("EDITOR_XROW_VARS", vars_)):
+for name, target in (("EDITOR_XROW_IDS", panels), ("EDITOR_XC_IDS", panels), ("EDITOR_XROW_VARS", vars_),
+                     ("EDITOR_TROW_IDS", panels), ("EDITOR_TG_IDS", panels), ("EDITOR_TROW_VARS", vars_),
+                     ("EDITOR_SG_IDS", panels), ("EDITOR_SG_VARS", vars_), ("EDITOR_STD_ROW_IDS", panels)):
     m = re.search(name + r"\[[^=]*=\s*\{([^}]*)\}", editor)
     if not m:
         sys.exit(f"{name} not found in editor.cpp")

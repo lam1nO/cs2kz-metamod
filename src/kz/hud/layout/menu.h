@@ -24,6 +24,8 @@
 #define KZ_MENU_LIST_ROWS 8 // li0..li7 — строки попапа списка
 #define KZ_MENU_FAMILIES 3  // lf0..lf2 — семейства шрифтов Stratum2/Noto/Arial
 #define KZ_EDITOR_ITEMS  10 // el{i}/et{i} — элементы худа в порядке LayoutElement
+#define KZ_EDITOR_LIST_ROWS 11 // el{i}/et{i} списка: элементы худа + строка прицела
+#define KZ_EDITOR_CROSSHAIR_ROW 10 // el10/et10 — прицел (не элемент сетки, своя панель свойств)
 #define KZ_EDITOR_GRID_COLS 64 // g{c}_{r} — сетка кликов редактора
 #define KZ_EDITOR_GRID_ROWS 36
 // Интерн-таблицы сущности (HUD_LAYOUT_MAX_INTERNED_STRINGS = 1024 на каждую из трёх: id

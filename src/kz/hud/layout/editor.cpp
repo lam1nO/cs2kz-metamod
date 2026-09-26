@@ -11,10 +11,12 @@
 //     PB/WR, showpos и курс — настоящие, если есть.
 //   - edit_grid — 64×36 кнопок g{c}_{r}: клик ставит ВЫБРАННЫЙ элемент центром в ячейку. Классов и
 //     переменных на ячейки сервер не ставит никогда (бюджет интернирования, menu.cpp).
-//   - edit_list — тумблеры элементов el{i}/et{i}, «Сбросить всё» (через confirm_popup), «Готово».
+//   - edit_list — строки элементов el{i} (клик выбирает) с тумблерами et{i}; el10 — прицел (своя
+//     панель свойств, на сетке и реплике его нет), «Сбросить всё» (через confirm_popup), «Готово».
 //   - edit_props — свойства выбранного: стрелки с шагом 1/5, кегль, шрифт (list_popup), цвет
-//     (color_popup), цвета дельты (только таймер), прозрачность, обводка, сброс элемента; у
-//     клавиш — ещё их вид (тумблеры ep_tg*, интервал ep_s_*, «в покое» ep_sg*).
+//     (color_popup), цвета дельты (только таймер), прозрачность, обводка, сброс элемента и общие
+//     строки поведения: тумблеры ep_trow*, степпер ep_srow, сегменты ep_grow (у кого что —
+//     таблицы GetEditorToggles/GetEditorSegments/HasEditorStepper ниже).
 //
 // Позиции элементов хранятся в процентах ОТ ЦЕНТРА экрана (.element — центр + x/y классы
 // positions.css, layout/prefs.cpp): видимая область — -50..50. Сетка отдаёт проценты от
@@ -102,12 +104,13 @@ static_global const EditorExtraColorDef EDITOR_EXTRA_COLORS[(i32)LayoutElement::
 };
 // clang-format on
 
-// Вид клавиш в панели свойств (решение владельца 26.09: страница «Клавиши» ушла из !options в
-// редактор, где изменение сразу видно на реплике). Тумблеры — строки ep_trow1..8 по порядку
-// таблицы, лишние строки скрыты. gate — тумблер, без которого строка серая и клик мимо (как
-// enabledBy пункта реестра). Ключи и дефолты — те же, что у пунктов в узле элемента
-// (hud_prefs.cpp) и у RefreshLayoutPrefs.
-struct EditorKeysToggleDef
+// Тумблеры панели свойств: строки ep_trow1..8 по порядку таблицы, лишние строки скрыты. Вид
+// клавиш переехал сюда 26.09, поведение остальных элементов (доли, скобки, ячейки PB/WR,
+// точность таймера) — 27.09 (решение владельца «всё, что можно вынести — вынести»): изменение
+// сразу видно на реплике. gate — тумблер, без которого строка серая и клик мимо (как enabledBy
+// пункта реестра). Ключи и дефолты — те же, что у пунктов в узле элемента (hud_prefs.cpp) и у
+// RefreshLayoutPrefs.
+struct EditorToggleDef
 {
 	const char *prefKey;
 	const char *phraseKey;
@@ -124,7 +127,23 @@ static_global const char *const EDITOR_SG_IDS[3] = {"ep_sg0", "ep_sg1", "ep_sg2"
 static_global const char *const EDITOR_SG_VARS[3] = {"pg0", "pg1", "pg2"};
 
 // clang-format off
-static_global const EditorKeysToggleDef EDITOR_KEYS_TOGGLES[] =
+static_global const EditorToggleDef EDITOR_TIMER_TOGGLES[] =
+{
+	{"hudTimerDetail", "HUD - Menu Label TimerDetail", true, NULL},
+};
+static_global const EditorToggleDef EDITOR_SPEED_TOGGLES[] =
+{
+	{"mhudSpeedPrecise", "HUD Editor - Prop Decimals", false, NULL},
+};
+// Бейджи PERF/JB/CJ — решение владельца 26.09, остальные три — со страницы «Скорость и престрейф».
+static_global const EditorToggleDef EDITOR_PRESPEED_TOGGLES[] =
+{
+	{"mhudPrespeedPrecise",     "HUD Editor - Prop Decimals",    false, NULL},
+	{"mhudPrespeedBrackets",    "HUD Editor - Prop Brackets",    false, NULL},
+	{"mhudPrespeedHideWalkOff", "HUD Editor - Prop HideWalkOff", false, NULL},
+	{"hudIndicators",           "HUD Editor - Prop Indicators",  true,  NULL},
+};
+static_global const EditorToggleDef EDITOR_KEYS_TOGGLES[] =
 {
 	{"mhudKeysLetters",     "HUD - Menu Label Letters",       true,  NULL},
 	{"mhudKeysSquare",      "HUD Editor - Prop KeysSquare",   true,  NULL},
@@ -134,35 +153,101 @@ static_global const EditorKeysToggleDef EDITOR_KEYS_TOGGLES[] =
 	{"hudKeysOverlap",      "HUD - Menu Label Overlap",       true,  NULL},
 	{"mhudKeysOverlapAxis", "HUD Editor - Prop KeysAxisOnly", false, "hudKeysOverlap"},
 };
+// Ячейки PB/WR: все четыре выключены — элемент скрыт целиком (UpdatePbWrElement).
+static_global const EditorToggleDef EDITOR_PBWR_TOGGLES[] =
+{
+	{"hudPbNub", "HUD - Menu Label PbNub", true, NULL},
+	{"hudPbPro", "HUD - Menu Label PbPro", true, NULL},
+	{"hudWrNub", "HUD - Menu Label WrNub", true, NULL},
+	{"hudWrPro", "HUD - Menu Label WrPro", true, NULL},
+};
 // clang-format on
 static_assert(KZ_ARRAYSIZE(EDITOR_KEYS_TOGGLES) <= KZ_EDITOR_TROWS, "строк ep_trow в разметке восемь");
+static_assert(KZ_ARRAYSIZE(EDITOR_PRESPEED_TOGGLES) <= KZ_EDITOR_TROWS, "строк ep_trow в разметке восемь");
 
-// Престрейф: бейджи PERF/JB/CJ (решение владельца 26.09) — тем же тумблером ep_trow1.
-static_global const EditorKeysToggleDef EDITOR_PRESPEED_TOGGLES[] =
+// editorSelected == KZ_EDITOR_CROSSHAIR_ROW — панель прицела (строка el10): не элемент худа, на
+// реплике и сетке его нет, у панели только тумблер ep_on и масштаб ep_srow.
+static_function bool IsEditorElement(i32 sel)
 {
-	{"hudIndicators", "HUD Editor - Prop Indicators", true, NULL},
-};
+	return sel >= 0 && sel < (i32)LayoutElement::Count;
+}
 
-// Тумблеры панели свойств выбранного элемента; у остальных элементов строк ep_trow нет.
-static_function const EditorKeysToggleDef *GetEditorToggles(i32 element, i32 &count)
+// Тумблеры панели свойств выбранного элемента; у прочих (и у прицела) строк ep_trow нет.
+static_function const EditorToggleDef *GetEditorToggles(i32 element, i32 &count)
 {
+#define KZ_EDITOR_TOGGLES_CASE(e, table) \
+	case LayoutElement::e: \
+		count = (i32)KZ_ARRAYSIZE(table); \
+		return table;
 	switch ((LayoutElement)element)
 	{
-		case LayoutElement::Keys:
-			count = (i32)KZ_ARRAYSIZE(EDITOR_KEYS_TOGGLES);
-			return EDITOR_KEYS_TOGGLES;
-		case LayoutElement::Prespeed:
-			count = (i32)KZ_ARRAYSIZE(EDITOR_PRESPEED_TOGGLES);
-			return EDITOR_PRESPEED_TOGGLES;
+		KZ_EDITOR_TOGGLES_CASE(Timer, EDITOR_TIMER_TOGGLES)
+		KZ_EDITOR_TOGGLES_CASE(Speed, EDITOR_SPEED_TOGGLES)
+		KZ_EDITOR_TOGGLES_CASE(Prespeed, EDITOR_PRESPEED_TOGGLES)
+		KZ_EDITOR_TOGGLES_CASE(Keys, EDITOR_KEYS_TOGGLES)
+		KZ_EDITOR_TOGGLES_CASE(PbWr, EDITOR_PBWR_TOGGLES)
 		default:
 			count = 0;
 			return NULL;
 	}
+#undef KZ_EDITOR_TOGGLES_CASE
 }
 
-// Порядок сегментов = значение mhudKeysIdle (0 показ, 1 скрыть, 2 подчёркивание).
-static_global const char *const EDITOR_KEYS_IDLE_PHRASES[3] = {"HUD Editor - Prop KeysIdleShow", "HUD Editor - Prop KeysIdleHide",
-															  "HUD Editor - Prop KeysIdleUnderscore"};
+// Сегменты ep_grow (три кнопки ep_sg0..2): у клавиш — «в покое», у таймера — сравнение. values —
+// значение префа за сегментом k: порядок сегментов у сравнения PB/WR/Выкл (как в спеке §4.4),
+// а преф — 1/2/0, поэтому индекс сегмента и значение не совпадают.
+struct EditorSegDef
+{
+	const char *prefKey;
+	const char *labelKey;
+	const char *phrases[3];
+	i32 values[3];
+};
+
+// clang-format off
+static_global const EditorSegDef EDITOR_KEYS_IDLE_SEG =
+	{"mhudKeysIdle", "HUD - Menu Label Idle",
+	 {"HUD Editor - Prop KeysIdleShow", "HUD Editor - Prop KeysIdleHide", "HUD Editor - Prop KeysIdleUnderscore"}, {0, 1, 2}};
+static_global const EditorSegDef EDITOR_TIMER_COMPARE_SEG =
+	{"hudTimerCompare", "HUD Editor - Prop Compare",
+	 {"HUD Editor - Prop ComparePB", "HUD Editor - Prop CompareWR", "HUD - Menu Label TimerCompare Off"}, {1, 2, 0}};
+// clang-format on
+
+static_function const EditorSegDef *GetEditorSegments(i32 sel)
+{
+	switch (sel)
+	{
+		case (i32)LayoutElement::Keys:
+			return &EDITOR_KEYS_IDLE_SEG;
+		case (i32)LayoutElement::Timer:
+			return &EDITOR_TIMER_COMPARE_SEG;
+		default:
+			return NULL;
+	}
+}
+
+// Текущее значение сегментов — из кэша префов, уже ограниченное читателем (RefreshLayoutPrefs).
+static_function i32 GetEditorSegCurrent(i32 sel, const MHUDLayoutPrefs &prefs)
+{
+	return sel == (i32)LayoutElement::Timer ? prefs.timerCompare : prefs.keysIdle;
+}
+
+// Степпер ep_srow: у клавиш — интервал, у прицела — масштаб.
+static_function bool HasEditorStepper(i32 sel)
+{
+	return sel == (i32)LayoutElement::Keys || sel == KZ_EDITOR_CROSSHAIR_ROW;
+}
+
+// Масштаб прицела: 0..500 шагом 10 (те же границы, что у пункта в узле и у читателя).
+#define KZ_EDITOR_XHAIR_SCALE_STEP 10
+#define KZ_EDITOR_XHAIR_SCALE_MAX  500
+
+// Строки панели свойств, у которых нет смысла для прицела (позиция, шаг, кегль, шрифт, цвет,
+// прозрачность, обводка): у прицела нет места на экране и текста. Скрываются классом hidden.
+static_global const char *const EDITOR_STD_ROW_IDS[] = {"ep_prow_pos", "ep_prow_step",  "ep_prow_size",   "ep_prow_font",
+														 "ep_prow_color", "ep_prow_op", "ep_prow_outline"};
+#define KZ_EDITOR_STD_ROWS 7
+static_assert(KZ_ARRAYSIZE(EDITOR_STD_ROW_IDS) == KZ_EDITOR_STD_ROWS, "кэш epStdRowHidden — по строке на id");
 
 // Видимая область экрана в процентах от центра (см. шапку).
 #define KZ_EDITOR_POS_MIN (-50)
@@ -298,7 +383,7 @@ void KZHUDService::RenderEditor()
 
 	this->RenderEditorReplica(layout, false);
 
-	// Список элементов: on = элемент включён (и у строки, и у её тумблера).
+	// Список элементов: on = элемент включён (и у строки, и у её тумблера). Строка el10 — прицел.
 	for (i32 i = 0; i < KZ_EDITOR_ITEMS; i++)
 	{
 		const EditorReplicaDef &r = EDITOR_REPLICA[i];
@@ -309,55 +394,71 @@ void KZHUDService::RenderEditor()
 		this->SetMenuBoolClass(layout, EtPanel(i), "on", this->menuApplied.etOn[i], enabled);
 		this->SetMenuBoolClass(layout, r.buttonId, "sel", this->menuApplied.eSel[i], i == this->editorSelected);
 	}
+	{
+		const i32 i = KZ_EDITOR_CROSSHAIR_ROW;
+		this->SetMenuVar(layout, ElPanel(i), EnVar(i), phrase("HUD Editor - Element Crosshair").c_str());
+		this->SetMenuBoolClass(layout, ElPanel(i), "on", this->menuApplied.elOn[i], prefs.crosshair);
+		this->SetMenuBoolClass(layout, EtPanel(i), "on", this->menuApplied.etOn[i], prefs.crosshair);
+	}
 
-	// Панель свойств — только при выбранном элементе.
+	// Панель свойств — только при выбранном элементе или прицеле.
 	const i32 sel = this->editorSelected;
-	const bool hasSel = sel >= 0 && sel < (i32)LayoutElement::Count;
+	const bool isCrosshair = sel == KZ_EDITOR_CROSSHAIR_ROW;
+	const bool isElement = IsEditorElement(sel);
+	const bool hasSel = isElement || isCrosshair;
 	if (hasSel)
 	{
-		const LayoutElementDef &def = LAYOUT_ELEMENTS[sel];
-		const MHUDLayoutPrefs::Element &el = prefs.elements[sel];
-		this->SetMenuVar(layout, "edit_props", "pn", phrase(EDITOR_REPLICA[sel].nameKey).c_str());
-		this->SetMenuBoolClass(layout, "ep_on", "on", this->menuApplied.epOn, el.enabled);
 		char buf[48];
-		// Позиция — в хранимом виде (проценты от центра), как её видят !hud share и БД.
-		V_snprintf(buf, sizeof(buf), "%i \xC2\xB7 %i", el.x, el.y);
-		this->SetMenuVar(layout, "edit_props", "xy", buf);
-		this->SetMenuBoolClass(layout, "ep_step1", "on", this->menuApplied.epStep1, this->editorStep == 1);
-		this->SetMenuBoolClass(layout, "ep_step5", "on", this->menuApplied.epStep5, this->editorStep == 5);
-		V_snprintf(buf, sizeof(buf), "%ipx", el.size);
-		this->SetMenuVar(layout, "edit_props", "sz", buf);
-		const char *slug = this->player->optionService->GetPreferenceStr(def.fontKey, def.fontDefault);
-		this->SetMenuVar(layout, "ep_font", "font", panorama::GetFontDisplayName(slug, def.fontDefault));
-		Color colorDef;
-		const char *colorKey = GetElementColorKey((LayoutElement)sel, colorDef);
-		const char *swatch = colorKey ? panorama::ResolveSwatchClass(this->GetMHUDColorPref(colorKey, colorDef)) : NULL;
-		this->SetMenuSwapClass(layout, "ep_color", this->menuApplied.epColor, swatch);
-		this->SetMenuBoolClass(layout, "ep_color", "hidden", this->menuApplied.epColorHidden, colorKey == NULL);
-		const bool isTimer = sel == (i32)LayoutElement::Timer;
-		this->SetMenuBoolClass(layout, "ep_drow", "hidden", this->menuApplied.epDrowHidden, !isTimer);
-		if (isTimer)
+		this->SetMenuVar(layout, "edit_props", "pn", phrase(isCrosshair ? "HUD Editor - Element Crosshair" : EDITOR_REPLICA[sel].nameKey).c_str());
+		this->SetMenuBoolClass(layout, "ep_on", "on", this->menuApplied.epOn, isCrosshair ? prefs.crosshair : prefs.elements[sel].enabled);
+		for (i32 k = 0; k < KZ_EDITOR_STD_ROWS; k++)
 		{
-			this->SetMenuSwapClass(layout, "ep_dcol_ahead", this->menuApplied.epDAhead, panorama::ResolveSwatchClass(prefs.deltaAhead));
-			this->SetMenuSwapClass(layout, "ep_dcol_behind", this->menuApplied.epDBehind, panorama::ResolveSwatchClass(prefs.deltaBehind));
+			this->SetMenuBoolClass(layout, EDITOR_STD_ROW_IDS[k], "hidden", this->menuApplied.epStdRowHidden[k], isCrosshair);
 		}
+		if (isElement)
+		{
+			const LayoutElementDef &def = LAYOUT_ELEMENTS[sel];
+			const MHUDLayoutPrefs::Element &el = prefs.elements[sel];
+			// Позиция — в хранимом виде (проценты от центра), как её видят !hud share и БД.
+			V_snprintf(buf, sizeof(buf), "%i \xC2\xB7 %i", el.x, el.y);
+			this->SetMenuVar(layout, "edit_props", "xy", buf);
+			this->SetMenuBoolClass(layout, "ep_step1", "on", this->menuApplied.epStep1, this->editorStep == 1);
+			this->SetMenuBoolClass(layout, "ep_step5", "on", this->menuApplied.epStep5, this->editorStep == 5);
+			V_snprintf(buf, sizeof(buf), "%ipx", el.size);
+			this->SetMenuVar(layout, "edit_props", "sz", buf);
+			const char *slug = this->player->optionService->GetPreferenceStr(def.fontKey, def.fontDefault);
+			this->SetMenuVar(layout, "ep_font", "font", panorama::GetFontDisplayName(slug, def.fontDefault));
+			Color colorDef;
+			const char *colorKey = GetElementColorKey((LayoutElement)sel, colorDef);
+			const char *swatch = colorKey ? panorama::ResolveSwatchClass(this->GetMHUDColorPref(colorKey, colorDef)) : NULL;
+			this->SetMenuSwapClass(layout, "ep_color", this->menuApplied.epColor, swatch);
+			this->SetMenuBoolClass(layout, "ep_color", "hidden", this->menuApplied.epColorHidden, colorKey == NULL);
+			if (sel == (i32)LayoutElement::Timer)
+			{
+				this->SetMenuSwapClass(layout, "ep_dcol_ahead", this->menuApplied.epDAhead, panorama::ResolveSwatchClass(prefs.deltaAhead));
+				this->SetMenuSwapClass(layout, "ep_dcol_behind", this->menuApplied.epDBehind, panorama::ResolveSwatchClass(prefs.deltaBehind));
+			}
+			V_snprintf(buf, sizeof(buf), "%i%%", el.opacity);
+			this->SetMenuVar(layout, "edit_props", "op", buf);
+			this->SetMenuBoolClass(layout, "ep_outline", "on", this->menuApplied.epOutline, el.outline);
+		}
+		this->SetMenuBoolClass(layout, "ep_drow", "hidden", this->menuApplied.epDrowHidden, sel != (i32)LayoutElement::Timer);
 		for (i32 k = 0; k < 3; k++)
 		{
-			const EditorExtraColorDef &xc = EDITOR_EXTRA_COLORS[sel][k];
-			if (xc.prefKey)
+			const EditorExtraColorDef *xc = isElement && EDITOR_EXTRA_COLORS[sel][k].prefKey ? &EDITOR_EXTRA_COLORS[sel][k] : NULL;
+			if (xc)
 			{
-				this->SetMenuVar(layout, "edit_props", EDITOR_XROW_VARS[k], phrase(xc.phraseKey).c_str());
+				this->SetMenuVar(layout, "edit_props", EDITOR_XROW_VARS[k], phrase(xc->phraseKey).c_str());
 				this->SetMenuSwapClass(layout, EDITOR_XC_IDS[k], this->menuApplied.epXc[k],
-									   panorama::ResolveSwatchClass(this->GetMHUDColorPref(xc.prefKey, *xc.def)));
+									   panorama::ResolveSwatchClass(this->GetMHUDColorPref(xc->prefKey, *xc->def)));
 			}
-			this->SetMenuBoolClass(layout, EDITOR_XROW_IDS[k], "hidden", this->menuApplied.epXrowHidden[k], xc.prefKey == NULL);
+			this->SetMenuBoolClass(layout, EDITOR_XROW_IDS[k], "hidden", this->menuApplied.epXrowHidden[k], xc == NULL);
 		}
-		const bool isKeys = sel == (i32)LayoutElement::Keys;
 		i32 toggleCount = 0;
-		const EditorKeysToggleDef *toggles = GetEditorToggles(sel, toggleCount);
+		const EditorToggleDef *toggles = GetEditorToggles(sel, toggleCount);
 		for (i32 k = 0; k < KZ_EDITOR_TROWS; k++)
 		{
-			const EditorKeysToggleDef *t = k < toggleCount ? &toggles[k] : NULL;
+			const EditorToggleDef *t = k < toggleCount ? &toggles[k] : NULL;
 			if (t)
 			{
 				this->SetMenuVar(layout, "edit_props", EDITOR_TROW_VARS[k], phrase(t->phraseKey).c_str());
@@ -369,7 +470,7 @@ void KZHUDService::RenderEditor()
 			}
 			this->SetMenuBoolClass(layout, EDITOR_TROW_IDS[k], "hidden", this->menuApplied.epTrowHidden[k], t == NULL);
 		}
-		if (isKeys)
+		if (sel == (i32)LayoutElement::Keys)
 		{
 			this->SetMenuVar(layout, "edit_props", "psl", phrase("HUD Editor - Prop KeysGap").c_str());
 			if (prefs.keysGap < 0)
@@ -381,19 +482,28 @@ void KZHUDService::RenderEditor()
 				V_snprintf(buf, sizeof(buf), "%i px", prefs.keysGap);
 				this->SetMenuVar(layout, "edit_props", "ps", buf);
 			}
-			this->SetMenuVar(layout, "edit_props", "pgl", phrase("HUD - Menu Label Idle").c_str());
+		}
+		else if (isCrosshair)
+		{
+			this->SetMenuVar(layout, "edit_props", "psl", phrase("HUD - Menu Label Scale").c_str());
+			V_snprintf(buf, sizeof(buf), "%i%%", prefs.crosshairScale);
+			this->SetMenuVar(layout, "edit_props", "ps", buf);
+		}
+		const EditorSegDef *seg = GetEditorSegments(sel);
+		if (seg)
+		{
+			const i32 current = GetEditorSegCurrent(sel, prefs);
+			this->SetMenuVar(layout, "edit_props", "pgl", phrase(seg->labelKey).c_str());
 			for (i32 k = 0; k < 3; k++)
 			{
-				this->SetMenuVar(layout, "edit_props", EDITOR_SG_VARS[k], phrase(EDITOR_KEYS_IDLE_PHRASES[k]).c_str());
-				this->SetMenuBoolClass(layout, EDITOR_SG_IDS[k], "on", this->menuApplied.epSgOn[k], prefs.keysIdle == k);
+				this->SetMenuVar(layout, "edit_props", EDITOR_SG_VARS[k], phrase(seg->phrases[k]).c_str());
+				this->SetMenuBoolClass(layout, EDITOR_SG_IDS[k], "on", this->menuApplied.epSgOn[k], current == seg->values[k]);
 			}
 		}
-		this->SetMenuBoolClass(layout, "ep_srow", "hidden", this->menuApplied.epSrowHidden, !isKeys);
-		this->SetMenuBoolClass(layout, "ep_grow", "hidden", this->menuApplied.epGrowHidden, !isKeys);
-		V_snprintf(buf, sizeof(buf), "%i%%", el.opacity);
-		this->SetMenuVar(layout, "edit_props", "op", buf);
-		this->SetMenuBoolClass(layout, "ep_outline", "on", this->menuApplied.epOutline, el.outline);
-		this->SetMenuBoolClass(layout, "edit_props", "flip", this->menuApplied.propsFlip, el.x > KZ_EDITOR_FLIP_FROM && el.y > KZ_EDITOR_FLIP_FROM);
+		this->SetMenuBoolClass(layout, "ep_srow", "hidden", this->menuApplied.epSrowHidden, !HasEditorStepper(sel));
+		this->SetMenuBoolClass(layout, "ep_grow", "hidden", this->menuApplied.epGrowHidden, seg == NULL);
+		const bool flip = isElement && prefs.elements[sel].x > KZ_EDITOR_FLIP_FROM && prefs.elements[sel].y > KZ_EDITOR_FLIP_FROM;
+		this->SetMenuBoolClass(layout, "edit_props", "flip", this->menuApplied.propsFlip, flip);
 	}
 	this->SetMenuBoolClass(layout, "edit_props", "hidden", this->menuApplied.propsHidden, !hasSel);
 
@@ -544,7 +654,7 @@ void KZHUDService::EditorSetPos(i32 element, i32 x, i32 y)
 
 void KZHUDService::EditorNudge(i32 dx, i32 dy)
 {
-	if (this->editorSelected < 0)
+	if (!IsEditorElement(this->editorSelected))
 	{
 		return;
 	}
@@ -554,7 +664,7 @@ void KZHUDService::EditorNudge(i32 dx, i32 dy)
 
 void KZHUDService::EditorStepSize(i32 delta)
 {
-	if (this->editorSelected < 0)
+	if (!IsEditorElement(this->editorSelected))
 	{
 		return;
 	}
@@ -567,7 +677,7 @@ void KZHUDService::EditorStepSize(i32 delta)
 
 void KZHUDService::EditorStepOpacity(i32 delta)
 {
-	if (this->editorSelected < 0)
+	if (!IsEditorElement(this->editorSelected))
 	{
 		return;
 	}
@@ -581,7 +691,7 @@ void KZHUDService::EditorStepOpacity(i32 delta)
 
 void KZHUDService::EditorToggleOutline()
 {
-	if (this->editorSelected < 0)
+	if (!IsEditorElement(this->editorSelected))
 	{
 		return;
 	}
@@ -594,7 +704,15 @@ void KZHUDService::EditorToggleOutline()
 
 void KZHUDService::EditorToggleElement(i32 element)
 {
-	if (element < 0 || element >= (i32)LayoutElement::Count)
+	if (element == KZ_EDITOR_CROSSHAIR_ROW)
+	{
+		// Прицел: тот же преф, что у пункта «Вкл» его узла, дефолт true (layout/prefs.cpp).
+		this->player->optionService->SetPreferenceBool("mhudCrosshair", !this->GetOwnLayoutPrefs().crosshair);
+		this->RefreshLayoutPrefs();
+		this->RenderEditor();
+		return;
+	}
+	if (!IsEditorElement(element))
 	{
 		return;
 	}
@@ -606,14 +724,16 @@ void KZHUDService::EditorToggleElement(i32 element)
 
 void KZHUDService::EditorResetSelected()
 {
-	if (this->editorSelected < 0)
+	if (!IsEditorElement(this->editorSelected) && this->editorSelected != KZ_EDITOR_CROSSHAIR_ROW)
 	{
 		return;
 	}
 	// Узел элемента в скрытой категории — тот, где лежит его пункт позиции (xKey нигде больше
 	// не регистрируется). ResetNode пишет дефолты всех пунктов узла (вкл., позиция, кегль,
 	// шрифт, обводка, прозрачность, цвета) — ровно прежняя кнопка «Сброс» страницы элемента.
-	KZOptNode *node = KZMenuFindNodeByPref(LAYOUT_ELEMENTS[this->editorSelected].xKey);
+	// У прицела узел свой (скрытый «Прицел» в hud_prefs.cpp) — ищем его по ключу масштаба.
+	KZOptNode *node = KZMenuFindNodeByPref(this->editorSelected == KZ_EDITOR_CROSSHAIR_ROW ? "mhudCrosshairScale"
+																							: LAYOUT_ELEMENTS[this->editorSelected].xKey);
 	if (!node)
 	{
 		KZ_LOG_WARN(LogChannel::General, "[cyb] hud_editor_reset_denied reason=node_not_found element=%i slot=%i\n", this->editorSelected,
@@ -630,18 +750,17 @@ void KZHUDService::EditorResetSelected()
 	this->RenderEditor();
 }
 
-// Тумблеры панели свойств (строки ep_trow*; у клавиш ещё ep_srow/ep_grow): преф пишется сразу,
-// реплика перерисовывается тем же RenderEditor. Строки нет у выбранного элемента — клик по
-// устаревшему кадру игнорируем.
-void KZHUDService::EditorToggleKeysPref(i32 row)
+// Тумблеры панели свойств (строки ep_trow*): преф пишется сразу, реплика перерисовывается тем
+// же RenderEditor. Строки нет у выбранного элемента — клик по устаревшему кадру игнорируем.
+void KZHUDService::EditorTogglePref(i32 row)
 {
 	i32 toggleCount = 0;
-	const EditorKeysToggleDef *toggles = this->editorSelected >= 0 ? GetEditorToggles(this->editorSelected, toggleCount) : NULL;
+	const EditorToggleDef *toggles = GetEditorToggles(this->editorSelected, toggleCount);
 	if (!toggles || row < 0 || row >= toggleCount)
 	{
 		return;
 	}
-	const EditorKeysToggleDef &t = toggles[row];
+	const EditorToggleDef &t = toggles[row];
 	if (t.gate && !this->player->optionService->GetPreferenceBool(t.gate, true))
 	{
 		return;
@@ -651,15 +770,33 @@ void KZHUDService::EditorToggleKeysPref(i32 row)
 	this->RenderEditor();
 }
 
-// Ступени интервала: авто (-1) → 0 → 2 → … → 24. С нечётного (из обмена/БД) шаг вниз уходит на
-// ближайшее чётное снизу, а не мимо нуля сразу в «авто».
-void KZHUDService::EditorStepKeysGap(i32 dir)
+// Степпер ep_srow. Клавиши — ступени интервала: авто (-1) → 0 → 2 → … → 24; с нечётного (из
+// обмена/БД) шаг вниз уходит на ближайшее чётное снизу, а не мимо нуля сразу в «авто». Прицел —
+// масштаб 0..500 шагом 10; значение не на сетке шага (из БД/старого окна с шагом 1) сперва
+// округляется к ближайшему кратному, иначе вся шкала сдвинулась бы на остаток.
+void KZHUDService::EditorStepPref(i32 dir)
 {
+	const MHUDLayoutPrefs &prefs = this->GetOwnLayoutPrefs();
+	if (this->editorSelected == KZ_EDITOR_CROSSHAIR_ROW)
+	{
+		const i32 scale = prefs.crosshairScale;
+		const i32 snapped = (scale + KZ_EDITOR_XHAIR_SCALE_STEP / 2) / KZ_EDITOR_XHAIR_SCALE_STEP * KZ_EDITOR_XHAIR_SCALE_STEP;
+		const i32 next = Clamp(snapped + dir * KZ_EDITOR_XHAIR_SCALE_STEP, 0, KZ_EDITOR_XHAIR_SCALE_MAX);
+		if (next == scale)
+		{
+			return;
+		}
+		// Int — тот же тип, что читает RefreshLayoutPrefs.
+		this->player->optionService->SetPreferenceInt("mhudCrosshairScale", next);
+		this->RefreshLayoutPrefs();
+		this->RenderEditor();
+		return;
+	}
 	if (this->editorSelected != (i32)LayoutElement::Keys)
 	{
 		return;
 	}
-	const i32 gap = this->GetOwnLayoutPrefs().keysGap;
+	const i32 gap = prefs.keysGap;
 	i32 next = gap;
 	if (dir > 0)
 	{
@@ -678,13 +815,15 @@ void KZHUDService::EditorStepKeysGap(i32 dir)
 	this->RenderEditor();
 }
 
-void KZHUDService::EditorPickKeysIdle(i32 idle)
+// Сегмент ep_sg{k}: пишет значение, стоящее за сегментом (EditorSegDef::values), не индекс.
+void KZHUDService::EditorPickSeg(i32 k)
 {
-	if (this->editorSelected != (i32)LayoutElement::Keys || idle < 0 || idle > 2)
+	const EditorSegDef *seg = GetEditorSegments(this->editorSelected);
+	if (!seg || k < 0 || k > 2)
 	{
 		return;
 	}
-	this->player->optionService->SetPreferenceInt("mhudKeysIdle", idle);
+	this->player->optionService->SetPreferenceInt(seg->prefKey, seg->values[k]);
 	this->RefreshLayoutPrefs();
 	this->RenderEditor();
 }
@@ -701,8 +840,9 @@ bool KZHUDService::HandleEditorClick(const char *id)
 	i32 y = 0;
 	if (KZ::hudfmt::GridCellToPercent(id, KZ_EDITOR_GRID_COLS, KZ_EDITOR_GRID_ROWS, x, y))
 	{
-		// Review Focus 4: без выбранного элемента клик по сетке молча ничего не делает.
-		if (this->editorSelected >= 0)
+		// Review Focus 4: без выбранного элемента клик по сетке молча ничего не делает. Прицел
+		// элементом сетки не бывает — места на экране у него нет.
+		if (IsEditorElement(this->editorSelected))
 		{
 			// Сетка — проценты от левого-верхнего угла, преф — от центра (см. шапку).
 			this->EditorSetPos(this->editorSelected, x - 50, y - 50);
@@ -718,14 +858,24 @@ bool KZHUDService::HandleEditorClick(const char *id)
 			return true;
 		}
 	}
-	// el{i}/et{i}: et вложен в el — второе переключение того же элемента в тот же тик гасится.
+	// el{i} — выбор строки (элемент или, у el10, панель прицела), et{i} — её тумблер. et вложен в
+	// el: что движок шлёт на клик по вложенной кнопке — одну или обе — вживую не проверено. Выбор
+	// идемпотентен, а повтор тумблера того же элемента в тот же тик гасится.
 	if ((id[0] == 'e' && (id[1] == 'l' || id[1] == 't')) && V_isdigit(id[2]))
 	{
 		char *end = NULL;
 		const i32 i = (i32)strtol(id + 2, &end, 10);
-		if (*end == '\0' && i >= 0 && i < KZ_EDITOR_ITEMS)
+		if (*end == '\0' && i >= 0 && i < KZ_EDITOR_LIST_ROWS)
 		{
-			if (!this->IsDuplicateMenuAction(2000 + i))
+			if (id[1] == 'l')
+			{
+				if (this->editorSelected != i)
+				{
+					this->editorSelected = i;
+					this->RenderEditor();
+				}
+			}
+			else if (!this->IsDuplicateMenuAction(2000 + i))
 			{
 				this->NoteMenuAction(2000 + i);
 				this->EditorToggleElement(i);
@@ -773,7 +923,7 @@ bool KZHUDService::HandleEditorClick(const char *id)
 	}
 	else if (!V_strcmp(id, "ep_font"))
 	{
-		if (this->editorSelected >= 0)
+		if (IsEditorElement(this->editorSelected))
 		{
 			this->OpenMenuPopup(MenuPopup::List, KZMenuFindItemByPref(LAYOUT_ELEMENTS[this->editorSelected].fontKey));
 		}
@@ -781,7 +931,7 @@ bool KZHUDService::HandleEditorClick(const char *id)
 	else if (!V_strcmp(id, "ep_color"))
 	{
 		Color def;
-		const char *key = this->editorSelected >= 0 ? GetElementColorKey((LayoutElement)this->editorSelected, def) : NULL;
+		const char *key = IsEditorElement(this->editorSelected) ? GetElementColorKey((LayoutElement)this->editorSelected, def) : NULL;
 		if (key)
 		{
 			this->OpenMenuPopup(MenuPopup::Color, KZMenuFindItemByPref(key));
@@ -797,7 +947,7 @@ bool KZHUDService::HandleEditorClick(const char *id)
 	else if (!V_strncmp(id, "ep_xc", 5) && id[5] >= '1' && id[5] <= '3' && id[6] == '\0')
 	{
 		const i32 k = id[5] - '1';
-		const char *key = this->editorSelected >= 0 ? EDITOR_EXTRA_COLORS[this->editorSelected][k].prefKey : NULL;
+		const char *key = IsEditorElement(this->editorSelected) ? EDITOR_EXTRA_COLORS[this->editorSelected][k].prefKey : NULL;
 		if (key)
 		{
 			this->OpenMenuPopup(MenuPopup::Color, KZMenuFindItemByPref(key));
@@ -805,15 +955,15 @@ bool KZHUDService::HandleEditorClick(const char *id)
 	}
 	else if (!V_strncmp(id, "ep_tg", 5) && id[5] >= '1' && id[5] <= '8' && id[6] == '\0')
 	{
-		this->EditorToggleKeysPref(id[5] - '1');
+		this->EditorTogglePref(id[5] - '1');
 	}
 	else if (!V_strcmp(id, "ep_s_dec") || !V_strcmp(id, "ep_s_inc"))
 	{
-		this->EditorStepKeysGap(id[5] == 'i' ? 1 : -1);
+		this->EditorStepPref(id[5] == 'i' ? 1 : -1);
 	}
 	else if (!V_strncmp(id, "ep_sg", 5) && id[5] >= '0' && id[5] <= '2' && id[6] == '\0')
 	{
-		this->EditorPickKeysIdle(id[5] - '0');
+		this->EditorPickSeg(id[5] - '0');
 	}
 	else if (!V_strcmp(id, "ep_reset"))
 	{
