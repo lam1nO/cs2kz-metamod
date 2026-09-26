@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Локальная сборка форка cs2kz-metamod в Docker (steamrt sniper SDK), без CI.
 #
-# Идемпотентно: сабмодули инициализируются один раз, образ собирается один раз
-# (кэш по тегу), повторные запуски просто пересобирают исходники через ambuild.
+# Идемпотентно: сабмодули инициализируются один раз, тяжёлые слои образа берутся из кэша
+# docker, а исходники заново копируются в образ на каждом запуске и пересобираются ambuild.
 #
 # Что чинит поверх штатного Dockerfile (сам Dockerfile в репозитории не трогаем,
 # патчим только временную копию):
@@ -63,13 +63,11 @@ COPY . .
 CMD [ "/bin/bash", "./docker-entrypoint.sh" ]
 DOCKERFILE
 
-# 3. Образ — только если тега ещё нет.
-if ! docker image inspect "$IMAGE_TAG" >/dev/null 2>&1; then
-  echo "==> Собираю образ $IMAGE_TAG..."
-  docker build -f "$PATCHED_DOCKERFILE" -t "$IMAGE_TAG" .
-else
-  echo "==> Образ $IMAGE_TAG уже есть, пропускаю сборку (удалите вручную, чтобы пересобрать)."
-fi
+# 3. Образ — КАЖДЫЙ запуск: исходники попадают в него через COPY, и закэшированный по тегу
+#    образ собирал бы снимок исходников на момент своего создания ("no changes"). Слои apt и
+#    ambuild берутся из кэша docker, пересобирается только COPY.
+echo "==> Собираю образ $IMAGE_TAG (слои до COPY — из кэша)..."
+docker build -q -f "$PATCHED_DOCKERFILE" -t "$IMAGE_TAG" . >/dev/null
 
 # 4. Сама сборка плагина через штатный docker-entrypoint.sh (configure.py --enable-optimize + ambuild).
 mkdir -p build
