@@ -100,8 +100,24 @@ static_function void OutlineOnActivate(KZPlayer *player, i64 tag)
 // (Count) и меню реплея (Count + 1) — см. RPMENU_RESET_SLOT ниже. Слоты живут только в памяти
 // (статический массив, наполняется при регистрации реестра), в префах не хранятся — рост
 // Count сдвигает номера двух последних безнаказанно.
+// С ужатия раздела (план hud-editor-options, Task 8) слот элемента указывает на его узел в
+// СКРЫТОЙ подкатегории (HiddenElements) — кнопки на нём нет, сброс элемента зовёт редактор !hud.
 static_global KZOptNode *s_resettableNodes[(i32)LayoutElement::Count + 2] {};
 static constexpr i32 RPMENU_RESET_SLOT = (i32)LayoutElement::Count + 1;
+
+// Узлы, которые «Сбросить всё» накрывает сверх s_resettableNodes и General: после ужатия
+// раздела пункты одной бывшей страницы разъехались по двум узлам (вид клавиш остался в меню,
+// их цвета ушли в скрытый узел элемента; позиция карточки реплея — в скрытый узел), а новые
+// тумблеры PB/WR живут на своей странице без кнопки сброса. Без этих слотов Reset All молча
+// перестал бы трогать часть того, что сбрасывал до переезда.
+enum HudExtraResetSlot
+{
+	EXTRA_RESET_KEYS_LOOK = 0,
+	EXTRA_RESET_PBWR,
+	EXTRA_RESET_RPMENU_POS,
+	EXTRA_RESET_COUNT
+};
+static_global KZOptNode *s_extraResetNodes[EXTRA_RESET_COUNT] {};
 
 // Сброс — тоже откатываемое действие (спека обмена §4), поэтому перед ResetNode снимаем слот
 // отката тем же и единственным способом, что и применение чужого худа
@@ -138,8 +154,8 @@ static_function void AddResetButton(KZOptNode *node, i32 slot)
 // Живёт в General, а не на родительской категории «Худ»: у категории с подкатегориями своих
 // пунктов не бывает вовсе (ActiveMenuNode, layout/menu.cpp — родитель возвращает NULL, пока не
 // выбрана подкатегория), так что пункт на ней был бы недостижим для игрока.
-// Сбрасывает страницы всех элементов LAYOUT_ELEMENTS + прицел + меню реплея (s_resettableNodes)
-// и саму General.
+// Сбрасывает страницы всех элементов LAYOUT_ELEMENTS + прицел + меню реплея (s_resettableNodes),
+// разъехавшиеся после ужатия узлы (s_extraResetNodes) и саму General.
 // HudType при этом НЕ сбрасывается: его Choice-пункт зарегистрирован без prefKey, а ResetNode
 // пункты без префа пропускает — иначе «сбросить оформление» могло бы выключить игроку худ.
 static_global KZOptNode *s_hudGeneralNode {};
@@ -151,11 +167,18 @@ static_function void ResetAllOnActivate(KZPlayer *player, i64 tag)
 	{
 		KZ::menu::ResetNode(player, s_resettableNodes[i]);
 	}
+	for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(s_extraResetNodes); i++)
+	{
+		KZ::menu::ResetNode(player, s_extraResetNodes[i]);
+	}
 	KZ::menu::ResetNode(player, s_hudGeneralNode);
 }
 
-// === Пять полей элемента, общих для Timer/Speed/Prespeed/Keys/Checkpoint — ключи из
-// LAYOUT_ELEMENTS (entity.cpp, Task 4), один источник правды, как и раньше в menu.cpp. =======
+// === Поля элемента, общие для всех строк LAYOUT_ELEMENTS — ключи из самой таблицы
+// (entity.cpp, Task 4), один источник правды, как и раньше в menu.cpp. ======================
+// С ужатия раздела (план hud-editor-options, Task 8) зовётся для узлов скрытой подкатегории
+// HiddenElements: в окне !options этих пунктов нет, их правит редактор !hud, а узлы остаются
+// в реестре ради ResetNode (сброс элемента в редакторе), обмена худом и белого списка префов.
 static_function void AddHudElementItems(KZOptNode *node, LayoutElement e)
 {
 	const LayoutElementDef &def = LAYOUT_ELEMENTS[(i32)e];
@@ -243,14 +266,73 @@ static_function void RpMenuScaleOnPick(KZPlayer *player, i64 tag, i64 id)
 	player->optionService->SetPreferenceInt("rpmenuScale", RPMENU_SCALE_STEPS[id]);
 }
 
+// === hudTimerCompare: живая дельта в таймере (план hud-editor-options, Task 7/8) ==============
+// Сырой int-преф, как mhudKeysIdle: 0 — выкл, 1 — к PB, 2 — к WR. Значения — те, что читает
+// RefreshLayoutPrefs (timerCompare, ограничение 0..2) и разбирает UpdateTimerElement (1 → PB,
+// иначе AWR). Порядок строк в списке — PB/WR/Выкл (как в спеке §4.4), а id — само значение
+// префа, поэтому «Выкл» идёт последним с id 0.
+static constexpr i64 HUD_TIMER_COMPARE_DEFAULT = 1;
+
+static_function void GetTimerCompareChoices(KZPlayer *player, i64 tag, std::vector<KZChoice> &out)
+{
+	const char *lang = player->languageService->GetLanguage();
+	out.push_back({KZLanguageService::PrepareMessageWithLang(lang, "HUD - Menu Label TimerCompare PB"), 1});
+	out.push_back({KZLanguageService::PrepareMessageWithLang(lang, "HUD - Menu Label TimerCompare WR"), 2});
+	out.push_back({KZLanguageService::PrepareMessageWithLang(lang, "HUD - Menu Label TimerCompare Off"), 0});
+}
+
+static_function i64 GetTimerCompareCurrent(KZPlayer *player, i64 tag)
+{
+	const i64 value = player->optionService->GetPreferenceInt("hudTimerCompare", HUD_TIMER_COMPARE_DEFAULT);
+	// Кривое значение из БД/снимка показываем тем же, чем его прочитает худ после ограничения.
+	return value < 0 ? 0 : (value > 2 ? 2 : value);
+}
+
+static_function void OnTimerComparePick(KZPlayer *player, i64 tag, i64 id)
+{
+	if (id < 0 || id > 2)
+	{
+		return;
+	}
+	player->optionService->SetPreferenceInt("hudTimerCompare", id);
+}
+
+// Подпись скрытого узла элемента. В окне она не видна (узел hiddenFromMenu), но нужна узлу как
+// любому другому и пригодится редактору/логу. switch только по элементам, которые были до
+// ужатия, — новые строки LAYOUT_ELEMENTS (PB/WR, showpos, курс, тип рана) получают подпись
+// самой скрытой подкатегории: своих фраз «Cat …» у них нет, а в меню они не показываются.
+static_function const char *HiddenElementPageKey(i32 index)
+{
+	switch ((LayoutElement)index)
+	{
+		case LayoutElement::Timer:
+			return "HUD - Menu Cat Timer";
+		case LayoutElement::Speed:
+			return "HUD - Menu Cat Speed";
+		case LayoutElement::Prespeed:
+			return "HUD - Menu Cat Prespeed";
+		case LayoutElement::Keys:
+			return "HUD - Menu Cat Keys";
+		case LayoutElement::Checkpoint:
+			return "HUD - Menu Cat Checkpoint";
+		case LayoutElement::LeadProgress:
+			return "HUD - Menu Cat LeadProgress";
+		default:
+			return "HUD - Menu Cat HiddenElements";
+	}
+}
 
 void KZHUDService::InitMenuPrefs()
 {
-	// Дерево, а не плоский список (задача «дерево категорий»): все семь страниц худа —
-	// ПОДКАТЕГОРИИ одного узла «Худ», как у апстрима (origin/master hud_prefs.cpp:135-162,
-	// AddCategory("Menu - HUD") + AddSub на каждый элемент). Состав пунктов не меняется —
-	// меняется только группировка; слева они рисуются теми же кнопками cat%i с отступом
-	// (класс indent), см. layout/menu.cpp:BuildMenuLeft.
+	// Дерево, а не плоский список (задача «дерево категорий»): страницы худа — ПОДКАТЕГОРИИ
+	// одного узла «Худ», как у апстрима (origin/master hud_prefs.cpp:135-162).
+	//
+	// Раздел ужат (план hud-editor-options, Task 8; спека §4.4): расположение, размер, шрифт,
+	// обводка, прозрачность и цвета каждого элемента переехали в редактор !hud, где их двигают
+	// по сетке и видят сразу на реплике худа. В окне остаются только настройки, у которых нет
+	// «места на экране»: тип худа, сравнение таймера, ячейки PB/WR, вид клавиш, прицел, меню
+	// реплея, обмен. Пункты элементов НЕ удалены из реестра — они в скрытой подкатегории
+	// HiddenElements ниже (почему именно подкатегория «Худ», а не своя категория — там же).
 	KZOptNode *hud = KZ::menu::AddCategory("HUD - Menu Cat Hud");
 
 	KZOptNode *general = KZ::menu::AddSub(hud, "HUD - Menu Cat General");
@@ -267,6 +349,17 @@ void KZHUDService::InitMenuPrefs()
 	// showPanel звал бы мёртвый метод, а пункт «Панель» поверх HudType дал бы ДВА источника
 	// одного состояния — тот же рассинхрон, из-за которого убран общий Outline (строкой выше).
 	//
+	// Сравнение таймера: к чему считать живую дельту под таймером (Task 7). Преф в General, а не
+	// на странице таймера: страницы таймера в окне больше нет (она в редакторе). SetItemPref —
+	// ради обмена худом и ResetNode (у Choice без префа сброс его пропускает).
+	KZ::menu::AddChoice(general, "HUD - Menu Label TimerCompare", &GetTimerCompareChoices, &GetTimerCompareCurrent, &OnTimerComparePick);
+	KZ::menu::SetItemPref(general, "hudTimerCompare", KZOptStorage::Int, (i32)HUD_TIMER_COMPARE_DEFAULT);
+	// hudTimerDetail — сотые доли и часы в таймере (layout/prefs.cpp:108, timerDetailed); с
+	// ужатия раздела заодно и точность дельты (FormatDelta). Раньше пункт жил на странице
+	// таймера — переехал в General вместе с ней. Ключ НАШ (апстримный называется
+	// mhudTimerDetailed) — не переименовываем, иначе у всех игроков настройка сбросилась бы на
+	// дефолт. Дефолт true = тот же, что читает RefreshLayoutPrefs.
+	KZ::menu::AddToggle(general, "HUD - Menu Label TimerDetail", "hudTimerDetail", true);
 	// mhudMimicSpec — мимикрия под настройки наблюдаемого (layout/prefs.cpp:GetLayoutPrefs).
 	// Дефолт false = тот же, что читает RefreshLayoutPrefs (layout/prefs.cpp:129).
 	KZ::menu::AddToggle(general, "HUD - Menu Label MimicSpec", "mhudMimicSpec", false);
@@ -282,57 +375,29 @@ void KZHUDService::InitMenuPrefs()
 	// стоит последним (см. ResetAllOnActivate выше).
 	KZ::menu::AddButton(general, "HUD - Menu Label ResetAll", &ResetAllOnActivate);
 
-	KZOptNode *timer = KZ::menu::AddSub(hud, "HUD - Menu Cat Timer");
-	AddHudElementItems(timer, LayoutElement::Timer);
-	// hudTimerDetail — сотые доли и часы в таймере (layout/prefs.cpp:108, timerDetailed).
-	// Преф читался кодом, а тронуть его игрок не мог вообще: ни пункта, ни команды. Ключ НАШ
-	// (апстримный называется mhudTimerDetailed) — не переименовываем, иначе у всех игроков
-	// настройка сбросилась бы на дефолт. Дефолт true = тот же, что читает RefreshLayoutPrefs.
-	KZ::menu::AddToggle(timer, "HUD - Menu Label TimerDetail", "hudTimerDetail", true);
-	KZ::menu::AddColor(timer, "HUD - Menu Label ProColor", "mhudTimerProColor", MHUD_DEF_TIMER_PRO_COLOR);
-	KZ::menu::AddColor(timer, "HUD - Menu Label TpColor", "mhudTimerTpColor", MHUD_DEF_TIMER_TP_COLOR);
-	KZ::menu::AddColor(timer, "HUD - Menu Label PausedColor", "mhudTimerPausedColor", MHUD_DEF_TIMER_PAUSED_COLOR);
-	KZ::menu::AddColor(timer, "HUD - Menu Label StoppedColor", "mhudTimerStoppedColor", MHUD_DEF_TIMER_STOPPED_COLOR);
-	AddResetButton(timer, (i32)LayoutElement::Timer);
+	// Ячейки элемента PB/WR (mhud_pbwr): какие из четырёх времён показывать. Все выключены —
+	// элемент скрыт целиком (UpdatePbWrElement). Дефолты true = те, что читает
+	// RefreshLayoutPrefs (defaults.cpp). Кнопки сброса страницы нет — четыре тумблера сбрасывать
+	// по одному проще, а «Сбросить всё» страницу накрывает (s_extraResetNodes).
+	KZOptNode *pbwr = KZ::menu::AddSub(hud, "HUD - Menu Cat PbWr");
+	s_extraResetNodes[EXTRA_RESET_PBWR] = pbwr;
+	KZ::menu::AddToggle(pbwr, "HUD - Menu Label PbNub", "hudPbNub", true);
+	KZ::menu::AddToggle(pbwr, "HUD - Menu Label PbPro", "hudPbPro", true);
+	KZ::menu::AddToggle(pbwr, "HUD - Menu Label WrNub", "hudWrNub", true);
+	KZ::menu::AddToggle(pbwr, "HUD - Menu Label WrPro", "hudWrPro", true);
 
-	KZOptNode *speed = KZ::menu::AddSub(hud, "HUD - Menu Cat Speed");
-	AddHudElementItems(speed, LayoutElement::Speed);
-	// mhudSpeedPrecise — "%.2f" вместо "%.0f" (layout/prefs.cpp:121, применяется в
-	// layout/mhud.cpp:UpdateSpeedElement). Преф читался, доступа у игрока не было.
-	KZ::menu::AddToggle(speed, "HUD - Menu Label Decimal", "mhudSpeedPrecise", false);
-	KZ::menu::AddColor(speed, "HUD - Menu Label Color", "mhudSpeedColor", MHUD_DEF_BASE_COLOR);
-	KZ::menu::AddColor(speed, "HUD - Menu Label CjColor", "mhudSpeedCjColor", MHUD_DEF_CJ_COLOR);
-	AddResetButton(speed, (i32)LayoutElement::Speed);
-
-	KZOptNode *prespeed = KZ::menu::AddSub(hud, "HUD - Menu Cat Prespeed");
-	AddHudElementItems(prespeed, LayoutElement::Prespeed);
-	// Три префа престрейфа, портированные соседней задачей (layout/prefs.cpp:124-126,
-	// применяются в layout/mhud.cpp:UpdatePrespeedElement) — дефолты те же, что там читаются.
-	KZ::menu::AddToggle(prespeed, "HUD - Menu Label Decimal", "mhudPrespeedPrecise", false);
-	KZ::menu::AddToggle(prespeed, "HUD - Menu Label PrespeedBrackets", "mhudPrespeedBrackets", false);
-	KZ::menu::AddToggle(prespeed, "HUD - Menu Label PrespeedHideWalkOff", "mhudPrespeedHideWalkOff", false);
-	KZ::menu::SetItemSubtext(prespeed, "HUD - Menu Label PrespeedHideWalkOff Sub");
-	KZ::menu::AddColor(prespeed, "HUD - Menu Label Color", "mhudPrespeedColor", MHUD_DEF_BASE_COLOR);
-	KZ::menu::AddColor(prespeed, "HUD - Menu Label PerfColor", "mhudPrespeedPerfColor", MHUD_DEF_PERF_COLOR);
-	KZ::menu::AddColor(prespeed, "HUD - Menu Label JumpbugColor", "mhudPrespeedJumpbugColor", MHUD_DEF_JUMPBUG_COLOR);
-	AddResetButton(prespeed, (i32)LayoutElement::Prespeed);
-
+	// Клавиши: в окне остался только ВИД (буквы, квадрат, рамка, свечение, заливка, перекрытие,
+	// ненажатая клавиша) — это стиль, а не место на экране, и на реплике редактора его не
+	// поправить. Тумблер элемента, позиция, размер, шрифт, обводка, прозрачность и все цвета
+	// клавиш — в скрытом узле элемента (ниже), их правит редактор.
 	KZOptNode *keys = KZ::menu::AddSub(hud, "HUD - Menu Cat Keys");
-	AddHudElementItems(keys, LayoutElement::Keys);
-	KZ::menu::AddColor(keys, "HUD - Menu Label Color", "mhudKeysColor", MHUD_DEF_BASE_COLOR);
+	s_extraResetNodes[EXTRA_RESET_KEYS_LOOK] = keys;
 	// hudKeysOverlap читался кодом (layout/prefs.cpp) ещё до этой задачи, но пункта в меню у
 	// него не было — одна из шести находок транша "клавиши" (без пункта/команды у игрока).
 	// Дефолт true — тот же, что уже читает GetPreferenceBool на этом ключе.
 	KZ::menu::AddToggle(keys, "HUD - Menu Label Overlap", "hudKeysOverlap", true);
-	KZ::menu::AddColor(keys, "HUD - Menu Label OverlapColor", "mhudKeysOverlapColor", MHUD_DEF_KEYS_OVERLAP_COLOR);
-	KZ::menu::SetItemEnabledBy(keys, "hudKeysOverlap");
 	// Осевой режим: тонировать только конфликтующую пару клавиш вместо всего контейнера.
 	KZ::menu::AddToggle(keys, "HUD - Menu Label OverlapAxisOnly", "mhudKeysOverlapAxis", false);
-	KZ::menu::SetItemEnabledBy(keys, "hudKeysOverlap");
-	KZ::menu::AddColor(keys, "HUD - Menu Label PressedColor", "mhudKeysPressedColor", MHUD_DEF_KEYS_PRESSED_COLOR);
-	KZ::menu::SetItemSolidOnly(keys); // key-glow-N (keys.css) — только сплошные, градиента там нет
-	KZ::menu::AddColor(keys, "HUD - Menu Label OverlapGlowColor", "mhudKeysOverlapGlowColor", MHUD_DEF_KEYS_OVERLAP_GLOW_COLOR);
-	KZ::menu::SetItemSolidOnly(keys);
 	KZ::menu::SetItemEnabledBy(keys, "hudKeysOverlap");
 	// Дефолты пяти тумблеров ниже синхронизированы с текущими настройками игрока (задача
 	// hud-defaults) — те же значения читает layout/prefs.cpp:RefreshLayoutPrefs.
@@ -343,22 +408,6 @@ void KZHUDService::InitMenuPrefs()
 	KZ::menu::AddToggle(keys, "HUD - Menu Label Fill", "mhudKeysFill", false);
 	KZ::menu::AddChoice(keys, "HUD - Menu Label Idle", &GetKeysIdleChoices, &GetKeysIdleCurrent, &OnKeysIdlePick);
 	KZ::menu::SetItemPref(keys, "mhudKeysIdle", KZOptStorage::Int, 2);
-	AddResetButton(keys, (i32)LayoutElement::Keys);
-
-	KZOptNode *checkpoint = KZ::menu::AddSub(hud, "HUD - Menu Cat Checkpoint");
-	AddHudElementItems(checkpoint, LayoutElement::Checkpoint);
-	KZ::menu::AddColor(checkpoint, "HUD - Menu Label Color", "mhudCheckpointColor", MHUD_DEF_BASE_COLOR);
-	AddResetButton(checkpoint, (i32)LayoutElement::Checkpoint);
-
-	// «Прогресс: N%» по маршруту `!lead` (kz/lead) — страница ровно того же состава, что у
-	// остальных элементов: тумблер, позиция, размер, шрифт, обводка, прозрачность. Своего
-	// цвета у элемента нет (в дизайне не просили), поэтому пункта AddColor здесь тоже нет.
-	// Подтекста здесь нет намеренно: SetItemSubtext вешает подпись на ПОСЛЕДНИЙ добавленный
-	// пункт, а после AddHudElementItems это «Прозрачность» — подсказка про маршрут оказалась бы
-	// не у того пункта. Что считает элемент — в CYBER.md и в описании `!lead`.
-	KZOptNode *leadProgress = KZ::menu::AddSub(hud, "HUD - Menu Cat LeadProgress");
-	AddHudElementItems(leadProgress, LayoutElement::LeadProgress);
-	AddResetButton(leadProgress, (i32)LayoutElement::LeadProgress);
 
 	KZOptNode *crosshair = KZ::menu::AddSub(hud, "HUD - Menu Cat Crosshair");
 	// Дефолт true синхронизирован с текущими настройками игрока (задача hud-defaults).
@@ -368,24 +417,23 @@ void KZHUDService::InitMenuPrefs()
 	KZ::menu::SetItemPref(crosshair, "mhudCrosshairScale", KZOptStorage::Int, 100);
 	AddResetButton(crosshair, (i32)LayoutElement::Count);
 
-	// Меню реплея спектатора (layout/rpmenu.cpp) — отдельная страница настроек. Пунктов ДВА, и
-	// оба списки: карточка живёт на своей panorama-странице, а сервер умеет над ней только
-	// SetHasClass, поэтому настраивается ровно то, под что в её vcss есть готовые наборы правил.
-	// Ключи читает layout/prefs.cpp:RefreshLayoutPrefs, дефолты — RPMENU_DEF_* (layout/layout.h).
-	// Чистые префы без кэша-колбэков — кнопка сброса страницы допустима, и «Сбросить всё» её
-	// тоже накрывает (s_resettableNodes).
+	// Меню реплея спектатора (layout/rpmenu.cpp) — отдельная страница настроек. Карточка живёт на
+	// своей panorama-странице, а сервер умеет над ней только SetHasClass, поэтому настраивается
+	// ровно то, под что в её vcss есть готовые наборы правил. Ключи читает
+	// layout/prefs.cpp:RefreshLayoutPrefs, дефолты — RPMENU_DEF_* (layout/layout.h).
 	//
 	// Пунктов позиции в процентах, кегля, шрифта, шага строк и подложки здесь БОЛЬШЕ НЕТ: они
 	// достались от карточки на разметке худа и после переезда не влияли ни на что (снято
 	// 17.09.2026 по замечанию владельца). Шрифты у карточки свои, выбор шрифта не нужен.
+	// Позиция карточки (степперы ±1/±5, c02af292) с ужатия раздела тоже ушла из окна — вместе с
+	// позициями элементов; её пункт перенесён в скрытый узел ниже, а не удалён: rpmenuPosX/Y
+	// по-прежнему читает RefreshLayoutPrefs, и без пункта в реестре ключи выпали бы из обмена
+	// худом и из «Сбросить всё» — сохранённое смещение карточки стало бы неснимаемым.
+	// Кнопки сброса страницы нет: пункт на ней один, «Сбросить всё» его накрывает (слот ниже).
 	KZOptNode *rpmenu = KZ::menu::AddSub(hud, "HUD - Menu Cat ReplayMenu");
+	s_resettableNodes[RPMENU_RESET_SLOT] = rpmenu;
 	KZ::menu::AddChoice(rpmenu, "HUD - Menu Label ReplayMenuScale", &RpMenuScaleGetChoices, &RpMenuScaleGetCurrent, &RpMenuScaleOnPick);
 	KZ::menu::SetItemPref(rpmenu, "rpmenuScale", KZOptStorage::Int, RPMENU_DEF_SCALE);
-	// Позиция — обычный Position со степперами ±1/±5, как у элементов худа: владелец просил
-	// двигать карточку «+ и −», а не выбирать из списка углов. Классы позиции берутся из
-	// cs2kz/positions.css, которая и так едет в аддоне (см. layout.h).
-	KZ::menu::AddPosition(rpmenu, "HUD - Menu Label Position", "rpmenuPosX", "rpmenuPosY", RPMENU_DEF_POS_X, RPMENU_DEF_POS_Y);
-	AddResetButton(rpmenu, RPMENU_RESET_SLOT);
 
 	// Обмен худом — СВОЯ подкатегория, а не пункты в General. Довод: в General лежит «сбросить
 	// все настройки худа», и действия обмена рядом с ней читались бы как часть сброса, а
@@ -404,4 +452,75 @@ void KZHUDService::InitMenuPrefs()
 	// («HUD Share - Undo Hint» печатается после каждого применения, hud_share.cpp). Команды
 	// !hudexport и !hudundo остались — снят только вход из меню, чтобы страница была короткой
 	// и на ней не было действий, которых игрок не искал.
+
+	// === Скрытая подкатегория: вид и место каждого элемента (правит редактор !hud) ============
+	// ПОДкатегория «Худ», а не своя категория верхнего уровня: обмен худом собирает состав ровно
+	// из поддерева "HUD - Menu Cat Hud" (KZ::hudshare::HUD_CATEGORY_KEY → CollectCategory), и
+	// отдельная категория молча выкинула бы из снимка позиции, размеры, шрифты и цвета — то
+	// есть почти всё, ради чего обмен существует. hiddenFromMenu прячет узел от окна !options
+	// (рендер его пропускает), реестр же видит его как обычный: ResetNode, белый список префов,
+	// отпечаток состава обмена.
+	// Раскладка для редактора: subs[i] при i < Count — узел элемента LAYOUT_ELEMENTS[i] (тот же
+	// узел лежит в s_resettableNodes[i]); после них — позиция карточки реплея. Цикл по таблице,
+	// а не список руками: новые строки LAYOUT_ELEMENTS (PB/WR, showpos, курс, тип рана) получают
+	// свой узел с полным набором полей без правки этого файла.
+	KZOptNode *hidden = KZ::menu::AddSub(hud, "HUD - Menu Cat HiddenElements");
+	hidden->hiddenFromMenu = true;
+	KZOptNode *elementNodes[(i32)LayoutElement::Count] {};
+	for (i32 i = 0; i < (i32)LayoutElement::Count; i++)
+	{
+		KZOptNode *node = KZ::menu::AddSub(hidden, HiddenElementPageKey(i));
+		node->hiddenFromMenu = true;
+		AddHudElementItems(node, (LayoutElement)i);
+		elementNodes[i] = node;
+		s_resettableNodes[i] = node;
+	}
+
+	// Дальше — поэлементные пункты сверх общих полей: цвета и форматы, которые раньше стояли на
+	// странице элемента. Состав, ключи и дефолты те же, что были до ужатия.
+	KZOptNode *timer = elementNodes[(i32)LayoutElement::Timer];
+	KZ::menu::AddColor(timer, "HUD - Menu Label ProColor", "mhudTimerProColor", MHUD_DEF_TIMER_PRO_COLOR);
+	KZ::menu::AddColor(timer, "HUD - Menu Label TpColor", "mhudTimerTpColor", MHUD_DEF_TIMER_TP_COLOR);
+	KZ::menu::AddColor(timer, "HUD - Menu Label PausedColor", "mhudTimerPausedColor", MHUD_DEF_TIMER_PAUSED_COLOR);
+	KZ::menu::AddColor(timer, "HUD - Menu Label StoppedColor", "mhudTimerStoppedColor", MHUD_DEF_TIMER_STOPPED_COLOR);
+
+	KZOptNode *speed = elementNodes[(i32)LayoutElement::Speed];
+	// mhudSpeedPrecise — "%.2f" вместо "%.0f" (layout/prefs.cpp:121, применяется в
+	// layout/mhud.cpp:UpdateSpeedElement).
+	KZ::menu::AddToggle(speed, "HUD - Menu Label Decimal", "mhudSpeedPrecise", false);
+	KZ::menu::AddColor(speed, "HUD - Menu Label Color", "mhudSpeedColor", MHUD_DEF_BASE_COLOR);
+	KZ::menu::AddColor(speed, "HUD - Menu Label CjColor", "mhudSpeedCjColor", MHUD_DEF_CJ_COLOR);
+
+	KZOptNode *prespeed = elementNodes[(i32)LayoutElement::Prespeed];
+	// Три префа престрейфа (layout/prefs.cpp:124-126, применяются в
+	// layout/mhud.cpp:UpdatePrespeedElement) — дефолты те же, что там читаются.
+	KZ::menu::AddToggle(prespeed, "HUD - Menu Label Decimal", "mhudPrespeedPrecise", false);
+	KZ::menu::AddToggle(prespeed, "HUD - Menu Label PrespeedBrackets", "mhudPrespeedBrackets", false);
+	KZ::menu::AddToggle(prespeed, "HUD - Menu Label PrespeedHideWalkOff", "mhudPrespeedHideWalkOff", false);
+	KZ::menu::SetItemSubtext(prespeed, "HUD - Menu Label PrespeedHideWalkOff Sub");
+	KZ::menu::AddColor(prespeed, "HUD - Menu Label Color", "mhudPrespeedColor", MHUD_DEF_BASE_COLOR);
+	KZ::menu::AddColor(prespeed, "HUD - Menu Label PerfColor", "mhudPrespeedPerfColor", MHUD_DEF_PERF_COLOR);
+	KZ::menu::AddColor(prespeed, "HUD - Menu Label JumpbugColor", "mhudPrespeedJumpbugColor", MHUD_DEF_JUMPBUG_COLOR);
+
+	// Цвета клавиш — здесь, вид (тумблеры) — на видимой странице Keys выше. Гейты enabledBy на
+	// hudKeysOverlap сохранены: преф один на оба узла, редактор читает их так же, как окно.
+	KZOptNode *keysColors = elementNodes[(i32)LayoutElement::Keys];
+	KZ::menu::AddColor(keysColors, "HUD - Menu Label Color", "mhudKeysColor", MHUD_DEF_BASE_COLOR);
+	KZ::menu::AddColor(keysColors, "HUD - Menu Label OverlapColor", "mhudKeysOverlapColor", MHUD_DEF_KEYS_OVERLAP_COLOR);
+	KZ::menu::SetItemEnabledBy(keysColors, "hudKeysOverlap");
+	KZ::menu::AddColor(keysColors, "HUD - Menu Label PressedColor", "mhudKeysPressedColor", MHUD_DEF_KEYS_PRESSED_COLOR);
+	KZ::menu::SetItemSolidOnly(keysColors); // key-glow-N (keys.css) — только сплошные, градиента там нет
+	KZ::menu::AddColor(keysColors, "HUD - Menu Label OverlapGlowColor", "mhudKeysOverlapGlowColor", MHUD_DEF_KEYS_OVERLAP_GLOW_COLOR);
+	KZ::menu::SetItemSolidOnly(keysColors);
+	KZ::menu::SetItemEnabledBy(keysColors, "hudKeysOverlap");
+
+	KZ::menu::AddColor(elementNodes[(i32)LayoutElement::Checkpoint], "HUD - Menu Label Color", "mhudCheckpointColor", MHUD_DEF_BASE_COLOR);
+	// У «Прогресса» своего цвета нет (в дизайне не просили) — только общие поля.
+
+	// Позиция карточки меню реплея — см. комментарий у видимой страницы ReplayMenu выше. Классы
+	// позиции берутся из cs2kz/positions.css, которая и так едет в аддоне (см. layout.h).
+	KZOptNode *rpmenuPos = KZ::menu::AddSub(hidden, "HUD - Menu Cat ReplayMenu");
+	rpmenuPos->hiddenFromMenu = true;
+	s_extraResetNodes[EXTRA_RESET_RPMENU_POS] = rpmenuPos;
+	KZ::menu::AddPosition(rpmenuPos, "HUD - Menu Label Position", "rpmenuPosX", "rpmenuPosY", RPMENU_DEF_POS_X, RPMENU_DEF_POS_Y);
 }
