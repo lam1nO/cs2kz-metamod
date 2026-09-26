@@ -35,4 +35,8 @@ namespace panorama
 	const char *GetColorEntryBgClass(i32 entry);
 	Color GetColorEntryValue(i32 entry);
 	i32 FindColorEntry(const Color &color);
+	// Попап цвета (cyber/options.xml): индекс палитры пресета cp{index} и клетки сетки
+	// оттенок ch{hue} × яркость cv{lum}. Таблицы генерирует scripts/gen_hue_lum.py из palette.css.
+	i32 GetPresetEntry(i32 index);
+	i32 GetHueLumEntry(i32 hue, i32 lum);
 } // namespace panorama

@@ -393,6 +393,37 @@ const char *panorama::ResolveSwatchClass(const Color &c)
 	return PANORAMA_COLORS[GetNearestColorIndex(c)].bgClass;
 }
 
+// Попап цвета окна !options/редактора !hud (cyber/options.xml): 32 пресета cp{i} и сетка
+// оттенок ch{i} × яркость cv{i} — индексы этой палитры, ближайшие к цветам дизайна.
+// GEN:color_popup — scripts/gen_hue_lum.py, руками не править
+static_global const i32 PRESET_PALETTE[32] = {9, 8, 6, 3, 138, 159, 129, 0, 16, 74, 143, 133, 132, 146, 15, 124, 88, 78, 70, 71, 155, 150, 124, 152, 30, 31, 33, 36, 57, 38, 59, 42};
+static_global const i32 HUE_LUM_PALETTE[10][8] =
+{
+	{ 50, 154, 143, 155,  10, 141,  20, 110},
+	{ 42, 131, 132, 133, 135,  81,  91, 101},
+	{ 42,  32,  62, 152,  12, 136,  83,  93},
+	{ 33,  64, 146, 150, 144, 149,  23, 104},
+	{ 45,  34, 151, 156,  14,  84,  24, 104},
+	{ 46,  35,  66,  15,  15,  75,  25, 106},
+	{ 57,  67, 124,  87,  87,  97, 107, 117},
+	{ 68,  78,  88,  17,  17,  27,  27, 117},
+	{ 59,  38,  79,  18,  18,  18,  28, 119},
+	{ 59,  39,  79,  19,  19,  29,  29, 119},
+};
+// /GEN:color_popup
+
+i32 panorama::GetPresetEntry(i32 index)
+{
+	return PRESET_PALETTE[Clamp(index, 0, (i32)KZ_ARRAYSIZE(PRESET_PALETTE) - 1)];
+}
+
+i32 panorama::GetHueLumEntry(i32 hue, i32 lum)
+{
+	hue = Clamp(hue, 0, (i32)KZ_ARRAYSIZE(HUE_LUM_PALETTE) - 1);
+	lum = Clamp(lum, 0, (i32)KZ_ARRAYSIZE(HUE_LUM_PALETTE[0]) - 1);
+	return HUE_LUM_PALETTE[hue][lum];
+}
+
 i32 panorama::GetColorEntryCount()
 {
 	return PANORAMA_COLOR_COUNT + PANORAMA_GRADIENT_COUNT;

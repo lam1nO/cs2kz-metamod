@@ -1072,35 +1072,29 @@ private:
 	void UpdateLeadProgressElement(KZPlayer *source);
 	CCSCustomHudLayout *EnsureLeadProgressLayout(bool &created);
 
-	// === Меню настроек (Task 11) — состояние и рендер ==================================
+	// === Окно !options и редактор !hud — состояние и рендер (layout/menu.cpp, layout/editor.cpp)
 
-	// Сущность меню ЭТОГО игрока — своя, отдельная от this->ownedLayout (см. комментарий у
-	// OpenLayoutMenu). Гасится вместе с ownedLayout везде, где гасится персистентный худ-стейт.
+	// Сущность меню ЭТОГО игрока (разметка cyber/options.xml) — своя, отдельная от this->ownedLayout
+	// (см. комментарий у OpenLayoutMenu). Гасится вместе с ownedLayout везде, где гасится
+	// персистентный худ-стейт. На ней же живёт редактор !hud (editorOpen).
 	CHandle<CBaseEntity> ownedMenuLayout {};
 	bool menuOpen {};
 	// Дедлайн следующей проверки инварианта захвата (curtime), см. CheckMenuCaptureInvariant.
 	f64 menuCaptureCheckTime {};
-	// Активный узел реестра — ДВА уровня, как у апстрима: индекс категории верхнего уровня
-	// (KZ::menu::GetTree()) и индекс её подкатегории. -1 в menuCategory — корень (ни одна не
-	// выбрана, панель пунктов пуста); -1 в menuSub — у категории подкатегорий нет и пункты
-	// показывает она сама. Раскладку левой колонки по 20 кнопкам cat%i считает BuildMenuLeft
-	// (layout/menu.cpp) из этой пары, отдельного состояния «что раскрыто» нет: раскрыта всегда
-	// menuCategory.
-	i32 menuCategory {-1};
-	i32 menuSub {-1};
+	// Активная вкладка — индекс среди ВИДИМЫХ категорий верхнего уровня (BuildMenuTabs в
+	// layout/menu.cpp: KZ::menu::GetTree() без hiddenFromMenu, не больше KZ_MENU_TABS).
+	i32 menuCategory {};
 
 	enum class MenuPopup
 	{
 		None,
-		Color, // попап выбора цвета (перенесено с апстрима почти без изменений)
-		Step,  // попап +-1/+-5 для позиции/размера/прозрачности/Vector (апстримный "Step popup")
-		List,  // попап списка (Choice) — строки li%i, наполняется getChoices при каждом рендере
-		Confirm, // подтверждение действия (confirm_popup) — сейчас только «Сбросить всё»
+		Color,   // color_popup: пресеты cp{i} + сетка оттенок ch{i} × яркость cv{i}, color_ok применяет
+		List,    // list_popup: Choice > 4 вариантов и шрифты (семейства lf{i}), строки li{i}
+		Confirm, // confirm_popup: подтверждение действия (сейчас — «Сбросить всё»)
 	};
 
 	MenuPopup menuPopup {MenuPopup::None};
-	i32 menuPopupItem {-1}; // индекс пункта в активной категории, на который открыт попап
-	i32 menuPopupPage {};   // страница попапа (свотчи цвета постранично, как в апстриме)
+	i32 menuPopupPage {}; // страница строк попапа списка
 	// Пункт реестра, который правит открытый попап (цвет/шрифт/список) или подтверждает
 	// confirm_popup. Указатель, а не индекс строки: редактор !hud открывает те же попапы на
 	// пунктах скрытых узлов элементов (hiddenFromMenu), у которых строки в окне нет. Узлы и их
@@ -1112,8 +1106,8 @@ private:
 	i32 menuListFamily {};     // семейство шрифтов lf{i} в попапе списка шрифтов
 	i32 menuPage {};           // страница строк вкладки (по KZ_MENU_ROWS)
 	// Защита от двойного клика вложенных кнопок (tg{i} внутри row{i}, et{i} внутри el{i}):
-	// ключ и тик последнего переключения. Что движок шлёт на клик по вложенной кнопке — одну
-	// или обе — вживую не проверено; второе переключение в тот же тик гасится.
+	// ключ и тик последнего действия. Что движок шлёт на клик по вложенной кнопке — одну
+	// или обе — вживую не проверено; второе действие по той же строке в тот же тик гасится.
 	i32 menuToggleKey {-1};
 	i32 menuToggleTick {-1};
 
@@ -1122,106 +1116,113 @@ private:
 	i32 editorSelected {-1}; // LayoutElement или -1 — ничего не выбрано
 	i32 editorStep {1};      // шаг стрелок позиции: 1 или 5 процентов
 	f64 editorOpenedAt {};   // curtime открытия — живой плейсхолдер таймера
-	// Диф-кэш реплики худа на сущности меню (x_* панели) — свой, отдельный от кэша настоящего
+	// Диф-кэш реплики худа на сущности меню (e_*/x_* панели) — свой, отдельный от кэша настоящего
 	// худа: это другая сущность. Живёт вместе с ownedMenuLayout (сброс в EnsureMenuLayout).
 	LayoutElementState editorElements[(i32)LayoutElement::Count] {};
 	LayoutKeysState editorKeys {};
 	LayoutExtraState editorExtra {};
 
-	// Диф-кэш применённых классов/переменных сущности меню — та же ловушка, что у
-	// layoutElements/layoutKeys/layoutCrosshair: живёт ТОЛЬКО вместе со своей сущностью,
-	// обнуляется в EnsureMenuLayout при created=true (см. force-паттерн entity.cpp).
+	// Диф-кэш применённых классов сущности меню — та же ловушка, что у layoutElements/layoutKeys/
+	// layoutCrosshair: живёт ТОЛЬКО вместе со своей сущностью, обнуляется в EnsureMenuLayout при
+	// создании. Стартовые значения обязаны совпадать с классами разметки cyber/options.xml
+	// (opt_root/edit_root/попапы/строки/вкладки — hidden, строки — t-none, ep_step1 — on).
 	struct MenuAppliedState
 	{
-		bool rootHidden {true};
-		// Шрифт и цвет корня — теперь ПРЕФЫ игрока (menuFont/menuColor, задача «оформление меню»),
-		// а не два зашитых класса: держим последний применённый класс, как у апстрима
-		// (KZMenuService::Applied::menuFont/menuColor, origin/master:src/kz/option/menu/kz_menu.h:127-128).
-		const char *menuFont {};  // font-family--* на menu_root, наследуется текстовыми панелями
-		const char *menuColor {}; // pal-fg-*/grad-* на menu_root, туда же
-		bool sounds {};           // menu_root "snd" — звуки наведения/клика (menuSounds)
-		bool shift {};            // menu_root "shift" — сдвиг меню влево под открытый попап (menuPopupShift)
+		bool optHidden {true};
+		bool editHidden {true};
 		bool colorPopupHidden {true};
-		bool stepPopupHidden {true};
 		bool listPopupHidden {true};
-		bool stepVHidden {true}; // вертикальный ряд степпера (Position и Y-ось Vector)
-		bool stepZHidden {true}; // ряд m_step_z (только Vector, третья ось)
+		bool confirmPopupHidden {true};
+		bool editOpenHidden {true};
+		bool pgPrevHidden {};
+		bool pgNextHidden {};
 
-		bool catHidden[KZ_MENU_CATS] {};
-		bool catSelected[KZ_MENU_CATS] {};
-		// Классы вложенности левой колонки (menu.css чужого аддона: .cat.indent — отступ 26px,
-		// .cat.cat-parent — жирная шапка, .cat.cat-parent.disabled — раскрытый родитель без
-		// подсветки наведения).
-		bool catIndent[KZ_MENU_CATS] {};
-		bool catParent[KZ_MENU_CATS] {};
-		bool catDisabled[KZ_MENU_CATS] {};
+		bool tabHidden[KZ_MENU_TABS] {};
+		bool tabOn[KZ_MENU_TABS] {};
 
-		bool itemHidden[KZ_MENU_ITEMS] {};
-		const char *itemType[KZ_MENU_ITEMS] {};
-		bool itemOn[KZ_MENU_ITEMS] {};
-		const char *itemSwatch[KZ_MENU_ITEMS] {};
-		bool itemHasSub[KZ_MENU_ITEMS] {};
-		bool itemDisabled[KZ_MENU_ITEMS] {};
+		bool secHidden[KZ_MENU_ROWS] {};
+		bool rowHidden[KZ_MENU_ROWS] {};
+		const char *rowType[KZ_MENU_ROWS] {};
+		bool tgOn[KZ_MENU_ROWS] {};
+		bool segOn[KZ_MENU_ROWS][KZ_MENU_SEGS] {};
+		bool segHidden[KZ_MENU_ROWS][KZ_MENU_SEGS] {};
+		const char *clBg[KZ_MENU_ROWS] {};
 
-		const char *swBg[KZ_MENU_SWATCH] {};
-		bool swSelected[KZ_MENU_SWATCH] {};
-		bool swHidden[KZ_MENU_SWATCH] {};
+		const char *cpBg[KZ_MENU_PRESETS] {};
+		bool cpOn[KZ_MENU_PRESETS] {};
+		const char *chBg[KZ_MENU_HUES] {};
+		bool chOn[KZ_MENU_HUES] {};
+		const char *cvBg[KZ_MENU_LUMS] {};
+		bool cvOn[KZ_MENU_LUMS] {};
+		const char *colorCur {};
 
-		bool liHidden[KZ_MENU_LIST] {};
-		bool liSelected[KZ_MENU_LIST] {};
-		// Класс начертания строки списка: в попапе ШРИФТОВ каждая строка нарисована своим
-		// шрифтом (у остальных Choice — NULL, строка наследует шрифт меню).
-		const char *liFont[KZ_MENU_LIST] {};
-		// lp_note — сноска про «*» у семейств, которых нет в игре. Стартовое true — ПРЕДПОЛОЖЕНИЕ
-		// о дефолтном состоянии панели в разметке чужого аддона (проверить нечем, .vxml не наш):
-		// если панель по умолчанию видима, сноска провисит до первого открытия списка шрифтов.
-		// Проверяется живьём — открыть НЕ шрифтовой список и посмотреть, есть ли сноска.
-		bool noteHidden {true};
+		bool liHidden[KZ_MENU_LIST_ROWS] {};
+		bool liOn[KZ_MENU_LIST_ROWS] {};
+		const char *liFont[KZ_MENU_LIST_ROWS] {};
+		bool lfHidden[KZ_MENU_FAMILIES] {};
+		bool lfOn[KZ_MENU_FAMILIES] {};
 
-		MenuAppliedState()
-		{
-			for (i32 i = 0; i < KZ_MENU_CATS; i++)
-			{
-				catHidden[i] = true;
-			}
-			for (i32 i = 0; i < KZ_MENU_ITEMS; i++)
-			{
-				itemHidden[i] = true;
-			}
-			for (i32 i = 0; i < KZ_MENU_SWATCH; i++)
-			{
-				swHidden[i] = true;
-			}
-			for (i32 i = 0; i < KZ_MENU_LIST; i++)
-			{
-				liHidden[i] = true;
-			}
-		}
+		// Редактор: список элементов, выбор на реплике, панель свойств.
+		bool elOn[KZ_EDITOR_ITEMS] {};
+		bool etOn[KZ_EDITOR_ITEMS] {};
+		bool eSel[KZ_EDITOR_ITEMS] {};
+		bool propsHidden {true};
+		bool propsFlip {};
+		bool epOn {};
+		bool epStep1 {true};
+		bool epStep5 {};
+		bool epOutline {};
+		bool epColorHidden {};
+		bool epDrowHidden {true};
+		const char *epColor {};
+		const char *epDAhead {};
+		const char *epDBehind {};
+
+		MenuAppliedState();
 	};
 
 	MenuAppliedState menuApplied {};
-	// Последнее записанное значение каждой (panelId,var)-пары — как у апстрима: SetDialogVariableString
-	// метит ВСЮ сущность на полную пересылку, повторная запись того же значения того не стоит.
+	// Последнее записанное значение каждой переменной — как у апстрима: SetDialogVariableString
+	// метит сущность на пересылку, повторная запись того же значения того не стоит.
 	std::unordered_map<std::string, std::string> menuVars;
 
 	CCSCustomHudLayout *EnsureMenuLayout(bool &created);
+	// Пересоздать закрытую сущность меню, если её интерн-таблицы подошли к лимиту (см. menu.h).
+	void RecycleMenuLayoutIfFull();
+	// Перерисовать активный режим (окно или редактор) вместе с попапами.
+	void RenderLayoutUi();
 	void RenderMenu();
-	void RenderMenuCategories(CCSCustomHudLayout *layout);
-	void RenderMenuItems(CCSCustomHudLayout *layout);
+	void RenderMenuTabs(CCSCustomHudLayout *layout);
+	void RenderMenuRows(CCSCustomHudLayout *layout);
+	void RenderMenuPopups(CCSCustomHudLayout *layout);
 	void RenderMenuColorPopup(CCSCustomHudLayout *layout);
-	void RenderMenuStepPopup(CCSCustomHudLayout *layout);
 	void RenderMenuListPopup(CCSCustomHudLayout *layout);
+	void RenderMenuConfirmPopup(CCSCustomHudLayout *layout);
 
-	void SelectMenuCategory(i32 index);
-	void ActivateMenuItem(i32 slot);
-	void OpenMenuPopup(MenuPopup kind, i32 itemIndex);
+	void SelectMenuTab(i32 tab);
+	void MenuRowAction(i32 row, i32 control, i32 arg);
+	void OpenMenuPopup(MenuPopup kind, const KZOptItem *item);
 	void CloseMenuPopup();
 	void MenuPopupPageStep(i32 delta);
-	void MenuPopupPick(i32 slot);
 	void MenuListPick(i32 slot);
-	// axis: 0 — x/размер/прозрачность (тот же, что раньше), 1 — y (Position и Y-ось Vector),
-	// 2 — z (только Vector).
-	void MenuStep(i32 axis, i32 delta);
+	void MenuColorApply();
+	void OpenMenuConfirm(const KZOptItem *item);
+	bool HandleMenuPopupClick(const char *panelId);
+	bool HandleMenuWindowClick(const char *panelId);
+	// true — действие по ключу key уже было в этом тике (второй отчёт о вложенной кнопке).
+	bool IsDuplicateMenuAction(i32 key);
+
+	// Редактор (layout/editor.cpp).
+	void RenderEditor();
+	void RenderEditorReplica(CCSCustomHudLayout *layout, bool tickOnly);
+	bool HandleEditorClick(const char *panelId);
+	void EditorSetPos(i32 element, i32 x, i32 y);
+	void EditorNudge(i32 dx, i32 dy);
+	void EditorStepSize(i32 delta);
+	void EditorStepOpacity(i32 delta);
+	void EditorToggleOutline();
+	void EditorToggleElement(i32 element);
+	void EditorResetSelected();
 
 	void SetMenuClass(CCSCustomHudLayout *layout, const char *panelId, const char *className, bool on);
 	void SetMenuBoolClass(CCSCustomHudLayout *layout, const char *panelId, const char *className, bool &cache, bool want);

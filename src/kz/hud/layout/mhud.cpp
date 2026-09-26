@@ -153,10 +153,11 @@ void KZHUDService::ApplyTimerDelta(CCSCustomHudLayout *layout, const char *prefi
 		this->SetLayoutClass(layout, deltaPanel, extra.deltaStateClass, isDefault ? (ahead ? "d-ahead" : "d-behind") : NULL);
 		this->SetLayoutClass(layout, deltaPanel, extra.deltaColorClass, colorClass);
 
-		// Кегль — половина кегля таймера, в пределах таблицы font-size.css (8..100 px): мельче
-		// восьми классов нет, и дельта при крошечном таймере не пропадает, а упирается в минимум.
+		// Кегль — 0.65 кегля таймера (половина при таймере 24px давала нечитаемые 12px), в пределах
+		// таблицы font-size.css (8..100 px): мельче восьми классов нет, дельта упирается в минимум.
 		const i32 timerSize = prefs.elements[(i32)LayoutElement::Timer].size;
-		this->SetLayoutValueClass(layout, deltaPanel, extra.deltaFontSize, Clamp(timerSize / 2, LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX), "font-size", false);
+		const i32 deltaSize = panorama::SnapToStep((timerSize * 65 + 50) / 100, LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX);
+		this->SetLayoutValueClass(layout, deltaPanel, extra.deltaFontSize, deltaSize, "font-size", false);
 	}
 	// hidden — последним: сначала текст/цвет/кегль, потом показ, чтобы не мелькнул прошлый кадр.
 	this->SetLayoutBoolClass(layout, deltaPanel, "hidden", extra.deltaHidden, !show);

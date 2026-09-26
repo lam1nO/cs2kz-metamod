@@ -32,20 +32,19 @@
 // RecycleMenuLayoutIfFull) — закрытая сущность ничего не держит, пересоздание бесплатно.
 #define KZ_MENU_INTERN_RECYCLE 900
 
-// Фиксированные ёмкости слотов разметки menu.vxml (тот же контракт, что у апстримного
-// kz_menu.h): категории слева, пункты в средней колонке, свотчи попапа цвета. Состав дерева
-// на сегодня — 14 категорий, самая длинная (Keys) занимает 19 пунктов из 20; константы держим
-// как в апстриме, чтобы разметка совпадала без сюрпризов на расширении. Пункты сверх KZ_MENU_ITEMS
-// молча не показываются, поэтому RenderMenuItems пишет об усечении в лог (panorama_menu_items_truncated).
-#define KZ_MENU_CATS   20
-#define KZ_MENU_ITEMS  20
-#define KZ_MENU_SWATCH 40
-// Строк попапа списка (Choice) — li0..li31 в разметке; самые длинные getChoices рантайм-овые
-// (Language 13 строк; Mode/Styles/Pistol — по числу загруженных плагинов), ёмкость держим как
-// в разметке. Страницы попапа листаются (MenuPopupPageStep), так что список длиннее 32 не режется.
-// Список шрифтов (68 начертаний) листается не по 32, а по СЕМЕЙСТВАМ: 15 страниц, самая длинная
-// (Stratum2) — 29 строк, то есть в эту же ёмкость (layout/menu.cpp, GetListPopupSlice).
-#define KZ_MENU_LIST 32
+// Класс типа строки по умолчанию (разметка ставит его всем row{i}) — стабильный указатель для
+// диф-кэша MenuAppliedState::rowType (SetMenuSwapClass сравнивает указатели).
+extern const char *const KZ_MENU_ROW_TYPE_NONE;
+
+struct KZOptItem;
+struct KZOptNode;
+// Поиск пункта/узла реестра по ключу префа — по всему дереву, включая скрытые (hiddenFromMenu)
+// узлы элементов худа: редактор !hud правит и сбрасывает именно их (layout/menu.cpp).
+const KZOptItem *KZMenuFindItemByPref(const char *prefKey);
+KZOptNode *KZMenuFindNodeByPref(const char *prefKey);
+const KZOptItem *KZMenuFindItemByPhrase(const char *phraseKey);
+// Пункт «Сбросить всё» раздела худа — в окне и в редакторе идёт через confirm_popup.
+#define KZ_MENU_RESET_ALL_PHRASE "HUD - Menu Label ResetAll"
 
 // Окно проверки инварианта «нет захвата ввода при закрытом меню» (CheckMenuCaptureInvariant,
 // layout/menu.cpp), секунды. Проверка живёт в игровом такте — окно нужно, чтобы не читать схему
