@@ -1173,6 +1173,56 @@
 		"chi"		"_"
 		"ua"		"_"
 	}
+	// Поведение элементов в панели свойств редактора (ep_trow*/ep_grow): раньше — пункты !options.
+	"HUD Editor - Prop Decimals"
+	{
+		"en"		"Decimal places"
+		"ru"		"Доли после запятой"
+		"chi"		"Decimal places"
+		"ua"		"Частки після коми"
+	}
+	"HUD Editor - Prop Brackets"
+	{
+		"en"		"In parentheses"
+		"ru"		"В скобках"
+		"chi"		"In parentheses"
+		"ua"		"У дужках"
+	}
+	"HUD Editor - Prop HideWalkOff"
+	{
+		"en"		"Hide when walking off an edge"
+		"ru"		"Скрывать при сходе с края"
+		"chi"		"Hide when walking off an edge"
+		"ua"		"Ховати при сході з краю"
+	}
+	"HUD Editor - Prop Compare"
+	{
+		"en"		"Compare"
+		"ru"		"Сравнение"
+		"chi"		"Compare"
+		"ua"		"Порівняння"
+	}
+	"HUD Editor - Prop ComparePB"
+	{
+		"en"		"PB"
+		"ru"		"PB"
+		"chi"		"PB"
+		"ua"		"PB"
+	}
+	"HUD Editor - Prop CompareWR"
+	{
+		"en"		"WR"
+		"ru"		"WR"
+		"chi"		"WR"
+		"ua"		"WR"
+	}
+	"HUD Editor - Element Crosshair"
+	{
+		"en"		"Crosshair"
+		"ru"		"Прицел"
+		"chi"		"Crosshair"
+		"ua"		"Приціл"
+	}
 	"HUD Editor - Element Timer"
 	{
 		"en"		"Timer"
