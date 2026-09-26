@@ -20,6 +20,7 @@
 #include "kz/mode/kz_mode.h"              // KZModeService::GetModeShortName для метки режима в строке 1
 #include "kz/replays/cyb_replay_common.h" // MapMode — тот же маппинг режима, что у PB/WR-фетча
 #include "kz/jumpstats/kz_jumpstats.h"    // JumpType_Jumpbug/jumps.Tail() для приписки JB у скорости
+#include "kz/lead/kz_lead.h"               // SetCompareWanted(false) — путь дельты вне panorama не держим
 
 #include <algorithm>
 
@@ -1980,6 +1981,13 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 		// Копия страницы под «Прогресс» живёт по тому же правилу: вне panorama её быть не
 		// должно (иначе на экране остался бы висеть процент от прошлого типа худа).
 		cfg->DestroyOwnedLeadProgressLayout();
+	}
+	if (!usePanorama && player == target && target->leadService)
+	{
+		// Дельта к PB/WR есть только в panorama-таймере (UpdateTimerElement): на HTML/Off (или при
+		// отказе panorama) путь сравнения держать не для кого — отпускаем. Вид записи при false
+		// не читается.
+		target->leadService->SetCompareWanted(false, CybReplayDownload::Kind::PB);
 	}
 
 	// Тип Off — единственный рычаг «выключить худ целиком»: ни panorama (уже обработана

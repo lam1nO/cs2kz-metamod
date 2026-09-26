@@ -291,8 +291,11 @@ void KZHUDService::RenderEditorReplica(CCSCustomHudLayout *layout, bool tickOnly
 	{
 		char pos[64];
 		char ang[48];
-		FormatShowPos(this->player, pos, sizeof(pos), ang, sizeof(ang));
-		this->ApplyShowPosLines(layout, "x_", this->editorExtra, pos, ang, prefs.elements[(i32)LayoutElement::ShowPos], prefs.showPosColor);
+		// Без пешки (смерть/спектейт под редактором) строки держат прошлое значение.
+		if (FormatShowPos(this->player, pos, sizeof(pos), ang, sizeof(ang)))
+		{
+			this->ApplyShowPosLines(layout, "x_", this->editorExtra, pos, ang, prefs.elements[(i32)LayoutElement::ShowPos], prefs.showPosColor);
+		}
 	}
 	apply(LayoutElement::ShowPos, true, NULL, prefs.showPosColor);
 	if (tickOnly)
@@ -510,6 +513,7 @@ bool KZHUDService::HandleEditorClick(const char *id)
 		{
 			if (!this->IsDuplicateMenuAction(2000 + i))
 			{
+				this->NoteMenuAction(2000 + i);
 				this->EditorToggleElement(i);
 			}
 			return true;

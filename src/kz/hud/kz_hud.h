@@ -1118,6 +1118,9 @@ private:
 	f64 editorOpenedAt {};   // curtime открытия — живой плейсхолдер таймера
 	// Диф-кэш реплики худа на сущности меню (e_*/x_* панели) — свой, отдельный от кэша настоящего
 	// худа: это другая сущность. Живёт вместе с ownedMenuLayout (сброс в EnsureMenuLayout).
+	// Начальное hidden{true} совпадает с разметкой: кнопки e_* в options.xml заводятся с классом
+	// hidden, сервер снимает его только у включённых элементов (после x/y, см. ApplyLayoutLabel),
+	// а выключенные так и остаются скрытыми — непозиционированной видимой рамки не бывает.
 	LayoutElementState editorElements[(i32)LayoutElement::Count] {};
 	LayoutKeysState editorKeys {};
 	LayoutExtraState editorExtra {};
@@ -1210,7 +1213,10 @@ private:
 	bool HandleMenuPopupClick(const char *panelId);
 	bool HandleMenuWindowClick(const char *panelId);
 	// true — действие по ключу key уже было в этом тике (второй отчёт о вложенной кнопке).
-	bool IsDuplicateMenuAction(i32 key);
+	// Только проверка: ключ регистрирует NoteMenuAction, и ТОЛЬКО после реально выполненного
+	// действия — иначе пустой отчёт о родительской строке съедал бы сегмент/степпер того же тика.
+	bool IsDuplicateMenuAction(i32 key) const;
+	void NoteMenuAction(i32 key);
 
 	// Редактор (layout/editor.cpp).
 	void RenderEditor();

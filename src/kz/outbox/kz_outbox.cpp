@@ -11,6 +11,7 @@
 #include "kz/db/queries/times.h"
 #include "kz/timer/submission.h"
 #include "kz/replays/kz_replay.h"
+#include "kz/lead/kz_lead.h" // OnReplayUploaded — путь дельты к PB/AWR устарел после аплоада
 
 #include "vendor/sql_mm/src/public/sql_mm.h"
 
@@ -458,6 +459,9 @@ static_function void SendReplayChain(const KZOutboxService::ReplayMeta &meta, co
 		if (anyOk)
 		{
 			KZOutboxService::AckReplay(meta.runUuid, "upload_2xx");
+			// Именно здесь, а не на финише (RunSubmission::UpdateLocalCache): до аплоада резолв
+			// реплея отдал бы ПРОШЛУЮ запись, и путь дельты перезагрузился бы в тот же старый.
+			KZLeadService::OnReplayUploaded(meta.steamId64, meta.course, meta.uploadPb && meta.isServerRecord);
 		}
 		else
 		{

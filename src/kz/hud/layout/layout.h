@@ -24,13 +24,13 @@
 #define LAYOUT_DEF_CHECKPOINT_Y    30
 #define LAYOUT_DEF_CHECKPOINT_SIZE 20
 
-// «Прогресс: N%» по маршруту `!lead` — «в поле таймера, но настраивается отдельно» (решение
-// пользователя): X как у таймера, Y на шесть процентов ниже, кегль мельче. Элемент по
-// умолчанию ВЫКЛЮЧЕН (LayoutElementDef::enabledDefault), поэтому этой раскладки никто не
-// увидит, пока сам не включит пункт в меню.
-#define LAYOUT_DEF_LEADPROGRESS_X    LAYOUT_DEF_TIMER_X
-#define LAYOUT_DEF_LEADPROGRESS_Y    (LAYOUT_DEF_TIMER_Y + 6)
-#define LAYOUT_DEF_LEADPROGRESS_SIZE 18
+// «Прогресс» по маршруту `!lead` — полоса с подписью и процентом (mhud_progress) справа снизу,
+// как в дизайне (борд 1). Раньше стоял под таймером (Y таймера + 6) и при дефолтах налезал на
+// тип рана — отсюда и перенос. Элемент по умолчанию ВЫКЛЮЧЕН (LayoutElementDef::enabledDefault),
+// поэтому этой раскладки никто не увидит, пока сам не включит пункт.
+#define LAYOUT_DEF_LEADPROGRESS_X    40
+#define LAYOUT_DEF_LEADPROGRESS_Y    40
+#define LAYOUT_DEF_LEADPROGRESS_SIZE 13
 
 // Поля редактора `!hud` (PB/WR, showpos, курс, тип рана) — ВРЕМЕННЫЕ дефолты до решения
 // владельца (чеклист H6). Борд 1 даёт их в процентах ЭКРАНА от левого верхнего угла
@@ -49,8 +49,9 @@
 #define LAYOUT_DEF_COURSE_Y    (-46)
 #define LAYOUT_DEF_COURSE_SIZE 13
 
-#define LAYOUT_DEF_RUNTYPE_X    (-3)
-#define LAYOUT_DEF_RUNTYPE_Y    43
+// Тип рана — под таймером по центру (0/40): прежние -3/43 перекрывались с «Прогрессом».
+#define LAYOUT_DEF_RUNTYPE_X    0
+#define LAYOUT_DEF_RUNTYPE_Y    40
 #define LAYOUT_DEF_RUNTYPE_SIZE 15
 
 #define LAYOUT_SIZE_MIN 8
@@ -122,8 +123,8 @@ inline const char *PrefixLayoutId(char *buf, size_t len, const char *prefix, con
 
 // Курс для PB/WR и строки курса: активный, а до старт-зоны — главный курс карты (layout/mhud.cpp).
 const KZCourseDescriptor *GetHudDisplayCourse(KZPlayer *source);
-// Строки showpos «x y z» / «pitch yaw» игрока source (layout/mhud.cpp).
-void FormatShowPos(KZPlayer *source, char *pos, u32 posLen, char *ang, u32 angLen);
+// Строки showpos «x y z» / «pitch yaw» игрока source (layout/mhud.cpp). false — нет пешки.
+bool FormatShowPos(KZPlayer *source, char *pos, u32 posLen, char *ang, u32 angLen);
 // Преф основного цвета элемента (ep_color редактора) и его дефолт; NULL — у элемента своего цвета
 // нет (тип рана — бейдж красят классы rt-*). Реализация — layout/prefs.cpp.
 const char *GetElementColorKey(LayoutElement element, Color &def);

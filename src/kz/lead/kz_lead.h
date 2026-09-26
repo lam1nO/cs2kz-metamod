@@ -181,13 +181,20 @@ public:
 	// время таймера записи в ближайшей вершине. true — только если путь сравнения загружен
 	// под ТЕКУЩИЙ курс+режим, таймер идёт и ближайшая вершина уже посчитана.
 	bool GetCompareDeltaSeconds(f64 &outSeconds) const;
+	// Запись вида kind на курсе cyberCourse (cyber-номер) обновилась на платформе: путь
+	// сравнения этого вида и курса отпускается, защёлка отказа снимается, следующая загрузка —
+	// своя, без копии с луча (у луча вершины прошлой записи).
+	void OnRecordsChanged(CybReplayDownload::Kind kind, i32 cyberCourse);
+	// Аплоад реплея доехал до платформы (kz_outbox, SendReplayChain): новый PB автора и, если
+	// ран — рекорд сервера, возможно новый AWR. Раздаёт OnRecordsChanged по игрокам.
+	static void OnReplayUploaded(u64 steamId64, i32 cyberCourse, bool serverRecord);
 	void OnPhysicsSimulatePost();
 
 	void OnTeleport()
 	{
 		// Телепорт рвёт непрерывность движения — ближайшую вершину ищем заново по всему пути.
 		this->resync = true;
-		// У пути сравнения — то же. Дельта до его прохода (<=32 тика) держит прежнюю вершину:
+		// У пути сравнения — то же. Дельта до его прохода (<=8 тиков) держит прежний снимок:
 		// прятать её на каждый телепорт значило бы мигать элементом весь NUB-ран.
 		this->compare.resync = true;
 	}
@@ -252,11 +259,13 @@ private:
 	static u32 FindNearest(const std::vector<Vertex> &path, const std::vector<f32> &cumLen, u32 nearest, bool resync, bool beamBound,
 						   u32 windowTo, const Vector &origin);
 	// Кумулятивные длины: общий расчёт для обоих слотов, возвращает полную длину.
+	// Время записи (тики, дробные) в точке origin: проекция на отрезок у ближайшей вершины.
+	static bool InterpolateRecordTicks(const std::vector<Vertex> &path, u32 nearest, const Vector &origin, bool awr, f64 &outTicks);
 	static f32 ComputeCumulativeLengths(const std::vector<Vertex> &path, std::vector<f32> &cumLen);
 
 	// === Путь сравнения (compare) ===
-	// Тиковая ветка слота: свой дроссель в 32 тика, своя пауза/защёлка, UpdateNearest в режиме
-	// «без луча». Зовётся из OnPhysicsSimulatePost ДО гейта луча/процента: дельте путь нужен и
+	// Тиковая ветка слота: свой дроссель в 32 тика (пауза/ключ/загрузка) и быстрый в 8 (поиск
+	// ближайшей + снимок времени), своя пауза/защёлка, FindNearest в режиме «без луча». Зовётся из OnPhysicsSimulatePost ДО гейта луча/процента: дельте путь нужен и
 	// при выключенных луче и проценте.
 	void UpdateCompare();
 	void ArmComparePath();
@@ -396,6 +405,18 @@ private:
 		i32 failRetriesLeft = 0;
 		i32 armCooldown = 0;
 		u32 ticksSinceUpdate = 0;
+		// Свой быстрый дроссель поиска ближайшей (KZ_LEAD_COMPARE_NEAREST_TICKS).
+		u32 ticksSinceNearest = 0;
+		// Снимок в тике поиска ближайшей: время нашего таймера и время записи в той же точке
+		// (интерполировано по отрезку). Дельта = их разность — без пилы от «таймер сейчас минус
+		// запись тогда» (см. UpdateCompare). sampleValid=false — снимка нет (таймер стоял, у
+		// вершины нет времени, путь только что сменился).
+		bool sampleValid = false;
+		f64 timeAtNearest = 0.0;
+		f64 recordTimeAtNearest = 0.0;
+		// Запись этого вида обновилась (OnRecordsChanged): пока свой путь не приземлился, вершины
+		// луча не копируем и его загрузку/защёлку не ждём — они про прошлую запись.
+		bool ownLoadOnly = false;
 	};
 	CompareSlot compare;
 };

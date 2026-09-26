@@ -37,23 +37,38 @@ namespace KZ::hudfmt
 		snprintf(out, outLen, "%.2f %.2f", pitch, yaw);
 	}
 
+	// snprintf возвращает длину, которую ХОТЕЛ записать, а не записанную: без зажима n после
+	// обрезки уходил за буфер, и следующий out + n / outLen - n (size_t) писал мимо него.
+	static size_t ClampWritten(size_t n, int written, size_t outLen)
+	{
+		if (written > 0)
+		{
+			n += (size_t)written;
+		}
+		return n < outLen ? n : outLen - 1;
+	}
+
 	void FormatCourseLine(const char *course, const char *modeShort, const char *const *styles, int styleCount, char *out, size_t outLen)
 	{
+		if (!out || outLen == 0)
+		{
+			return;
+		}
 		size_t n = 0;
 		for (const char *p = course ? course : ""; *p && n + 1 < outLen; p++)
 		{
 			out[n++] = (char)toupper((unsigned char)*p);
 		}
 		out[n] = 0;
-		n += (size_t)snprintf(out + n, outLen - n, " \xC2\xB7 %s", modeShort ? modeShort : "");
+		n = ClampWritten(n, snprintf(out + n, outLen - n, " \xC2\xB7 %s", modeShort ? modeShort : ""), outLen);
 		if (styleCount <= 0)
 		{
 			snprintf(out + n, outLen - n, " \xC2\xB7 NRM");
 			return;
 		}
-		for (int i = 0; i < styleCount && n < outLen; i++)
+		for (int i = 0; i < styleCount && n + 1 < outLen; i++)
 		{
-			n += (size_t)snprintf(out + n, outLen - n, " \xC2\xB7 %s", styles[i]);
+			n = ClampWritten(n, snprintf(out + n, outLen - n, " \xC2\xB7 %s", styles[i]), outLen);
 		}
 	}
 

@@ -187,10 +187,18 @@ void KZHUDService::ApplyLayoutLabel(CCSCustomHudLayout *layout, const char *pane
 		state = LayoutElementState();
 	}
 
-	if (state.hidden != !show)
+	// hidden — отдельной лямбдой: гасим СРАЗУ (дальше писать нечего), а показываем ПОСЛЕДНИМ,
+	// после позиции/кегля/цвета. Разметка (mhud.xml и реплика e_* в options.xml) заводит элементы
+	// скрытыми, и снятие hidden до классов x/y хоть на один апдейт показало бы элемент в
+	// дефолтной точке .element (центр экрана) — непозиционированный видимый элемент.
+	auto applyHidden = [&](bool hidden)
 	{
-		state.hidden = !show;
-		if (!layout->SetHasClass(posPanelId, "hidden", state.hidden ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass))
+		if (state.hidden == hidden)
+		{
+			return;
+		}
+		state.hidden = hidden;
+		if (!layout->SetHasClass(posPanelId, "hidden", hidden ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass))
 		{
 			LogHudInternFailure(this->player, posPanelId, "hidden");
 		}
@@ -201,12 +209,13 @@ void KZHUDService::ApplyLayoutLabel(CCSCustomHudLayout *layout, const char *pane
 		// не добавляет — и id, и класс уже в таблице сущности.
 		if (V_strcmp(posPanelId, panelId) != 0)
 		{
-			layout->SetHasClass(panelId, "hidden", state.hidden ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass);
+			layout->SetHasClass(panelId, "hidden", hidden ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass);
 		}
-	}
+	};
 	// Скрытый элемент не теряет значения — включить его обратно ничего не стоит.
-	if (state.hidden)
+	if (!show)
 	{
+		applyHidden(true);
 		return;
 	}
 
@@ -261,6 +270,8 @@ void KZHUDService::ApplyLayoutLabel(CCSCustomHudLayout *layout, const char *pane
 			LogHudInternFailure(this->player, panelId, "outline");
 		}
 	}
+	// Показ — последним (см. applyHidden выше).
+	applyHidden(false);
 }
 
 // === Сущность на игрока =============================================================

@@ -17,6 +17,21 @@ int main()
 	const char *st[] = {"ABH", "LG"};
 	FormatCourseLine("main", "CKZ", st, 2, b, sizeof(b)); assert(!strcmp(b, "MAIN \xC2\xB7 CKZ \xC2\xB7 ABH \xC2\xB7 LG"));
 	FormatCourseLine("Bonus 1", "VNL", nullptr, 0, b, sizeof(b)); assert(!strcmp(b, "BONUS 1 \xC2\xB7 VNL \xC2\xB7 NRM"));
+	// Длинное имя курса в маленький буфер: обрезка без выхода за буфер (n зажимается после snprintf).
+	{
+		char small[12];
+		memset(small, 'Z', sizeof(small));
+		const char *many[] = {"ABH", "LGJ", "SW", "HSW"};
+		FormatCourseLine("a very long course name", "CKZ", many, 4, small, sizeof(small));
+		assert(strlen(small) == sizeof(small) - 1 && !strcmp(small, "A VERY LONG"));
+		char tiny[16];
+		FormatCourseLine("main", "CKZ", many, 4, tiny, sizeof(tiny));
+		assert(strlen(tiny) < sizeof(tiny) && !strncmp(tiny, "MAIN \xC2\xB7 CKZ", 10));
+		char guard[24];
+		memset(guard, 'Z', sizeof(guard));
+		FormatCourseLine("main", "CKZ", many, 4, guard, 8);
+		assert(strlen(guard) == 7 && guard[8] == 'Z' && guard[23] == 'Z');
+	}
 	int x, y;
 	// центр ячейки 0..63 x 0..35: x=round((c+0.5)*100/64), y=round((r+0.5)*100/36).
 	// Плановое ожидание g0_0 (x==0) арифметически неверно: (0+0.5)*100/64=0.78125 → round=1.

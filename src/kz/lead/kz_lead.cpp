@@ -37,6 +37,13 @@
 // Пересчёт окна — раз в 32 тика (два раза в секунду): создание сущностей дороже, чем
 // точность отставания луча на полшага.
 #define KZ_LEAD_UPDATE_TICKS 32
+// Поиск ближайшей вершины ПУТИ СРАВНЕНИЯ (дельта таймера) — чаще, раз в 8 тиков (8 раз в
+// секунду). Дельта — число на экране, и её ступенька равна шагу выборки: при 32 тиках она
+// обновлялась бы дважды в секунду рывками. Скан ограничен (KZ_LEAD_SCAN_UNITS вперёд от
+// прошлой ближайшей, потолок KZ_LEAD_SCAN_MAX_VERTS), так что вчетверо чаще — это вчетверо
+// больше ограниченного прохода, а не полного пути. Остальное (пауза, ключ, загрузка) остаётся
+// на KZ_LEAD_UPDATE_TICKS.
+#define KZ_LEAD_COMPARE_NEAREST_TICKS 8
 // Дальше этого от ближайшей вершины считаем, что игрок сошёл с маршрута, и ищем заново
 // по всему пути (телепорт мимо хука, спавн, падение в другую часть карты).
 #define KZ_LEAD_RESEARCH_DIST 300.0f
@@ -1058,6 +1065,7 @@ void KZLeadService::ResetState(bool keepEntities)
 	this->compare.failedMode[0] = '\0';
 	this->compare.failRetriesLeft = 0;
 	this->compare.armCooldown = this->player->GetPlayerSlot().Get() % KZ_LEAD_ARM_COOLDOWN_CYCLES + 1;
+	this->compare.ownLoadOnly = false;
 	// Преф прогресса здесь НЕ трогаем: OnMapChanged зовёт этот метод на смене карты, а
 	// настройка игрока карту переживает — иначе элемент худа молча умирал бы до следующего
 	// захода в меню. Гасит его только Reset() (дисконнект, слот освободился).
@@ -2098,6 +2106,7 @@ void KZLeadService::SetCompareWanted(bool wanted, CybReplayDownload::Kind kind)
 		this->compare.failedMode[0] = '\0';
 		this->compare.failRetriesLeft = 0;
 		this->compare.armCooldown = 0;
+		this->compare.ownLoadOnly = false;
 	}
 	// Включение того же вида защёлку НЕ снимает (в отличие от SetProgressWanted): тумблер
 	// дельты худ дёргает сам, а не игрок командой, и снятие на каждом включении дало бы
@@ -2122,6 +2131,7 @@ void KZLeadService::ReleaseCompare()
 	c.nearest = 0;
 	c.resync = true;
 	c.nearestReady = false;
+	c.sampleValid = false;
 	c.pathCourse = -1;
 	c.modeName[0] = '\0';
 	c.loading = false;
@@ -2140,34 +2150,43 @@ bool KZLeadService::ComparePathKeyMatchesCurrent() const
 void KZLeadService::UpdateCompare()
 {
 	CompareSlot &c = this->compare;
-	// Свой дроссель, та же единица (32 тика), что у луча/процента: и пауза armCooldown, и
-	// поиск ближайшей считаются в этих проходах.
-	if (++c.ticksSinceUpdate < KZ_LEAD_UPDATE_TICKS)
+	// Два дросселя. Медленный (32 тика, та же единица, что у луча/процента): пауза armCooldown,
+	// сверка ключа, загрузка. Быстрый (KZ_LEAD_COMPARE_NEAREST_TICKS): поиск ближайшей и снимок
+	// времени — см. комментарий у константы.
+	if (++c.ticksSinceUpdate >= KZ_LEAD_UPDATE_TICKS)
+	{
+		c.ticksSinceUpdate = 0;
+		if (c.armCooldown > 0)
+		{
+			c.armCooldown--;
+		}
+		// Путь режим- И курс-зависим: дельта по маршруту чужого курса/режима — враньё. Отпускаем и
+		// перезапрашиваем под новый ключ (как процент при выключенном луче). Защёлка ключевана и
+		// отказу прошлого ключа не мешает; мигающий ключ во время загрузки гасит пауза в
+		// PollComparePending (path_dropped).
+		if (!c.path.empty() && !this->ComparePathKeyMatchesCurrent())
+		{
+			this->ReleaseCompare();
+			return;
+		}
+		if (!this->player->GetPlayerPawn())
+		{
+			// Мёртв/спектейт — ничего не двигаем, вернётся сам.
+			return;
+		}
+		if (c.path.empty())
+		{
+			this->ArmComparePath();
+			return;
+		}
+	}
+	if (c.path.empty() || ++c.ticksSinceNearest < KZ_LEAD_COMPARE_NEAREST_TICKS)
 	{
 		return;
 	}
-	c.ticksSinceUpdate = 0;
-	if (c.armCooldown > 0)
-	{
-		c.armCooldown--;
-	}
-	// Путь режим- И курс-зависим: дельта по маршруту чужого курса/режима — враньё. Отпускаем и
-	// перезапрашиваем под новый ключ (как процент при выключенном луче). Защёлка ключевана и
-	// отказу прошлого ключа не мешает; мигающий ключ во время загрузки гасит пауза в
-	// PollComparePending (path_dropped).
-	if (!c.path.empty() && !this->ComparePathKeyMatchesCurrent())
-	{
-		this->ReleaseCompare();
-		return;
-	}
+	c.ticksSinceNearest = 0;
 	if (!this->player->GetPlayerPawn())
 	{
-		// Мёртв/спектейт — ничего не двигаем, вернётся сам.
-		return;
-	}
-	if (c.path.empty())
-	{
-		this->ArmComparePath();
 		return;
 	}
 	Vector origin = vec3_invalid;
@@ -2180,6 +2199,75 @@ void KZLeadService::UpdateCompare()
 	c.nearest = FindNearest(c.path, c.cumLen, c.nearest, c.resync, false, 0, origin);
 	c.resync = false;
 	c.nearestReady = true;
+
+	// СНИМОК: время нашего таймера и время записи — в ОДНОМ тике, по одной и той же позиции.
+	// Раньше вершина искалась раз в 32 тика, а из таймера вычиталось время на момент показа:
+	// между проходами наш таймер уходил вперёд, а время записи стояло на месте — дельта росла
+	// пилой до ~0.5 с и сбрасывалась на каждом проходе. Теперь пара фиксируется здесь, и число
+	// на экране меняется только от настоящего отрыва.
+	KZTimerService *timer = this->player->timerService;
+	f64 recordTicks = 0.0;
+	c.sampleValid = timer && timer->GetTimerRunning()
+					&& InterpolateRecordTicks(c.path, c.nearest, origin, c.kind == CybReplayDownload::Kind::AWR, recordTicks);
+	if (c.sampleValid)
+	{
+		c.timeAtNearest = timer->GetTime();
+		c.recordTimeAtNearest = recordTicks * (f64)ENGINE_FIXED_TICK_INTERVAL;
+	}
+}
+
+// Время записи в точке игрока, в тиках (дробных): проекция позиции на соседний отрезок
+// (nearest, nearest+1) или (nearest-1, nearest) — какой ближе — и линейная интерполяция времени
+// по нему. Одна ближайшая ВЕРШИНА давала ступеньки: после RDP вершины стоят редко (на прямой —
+// десятки юнитов, то есть десятые доли секунды записи), и дельта прыгала на шаг вершины.
+// false — у вершины нет времени (KZ_LEAD_NO_RUN_TICK). Отрезок, у конца которого времени нет,
+// в расчёт не берётся — тогда остаётся время самой вершины.
+bool KZLeadService::InterpolateRecordTicks(const std::vector<Vertex> &path, u32 nearest, const Vector &origin, bool awr, f64 &outTicks)
+{
+	if (nearest >= path.size())
+	{
+		return false;
+	}
+	auto tickOf = [&](u32 i) { return awr ? path[i].liveRunTick : path[i].runTick; };
+	const u32 base = tickOf(nearest);
+	if (base == KZ_LEAD_NO_RUN_TICK)
+	{
+		return false;
+	}
+	outTicks = (f64)base;
+	f32 bestDist = FLT_MAX;
+	auto trySegment = [&](u32 a, u32 b)
+	{
+		const u32 ta = tickOf(a);
+		const u32 tb = tickOf(b);
+		if (ta == KZ_LEAD_NO_RUN_TICK || tb == KZ_LEAD_NO_RUN_TICK)
+		{
+			return;
+		}
+		const Vector ab = path[b].pos - path[a].pos;
+		const f32 len2 = ab.LengthSqr();
+		if (len2 < 0.0001f)
+		{
+			return;
+		}
+		const f32 t = Clamp(DotProduct(origin - path[a].pos, ab) / len2, 0.0f, 1.0f);
+		const Vector proj = path[a].pos + ab * t;
+		const f32 d = (origin - proj).LengthSqr();
+		if (d < bestDist)
+		{
+			bestDist = d;
+			outTicks = (f64)ta + ((f64)tb - (f64)ta) * (f64)t;
+		}
+	};
+	if (nearest + 1 < path.size())
+	{
+		trySegment(nearest, nearest + 1);
+	}
+	if (nearest > 0)
+	{
+		trySegment(nearest - 1, nearest);
+	}
+	return true;
 }
 
 void KZLeadService::ArmComparePath()
@@ -2198,7 +2286,9 @@ void KZLeadService::ArmComparePath()
 	// — и индекс nearest сравнения по чужому вектору разъехался бы с ним молча. Копия — один
 	// проход по памяти раз на ключ; второй вектор вершин спека считает допустимым (§4.3), а
 	// сэкономлены именно дорогие части: резолв, докачка до 32 МБ и поток разбора.
-	if (!this->path.empty() && this->PathKeyMatchesCurrent(c.kind))
+	// ownLoadOnly — запись этого вида только что обновилась (OnRecordsChanged): вершины луча
+	// построены из ПРОШЛОЙ записи, и копия с них вернула бы устаревший путь. Идём за своим.
+	if (!c.ownLoadOnly && !this->path.empty() && this->PathKeyMatchesCurrent(c.kind))
 	{
 		if (this->path.front().runTick == KZ_LEAD_NO_RUN_TICK)
 		{
@@ -2225,21 +2315,22 @@ void KZLeadService::ArmComparePath()
 		c.failedCourse = -1;
 		c.failedMode[0] = '\0';
 		c.failRetriesLeft = 0;
-		// Ближайшая — на ближайшем же тике, а не через полсекунды.
-		c.ticksSinceUpdate = KZ_LEAD_UPDATE_TICKS;
+		// Ближайшая — на ближайшем же тике, а не через выборку.
+		c.ticksSinceNearest = KZ_LEAD_COMPARE_NEAREST_TICKS;
 		KZ_LOG_DEBUG(LogChannel::Replays, "[lead] compare_path_shared verts=%i course=%i mode=%s steam_id=%llu\n", (int)c.path.size(), course,
 					 mode, (unsigned long long)this->player->GetSteamId64());
 		return;
 	}
 	// Луч/процент УЖЕ грузит тот же вид под текущий ключ — ждём его и возьмём копией
 	// следующим проходом. Пересборка (pendingIsRebuild) не в счёт: путь при ней уже есть.
-	if ((this->loading || (this->pending && !this->pendingIsRebuild)) && this->RequestKeyMatchesCurrent(c.kind))
+	if (!c.ownLoadOnly && (this->loading || (this->pending && !this->pendingIsRebuild)) && this->RequestKeyMatchesCurrent(c.kind))
 	{
 		return;
 	}
 	// Луч/процент уже защёлкнул ТОТ ЖЕ вид под этим ключом — записи нет, идти за ней второй раз
 	// незачем (новичок без записи не должен давать лишних резолвов, Review Focus 3).
-	if (this->failedCourse == course && KZ_STREQI(this->failedMode, mode) && this->failRetriesLeft <= 0 && this->failedKind == c.kind)
+	if (!c.ownLoadOnly && this->failedCourse == course && KZ_STREQI(this->failedMode, mode) && this->failRetriesLeft <= 0
+		&& this->failedKind == c.kind)
 	{
 		return;
 	}
@@ -2384,7 +2475,10 @@ void KZLeadService::PollComparePending()
 	c.failedCourse = -1;
 	c.failedMode[0] = '\0';
 	c.failRetriesLeft = 0;
-	c.ticksSinceUpdate = KZ_LEAD_UPDATE_TICKS;
+	// Свой путь приземлился — запись, ради которой брали свой, уже в нём; дальше снова можно
+	// делить вершины с лучом.
+	c.ownLoadOnly = false;
+	c.ticksSinceNearest = KZ_LEAD_COMPARE_NEAREST_TICKS;
 }
 
 bool KZLeadService::GetCompareDeltaSeconds(f64 &outSeconds) const
@@ -2410,16 +2504,70 @@ bool KZLeadService::GetCompareDeltaSeconds(f64 &outSeconds) const
 	//   AWR — liveRunTick: время рекорда по шкале AWR, петли вычтены (так и считается awrMs).
 	// Тик -> секунды — ENGINE_FIXED_TICK_INTERVAL (1/64 с): это те же «эффективные серверные
 	// тики 64/с», в которых kz_lead меряет окно луча (KZ_LEAD_BACK_TICKS/AHEAD_TICKS).
-	const Vertex &v = c.path[c.nearest];
-	const u32 recordTicks = c.kind == CybReplayDownload::Kind::AWR ? v.liveRunTick : v.runTick;
-	if (recordTicks == KZ_LEAD_NO_RUN_TICK)
+	// Сама пара «наше время / время записи» снята в UpdateCompare в ОДНОМ тике (см. там —
+	// почему не GetTime() сейчас).
+	if (!c.sampleValid)
 	{
 		return false;
 	}
-	const f64 recordTime = (f64)recordTicks * (f64)ENGINE_FIXED_TICK_INTERVAL;
+	// Таймер ушёл назад (рестарт рана) — снимок остался от прошлого рана, до следующей выборки
+	// (<= KZ_LEAD_COMPARE_NEAREST_TICKS тиков) дельты нет.
+	if (this->player->timerService->GetTime() + EPSILON < c.timeAtNearest)
+	{
+		return false;
+	}
 	// + = позади записи (наш таймер показывает больше, чем был у рекорда в этой точке).
-	outSeconds = this->player->timerService->GetTime() - recordTime;
+	outSeconds = c.timeAtNearest - c.recordTimeAtNearest;
 	return true;
+}
+
+// Запись вида kind на курсе cyberCourse обновилась на платформе (доехал аплоад реплея): путь
+// сравнения, построенный из прошлой записи, устарел. Зовётся из OnReplayUploaded.
+void KZLeadService::OnRecordsChanged(CybReplayDownload::Kind kind, i32 cyberCourse)
+{
+	CompareSlot &c = this->compare;
+	if (!c.wanted || c.kind != kind)
+	{
+		return;
+	}
+	// Чужой курс — наш путь ни при чём. Курс слота: путь, уходящий запрос или защёлка отказа
+	// («записи нет» — ровно то, что новый PB и опровергает).
+	const bool ours = c.pathCourse == cyberCourse || c.failedCourse == cyberCourse || ((c.loading || c.pending) && c.requestCourse == cyberCourse);
+	if (!ours)
+	{
+		return;
+	}
+	KZ_LOG_DEBUG(LogChannel::Replays, "[lead] compare_records_changed course=%i kind=%i steam_id=%llu\n", cyberCourse, (int)kind,
+				 (unsigned long long)this->player->GetSteamId64());
+	this->ReleaseCompare();
+	c.failedCourse = -1;
+	c.failedMode[0] = '\0';
+	c.failRetriesLeft = 0;
+	c.ownLoadOnly = true;
+	// Не в этом же тике: колбэк аплоада приходит всем разом (AWR-ветка), разброс по слоту.
+	c.armCooldown = this->player->GetPlayerSlot().Get() % KZ_LEAD_ARM_COOLDOWN_CYCLES + 1;
+}
+
+void KZLeadService::OnReplayUploaded(u64 steamId64, i32 cyberCourse, bool serverRecord)
+{
+	for (i32 i = 0; i < MAXPLAYERS; i++)
+	{
+		KZPlayer *player = g_pKZPlayerManager->ToPlayer(CPlayerSlot(i));
+		if (!player || !player->leadService)
+		{
+			continue;
+		}
+		// PB — только у автора. Рекорд сервера мог стать и AWR (платформа считает его по всем
+		// серверам, узнать отсюда нечем) — AWR-путь курса перезапрашивают все, у кого он есть.
+		if (player->GetSteamId64() == steamId64)
+		{
+			player->leadService->OnRecordsChanged(CybReplayDownload::Kind::PB, cyberCourse);
+		}
+		if (serverRecord)
+		{
+			player->leadService->OnRecordsChanged(CybReplayDownload::Kind::AWR, cyberCourse);
+		}
+	}
 }
 
 // Ручной рычаг к колбэкам конваров: перерисовать отрезки всем, у кого луч включён. Нужен, если

@@ -717,16 +717,15 @@ static_function bool IsMenuMimicActive(KZPlayer *player)
 	return target->hudService->GetOwnLayoutPrefs().loaded;
 }
 
-bool KZHUDService::IsDuplicateMenuAction(i32 key)
+bool KZHUDService::IsDuplicateMenuAction(i32 key) const
 {
-	const i32 tick = g_pKZUtils->GetServerGlobals()->tickcount;
-	if (this->menuToggleKey == key && this->menuToggleTick == tick)
-	{
-		return true;
-	}
+	return this->menuToggleKey == key && this->menuToggleTick == g_pKZUtils->GetServerGlobals()->tickcount;
+}
+
+void KZHUDService::NoteMenuAction(i32 key)
+{
 	this->menuToggleKey = key;
-	this->menuToggleTick = tick;
-	return false;
+	this->menuToggleTick = g_pKZUtils->GetServerGlobals()->tickcount;
 }
 
 // === Рендер ===================================================================================
@@ -1104,8 +1103,12 @@ void KZHUDService::MenuRowAction(i32 rowIndex, i32 control, i32 arg)
 		return;
 	}
 	// Вложенные кнопки (tg{i} внутри row{i}) могли прийти обе — второе действие по строке в том же
-	// тике гасим, иначе тумблер щёлкнул бы дважды и остался на месте.
-	if (this->IsDuplicateMenuAction(1000 + rowIndex))
+	// тике гасим, иначе тумблер щёлкнул бы дважды и остался на месте. Ключ ставится ниже, только
+	// когда действие реально выполнено: движок может сначала прислать клик по родительской строке
+	// (control 0), который у сегментов/степперов ничего не делает, — он не должен съесть следующий
+	// за ним в том же тике клик по сегменту sg{i}_{k} или степперу.
+	const i32 dupKey = 1000 + rowIndex;
+	if (this->IsDuplicateMenuAction(dupKey))
 	{
 		return;
 	}
@@ -1121,6 +1124,7 @@ void KZHUDService::MenuRowAction(i32 rowIndex, i32 control, i32 arg)
 			{
 				return;
 			}
+			this->NoteMenuAction(dupKey);
 			// AddActionToggle: щёлкает сервис, сырая запись префа запрещена (prefKey может быть NULL).
 			if (it.onActivate)
 			{
@@ -1140,6 +1144,7 @@ void KZHUDService::MenuRowAction(i32 rowIndex, i32 control, i32 arg)
 			{
 				if (control == 0)
 				{
+					this->NoteMenuAction(dupKey);
 					this->OpenMenuPopup(MenuPopup::List, &it);
 				}
 				return;
@@ -1148,18 +1153,21 @@ void KZHUDService::MenuRowAction(i32 rowIndex, i32 control, i32 arg)
 			{
 				return;
 			}
+			this->NoteMenuAction(dupKey);
 			it.onPick(this->player, it.tag, choices[arg].id);
 			break;
 		}
 		case KZOptItemType::Font:
 			if (control == 0)
 			{
+				this->NoteMenuAction(dupKey);
 				this->OpenMenuPopup(MenuPopup::List, &it);
 			}
 			return;
 		case KZOptItemType::Color:
 			if (control == 0)
 			{
+				this->NoteMenuAction(dupKey);
 				this->OpenMenuPopup(MenuPopup::Color, &it);
 			}
 			return;
@@ -1169,6 +1177,7 @@ void KZHUDService::MenuRowAction(i32 rowIndex, i32 control, i32 arg)
 			{
 				return;
 			}
+			this->NoteMenuAction(dupKey);
 			const bool isFloat = it.storage == KZOptStorage::Float;
 			const i32 cur = GetScaledDisplay(this->player, it.prefKey, it.idef, it.scale, isFloat);
 			SetScaledDisplay(this->player, it.prefKey, panorama::SnapToStep(cur + StepDelta(cur, arg), it.lo, it.hi), it.scale, isFloat);
@@ -1179,6 +1188,7 @@ void KZHUDService::MenuRowAction(i32 rowIndex, i32 control, i32 arg)
 			{
 				return;
 			}
+			this->NoteMenuAction(dupKey);
 			if (it.phraseKey && V_strcmp(it.phraseKey, KZ_MENU_RESET_ALL_PHRASE) == 0)
 			{
 				this->OpenMenuConfirm(&it);

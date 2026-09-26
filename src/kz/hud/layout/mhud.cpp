@@ -102,14 +102,26 @@ void KZHUDService::UpdateTimerElement(CCSCustomHudLayout *layout, KZPlayer *sour
 	// дергали бы его слот туда-обратно). Наблюдаемому дельта видна, если его собственный худ
 	// её заказал. Вызов каждый тик — уровень, а не фронт: сервис сам решает, грузить ли
 	// (кулдаун и защёлка отказа — у него, Review Focus 3).
+	//
+	// Желание — только при ВКЛЮЧЁННОМ своём элементе таймера: дельта живёт в его строке, и
+	// выключенный таймер с hudTimerCompare != 0 иначе держал бы путь (резолв, докачку, вектор
+	// вершин) ради элемента, которого нет на экране. Что худ именно panorama — гарантирует
+	// вызывающий: UpdateHudLayout зовётся только на этом типе, а на остальных DrawPanels
+	// отпускает путь сам (SetCompareWanted(false)).
 	if (source == this->player && this->player->leadService)
 	{
-		const i32 wantMode = this->GetOwnLayoutPrefs().timerCompare;
+		const MHUDLayoutPrefs &own = this->GetOwnLayoutPrefs();
+		const i32 wantMode = own.elements[(i32)LayoutElement::Timer].enabled ? own.timerCompare : 0;
 		this->player->leadService->SetCompareWanted(wantMode != 0, wantMode == 2 ? CybReplayDownload::Kind::AWR : CybReplayDownload::Kind::PB);
 	}
 	f64 delta = 0.0;
+	// Спектейт: путь сравнения — у наблюдаемого и под ЕГО вид записи (PB или AWR). Если зритель
+	// хочет другой вид, число было бы подписано не тем, что он выбрал («+0.3 к AWR» под видом
+	// «к PB»), — такую дельту не показываем вовсе.
+	const bool kindMatches = source == this->player
+							 || (source->hudService && source->hudService->GetOwnLayoutPrefs().timerCompare == prefs.timerCompare);
 	// prac-часы и реплей-бот к пути сравнения отношения не имеют: там показывать нечего.
-	const bool gotDelta = show && !replay && !inPrac && prefs.timerCompare != 0 && source->leadService
+	const bool gotDelta = show && !replay && !inPrac && prefs.timerCompare != 0 && kindMatches && source->leadService
 						  && source->leadService->GetCompareDeltaSeconds(delta);
 	// Нет пути (новичок без PB-реплея, идёт загрузка, путь другого курса/режима) — дельта просто
 	// скрыта: ни прочерка, ни сообщения (Review Focus 3).
@@ -475,14 +487,22 @@ void KZHUDService::UpdateCheckpointElement(CCSCustomHudLayout *layout, KZPlayer 
 // зашёл, стоит вне зоны) — главный курс карты (cyber 0). Тот же выбор, что у строки PB/WR
 // HTML-худа (kz_hud.cpp, pbwrCourse): показания двух путей худа не должны расходиться.
 // Строки showpos игрока: «x y z» и «pitch yaw» (форматтеры — host-тест tests/hud_format_test.cpp).
-void FormatShowPos(KZPlayer *source, char *pos, u32 posLen, char *ang, u32 angLen)
+// false — пешки нет (GetOrigin/GetAngles без неё выходят молча, ничего не записав): строки не
+// тронуты, вызывающий их не показывает. Раньше origin оставался неинициализированным, и в худ
+// уходил мусор со стека.
+bool FormatShowPos(KZPlayer *source, char *pos, u32 posLen, char *ang, u32 angLen)
 {
-	Vector origin;
-	QAngle angles;
+	if (!source || !source->GetPlayerPawn())
+	{
+		return false;
+	}
+	Vector origin = vec3_origin;
+	QAngle angles(0.0f, 0.0f, 0.0f);
 	source->GetOrigin(&origin);
 	source->GetAngles(&angles);
 	KZ::hudfmt::FormatPos(origin.x, origin.y, origin.z, pos, posLen);
 	KZ::hudfmt::FormatAng(angles.x, angles.y, ang, angLen);
+	return true;
 }
 
 const KZCourseDescriptor *GetHudDisplayCourse(KZPlayer *source)
@@ -610,13 +630,14 @@ void KZHUDService::UpdateShowPosElement(CCSCustomHudLayout *layout, KZPlayer *so
 {
 	// Тумблер — настройка получателя (эффективный набор), координаты — наблюдаемого (source),
 	// как у строк !showpos HTML-худа.
-	const bool show = this->IsLayoutElementEnabled(LayoutElement::ShowPos);
+	bool show = this->IsLayoutElementEnabled(LayoutElement::ShowPos);
 	const MHUDLayoutPrefs &prefs = this->GetLayoutPrefs();
+	char pos[64];
+	char ang[48];
+	// Без пешки координат нет — элемент гаснет, а не показывает нули.
+	show = show && FormatShowPos(source, pos, sizeof(pos), ang, sizeof(ang));
 	if (show)
 	{
-		char pos[64];
-		char ang[48];
-		FormatShowPos(source, pos, sizeof(pos), ang, sizeof(ang));
 		this->ApplyShowPosLines(layout, "", this->layoutExtra, pos, ang, prefs.elements[(i32)LayoutElement::ShowPos], prefs.showPosColor);
 	}
 	// text = NULL: строки пишутся в свои лейблы выше, корень — только позиция/показ.
