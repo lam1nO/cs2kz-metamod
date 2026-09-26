@@ -95,6 +95,63 @@ void KZHUDService::UpdateTimerElement(CCSCustomHudLayout *layout, KZPlayer *sour
 
 	const bool show = this->IsLayoutElementEnabled(LayoutElement::Timer) && !text.empty();
 	this->UpdateLayoutElement(layout, LayoutElement::Timer, show, text.c_str(), color, force);
+
+	// === Дельта к PB/WR (спека §4.3): «+0.312» справа от таймера, по пути `!lead` ===========
+	// Путь сравнения держит СВОЙ игрок и по СВОЕМУ префу: при спектейте source — наблюдаемый, и
+	// заказывать путь в его сервисе по нашим настройкам нельзя (два зрителя с разным режимом
+	// дергали бы его слот туда-обратно). Наблюдаемому дельта видна, если его собственный худ
+	// её заказал. Вызов каждый тик — уровень, а не фронт: сервис сам решает, грузить ли
+	// (кулдаун и защёлка отказа — у него, Review Focus 3).
+	if (source == this->player && this->player->leadService)
+	{
+		const i32 wantMode = this->GetOwnLayoutPrefs().timerCompare;
+		this->player->leadService->SetCompareWanted(wantMode != 0, wantMode == 2 ? CybReplayDownload::Kind::AWR : CybReplayDownload::Kind::PB);
+	}
+	f64 delta = 0.0;
+	// prac-часы и реплей-бот к пути сравнения отношения не имеют: там показывать нечего.
+	const bool gotDelta = show && !replay && !inPrac && prefs.timerCompare != 0 && source->leadService
+						  && source->leadService->GetCompareDeltaSeconds(delta);
+	// Нет пути (новичок без PB-реплея, идёт загрузка, путь другого курса/режима) — дельта просто
+	// скрыта: ни прочерка, ни сообщения (Review Focus 3).
+	const bool showDelta = KZ::hudfmt::DeltaVisible(running, gotDelta, gotDelta, prefs.timerCompare);
+	const char *const deltaPanel = "mhud_delta";
+	LayoutExtraState &extra = this->layoutExtra;
+	if (showDelta)
+	{
+		char deltaText[24];
+		KZ::hudfmt::FormatDelta(delta, prefs.timerDetailed, deltaText, sizeof(deltaText));
+		this->SetLayoutVar(layout, deltaPanel, "delta", extra.deltaText, deltaText);
+
+		// Цвет: при дефолтных цветах — классы d-ahead/d-behind (в mhud.css точные #4CC38A/
+		// #FF5C5C дизайна), при своих — ближайший класс палитры (pal-fg-N/grad-N). Одновременно
+		// оба не ставим: `.delta.d-ahead` специфичнее `.pal-fg-N` и перебил бы цвет игрока.
+		const bool ahead = delta < 0.0;
+		const Color &wanted = ahead ? prefs.deltaAhead : prefs.deltaBehind;
+		const Color &fallback = ahead ? MHUD_DEF_DELTA_AHEAD_COLOR : MHUD_DEF_DELTA_BEHIND_COLOR;
+		const auto pack = [](const Color &c) { return ((u32)c.r() << 24) | ((u32)c.g() << 16) | ((u32)c.b() << 8) | (u32)c.a(); };
+		const u32 packed = pack(wanted);
+		const bool isDefault = packed == pack(fallback);
+		const char *colorClass = NULL;
+		if (!isDefault)
+		{
+			if (!extra.deltaColorValid || extra.deltaColorPacked != packed)
+			{
+				extra.deltaColorValid = true;
+				extra.deltaColorPacked = packed;
+				extra.deltaColorComputed = panorama::ResolveColorClass(wanted);
+			}
+			colorClass = extra.deltaColorComputed;
+		}
+		this->SetLayoutClass(layout, deltaPanel, extra.deltaStateClass, isDefault ? (ahead ? "d-ahead" : "d-behind") : NULL);
+		this->SetLayoutClass(layout, deltaPanel, extra.deltaColorClass, colorClass);
+
+		// Кегль — половина кегля таймера, в пределах таблицы font-size.css (8..100 px): мельче
+		// восьми классов нет, и дельта при крошечном таймере не пропадает, а упирается в минимум.
+		const i32 timerSize = prefs.elements[(i32)LayoutElement::Timer].size;
+		this->SetLayoutValueClass(layout, deltaPanel, extra.deltaFontSize, Clamp(timerSize / 2, LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX), "font-size", false);
+	}
+	// hidden — последним: сначала текст/цвет/кегль, потом показ, чтобы не мелькнул прошлый кадр.
+	this->SetLayoutBoolClass(layout, deltaPanel, "hidden", extra.deltaHidden, !showDelta);
 }
 
 void KZHUDService::UpdateSpeedElement(CCSCustomHudLayout *layout, const SpeedInfo &info, bool force)
