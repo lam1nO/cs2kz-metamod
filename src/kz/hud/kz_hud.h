@@ -647,6 +647,21 @@ public:
 		return this->replayMenuOpen;
 	}
 
+	// !rpmenu — тумблер «спрятать/показать» меню реплея (по умолчанию показано). Флаг сессии:
+	// переживает смену бота и конец реплея, сбрасывается в Reset() (новый игрок в слоте).
+	// Спрятанное меню закрывается тиком UpdateReplayMenu (reason=hidden) и не читает ввод.
+	bool IsReplayMenuHidden() const
+	{
+		return this->replayMenuHidden;
+	}
+
+	// Возвращает новое состояние: true — меню теперь спрятано.
+	bool ToggleReplayMenuHidden()
+	{
+		this->replayMenuHidden = !this->replayMenuHidden;
+		return this->replayMenuHidden;
+	}
+
 	// Тик меню: зовётся из DrawPanels для ПОЛУЧАТЕЛЯ (this) с источником данных source
 	// (наблюдаемый или сам игрок). Открывает меню, как только source — реплей-бот с идущим
 	// плейбеком и есть аддон; закрывает, как только это перестало быть так; иначе читает ввод
@@ -823,6 +838,8 @@ private:
 	// Сущность меню реплея ЭТОГО игрока (см. OpenReplayMenu); гасится вместе с остальными.
 	CHandle<CBaseEntity> ownedReplayLayout {};
 	bool replayMenuOpen {};
+	// Спрятано игроком через !rpmenu (см. ToggleReplayMenuHidden).
+	bool replayMenuHidden {};
 	bool replayMenuFailLogged {}; // серия отказов создания сущности уже залогирована (см. rpmenu.cpp)
 	i32 replayMenuRetryTick {};   // тик последнего отказа — повтор создания с бэкоффом
 	i32 replayMenuRow {};        // выбранная строка — индекс в RPMENU_ROWS (порядок СТРАНИЦЫ, не

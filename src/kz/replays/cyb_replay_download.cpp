@@ -7,6 +7,7 @@
 #include "kz/option/kz_option.h"
 #include "kz/language/kz_language.h"
 #include "kz/timer/kz_timer.h"
+#include "kz/spec/kz_spec.h"
 #include "kz/replays/kz_replay.h"
 #include "kz/replays/commands.h"
 #include "cyb_replay_common.h"
@@ -75,12 +76,22 @@ namespace
 		std::string mode; // короткое api-имя (ckz/vnl/kzt), либо пусто — режим не поддержан
 	};
 
-	ResolveKey BuildKey(KZPlayer *player)
+	// followSpectated — ключ по курсу/режиму НАБЛЮДАЕМОГО, если игрок наблюдает (команда
+	// !replay: смотрящий за чужим раном хочет реплеи его курса). !lead — всегда свой ключ.
+	ResolveKey BuildKey(KZPlayer *player, bool followSpectated)
 	{
 		ResolveKey key;
 		key.map = g_pKZUtils->GetCurrentMapName().Get();
-		key.course = KZ::course::GetCyberCourseNumber(player->timerService->GetCourse());
-		auto modeInfo = KZ::mode::GetModeInfo(player->modeService);
+		const KZCourseDescriptor *course = player->timerService->GetCourse();
+		KZPlayer *modeOwner = player;
+		if (followSpectated)
+		{
+			KZInfoSubject subject = player->specService->GetInfoSubject();
+			course = subject.course;
+			modeOwner = subject.player;
+		}
+		key.course = KZ::course::GetCyberCourseNumber(course);
+		auto modeInfo = KZ::mode::GetModeInfo(modeOwner->modeService);
 		key.mode = CybReplayCommon::MapMode(std::string(modeInfo.shortModeName.Get(), modeInfo.shortModeName.Length()));
 		return key;
 	}
@@ -109,7 +120,8 @@ namespace
 	// сервере выключены либо режим/карта не поддержаны ключом), сеть не дёргаем.
 	// outReason — машинная причина такого отказа: без неё «повтор не найден» одинаково
 	// покрывал и выключенный конфиг, и неподдержанный режим, и реальный промах по ключу.
-	bool PrepareResolve(KZPlayer *player, std::string &outUrl, std::string &outToken, ResolveKey &outKey, const char **outReason = nullptr)
+	bool PrepareResolve(KZPlayer *player, std::string &outUrl, std::string &outToken, ResolveKey &outKey, const char **outReason = nullptr,
+						bool followSpectated = false)
 	{
 		auto deny = [outReason](const char *reason)
 		{
@@ -124,7 +136,7 @@ namespace
 		{
 			return deny("central_disabled");
 		}
-		outKey = BuildKey(player);
+		outKey = BuildKey(player, followSpectated);
 		if (outKey.mode.empty())
 		{
 			return deny("mode_unsupported");
@@ -477,7 +489,7 @@ void CybReplayDownload::RequestAndPlay(KZPlayer *player, Kind kind, u64 targetSt
 	std::string fullUrl, token;
 	ResolveKey key;
 	const char *denyReason = "-";
-	if (!PrepareResolve(player, fullUrl, token, key, &denyReason))
+	if (!PrepareResolve(player, fullUrl, token, key, &denyReason, true))
 	{
 		// Отказ ДО сети: центральные реплеи выключены на сервере либо режим не поддержан
 		// центральным хранилищем. Раньше игрок и лог видели тут то же «повтор не найден»,

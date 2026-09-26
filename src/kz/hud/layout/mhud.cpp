@@ -20,6 +20,7 @@
 #include "kz/checkpoint/kz_checkpoint.h"
 #include "kz/lead/kz_lead.h" // GetProgressPercent — данные элемента «Прогресс»
 #include "kz/replays/kz_replaysystem.h"
+#include "kz/prac/kz_prac.h" // prac-часы в элементе таймера
 #include "sdk/entity/ccscustomhudlayout.h"
 #include "entitykeyvalues.h"
 #include "utils/utils.h"
@@ -30,8 +31,30 @@
 
 void KZHUDService::UpdateTimerElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force)
 {
-	std::string text = source->hudService->GetTimerText(this->player->languageService->GetLanguage());
-	if (!this->GetLayoutPrefs().timerDetailed)
+	// prac: настоящий таймер на входе честно остановлен (kz_prac), поэтому GetTimerText давал
+	// «(СТОП)» на время показа после стопа, а потом элемент пропадал совсем — хотя попытка идёт
+	// по prac-часам. Показываем их, как стандартный (HTML) худ: идут — как живой ран, стоят —
+	// плейсхолдер «--:--.--» цветом остановленного таймера (попытки нет до выхода из старта
+	// или !practp на точку со временем). Флаг — от НАБЛЮДАЕМОГО (source), как и весь элемент.
+	const bool replay = KZ::replaysystem::IsReplayBot(source);
+	const bool inPrac = !replay && source->pracService && source->pracService->IsInPrac();
+	const bool pracRunning = inPrac && source->pracService->IsPracTimeRunning();
+	std::string text;
+	if (pracRunning)
+	{
+		char timeText[128];
+		utils::FormatTime(source->pracService->GetPracTime(), timeText, sizeof(timeText));
+		text = timeText;
+	}
+	else if (inPrac)
+	{
+		text = this->GetLayoutPrefs().timerDetailed ? "--:--.--" : "--:--";
+	}
+	else
+	{
+		text = source->hudService->GetTimerText(this->player->languageService->GetLanguage());
+	}
+	if (!this->GetLayoutPrefs().timerDetailed && !(inPrac && !pracRunning)) // плейсхолдер уже нужной ширины
 	{
 		// Отбросить дробную часть, суффикс (STOPPED)/(PAUSED) — сохранить.
 		const size_t dot = text.find('.');
@@ -48,9 +71,8 @@ void KZHUDService::UpdateTimerElement(CCSCustomHudLayout *layout, KZPlayer *sour
 
 	// Ветки реплей-бота: у наблюдаемого реплей-бота нет timerService/checkpointService с
 	// реальными данными, всё идёт через KZ::replaysystem (нужно для спектейта бота).
-	const bool replay = KZ::replaysystem::IsReplayBot(source);
-	const bool paused = replay ? KZ::replaysystem::GetPaused() : source->timerService->GetPaused();
-	const bool running = replay ? KZ::replaysystem::GetEndTime() == 0.0f : source->timerService->GetTimerRunning();
+	const bool paused = replay ? KZ::replaysystem::GetPaused() : (!inPrac && source->timerService->GetPaused());
+	const bool running = replay ? KZ::replaysystem::GetEndTime() == 0.0f : (inPrac ? pracRunning : source->timerService->GetTimerRunning());
 	const i32 teleports = replay ? KZ::replaysystem::GetTeleportCount() : source->checkpointService->GetTeleportCount();
 
 	const MHUDLayoutPrefs &prefs = this->GetLayoutPrefs();

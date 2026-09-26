@@ -989,6 +989,16 @@
 		"en"		"The replay menu opens by itself while you are watching a replay bot (W/S select, E apply, A/D adjust)."
 		"ru"		"Меню реплея открывается само, пока вы наблюдаете за реплей-ботом (W/S выбор, E применить, A/D изменить)."
 	}
+	"Replay Panel - Hidden"
+	{
+		"en"		"Replay menu hidden. Type {purple}!rpmenu{grey} to show it again."
+		"ru"		"Меню реплея скрыто. {purple}!rpmenu{grey} — показать снова."
+	}
+	"Replay Panel - Shown"
+	{
+		"en"		"Replay menu shown (W/S select, E apply, A/D adjust). Type {purple}!rpmenu{grey} to hide it."
+		"ru"		"Меню реплея показано (W/S выбор, E применить, A/D изменить). {purple}!rpmenu{grey} — скрыть."
+	}
 	// Поиск реплея по НИКУ (`!replay <подстрока>`) через наш api — путь, на котором
 	// раньше был безусловный отказ «Invalid UUID».
 	"Replay Search Menu - Title"

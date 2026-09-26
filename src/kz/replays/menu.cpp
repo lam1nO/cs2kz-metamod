@@ -1,9 +1,10 @@
 // Меню реплея: словарь пунктов, их семантика и данные карточки нашей panorama-страницы
 // (hud/layout/rpmenu.cpp) + cs2menus-меню выбора реплея по нику (OpenReplaySearchMenu).
-// Старое cs2menus-!rpmenu удалено 09.09; сама команда !rpmenu лишь напоминает, что меню
-// открывается само при просмотре реплей-бота.
+// Старое cs2menus-!rpmenu удалено 09.09; меню открывается само при просмотре реплей-бота, а
+// команда !rpmenu прячет/возвращает его.
 #include "kz/kz.h"
 #include "kz/language/kz_language.h"
+#include "kz/hud/kz_hud.h" // !rpmenu — тумблер скрытия меню реплея
 #include "menu.h"
 #include "commands.h"
 #include "kz_replaysystem.h" // GetPaused — строка состояния карточки
@@ -417,8 +418,9 @@ bool KZ::replaysystem::menu::OpenReplaySearchMenu(KZPlayer *player, const std::v
 	return true;
 }
 
-// Команды открытия больше нет: panorama-меню реплея само открыто, пока игрок наблюдает бота
-// (hud/layout/rpmenu.cpp). Команда оставлена, чтобы привычный !rpmenu не отвечал молчанием.
+// panorama-меню реплея само открыто, пока игрок наблюдает бота (hud/layout/rpmenu.cpp);
+// !rpmenu прячет его и возвращает обратно (по умолчанию показано) — за реплеем меню иногда
+// закрывает обзор. Само закрытие/открытие делает следующий тик UpdateReplayMenu.
 SCMD(kz_rpmenu, SCFL_REPLAY | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
@@ -426,6 +428,7 @@ SCMD(kz_rpmenu, SCFL_REPLAY | SCFL_HELP)
 	{
 		return MRES_SUPERCEDE;
 	}
-	player->languageService->PrintChat(true, false, "Replay Panel - Auto");
+	const bool hidden = player->hudService->ToggleReplayMenuHidden();
+	player->languageService->PrintChat(true, false, hidden ? "Replay Panel - Hidden" : "Replay Panel - Shown");
 	return MRES_SUPERCEDE;
 }
