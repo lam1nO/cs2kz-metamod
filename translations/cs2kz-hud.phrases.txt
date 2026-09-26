@@ -736,6 +736,80 @@
 		"chi"		"详细时间"
 		"ua"		"Докладний час"
 	}
+	// Сравнение таймера (hudTimerCompare, General): к чему считать живую дельту под таймером.
+	"HUD - Menu Label TimerCompare"
+	{
+		"en"		"Timer compare"
+		"ru"		"Сравнение таймера"
+		"chi"		"计时器对比"
+		"ua"		"Порівняння таймера"
+	}
+	"HUD - Menu Label TimerCompare PB"
+	{
+		"en"		"Personal best"
+		"ru"		"Личный рекорд"
+		"chi"		"个人最佳"
+		"ua"		"Особистий рекорд"
+	}
+	"HUD - Menu Label TimerCompare WR"
+	{
+		"en"		"World record"
+		"ru"		"Мировой рекорд"
+		"chi"		"世界纪录"
+		"ua"		"Світовий рекорд"
+	}
+	"HUD - Menu Label TimerCompare Off"
+	{
+		"en"		"Off"
+		"ru"		"Выкл"
+		"chi"		"关闭"
+		"ua"		"Вимк"
+	}
+	// Ячейки элемента PB/WR (hudPbNub/hudPbPro/hudWrNub/hudWrPro).
+	"HUD - Menu Cat PbWr"
+	{
+		"en"		"PB / WR"
+		"ru"		"PB / WR"
+		"chi"		"PB / WR"
+		"ua"		"PB / WR"
+	}
+	"HUD - Menu Label PbNub"
+	{
+		"en"		"PB NUB"
+		"ru"		"PB NUB"
+		"chi"		"PB NUB"
+		"ua"		"PB NUB"
+	}
+	"HUD - Menu Label PbPro"
+	{
+		"en"		"PB PRO"
+		"ru"		"PB PRO"
+		"chi"		"PB PRO"
+		"ua"		"PB PRO"
+	}
+	"HUD - Menu Label WrNub"
+	{
+		"en"		"WR NUB"
+		"ru"		"WR NUB"
+		"chi"		"WR NUB"
+		"ua"		"WR NUB"
+	}
+	"HUD - Menu Label WrPro"
+	{
+		"en"		"WR PRO"
+		"ru"		"WR PRO"
+		"chi"		"WR PRO"
+		"ua"		"WR PRO"
+	}
+	// Скрытая подкатегория с видом и местом элементов (правит редактор !hud) — в окне !options
+	// не показывается, фраза нужна узлу реестра и на случай вывода в редакторе/логе.
+	"HUD - Menu Cat HiddenElements"
+	{
+		"en"		"HUD elements"
+		"ru"		"Элементы худа"
+		"chi"		"HUD 元素"
+		"ua"		"Елементи худу"
+	}
 	// Один ключ на два пункта — Speed и Prespeed (как "HUD - Menu Label Color" на четыре).
 	"HUD - Menu Label Decimal"
 	{

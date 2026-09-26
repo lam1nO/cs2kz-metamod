@@ -80,6 +80,10 @@ struct KZOptNode
 	const char *phraseKey {};
 	std::vector<KZOptItem> items;
 	std::vector<KZOptNode *> subs; // heap nodes: pointers stay valid as the registry grows
+	// НАША добавка: узел живёт в реестре (обмен худом, белый список префов, ResetNode), но окно
+	// !options его не рисует — ни вкладкой, ни подкатегорией. Так лежат пункты вида элементов
+	// худа: правит их редактор !hud, а сброс/экспорт идут по тем же узлам, что и раньше.
+	bool hiddenFromMenu {};
 };
 
 namespace KZ::menu
