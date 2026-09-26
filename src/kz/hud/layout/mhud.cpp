@@ -21,6 +21,9 @@
 #include "kz/lead/kz_lead.h" // GetProgressPercent — данные элемента «Прогресс»
 #include "kz/replays/kz_replaysystem.h"
 #include "kz/prac/kz_prac.h" // prac-часы в элементе таймера
+#include "kz/mode/kz_mode.h"   // GetModeShortName — строка курса
+#include "kz/style/kz_style.h" // GetStyleShortName — строка курса
+#include "kz/hud/hud_format.h" // чистые форматтеры полей редактора (host-тест tests/hud_format_test.cpp)
 #include "sdk/entity/ccscustomhudlayout.h"
 #include "entitykeyvalues.h"
 #include "utils/utils.h"
@@ -382,6 +385,158 @@ void KZHUDService::UpdateCheckpointElement(CCSCustomHudLayout *layout, KZPlayer 
 	this->UpdateLayoutElement(layout, LayoutElement::Checkpoint, show, text.c_str(), color, force);
 }
 
+// === Поля редактора `!hud`: PB/WR, showpos, курс, тип рана (спека 2026-09-26, §4.2) ==========
+
+// Курс, по которому показываем PB/WR и строку курса: активный, а до входа в старт-зону (только
+// зашёл, стоит вне зоны) — главный курс карты (cyber 0). Тот же выбор, что у строки PB/WR
+// HTML-худа (kz_hud.cpp, pbwrCourse): показания двух путей худа не должны расходиться.
+static_function const KZCourseDescriptor *GetHudDisplayCourse(KZPlayer *source)
+{
+	const KZCourseDescriptor *course = source->timerService->GetCourse();
+	return course ? course : KZ::course::GetCourseByCyberNumber(0);
+}
+
+// Время ячейки PB/WR в точности таймера: с hudTimerDetail — тысячные (utils::FormatTime,
+// mm:ss.mmm), без — сотые (FormatTimeHud, mm:ss.cc). Ширина совпадает с плейсхолдером
+// KZ::hudfmt::NoTimePlaceholder, поэтому ячейки не прыгают, когда время появляется.
+static_function void FormatHudRecordTime(f64 time, bool detailed, char *out, u32 length)
+{
+	if (detailed)
+	{
+		utils::FormatTime(time, out, length, true);
+	}
+	else
+	{
+		FormatTimeHud(time, out, length);
+	}
+}
+
+void KZHUDService::UpdatePbWrElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force)
+{
+	const MHUDLayoutPrefs &prefs = this->GetLayoutPrefs();
+	// Порядок ячеек: PB NUB, PB PRO, WR NUB, WR PRO — i < 2 это PB, нечётный индекс — PRO.
+	static const char *const cellIds[4] = {"pw_pb_nub", "pw_pb_pro", "pw_wr_nub", "pw_wr_pro"};
+	static const char *const varNames[4] = {"pb_nub", "pb_pro", "wr_nub", "wr_pro"};
+	const bool cells[4] = {prefs.pbNub, prefs.pbPro, prefs.wrNub, prefs.wrPro};
+	// Все четыре ячейки выключены — элемент гаснет целиком (Review Focus 5), иначе на экране
+	// висела бы пустая рамка элемента, а в редакторе — пустышка, которую нечем наполнить.
+	const bool any = cells[0] || cells[1] || cells[2] || cells[3];
+	// Реплей-бот: у него нет своих PB/WR кэшей по курсу — как и HTML-худ, строку не показываем.
+	const bool replay = KZ::replaysystem::IsReplayBot(source);
+	const KZCourseDescriptor *course = (any && !replay && this->IsLayoutElementEnabled(LayoutElement::PbWr)) ? GetHudDisplayCourse(source) : NULL;
+	const bool show = course != NULL;
+	if (show)
+	{
+		const bool detailed = prefs.timerDetailed;
+		for (i32 i = 0; i < 4; i++)
+		{
+			f64 time = 0.0;
+			const bool pro = (i & 1) != 0;
+			const bool has = i < 2 ? source->timerService->GetHudPBTime(time, course, pro) : source->timerService->GetHudWorldRecordTime(time, course, pro);
+			char text[32];
+			if (has)
+			{
+				FormatHudRecordTime(time, detailed, text, sizeof(text));
+			}
+			else
+			{
+				V_strncpy(text, KZ::hudfmt::NoTimePlaceholder(detailed), sizeof(text));
+			}
+			// Переменная — на корне элемента: у лейблов времени в разметке нет id, они читают
+			// {s:pb_nub}… из переменных предка.
+			this->SetLayoutVar(layout, LAYOUT_ELEMENTS[(i32)LayoutElement::PbWr].panelId, varNames[i], this->layoutExtra.pbwrText[i], text);
+			this->SetLayoutBoolClass(layout, cellIds[i], "hidden", this->layoutExtra.pbwrCellHidden[i], !cells[i]);
+		}
+		// Строка гаснет, когда обе её ячейки выключены: иначе от неё остался бы бейдж NUB/PRO.
+		this->SetLayoutBoolClass(layout, "pw_nub", "hidden", this->layoutExtra.pbwrRowHidden[0], !(cells[0] || cells[2]));
+		this->SetLayoutBoolClass(layout, "pw_pro", "hidden", this->layoutExtra.pbwrRowHidden[1], !(cells[1] || cells[3]));
+	}
+	// text = NULL: у корня (Panel) своей переменной нет, всё содержимое — в ячейках выше.
+	this->UpdateLayoutElement(layout, LayoutElement::PbWr, show, NULL, MHUD_DEF_BASE_COLOR, force);
+}
+
+void KZHUDService::UpdateShowPosElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force)
+{
+	// Тумблер — настройка получателя (эффективный набор), координаты — наблюдаемого (source),
+	// как у строк !showpos HTML-худа.
+	const bool show = this->IsLayoutElementEnabled(LayoutElement::ShowPos);
+	char pos[64] = "";
+	if (show)
+	{
+		Vector origin;
+		QAngle angles;
+		source->GetOrigin(&origin);
+		source->GetAngles(&angles);
+		KZ::hudfmt::FormatPos(origin.x, origin.y, origin.z, pos, sizeof(pos));
+		char ang[48];
+		KZ::hudfmt::FormatAng(angles.x, angles.y, ang, sizeof(ang));
+		// Вторая строка (mhud_ang) читает {s:ang} из переменных корня, как и первая {s:pos}.
+		this->SetLayoutVar(layout, LAYOUT_ELEMENTS[(i32)LayoutElement::ShowPos].panelId, "ang", this->layoutExtra.angText, ang);
+	}
+	this->UpdateLayoutElement(layout, LayoutElement::ShowPos, show, show ? pos : NULL, MHUD_DEF_BASE_COLOR, force);
+}
+
+void KZHUDService::UpdateCourseElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force)
+{
+	// Реплей-бот: курс и стили живого игрока к записи не относятся — строку не показываем.
+	const bool replay = KZ::replaysystem::IsReplayBot(source);
+	const KZCourseDescriptor *course = (!replay && this->IsLayoutElementEnabled(LayoutElement::Course)) ? GetHudDisplayCourse(source) : NULL;
+	char line[128] = "";
+	if (course)
+	{
+		// Короткие имена стилей (ABH, LGJ): строка одна на весь экран, полные имена её раздули бы.
+		const char *styles[8];
+		i32 styleCount = 0;
+		for (i32 i = 0; i < source->styleServices.Count() && styleCount < (i32)KZ_ARRAYSIZE(styles); i++)
+		{
+			styles[styleCount++] = source->styleServices[i]->GetStyleShortName();
+		}
+		KZ::hudfmt::FormatCourseLine(course->name, source->modeService->GetModeShortName(), styles, styleCount, line, sizeof(line));
+	}
+	this->UpdateLayoutElement(layout, LayoutElement::Course, course != NULL, course ? line : NULL, MHUD_DEF_BASE_COLOR, force);
+}
+
+// PRAC / PRO / NUB — тот же критерий, что у метки слева от времени в HTML-худе (kz_hud.cpp):
+// prac важнее всего (настоящий таймер в prac остановлен), PRO — ран без телепортов
+// (GetTeleportCount() == 0, как KZTimerService::GetCurrentTimeType). Таймер стоит и не prac —
+// NULL, элемент скрыт. cls — класс расцветки бейджа (строковый литерал: SetLayoutClass
+// сравнивает указатели).
+static_function const char *GetRunTypeText(KZPlayer *source, const char *&cls)
+{
+	cls = NULL;
+	if (source->pracService && source->pracService->IsInPrac())
+	{
+		cls = "rt-prac";
+		return "PRAC";
+	}
+	if (!source->timerService->GetTimerRunning() || !source->checkpointService)
+	{
+		return NULL;
+	}
+	if (source->checkpointService->GetTeleportCount() > 0)
+	{
+		cls = "rt-nub";
+		return "NUB";
+	}
+	cls = "rt-pro";
+	return "PRO";
+}
+
+void KZHUDService::UpdateRunTypeElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force)
+{
+	const char *cls = NULL;
+	// Реплей-бот — как HTML-худ, метки нет (его timerService/checkpointService не про запись).
+	const char *text = KZ::replaysystem::IsReplayBot(source) ? NULL : GetRunTypeText(source, cls);
+	const bool show = text != NULL && this->IsLayoutElementEnabled(LayoutElement::RunType);
+	if (show)
+	{
+		// Скрытый элемент класс не трогает: прошлый rt-* под hidden никому не мешает, а снятие
+		// и возврат на каждом старте/стопе были бы лишними пересылками.
+		this->SetLayoutClass(layout, LAYOUT_ELEMENTS[(i32)LayoutElement::RunType].panelId, this->layoutExtra.runTypeClass, cls);
+	}
+	this->UpdateLayoutElement(layout, LayoutElement::RunType, show, text, MHUD_DEF_BASE_COLOR, force);
+}
+
 // === Элемент «Прогресс: N%» по маршруту `!lead` (LayoutElement::LeadProgress) ==============
 // Живёт на СВОЕЙ копии страницы худа: свободного лейбла в чужой разметке mhud.vxml_c нет
 // (четыре текстовых, все заняты элементами худа), а лишняя копия у того же клиента даёт ещё
@@ -492,6 +647,13 @@ bool KZHUDService::UpdateHudLayout(KZPlayer *source)
 	// (см. LayoutElementState/LayoutKeysState), поэтому первый проход обязан выставить всё
 	// принудительно (иначе первый кадр уедет с дефолтными классами схемы).
 	const bool force = created;
+	if (force)
+	{
+		// Свежая сущность — кэш дочерних панелей полей редактора обязан сброситься вместе с ней
+		// (см. LayoutExtraState). Здесь, а не в каждом Update*: дельту таймера и ячейки PB/WR
+		// пишут разные функции, а сброс нужен ровно один, до первой из них.
+		this->layoutExtra = LayoutExtraState();
+	}
 	// IsShowingPanel() здесь НЕ читаем: преф showPanel выведен из оборота (TogglePanel()
 	// не вызывается ниоткуда, !panel переключает hudType Off↔Standard) — у игрока со старым
 	// showPanel=false в БД panorama иначе гасла бы целиком и молча, без лога и без способа
@@ -522,6 +684,10 @@ bool KZHUDService::UpdateHudLayout(KZPlayer *source)
 	this->UpdatePrespeedElement(layout, info, force);
 	this->UpdateKeysElement(layout, source, force);
 	this->UpdateCheckpointElement(layout, source, force);
+	this->UpdatePbWrElement(layout, source, force);
+	this->UpdateShowPosElement(layout, source, force);
+	this->UpdateCourseElement(layout, source, force);
+	this->UpdateRunTypeElement(layout, source, force);
 	// «Прогресс» — на СВОЕЙ сущности (см. выше), поэтому ни layout, ни force ему не передаём:
 	// он сам решает, создавать копию страницы или гасить её.
 	this->UpdateLeadProgressElement(source);

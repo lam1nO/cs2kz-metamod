@@ -75,7 +75,7 @@ static_function void FormatTimeHudCs(i32 rounded, char *output, u32 length)
 	}
 }
 
-static_function void FormatTimeHud(f64 time, char *output, u32 length)
+void FormatTimeHud(f64 time, char *output, u32 length)
 {
 	FormatTimeHudCs(RoundFloatToInt(time * 100), output, length);
 }

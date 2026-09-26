@@ -485,12 +485,15 @@ public:
 	// course == nullptr → активный курс игрока (this->GetCourse()); передан явно (напр. главный
 	// курс) — лукап по нему,
 	// чтобы PB показывался и вне старт-зоны. false, если курса нет или PB не наполнен нигде.
-	bool GetHudPBTime(f64 &outTime, const KZCourseDescriptor *course = nullptr);
+	// pro=true — PB без телепортов (PBData::pro): платформенного источника у него НЕТ (ручка
+	// /ingest/v1/kz/records отдаёт только overall), поэтому только наши кэши, см. kz_timer.cpp.
+	bool GetHudPBTime(f64 &outTime, const KZCourseDescriptor *course = nullptr, bool pro = false);
 	// WR-время (overall) для режима+курса. ЛУЧШЕЕ (минимум) из платформенного кэша и srCache
 	// (рекорд НАШЕЙ сети); wrCache (рекорд чужой сети cs2kz) — только крайний фолбэк, в минимум
 	// не входит. course == nullptr → активный курс; иначе лукап по переданному. false только
 	// когда нет ни одного источника. Почему минимум, а не приоритет — см. kz_timer.cpp.
-	bool GetHudWorldRecordTime(f64 &outTime, const KZCourseDescriptor *course = nullptr);
+	// pro=true — рекорд без телепортов; как и у GetHudPBTime, только из наших кэшей.
+	bool GetHudWorldRecordTime(f64 &outTime, const KZCourseDescriptor *course = nullptr, bool pro = false);
 
 	void SetCourse(u32 courseGUID)
 	{

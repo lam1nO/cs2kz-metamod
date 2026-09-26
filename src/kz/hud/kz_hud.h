@@ -30,6 +30,10 @@ extern const Color MHUD_DEF_KEYS_OVERLAP_GLOW_COLOR;
 extern const Color MHUD_DEF_DELTA_AHEAD_COLOR;
 extern const Color MHUD_DEF_DELTA_BEHIND_COLOR;
 
+// Время худа mm:ss.cc (сотые) — формат кибершоковского худа (kz_hud.cpp). Открыт наружу ради
+// ячеек PB/WR panorama-худа (layout/mhud.cpp): без hudTimerDetail они показывают сотые.
+void FormatTimeHud(f64 time, char *output, u32 length);
+
 // Элементы panorama-худа (сущность custom_hud_layout, Task 4).
 enum class LayoutElement
 {
@@ -534,6 +538,11 @@ public:
 
 	void SetLayoutClass(CCSCustomHudLayout *layout, const char *panelId, const char *&cache, const char *className);
 	void SetLayoutValueClass(CCSCustomHudLayout *layout, const char *panelId, i32 &cache, i32 value, const char *prefix, bool percent);
+	// Дочерние панели элементов (ячейки PB/WR, вторая строка showpos, дельта таймера): их
+	// классы/переменные не проходят через UpdateLayoutElement, и диф-кэш у них свой
+	// (LayoutExtraState). cache у bool-класса: -1 — ещё не выставляли на ЭТОЙ сущности.
+	void SetLayoutVar(CCSCustomHudLayout *layout, const char *panelId, const char *varName, std::string &cache, const char *value);
+	void SetLayoutBoolClass(CCSCustomHudLayout *layout, const char *panelId, const char *className, i32 &cache, bool want);
 	void UpdateLayoutElement(CCSCustomHudLayout *layout, LayoutElement element, bool show, const char *text, const Color &color, bool force);
 
 	// CheckTransmit support (см. KZ::quiet::OnCheckTransmit) — свою сущность транслируем.
@@ -853,6 +862,30 @@ private:
 	};
 
 	LayoutKeysState layoutKeys {};
+
+	// Диф-кэш дочерних панелей элементов редактора `!hud` (ячейки PB/WR, угол showpos, класс
+	// типа рана, дельта таймера). Та же ловушка, что у layoutElements[]/layoutKeys: живёт ТОЛЬКО
+	// вместе с сущностью — обнулять в DestroyOwnedLayout и на force (свежая сущность), иначе
+	// кэш решит, что всё уже выставлено, и ячейки останутся с дефолтами разметки.
+	struct LayoutExtraState
+	{
+		std::string pbwrText[4] {};
+		i32 pbwrCellHidden[4] {-1, -1, -1, -1};
+		i32 pbwrRowHidden[2] {-1, -1};
+		std::string angText {};
+		const char *runTypeClass {};
+		std::string deltaText {};
+		i32 deltaHidden {-1};
+		const char *deltaStateClass {}; // d-ahead/d-behind — только при дефолтных цветах
+		const char *deltaColorClass {}; // pal-fg-N/grad-N — только при своих цветах
+		i32 deltaFontSize {INT_MIN};
+		// Ближайший цвет палитры ищется только при смене цвета (как в ApplyLayoutLabel).
+		const char *deltaColorComputed {};
+		u32 deltaColorPacked {};
+		bool deltaColorValid {};
+	};
+
+	LayoutExtraState layoutExtra {};
 	// Кегль контейнера/кнопок и шрифт глифов блока клавиш — общий для худа и меню реплея
 	// (реализация в layout/mhud.cpp).
 	void ApplyKeysSizing(CCSCustomHudLayout *layout, LayoutKeysState &state, i32 size, const char *fontClass);
@@ -954,6 +987,11 @@ private:
 	void UpdatePrespeedElement(CCSCustomHudLayout *layout, const SpeedInfo &info, bool force);
 	void UpdateKeysElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force);
 	void UpdateCheckpointElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force);
+	// Поля редактора `!hud` (спека 2026-09-26-hud-editor-options, §4.2), тот же контракт source.
+	void UpdatePbWrElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force);
+	void UpdateShowPosElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force);
+	void UpdateCourseElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force);
+	void UpdateRunTypeElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force);
 	// «Прогресс: N%» — своя сущность (ownedLeadProgressLayout), поэтому и layout себе ищет
 	// сам, а не получает его от UpdateHudLayout: элемент живёт только пока включён преф и есть
 	// путь маршрута (source->leadService), иначе сущность гасится.

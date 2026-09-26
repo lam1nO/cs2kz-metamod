@@ -92,6 +92,36 @@ void KZHUDService::SetLayoutValueClass(CCSCustomHudLayout *layout, const char *p
 	cache = value;
 }
 
+// Переменная дочерней панели с диф-кэшем: каждый SetDialogVariableString — изменение
+// сетевого состояния сущности, слать одно и то же каждый тик незачем.
+void KZHUDService::SetLayoutVar(CCSCustomHudLayout *layout, const char *panelId, const char *varName, std::string &cache, const char *value)
+{
+	if (cache == value)
+	{
+		return;
+	}
+	cache = value;
+	if (!layout->SetDialogVariableString(panelId, varName, value))
+	{
+		LogHudInternFailure(this->player, panelId, varName);
+	}
+}
+
+// Класс-тумблер (ставится И снимается по значению) с диф-кэшем; -1 в cache — ещё не выставляли.
+void KZHUDService::SetLayoutBoolClass(CCSCustomHudLayout *layout, const char *panelId, const char *className, i32 &cache, bool want)
+{
+	const i32 value = want ? 1 : 0;
+	if (cache == value)
+	{
+		return;
+	}
+	cache = value;
+	if (!layout->SetHasClass(panelId, className, want ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass))
+	{
+		LogHudInternFailure(this->player, panelId, className);
+	}
+}
+
 void KZHUDService::UpdateLayoutElement(CCSCustomHudLayout *layout, LayoutElement element, bool show, const char *text, const Color &color, bool force)
 {
 	const LayoutElementDef &def = LAYOUT_ELEMENTS[(i32)element];
@@ -341,6 +371,9 @@ void KZHUDService::DestroyOwnedLayout()
 	// выставлен как надо, — крестик молча не появится (тот же баг, что ревью поймало для
 	// клавиш в задаче 6).
 	this->layoutCrosshair = LayoutCrosshairState();
+	// Кэш дочерних панелей полей редактора (ячейки PB/WR, угол showpos, тип рана, дельта) — та
+	// же ловушка: переживший сущность кэш оставил бы новую сущность с дефолтами разметки.
+	this->layoutExtra = LayoutExtraState();
 	// Сами значения cl_crosshair* (и флаг confirmed) здесь НЕ трогаем: это НАСТОЯЩИЕ данные
 	// игрока (не кэш классов ЭТОЙ сущности), и без цели наблюдения/при смене типа худа они
 	// обязаны пережить пересоздание сущности — иначе крестик вернётся только через следующий
