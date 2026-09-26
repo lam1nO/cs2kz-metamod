@@ -634,6 +634,12 @@ void Jump::End()
 			this->jumpType = JumpType_Invalid;
 		}
 	}
+	// cyber: edge отрыва считаем на каждом прыжке, а не только при найденном блоке
+	// или под jsAlways (CalcAlwaysEdge меряет край площадки отрыва, если он в 20 юнитах).
+	if (this->edge < 0.0f && this->jumpType != JumpType_LadderJump && this->jumpType != JumpType_FullInvalid)
+	{
+		this->CalcAlwaysEdge();
+	}
 	this->serverTick = g_pKZUtils->GetServerGlobals()->tickcount;
 	this->airtime = this->player->landingTimeActual - this->player->takeoffTime;
 }
