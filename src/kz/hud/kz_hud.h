@@ -931,9 +931,9 @@ private:
 		const char *deltaColorComputed {};
 		u32 deltaColorPacked {};
 		bool deltaColorValid {};
-		// Стиль лейблов времени pw_t_* (кегль/шрифт/цвет) и кегль подписей pw_c_*.
+		// Стиль лейблов времени pw_t_* и подписей pw_c_* (кегль/шрифт/цвет — одни на элемент).
 		LayoutChildStyleState pwTime[4] {};
-		i32 pwCapSize[4] {INT_MIN, INT_MIN, INT_MIN, INT_MIN};
+		LayoutChildStyleState pwCap[4] {};
 		// Кегль бейджей строк NUB/PRO (pw_b_nub/pw_b_pro) и подписей showpos (mhud_pos_cap/
 		// mhud_ang_cap): тот же font-size--N, что у корня, иначе при масштабе они оставались мелкими.
 		i32 pwBadgeSize[2] {INT_MIN, INT_MIN};

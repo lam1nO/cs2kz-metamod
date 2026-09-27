@@ -600,8 +600,7 @@ static_function void FormatHudRecordTime(f64 time, bool detailed, char *out, u32
 
 // Стиль дочернего лейбла элемента (ячейки PB/WR, строки showpos): font-size/шрифт/цвет ставятся
 // на САМ лейбл — в panorama font-size через класс предка ребёнку не наследуется (как у клавиш), а
-// разметка больше не задаёт им размер/цвет/шрифт в css. colorClass NULL — класс цвета снят
-// (подписи PB/WR держат свой статичный цвет из css).
+// разметка больше не задаёт им размер/цвет/шрифт в css. colorClass NULL — класс цвета снят.
 void KZHUDService::ApplyChildLabelStyle(CCSCustomHudLayout *layout, const char *panelId, LayoutChildStyleState &state, i32 size, const char *fontClass,
 										const char *colorClass)
 {
@@ -630,9 +629,10 @@ void KZHUDService::ApplyPbWrCells(CCSCustomHudLayout *layout, const char *prefix
 		const char *timeId = PrefixLayoutId(idBuf, sizeof(idBuf), prefix, PBWR_TIME_IDS[i]);
 		this->SetLayoutVar(layout, timeId, PBWR_VARS[i], extra.pbwrText[i], texts[i]);
 		this->ApplyChildLabelStyle(layout, timeId, extra.pwTime[i], style.size, style.fontClass, colorClass);
-		// Подпись PB/WR: только кегль — цвет статичный из css (WR — янтарный), шрифт — бейджевый.
+		// Подпись PB/WR — тем же кеглем/шрифтом/цветом, что время: всё, что видно в элементе, должно
+		// настраиваться из редактора (требование владельца 27.09), статичный янтарный WR из css убран.
 		const char *capId = PrefixLayoutId(idBuf, sizeof(idBuf), prefix, PBWR_CAP_IDS[i]);
-		this->SetLayoutValueClass(layout, capId, extra.pwCapSize[i], style.size, "font-size", false);
+		this->ApplyChildLabelStyle(layout, capId, extra.pwCap[i], style.size, style.fontClass, colorClass);
 		this->SetLayoutBoolClass(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, PBWR_CELL_IDS[i]), "hidden", extra.pbwrCellHidden[i], !cells[i]);
 	}
 	// Бейджи NUB/PRO — тот же кегль, что у времени: font-size ребёнку через класс корня не
