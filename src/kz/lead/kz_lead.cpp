@@ -220,19 +220,19 @@ CConVar<f32> cyb_lead_rdp("cyb_lead_rdp", FCVAR_NONE,
 						  [](CConVar<f32> *, CSplitScreenSlot, const f32 *newValue, const f32 *) { LeadRdpChanged(newValue ? *newValue : 0.0f); });
 
 // Примитив отрезка. Дефолт — НАША ЧАСТИЦА (info_particle_system + particles/gymstrike/
-// lead_segment.vpcf): решение владельца серверов 16.09.2026 после живого сравнения на
-// канарейке. Причина: у CBeam не задаётся m_nRenderMode, дефолт движка не аддитивный, и на
-// тёмных картах луч тонет в фоне («местами не видно», kz_bhop_nothing_go). Наша частица
-// аддитивная, self-illum 1.0 и рисуется сквозь геометрию (m_bDisableZBuffering), то есть
-// видна везде и целиком.
-// Единица возвращает штатную сущность-луч (`beam`, CBeam) — прежний дефолт по пробе 11.09,
-// дорога назад одной командой — на случай, если у сущности-луча найдётся дефект.
+// lead_segment.vpcf): решение владельца серверов 27.09.2026 после живой проверки на канарейке
+// (тёмный участок kz_bhop_nothing_go ~76% AWR, старт). CBeam клиент рисует стоковой
+// default_beam.vpcf (аддитивная лента на уровне ног): на светлом полу растворяется, на тёмном
+// тонет, краем уходит в пол и рвётся «будто за стеной». Наша частица — та же лента из 10
+// частиц, поднята на 2.5 юнита, освещается картой + self-illum 0.1 (не чернеет в темноте),
+// туман карты и z-буфер соблюдает (сквозь стены не видна).
+// Единица возвращает штатную сущность-луч (`beam`, CBeam) — дорога назад одной командой.
 // Смешанных окон не бывает: колбэк перерисовывает отрезки, а RefreshSegments обнуляет окно,
 // из-за чего ApplyWindow не находит пересечения и снимает ВСЕ прежние сущности разом.
 CConVar<bool> cyb_lead_beam_entity("cyb_lead_beam_entity", FCVAR_NONE,
 								   "Draw !lead segments with the native beam entity instead of info_particle_system "
-								   "(default: true - solid beam, no seams; the particle draws as a chain of cones).",
-								   true, [](CConVar<bool> *, CSplitScreenSlot, const bool *, const bool *) { LeadLookChanged(); });
+								   "(default: false - the gymstrike lead_segment particle; true - fallback to CBeam).",
+								   false, [](CConVar<bool> *, CSplitScreenSlot, const bool *, const bool *) { LeadLookChanged(); });
 
 // Ширина отрезка-луча в юнитах (m_fWidth/m_fEndWidth). Только для сущности-луча: у частицы
 // толщину задаёт сам ассет, и этот конвар на неё не влияет. Применяется к СЛЕДУЮЩЕЙ
