@@ -165,7 +165,7 @@ const char *KZHUDService::ColorClassCache::Get(const Color &c)
 	{
 		this->valid = true;
 		this->packed = p;
-		this->cls = panorama::ResolveColorClass(c);
+		this->cls = this->swatch ? panorama::ResolveSwatchClass(c) : panorama::ResolveColorClass(c);
 	}
 	return this->cls;
 }

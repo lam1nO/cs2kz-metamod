@@ -906,11 +906,13 @@ private:
 	};
 
 	// Класс цвета палитры по Color с кэшем: поиск ближайшего цвета — только при смене цвета.
+	// swatch — класс ФОНА (pal-bg-N/gbg-N) вместо текстового: для пустых панелей вроде заливки полосы.
 	struct ColorClassCache
 	{
 		u32 packed {};
 		bool valid {};
 		const char *cls {};
+		bool swatch {};
 		const char *Get(const Color &c);
 	};
 
@@ -950,6 +952,9 @@ private:
 		// Подпись «ПРОГРЕСС» — те же кегль/шрифт/цвет, что у процента: 11px из css в игре не читались.
 		LayoutChildStyleState progressCapStyle {};
 		ColorClassCache progressColor {};
+		// Заливка полосы mhud_progress_fill — цветом элемента, но фоном (пустой Panel, color не рисует).
+		ColorClassCache progressFillColor {0u, false, NULL, true};
+		const char *progressFillClass {};
 		// Бейджи прыжка под престрейфом: полоса mhud_ind и ind_perf/ind_jb/ind_cj (hidden, кегль).
 		i32 indStripHidden {-1};
 		i32 indHidden[3] {-1, -1, -1};

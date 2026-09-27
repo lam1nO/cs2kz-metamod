@@ -822,6 +822,10 @@ void KZHUDService::ApplyLeadProgressParts(CCSCustomHudLayout *layout, const char
 		}
 		extra.progressFill = fill;
 	}
+	// Цвет заливки — цвет элемента (фоном): полоса — видимая часть «Прогресса» и обязана
+	// настраиваться вместе с подписью и процентом; в .progress-fill (mhud.css) фона больше нет.
+	this->SetLayoutClass(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "mhud_progress_fill"), extra.progressFillClass,
+						 extra.progressFillColor.Get(color));
 
 	// Кегль/шрифт/цвет — на самом лейбле процента: в panorama font-size через класс корня
 	// ребёнку не наследуется (как у ячеек PB/WR), а корень элемента — Panel.
