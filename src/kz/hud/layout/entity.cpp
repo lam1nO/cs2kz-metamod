@@ -123,8 +123,23 @@ void KZHUDService::UpdateLayoutElement(CCSCustomHudLayout *layout, LayoutElement
 	// Кегль на строку — только таймеру и престрейфу (отзыв 5): у «Прогресса» posPanelId тоже
 	// свой, но его строке кегль не нужен — подпись и полоса пишутся отдельно.
 	const bool sizeRow = element == LayoutElement::Timer || element == LayoutElement::Prespeed;
-	this->ApplyLayoutElementTo(layout, this->GetLayoutPrefs().elements[(i32)element], this->layoutElements[(i32)element], def.panelId, def.varName,
-							   def.posPanelId, show, text, color, force, sizeRow ? def.posPanelId : NULL);
+	LayoutElementState &state = this->layoutElements[(i32)element];
+	// Строки таймера/престрейфа в mhud.xml по умолчанию в режиме старого плагина (флот до 0.26x
+	// двигает и гасит сами mhud_timer/mhud_prespeed): подложка на весь корень, видимая. Класс v2
+	// включает геометрию строки; hidden — вместе с ним, как было в разметке до совместимости
+	// (state.hidden по умолчанию true). На свежей сущности (force) — заново.
+	if (sizeRow && (force || !state.rowV2))
+	{
+		layout->SetHasClass(def.posPanelId, "hidden", k_eHudPanelClassStatus_HasClass);
+		if (!layout->SetHasClass(def.posPanelId, "v2", k_eHudPanelClassStatus_HasClass))
+		{
+			LogHudInternFailure(this->player, def.posPanelId, "v2");
+		}
+	}
+	this->ApplyLayoutElementTo(layout, this->GetLayoutPrefs().elements[(i32)element], state, def.panelId, def.varName, def.posPanelId, show, text,
+							   color, force, sizeRow ? def.posPanelId : NULL);
+	// После Apply: force внутри сбрасывает state целиком.
+	state.rowV2 = sizeRow;
 }
 
 // Запись элемента худа на произвольные id и кэш: настоящий худ (UpdateLayoutElement выше) и

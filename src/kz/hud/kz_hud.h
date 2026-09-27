@@ -834,6 +834,8 @@ private:
 		const char *colorClassComputed {};
 		u32 lastColorPacked {};
 		bool colorComputed {};
+		// Строке таймера/престрейфа уже поставлен v2 (см. UpdateLayoutElement).
+		bool rowV2 {};
 	};
 
 	// Сущность худа ЭТОГО игрока; чужим не транслируется (KZ::quiet::OnCheckTransmit).
