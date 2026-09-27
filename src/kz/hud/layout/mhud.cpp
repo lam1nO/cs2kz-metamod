@@ -251,10 +251,16 @@ void KZHUDService::ApplyJumpIndicators(CCSCustomHudLayout *layout, const char *p
 {
 	char idBuf[64];
 	bool any = false;
+	// Цвета индикаторов = цвета тех же событий у чисел (решение владельца 27.09): PERF —
+	// «цвет перфа» престрейфа, JB — «цвет джампбага», CJ — «цвет CJ» скорости. Отдельной
+	// настройки нет: игрок красит один раз, число и метка совпадают.
+	const MHUDLayoutPrefs &prefs = this->GetLayoutPrefs();
+	const Color *indColors[3] = {&prefs.prespeedPerf, &prefs.prespeedJumpbug, &prefs.speedCj};
 	for (i32 i = 0; i < 3; i++)
 	{
 		const char *id = PrefixLayoutId(idBuf, sizeof(idBuf), prefix, JUMP_IND_IDS[i]);
 		this->SetLayoutValueClass(layout, id, extra.indSize[i], size, "font-size", false);
+		this->SetLayoutClass(layout, id, extra.indColorClass[i], panorama::ResolveColorClass(*indColors[i]));
 		this->SetLayoutBoolClass(layout, id, "hidden", extra.indHidden[i], !(show && lit[i]));
 		any |= show && lit[i];
 	}
