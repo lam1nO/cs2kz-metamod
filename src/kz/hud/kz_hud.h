@@ -955,6 +955,7 @@ private:
 		// Заливка полосы mhud_progress_fill — цветом элемента, но фоном (пустой Panel, color не рисует).
 		ColorClassCache progressFillColor {0u, false, NULL, true};
 		const char *progressFillClass {};
+		const char *progressFillDefaultClass {};
 		// Бейджи прыжка под престрейфом: полоса mhud_ind и ind_perf/ind_jb/ind_cj (hidden, кегль).
 		i32 indStripHidden {-1};
 		i32 indHidden[3] {-1, -1, -1};
