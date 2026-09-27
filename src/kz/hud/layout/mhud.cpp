@@ -57,6 +57,26 @@ void KZHUDService::UpdateTimerElement(CCSCustomHudLayout *layout, KZPlayer *sour
 	{
 		text = source->hudService->GetTimerText(this->player->languageService->GetLanguage());
 	}
+	// Статус «(СТОП)»/«(НА ПАУЗЕ)» — отдельным лейблом слева от времени (mhud_timer_status): в
+	// тексте таймера он удлинял строку вправо и налезал на дельту. GetTimerText общий с
+	// остальными худами, поэтому суффиксы срезаем здесь — сначала пауза (она последняя), потом стоп.
+	std::string status;
+	if (!inPrac && !text.empty())
+	{
+		const char *lang = this->player->languageService->GetLanguage();
+		for (const char *phrase : {"HUD - Paused Text", "HUD - Stopped Text"})
+		{
+			const std::string suffix = KZLanguageService::PrepareMessageWithLang(lang, phrase);
+			if (suffix.empty() || text.size() < suffix.size() || text.compare(text.size() - suffix.size(), suffix.size(), suffix) != 0)
+			{
+				continue;
+			}
+			text.erase(text.size() - suffix.size());
+			const size_t first = suffix.find_first_not_of(' ');
+			const std::string word = first == std::string::npos ? std::string() : suffix.substr(first);
+			status = status.empty() ? word : word + " " + status;
+		}
+	}
 	if (!this->GetLayoutPrefs().timerDetailed && !(inPrac && !pracRunning)) // плейсхолдер уже нужной ширины
 	{
 		// Отбросить дробную часть, суффикс (STOPPED)/(PAUSED) — сохранить.
@@ -95,6 +115,19 @@ void KZHUDService::UpdateTimerElement(CCSCustomHudLayout *layout, KZPlayer *sour
 
 	const bool show = this->IsLayoutElementEnabled(LayoutElement::Timer) && !text.empty();
 	this->UpdateLayoutElement(layout, LayoutElement::Timer, show, text.c_str(), color, force);
+
+	// Статус — тем же кеглем/шрифтом/цветом/обводкой, что время (цвет — уже посчитанный класс
+	// таймера); позиция и прозрачность — от строки.
+	const bool showStatus = show && !status.empty();
+	if (showStatus)
+	{
+		const MHUDLayoutPrefs::Element &el = prefs.elements[(i32)LayoutElement::Timer];
+		this->SetLayoutVar(layout, "mhud_timer_status", "tstatus", this->layoutExtra.statusText, status.c_str());
+		this->ApplyChildLabelStyle(layout, "mhud_timer_status", this->layoutExtra.statusStyle, el.size, el.fontClass,
+								   this->layoutElements[(i32)LayoutElement::Timer].colorClassComputed);
+		this->SetLayoutBoolClass(layout, "mhud_timer_status", "outline", this->layoutExtra.statusOutline, el.outline);
+	}
+	this->SetLayoutBoolClass(layout, "mhud_timer_status", "hidden", this->layoutExtra.statusHidden, !showStatus);
 
 	// === Дельта к PB/WR (спека §4.3): «+0.312» справа от таймера, по пути `!lead` ===========
 	// Путь сравнения держит СВОЙ игрок и по СВОЕМУ префу: при спектейте source — наблюдаемый, и

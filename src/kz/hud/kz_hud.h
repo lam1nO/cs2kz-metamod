@@ -927,6 +927,11 @@ private:
 		const char *runTypeClass {};
 		std::string deltaText {};
 		i32 deltaHidden {-1};
+		// Статус таймера слева от времени (mhud_timer_status).
+		std::string statusText {};
+		i32 statusHidden {-1};
+		i32 statusOutline {-1};
+		LayoutChildStyleState statusStyle {};
 		const char *deltaStateClass {}; // d-ahead/d-behind — только при дефолтных цветах
 		const char *deltaColorClass {}; // pal-fg-N/grad-N — только при своих цветах
 		i32 deltaFontSize {INT_MIN};
