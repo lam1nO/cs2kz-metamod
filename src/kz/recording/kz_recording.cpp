@@ -598,6 +598,16 @@ void KZRecordingService::CopyWeaponsToRecorder(Recorder *recorder)
 			referencedWeaponIndices.insert(tick.weapon);
 		}
 	}
+	// Кадры, уже сброшенные на диск частями (длинный ран, в том числе склеенный с куском из
+	// бэкапа — kz/savedrun/kz_partial_replay.cpp), в памяти не видны, а оружие в них ссылается на
+	// тот же список сессии. Список короткий (по записи на ствол) — отдаём его целиком.
+	if (recorder->numFlushedChunks > 0)
+	{
+		for (i32 i = 0; i < (i32)this->weapons.size(); i++)
+		{
+			referencedWeaponIndices.insert(i);
+		}
+	}
 
 	KZ_LOG_DEBUG(LogChannel::Recording, "Copying %zu referenced weapons to recorder\n", referencedWeaponIndices.size());
 

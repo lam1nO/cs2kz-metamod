@@ -153,7 +153,8 @@ static_function u64 BuildPreChangeFlags(const TickData::MovementData &current, c
 	if (current.replayFlags.ducking != previous.replayFlags.ducking || 
 		current.replayFlags.ducked != previous.replayFlags.ducked || 
 		current.replayFlags.desiresDuck != previous.replayFlags.desiresDuck ||
-		current.replayFlags.prac != previous.replayFlags.prac)
+		current.replayFlags.prac != previous.replayFlags.prac ||
+		current.replayFlags.splice != previous.replayFlags.splice)
 	{
 		flags |= CHANGED_PRE_REPLAY_FLAGS;
 	}
@@ -181,7 +182,8 @@ static_function u64 BuildPostChangeFlags(const TickData::MovementData &current, 
 	if (current.replayFlags.ducking != previous.replayFlags.ducking || 
 		current.replayFlags.ducked != previous.replayFlags.ducked || 
 		current.replayFlags.desiresDuck != previous.replayFlags.desiresDuck ||
-		current.replayFlags.prac != previous.replayFlags.prac)
+		current.replayFlags.prac != previous.replayFlags.prac ||
+		current.replayFlags.splice != previous.replayFlags.splice)
 	{
 		flags |= CHANGED_POST_REPLAY_FLAGS;
 	}

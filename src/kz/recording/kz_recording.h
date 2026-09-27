@@ -111,6 +111,74 @@ struct Recorder
 	u32 totalTicksRecorded = 0; // Total across all flushed chunks + in-memory
 	std::string tempFileBase;   // Set on first flush; empty means no flushing has occurred
 
+	// --- Склейка с куском рана из бэкапа (SavedRuns, kz/savedrun/kz_partial_replay.h) ---
+	// Рекордер восстановленного рана заводится сразу при восстановлении, а кусок (кадры до выхода
+	// игрока) приезжает асинхронно — с диска или из api. Пока он не вставлен в начало,
+	// splicePending = true: такой рекордер не имеет права стать файлом (в нём нет старта рана).
+	bool splicePending = false;
+	// id куска, который ждёт этот рекордер: повторный выход ДО вставки оставляет в SavedRuns его же.
+	std::string splicePartialId;
+	// Кадры продолжения идут в файле СРАЗУ за кадрами куска: живой tickcount сдвигается так, чтобы
+	// тик tickShiftFrom лёг на tickShiftTo (первый тик после куска). Тики раньше tickShiftFrom
+	// прижимаются к tickShiftTo — serverTick в файле обязан не убывать (бинарные поиски плейбека).
+	bool tickShiftActive = false;
+	u32 tickShiftFrom = 0;
+	u32 tickShiftTo = 0;
+
+	u32 ShiftTick(u32 tick) const
+	{
+		if (!tickShiftActive)
+		{
+			return tick;
+		}
+		return tick < tickShiftFrom ? tickShiftTo : tickShiftTo + (tick - tickShiftFrom);
+	}
+
+	// Сдвиг кадра целиком: кроме serverTick в кадре есть и другие АБСОЛЮТНЫЕ величины той же
+	// шкалы, и плейбек читает их относительно serverTick/gameTime своего кадра
+	// (playback.cpp: `tickcount + modernJump.* - serverTick`, `curtime + jumpPressedTime -
+	// gameTime`), а перемотка считает время как `gameTime - serverTick * интервал`. Сдвинутые
+	// на ту же дельту, они дают те же относительные значения, что до сдвига.
+	void ShiftFrame(TickData &t) const
+	{
+		if (!tickShiftActive)
+		{
+			return;
+		}
+		const u32 shifted = ShiftTick(t.serverTick);
+		const i32 delta = (i32)(shifted - t.serverTick);
+		const f32 deltaTime = (f32)delta * ENGINE_FIXED_TICK_INTERVAL;
+		t.serverTick = shifted;
+		t.gameTime += deltaTime;
+		t.pre.jumpPressedTime += deltaTime;
+		t.post.jumpPressedTime += deltaTime;
+		t.pre.lastDuckTime += deltaTime;
+		t.post.lastDuckTime += deltaTime;
+		t.modernJump.lastActualJumpPressTick += delta;
+		t.modernJump.lastUsableJumpPressTick += delta;
+		t.modernJump.lastLandedTick += delta;
+	}
+
+	void ShiftCmd(CmdData &c) const
+	{
+		if (!tickShiftActive)
+		{
+			return;
+		}
+		const u32 shifted = ShiftTick(c.serverTick);
+		c.gameTime += (f32)(i32)(shifted - c.serverTick) * ENGINE_FIXED_TICK_INTERVAL;
+		c.serverTick = shifted;
+	}
+
+	// Сериализация частей рекордера в формат временного чанка (см. FlushChunkToDisk) — общая с
+	// рабочим потоком склейки (kz/savedrun/kz_partial_replay.cpp пишет кусок рана готовым чанком).
+	static void BuildChunkBuffer(std::vector<char> &buf, const std::vector<TickData> &ticks, const std::vector<u8> &subtickCounts,
+								 const std::vector<SubtickData::RpSubtickMove> &subtickMoves, const std::vector<RpEvent> &events,
+								 const std::vector<RpJumpStats> &jumps, const std::vector<CmdData> &cmds, const std::vector<u8> &cmdSubtickCounts,
+								 const std::vector<SubtickData::RpSubtickMove> &cmdSubtickMoves);
+	// Путь к чанку номер index рекордера с этим uuid (относительно csgo/).
+	static std::string ChunkBasePath(const UUID_t &uuid);
+
 	// Flush in-memory recording data to a temp chunk file on disk, then clear in-memory vectors.
 	void FlushChunkToDisk();
 	// Read all flushed chunks from disk back into vectors, appending the current in-memory remainder.
@@ -144,6 +212,7 @@ struct Recorder
 		if constexpr (std::is_same<T, TickData>::value)
 		{
 			tickData.push_back(data);
+			ShiftFrame(tickData.back());
 			totalTicksRecorded++;
 			if (tickData.size() >= FLUSH_INTERVAL_TICKS)
 			{
@@ -153,6 +222,7 @@ struct Recorder
 		else if constexpr (std::is_same<T, RpEvent>::value)
 		{
 			rpEvents.push_back(data);
+			rpEvents.back().serverTick = ShiftTick(data.serverTick);
 		}
 		else if constexpr (std::is_same<T, RpJumpStats>::value)
 		{
@@ -169,14 +239,17 @@ struct Recorder
 				jumps.emplace_back();
 				RpJumpStats &slim = jumps.back();
 				slim.overall = data.overall;
+				slim.overall.serverTick = ShiftTick(data.overall.serverTick);
 				slim.strafes = data.strafes;
 				return;
 			}
 			jumps.push_back(data);
+			jumps.back().overall.serverTick = ShiftTick(data.overall.serverTick);
 		}
 		else if constexpr (std::is_same<T, CmdData>::value)
 		{
 			cmdData.push_back(data);
+			ShiftCmd(cmdData.back());
 		}
 		else
 		{
@@ -259,6 +332,11 @@ public:
 
 	// Spawn a thread to write recorder to disk; calls onSuccess/onFailure on the main thread (both optional).
 	void QueueWriteToFile(std::unique_ptr<Recorder> recorder, DiskWriteSuccessCallback onSuccess = nullptr, WriteFailureCallback onFailure = nullptr);
+
+	// Произвольная тяжёлая работа на отдельном потоке (разбор куска рана из бэкапа —
+	// kz/savedrun/kz_partial_replay.cpp): work выполняется на потоке и возвращает колбэк, который
+	// зовётся на ГЛАВНОМ потоке из RunFrame (пустой колбэк допустим). Stop() ждёт и эти потоки.
+	void QueueTask(std::function<std::function<void()>()> work);
 
 	// Invoke pending callbacks — call once per game frame from the main thread.
 	void RunFrame();

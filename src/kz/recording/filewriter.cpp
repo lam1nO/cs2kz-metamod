@@ -113,6 +113,25 @@ void ReplayFileWriter::QueueWriteToFile(std::unique_ptr<Recorder> recorder, Disk
 		});
 }
 
+void ReplayFileWriter::QueueTask(std::function<std::function<void()>()> work)
+{
+	SpawnThread(
+		[this, work = std::move(work)]()
+		{
+			if (!work)
+			{
+				return;
+			}
+			std::function<void()> done = work();
+			if (!done)
+			{
+				return;
+			}
+			std::lock_guard<std::mutex> lock(m_completedLock);
+			m_completedCallbacks.push(std::move(done));
+		});
+}
+
 void ReplayFileWriter::RunFrame()
 {
 	std::queue<std::function<void()>> pending;
