@@ -956,6 +956,7 @@ private:
 		i32 indSize[3] {INT_MIN, INT_MIN, INT_MIN};
 		// Цвет индикатора — из настроек престрейфа/скорости (perf, jumpbug, cj): класс pal-fg-N.
 		const char *indColorClass[3] {};
+		const char *indFontClass[3] {};
 		// Защёлка флагов взлёта (см. SpeedInfo::takeoffTime): чей взлёт и какой.
 		bool indLatchValid {};
 		i32 indLatchSlot {-1};

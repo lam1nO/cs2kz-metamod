@@ -261,6 +261,8 @@ void KZHUDService::ApplyJumpIndicators(CCSCustomHudLayout *layout, const char *p
 		const char *id = PrefixLayoutId(idBuf, sizeof(idBuf), prefix, JUMP_IND_IDS[i]);
 		this->SetLayoutValueClass(layout, id, extra.indSize[i], size, "font-size", false);
 		this->SetLayoutClass(layout, id, extra.indColorClass[i], panorama::ResolveColorClass(*indColors[i]));
+		// Шрифт — тот же, что у престрейфа (решение владельца 27.09): индикатор — часть элемента.
+		this->SetLayoutClass(layout, id, extra.indFontClass[i], prefs.elements[(i32)LayoutElement::Prespeed].fontClass);
 		this->SetLayoutBoolClass(layout, id, "hidden", extra.indHidden[i], !(show && lit[i]));
 		any |= show && lit[i];
 	}
