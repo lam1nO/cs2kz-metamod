@@ -27,6 +27,7 @@
 
 #include "common.h"
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -69,6 +70,23 @@ public:
 		bool unconfirmedPb {};
 		u64 timeMs {};          // время рана в мс — для сверки с платформенным PB
 		std::string replayPath; // путь к файлу реплея относительно csgo/ (kzreplays/<uuid>.replay)
+	};
+
+	// Кусок реплея незавершённого рана (бэкап SavedRuns, kz/savedrun/kz_partial_replay.h) —
+	// <stem>.partial.meta, где stem — ключ SavedRuns. ОДИН файл на ключ: свежее намерение
+	// (новый кусок put или удаление delete) перезаписывает прежнее, квитанция снимает файл,
+	// только если в нём всё ещё ТО ЖЕ намерение (op + partialId) — иначе ответ на устаревший
+	// запрос снёс бы новое.
+	struct PartialMeta
+	{
+		std::string op; // "put" | "delete"
+		std::string partialId;
+		u64 steamId64 {};
+		std::string map;
+		i32 course {};
+		std::string mode; // api-режим: ckz/vnl/kzt
+		std::string styles;
+		std::string path; // локальный файл куска относительно csgo/ (для put)
 	};
 
 	// Создаёт каталоги очереди и запускает таймер ретраера. Зовётся один раз при загрузке плагина.
@@ -116,6 +134,14 @@ public:
 	// POST события в ingest; 2xx → AckEvent, 4xx → dead/, иначе файл остаётся до следующего тика.
 	static void SendEvent(const std::string &runUuid, const std::string &body);
 
+	// Write-ahead намерения по куску (перезапись файла <stem>.partial.meta).
+	static void EnqueuePartial(const std::string &stem, const PartialMeta &meta);
+
+	// put: POST /replays/v1/partial (тело — body; nullptr — ретраер прочитает meta.path);
+	// delete: DELETE /replays/v1/partial. 2xx (и 404 у delete) → квитанция, 4xx → dead/,
+	// сеть/5xx → остаётся ретраеру.
+	static void SendPartial(const std::string &stem, const PartialMeta &meta, std::shared_ptr<std::vector<char>> body);
+
 	// Аплоад реплея: POST type=pb (uploadPb), type=pbpro (uploadPro), type=wr (isServerRecord) —
 	// по очереди; полный успех → AckReplay. Отказ 4xx на pbpro НЕ хоронит мету (см. .cpp).
 	static void SendReplay(const ReplayMeta &meta, const std::vector<char> &buffer);
@@ -132,4 +158,5 @@ private:
 	static void RetrySqlFile(const std::string &name, const std::string &runUuid);
 	static void RetryReplayFile(const std::string &name, const std::string &runUuid);
 	static void RetryReplayRead(const ReplayMeta &meta);
+	static void RetryPartialFile(const std::string &name, const std::string &stem);
 };
