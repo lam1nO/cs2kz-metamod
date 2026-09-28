@@ -253,7 +253,7 @@ static_function void RpMenuScaleOnPick(KZPlayer *player, i64 tag, i64 id)
 // RefreshLayoutPrefs (timerCompare, ограничение 0..2) и разбирает UpdateTimerElement (1 → PB,
 // иначе AWR). Порядок строк в списке — PB/WR/Выкл (как в спеке §4.4), а id — само значение
 // префа, поэтому «Выкл» идёт последним с id 0.
-static constexpr i64 HUD_TIMER_COMPARE_DEFAULT = 1;
+static constexpr i64 HUD_TIMER_COMPARE_DEFAULT = 2; // к WR (решение владельца 28.09)
 
 static_function void GetTimerCompareChoices(KZPlayer *player, i64 tag, std::vector<KZChoice> &out)
 {

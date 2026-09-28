@@ -141,7 +141,7 @@ void KZHUDService::RefreshLayoutPrefs()
 	this->layoutPrefs.wrPro = opts->GetPreferenceBool("hudWrPro", true);
 	// Клэмп обязателен: преф мог прийти из БД/импорта мимо меню, а 3+ UpdateTimerElement
 	// прочитал бы как «сравнивать с WR».
-	this->layoutPrefs.timerCompare = Clamp((i32)opts->GetPreferenceInt("hudTimerCompare", 1), 0, 2);
+	this->layoutPrefs.timerCompare = Clamp((i32)opts->GetPreferenceInt("hudTimerCompare", 2), 0, 2);
 	this->layoutPrefs.deltaAhead = this->GetMHUDColorPref("mhudDeltaAheadColor", MHUD_DEF_DELTA_AHEAD_COLOR);
 	this->layoutPrefs.deltaBehind = this->GetMHUDColorPref("mhudDeltaBehindColor", MHUD_DEF_DELTA_BEHIND_COLOR);
 	// hudKeysOverlap читался кодом до этой задачи, но пункта в реестре меню у него не было

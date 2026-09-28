@@ -121,7 +121,7 @@ void KZHUDService::ApplyHudDefaults()
 		opts->SetPreferenceInt("mhudKeysIdle", 2);
 		opts->SetPreferenceInt("mhudCrosshairScale", 100);
 		// Дельта таймера: 0 выкл / 1 к PB / 2 к WR (§4.1 спеки редактора).
-		opts->SetPreferenceInt("hudTimerCompare", 1);
+		opts->SetPreferenceInt("hudTimerCompare", 2);
 		written += 3;
 
 		// Цвета: тот же упакованный int, что читает GetMHUDColorPref, — пишем через
