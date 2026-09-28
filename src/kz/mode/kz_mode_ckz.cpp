@@ -19,6 +19,44 @@ PLUGIN_EXPOSE(KZClassicModePlugin, g_KZClassicModePlugin);
 
 CConVarRef<f32> sv_standable_normal("sv_standable_normal");
 
+// Слайды как в CS:GO. AirAccelerate CS2 сразу отдаёт не больше половины прироста, а остаток
+// кладёт в m_vecFrameVelocityDelta, и AirMove прибавляет его к скорости уже ПОСЛЕ TryPlayerMove,
+// мимо среза об склон. В GO весь прирост шёл до среза. На склоне отложенная часть направлена в
+// плоскость: в следующем шаге она съедает лимит стрейфа (sv_air_max_wishspeed), а потом всё равно
+// срезается — подъём по склону слабее, чем в GO (разбор реплеев 29.09.2026: в среднем 0.33 u/s за
+// тик вверх по рампе, до 1.45 на отдельных участках). Фикс отдаёт отложенную часть сразу, но
+// только пока игрок скользит по склону: в свободном полёте конечная скорость шага та же, а сдвиг
+// позиции поменял бы дистанции джампстатов.
+CConVar<bool> kz_ckz_slide_go("kz_ckz_slide_go", FCVAR_NONE, "CKZ: воздушное ускорение на склонах как в CS:GO (без отложенной части)", true);
+
+static u64 g_slideFixCalls {};
+static f64 g_slideFixSum {};
+// Отказы страховки по причинам: остаток против wishdir / поперёк него / больше половины прироста.
+static u64 g_slideFixAnomalies[3] {};
+
+CON_COMMAND_F(kz_ckz_slide_stats, "CKZ: сколько раз фикс слайдов отдал отложенное ускорение (со сбросом)", FCVAR_NONE)
+{
+	Msg("[CKZ] slide_go calls=%llu mean_deferred=%.3f anomalies(back/perp/big)=%llu/%llu/%llu enabled=%d\n",
+		(unsigned long long)g_slideFixCalls, g_slideFixCalls ? g_slideFixSum / g_slideFixCalls : 0.0,
+		(unsigned long long)g_slideFixAnomalies[0], (unsigned long long)g_slideFixAnomalies[1], (unsigned long long)g_slideFixAnomalies[2],
+		(int)kz_ckz_slide_go.Get());
+	g_slideFixCalls = 0;
+	g_slideFixSum = 0.0;
+	g_slideFixAnomalies[0] = g_slideFixAnomalies[1] = g_slideFixAnomalies[2] = 0;
+}
+
+// Склон, по которому скользят: смотрит вверх, но стоять на нём нельзя. Стены (n.z ~ 0) и
+// потолки не в счёт. В зоне слайда sv_standable_normal = 2, и склоном становится любой пол.
+static_function bool IsSlidePlane(const Vector &normal)
+{
+	f32 standableZ = 0.7f;
+	if (sv_standable_normal.IsValidRef() && sv_standable_normal.IsConVarDataAvailable())
+	{
+		standableZ = sv_standable_normal.Get();
+	}
+	return normal.z > 0.03125f && normal.z < standableZ;
+}
+
 bool KZClassicModePlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool late)
 {
 	PLUGIN_SAVEVARS();
@@ -117,6 +155,8 @@ void KZClassicModeService::Reset()
 	this->lastValidPlane = vec3_origin;
 
 	this->airMoving = {};
+	this->touchedSlopeLastMove = {};
+	this->preAirAccelFrameDelta = vec3_origin;
 	this->tpmTriggerFixOrigins.RemoveAll();
 }
 
@@ -211,6 +251,8 @@ void KZClassicModeService::OnStopTouchGround()
 
 void KZClassicModeService::OnStartTouchGround()
 {
+	// Последний воздушный шаг мог задеть низ рампы — на такеофф следующего прыжка это не тянем.
+	this->touchedSlopeLastMove = false;
 	this->SlopeFix();
 	bbox_t bounds;
 	this->player->GetBBoxBounds(&bounds);
@@ -330,6 +372,7 @@ void KZClassicModeService::OnProcessMovementPost()
 	if (!this->didTPM)
 	{
 		this->lastValidPlane = vec3_origin;
+		this->touchedSlopeLastMove = false;
 	}
 	f32 velMod = this->originalMaxSpeed >= 0 ? (SPEED_NORMAL + this->GetPrestrafeGain()) / this->originalMaxSpeed : 1.0f;
 	if (this->player->GetPlayerPawn()->m_flVelocityModifier() != velMod)
@@ -681,6 +724,7 @@ void KZClassicModeService::OnTryPlayerMove(Vector *pFirstDest, trace_t *pFirstTr
 	this->tpmTriggerFixOrigins.RemoveAll();
 	this->overrideTPM = false;
 	this->didTPM = true;
+	this->touchedSlopeLastMove = false;
 	CCSPlayerPawn *pawn = this->player->GetPlayerPawn();
 
 	f32 timeLeft = g_pKZUtils->GetGlobals()->frametime;
@@ -830,6 +874,11 @@ void KZClassicModeService::OnTryPlayerMove(Vector *pFirstDest, trace_t *pFirstTr
 				this->lastValidPlane = pm.m_vHitNormal;
 			}
 			potentiallyStuck = pm.m_flFraction == 0.0f;
+		}
+
+		if (this->airMoving && pm.m_flFraction < 1.0f && IsSlidePlane(pm.m_vHitNormal))
+		{
+			this->touchedSlopeLastMove = true;
 		}
 
 		if (pm.m_flFraction * velocity.Length() > 0.03125f || pm.m_flFraction > 0.03125f)
@@ -1011,6 +1060,46 @@ void KZClassicModeService::OnAirMovePost()
 	this->player->currentMoveData->m_flMaxSpeed = SPEED_NORMAL + this->GetPrestrafeGain();
 }
 
+void KZClassicModeService::OnAirAccelerate(Vector &wishdir, f32 &wishspeed, f32 &accel)
+{
+	this->preAirAccelFrameDelta = this->player->currentMoveData->m_vecFrameVelocityDelta;
+}
+
+void KZClassicModeService::OnAirAcceleratePost(Vector wishdir, f32 wishspeed, f32 accel)
+{
+	// Склон — по TryPlayerMove ПРОШЛОГО шага: AirAccelerate идёт раньше TryPlayerMove своего шага.
+	// Первый шаг касания поэтому проходит по-старому; дальше игрок касается склона каждый шаг.
+	if (!this->touchedSlopeLastMove || !kz_ckz_slide_go.Get())
+	{
+		return;
+	}
+	CMoveData *mv = this->player->currentMoveData;
+	// Всё, что этот вызов положил в отложенную дельту, — остаток прироста вдоль wishdir.
+	Vector deferred = mv->m_vecFrameVelocityDelta - this->preAirAccelFrameDelta;
+	if (deferred == vec3_origin)
+	{
+		return;
+	}
+	// Страховка от чужой раскладки CMoveData и от будущих правок Valve: остаток обязан лежать
+	// вдоль wishdir и не превышать половины прироста accel·wishspeed·friction·dt (вторую половину
+	// движок уже отдал). Иначе не трогаем ничего.
+	f32 along = deferred.Dot(wishdir);
+	f32 fullAccel = accel * wishspeed * this->player->GetMoveServices()->m_flSurfaceFriction() * g_pKZUtils->GetGlobals()->frametime;
+	i32 anomaly = along <= 0.0f ? 0 : (deferred - wishdir * along).Length() > 0.01f ? 1 : along > 0.5f * fullAccel + 0.01f ? 2 : -1;
+	if (anomaly >= 0)
+	{
+		g_slideFixAnomalies[anomaly]++;
+		return;
+	}
+	mv->m_vecVelocity += deferred;
+	// В CS2 отложенная часть в outWishVel не попадает, в GO весь прирост шёл туда. Берём как в GO:
+	// читатели outWishVel (детект прыжка, телеметрия) смотрят его только вокруг OnJump*.
+	mv->m_outWishVel += deferred;
+	mv->m_vecFrameVelocityDelta = this->preAirAccelFrameDelta;
+	g_slideFixCalls++;
+	g_slideFixSum += deferred.Length();
+}
+
 void KZClassicModeService::OnWaterMove()
 {
 	this->player->currentMoveData->m_flMaxSpeed = SPEED_NORMAL;
@@ -1023,6 +1112,12 @@ void KZClassicModeService::OnWaterMovePost()
 
 void KZClassicModeService::OnTeleport(const Vector *newPosition, const QAngle *newAngles, const Vector *newVelocity)
 {
+	// Чекпоинт/!tp со слайда: касание склона до телепорта к новому месту отношения не имеет.
+	// Смена одних углов (SetAngles зовёт Teleport без позиции и скорости) — не телепорт.
+	if (newPosition || newVelocity)
+	{
+		this->touchedSlopeLastMove = false;
+	}
 	if (!this->player->processingMovement)
 	{
 		return;
