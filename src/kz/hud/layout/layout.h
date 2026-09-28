@@ -24,29 +24,29 @@
 #define LAYOUT_DEF_CHECKPOINT_Y    30
 #define LAYOUT_DEF_CHECKPOINT_SIZE 20
 
-// «Прогресс» по маршруту `!lead` — полоса с подписью и процентом (mhud_progress) справа снизу,
-// как в дизайне (борд 1). Раньше стоял под таймером (Y таймера + 6) и при дефолтах налезал на
-// тип рана — отсюда и перенос. Элемент по умолчанию ВЫКЛЮЧЕН (LayoutElementDef::enabledDefault),
-// поэтому этой раскладки никто не увидит, пока сам не включит пункт.
-#define LAYOUT_DEF_LEADPROGRESS_X    40
-#define LAYOUT_DEF_LEADPROGRESS_Y    40
+// «Прогресс» по маршруту `!lead` — старый элемент: дефолт позиции прежний (под таймером), чтобы
+// у игроков, включивших его без переноса, полоса не переехала (правило владельца 28.09: старым
+// параметрам дефолты не менять). При дефолтах соседствует с типом рана (0/40).
+#define LAYOUT_DEF_LEADPROGRESS_X    LAYOUT_DEF_TIMER_X
+#define LAYOUT_DEF_LEADPROGRESS_Y    (LAYOUT_DEF_TIMER_Y + 6)
 #define LAYOUT_DEF_LEADPROGRESS_SIZE 18
 
-// Поля редактора `!hud` (PB/WR, showpos, курс, тип рана) — ВРЕМЕННЫЕ дефолты до решения
-// владельца (чеклист H6). Борд 1 даёт их в процентах ЭКРАНА от левого верхнего угла
+// Поля редактора `!hud` (PB/WR, showpos, курс, тип рана) — дефолты владельца 28.09 (его
+// сохранённая раскладка; тип рана он не двигал). Все четыре по умолчанию включены.
+// Исходно (чеклист H6): Борд 1 даёт их в процентах ЭКРАНА от левого верхнего угла
 // (PB/WR 1/88, showpos 1/2, курс 50/2, тип рана 47/93), а у нас X/Y — проценты от ЦЕНТРА, и
 // элемент центрируется на своей точке. Прямой перевод p-50 увёл бы левые элементы
 // наполовину за край экрана, поэтому они подтянуты внутрь примерно на полширины элемента.
-#define LAYOUT_DEF_PBWR_X    (-40)
+#define LAYOUT_DEF_PBWR_X    (-41)
 #define LAYOUT_DEF_PBWR_Y    (-44)
-#define LAYOUT_DEF_PBWR_SIZE 17
+#define LAYOUT_DEF_PBWR_SIZE 12
 
-#define LAYOUT_DEF_SHOWPOS_X    (-42)
-#define LAYOUT_DEF_SHOWPOS_Y    (-36)
+#define LAYOUT_DEF_SHOWPOS_X    43
+#define LAYOUT_DEF_SHOWPOS_Y    (-40)
 #define LAYOUT_DEF_SHOWPOS_SIZE 13
 
 #define LAYOUT_DEF_COURSE_X    0
-#define LAYOUT_DEF_COURSE_Y    (-46)
+#define LAYOUT_DEF_COURSE_Y    (-39)
 #define LAYOUT_DEF_COURSE_SIZE 13
 
 // Тип рана — под таймером по центру (0/40): прежние -3/43 перекрывались с «Прогрессом».
