@@ -68,8 +68,8 @@ void KZHUDService::ApplyHudDefaults()
 		for (i32 e = 0; e < (i32)LayoutElement::Count; e++)
 		{
 			const LayoutElementDef &def = LAYOUT_ELEMENTS[e];
-			// Дефолт тумблера — поэлементный: «Прогресс» по умолчанию выключен, и одноразовая
-			// перезапись оформления не имеет права включить его игроку (тот же ответ дают
+			// Дефолт тумблера — поэлементный (def.enabledDefault; с 28.09 все включены), и одноразовая
+			// перезапись оформления ставит ровно его (тот же ответ дают
 			// RefreshLayoutPrefs и пункт меню).
 			opts->SetPreferenceBool(def.enabledKey, def.enabledDefault);
 			opts->SetPreferenceFloat(def.xKey, (f64)def.xDefault);
@@ -150,7 +150,7 @@ void KZHUDService::ApplyHudDefaults()
 			{"mhudPbWrColor", &MHUD_DEF_BASE_COLOR},
 			{"mhudShowPosColor", &MHUD_DEF_SHOWPOS_COLOR},
 			{"mhudCourseColor", &MHUD_DEF_BASE_COLOR},
-			{"mhudLeadProgressColor", &MHUD_DEF_BASE_COLOR},
+			{"mhudLeadProgressColor", &MHUD_DEF_LEADPROGRESS_COLOR},
 		};
 
 		for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(kColors); i++)

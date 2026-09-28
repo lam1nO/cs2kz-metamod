@@ -24,11 +24,11 @@
 #define LAYOUT_DEF_CHECKPOINT_Y    30
 #define LAYOUT_DEF_CHECKPOINT_SIZE 20
 
-// «Прогресс» по маршруту `!lead` — старый элемент: дефолт позиции прежний (под таймером), чтобы
-// у игроков, включивших его без переноса, полоса не переехала (правило владельца 28.09: старым
-// параметрам дефолты не менять). При дефолтах соседствует с типом рана (0/40).
-#define LAYOUT_DEF_LEADPROGRESS_X    LAYOUT_DEF_TIMER_X
-#define LAYOUT_DEF_LEADPROGRESS_Y    (LAYOUT_DEF_TIMER_Y + 6)
+// «Прогресс» по маршруту `!lead` — дефолты владельца 28.09 (его раскладка: слева по центру
+// высоты, Stratum2 Medium, #00AAFF). Для «Прогресса» смена дефолтов разрешена им явно — у
+// остальных старых элементов дефолты не трогаем. Элемент по умолчанию включён.
+#define LAYOUT_DEF_LEADPROGRESS_X    (-42)
+#define LAYOUT_DEF_LEADPROGRESS_Y    (-5)
 #define LAYOUT_DEF_LEADPROGRESS_SIZE 18
 
 // Поля редактора `!hud` (PB/WR, showpos, курс, тип рана) — дефолты владельца 28.09 (его

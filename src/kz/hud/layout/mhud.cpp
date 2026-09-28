@@ -860,7 +860,9 @@ void KZHUDService::ApplyLeadProgressParts(CCSCustomHudLayout *layout, const char
 	// Цвет по умолчанию (белый у элемента) — заливка остаётся синей из css (.progress-fill-default,
 	// как на дизайне); свой цвет игрока — палитрой фона. Тот же приём, что у дельты.
 	{
-		const bool fillDefault = color.r() == MHUD_DEF_BASE_COLOR.r() && color.g() == MHUD_DEF_BASE_COLOR.g() && color.b() == MHUD_DEF_BASE_COLOR.b();
+		// Белый — прежний дефолт элемента (у тех, кто его сохранил), #00AAFF — нынешний.
+		const auto same = [&](const Color &c) { return color.r() == c.r() && color.g() == c.g() && color.b() == c.b(); };
+		const bool fillDefault = same(MHUD_DEF_BASE_COLOR) || same(MHUD_DEF_LEADPROGRESS_COLOR);
 		const char *fillId2 = PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "mhud_progress_fill");
 		this->SetLayoutClass(layout, fillId2, extra.progressFillDefaultClass, fillDefault ? "progress-fill-default" : NULL);
 		this->SetLayoutClass(layout, fillId2, extra.progressFillClass, fillDefault ? NULL : extra.progressFillColor.Get(color));

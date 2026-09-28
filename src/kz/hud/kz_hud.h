@@ -18,6 +18,7 @@ struct KZOptNode;
 // GetMHUDColorPref из удалённого particle-пути); значения не менялись ни на бит (иначе у
 // игроков поехали бы цвета худа).
 extern const Color MHUD_DEF_BASE_COLOR;
+extern const Color MHUD_DEF_LEADPROGRESS_COLOR;
 extern const Color MHUD_DEF_SHOWPOS_COLOR;
 extern const Color MHUD_DEF_PERF_COLOR;
 extern const Color MHUD_DEF_JUMPBUG_COLOR;
@@ -80,7 +81,7 @@ struct LayoutElementDef
 	i32 yDefault;
 	i32 sizeDefault;
 	// Дефолт общего тумблера элемента. Поле, а не константа `true` в двух местах: элемент
-	// «Прогресс» по умолчанию ВЫКЛЮЧЕН, и один и тот же ответ обязаны давать
+	// у элементов свой дефолт (с 28.09 все включены), и один и тот же ответ обязаны давать
 	// RefreshLayoutPrefs (layout/prefs.cpp) и пункт меню (hud/prefs/hud_prefs.cpp).
 	bool enabledDefault;
 	// Дефолтный шрифт элемента (слаг panorama_tables.cpp). Поэлементный: по дизайну showpos

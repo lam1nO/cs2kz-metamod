@@ -164,7 +164,7 @@ static_function void ResetAllOnActivate(KZPlayer *player, i64 tag)
 static_function void AddHudElementItems(KZOptNode *node, LayoutElement e)
 {
 	const LayoutElementDef &def = LAYOUT_ELEMENTS[(i32)e];
-	// Дефолт — поэлементный (def.enabledDefault): у «Прогресса» он false. Тот же ответ читает
+	// Дефолт — поэлементный (def.enabledDefault; с 28.09 у всех true). Тот же ответ читает
 	// RefreshLayoutPrefs (layout/prefs.cpp) — разойтись значило бы показать в меню «Вкл» при
 	// фактически выключенном элементе.
 	KZ::menu::AddToggle(node, "HUD - Menu Label Enabled", def.enabledKey, def.enabledDefault);
@@ -479,7 +479,7 @@ void KZHUDService::InitMenuPrefs()
 	// худом. Ключи — те же, что читает RefreshLayoutPrefs (layout/prefs.cpp).
 	KZ::menu::AddColor(timer, "HUD - Menu Label DeltaAheadColor", "mhudDeltaAheadColor", MHUD_DEF_DELTA_AHEAD_COLOR);
 	KZ::menu::AddColor(timer, "HUD - Menu Label DeltaBehindColor", "mhudDeltaBehindColor", MHUD_DEF_DELTA_BEHIND_COLOR);
-	KZ::menu::AddColor(elementNodes[(i32)LayoutElement::LeadProgress], "HUD - Menu Label Color", "mhudLeadProgressColor", MHUD_DEF_BASE_COLOR);
+	KZ::menu::AddColor(elementNodes[(i32)LayoutElement::LeadProgress], "HUD - Menu Label Color", "mhudLeadProgressColor", MHUD_DEF_LEADPROGRESS_COLOR);
 	KZOptNode *pbwr = elementNodes[(i32)LayoutElement::PbWr];
 	KZ::menu::AddColor(pbwr, "HUD - Menu Label Color", "mhudPbWrColor", MHUD_DEF_BASE_COLOR);
 	// Ячейки PB/WR: все четыре выключены — элемент скрыт целиком (UpdatePbWrElement).

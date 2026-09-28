@@ -95,8 +95,8 @@ void KZHUDService::RefreshLayoutPrefs()
 	{
 		const LayoutElementDef &def = LAYOUT_ELEMENTS[e];
 		MHUDLayoutPrefs::Element &element = this->layoutPrefs.elements[e];
-		// Дефолт тумблера — ПОЭЛЕМЕНТНЫЙ (def.enabledDefault): «Прогресс» по умолчанию выключен,
-		// остальные пять включены. Тот же ответ обязан давать пункт меню (AddHudElementItems).
+		// Дефолт тумблера — ПОЭЛЕМЕНТНЫЙ (def.enabledDefault; с 28.09 у всех true),
+		// тот же ответ обязан давать пункт меню (AddHudElementItems).
 		element.enabled = opts->GetPreferenceBool(def.enabledKey, def.enabledDefault);
 		element.x = panorama::SnapToStep((i32)opts->GetPreferenceFloat(def.xKey, (f32)def.xDefault), -100, 100);
 		element.y = panorama::SnapToStep((i32)opts->GetPreferenceFloat(def.yKey, (f32)def.yDefault), -100, 100);
@@ -130,7 +130,7 @@ void KZHUDService::RefreshLayoutPrefs()
 	this->layoutPrefs.pbwrColor = this->GetMHUDColorPref("mhudPbWrColor", MHUD_DEF_BASE_COLOR);
 	this->layoutPrefs.showPosColor = this->GetMHUDColorPref("mhudShowPosColor", MHUD_DEF_SHOWPOS_COLOR);
 	this->layoutPrefs.courseColor = this->GetMHUDColorPref("mhudCourseColor", MHUD_DEF_BASE_COLOR);
-	this->layoutPrefs.leadProgressColor = this->GetMHUDColorPref("mhudLeadProgressColor", MHUD_DEF_BASE_COLOR);
+	this->layoutPrefs.leadProgressColor = this->GetMHUDColorPref("mhudLeadProgressColor", MHUD_DEF_LEADPROGRESS_COLOR);
 
 	this->layoutPrefs.timerDetailed = opts->GetPreferenceBool("hudTimerDetail", true);
 	// Поля редактора `!hud`. Дефолты — те же, что пишет ApplyHudDefaults (layout/defaults.cpp)
