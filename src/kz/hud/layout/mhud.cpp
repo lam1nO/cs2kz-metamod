@@ -145,11 +145,11 @@ void KZHUDService::UpdateTimerElement(CCSCustomHudLayout *layout, KZPlayer *sour
 	{
 		const MHUDLayoutPrefs &own = this->GetOwnLayoutPrefs();
 		const i32 wantMode = own.elements[(i32)LayoutElement::Timer].enabled ? own.timerCompare : 0;
-		this->player->leadService->SetCompareWanted(wantMode != 0, wantMode == 2 ? CybReplayDownload::Kind::AWR : CybReplayDownload::Kind::PB);
+		this->player->leadService->SetCompareWanted(wantMode != 0, wantMode == 2 ? CybReplayDownload::Kind::WR : CybReplayDownload::Kind::PB);
 	}
 	f64 delta = 0.0;
-	// Спектейт: путь сравнения — у наблюдаемого и под ЕГО вид записи (PB или AWR). Если зритель
-	// хочет другой вид, число было бы подписано не тем, что он выбрал («+0.3 к AWR» под видом
+	// Спектейт: путь сравнения — у наблюдаемого и под ЕГО вид записи (PB или WR). Если зритель
+	// хочет другой вид, число было бы подписано не тем, что он выбрал («+0.3 к WR» под видом
 	// «к PB»), — такую дельту не показываем вовсе.
 	const bool kindMatches = source == this->player
 							 || (source->hudService && source->hudService->GetOwnLayoutPrefs().timerCompare == prefs.timerCompare);

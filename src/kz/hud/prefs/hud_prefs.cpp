@@ -250,8 +250,8 @@ static_function void RpMenuScaleOnPick(KZPlayer *player, i64 tag, i64 id)
 
 // === hudTimerCompare: живая дельта в таймере (план hud-editor-options, Task 7/8) ==============
 // Сырой int-преф, как mhudKeysIdle: 0 — выкл, 1 — к PB, 2 — к WR. Значения — те, что читает
-// RefreshLayoutPrefs (timerCompare, ограничение 0..2) и разбирает UpdateTimerElement (1 → PB,
-// иначе AWR). Порядок строк в списке — PB/WR/Выкл (как в спеке §4.4), а id — само значение
+// RefreshLayoutPrefs (timerCompare, ограничение 0..2) и разбирает UpdateTimerElement (1 → PB, 2 → WR —
+// настоящий WR, не AWR). Порядок строк в списке — PB/WR/Выкл (как в спеке §4.4), а id — само значение
 // префа, поэтому «Выкл» идёт последним с id 0.
 static constexpr i64 HUD_TIMER_COMPARE_DEFAULT = 2; // к WR (решение владельца 28.09)
 

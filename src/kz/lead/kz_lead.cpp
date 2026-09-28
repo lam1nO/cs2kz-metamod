@@ -2566,6 +2566,8 @@ void KZLeadService::OnReplayUploaded(u64 steamId64, i32 cyberCourse, bool server
 		if (serverRecord)
 		{
 			player->leadService->OnRecordsChanged(CybReplayDownload::Kind::AWR, cyberCourse);
+			// Дельта таймера «к WR» держит путь настоящего WR (не AWR) — его тоже перезапросить.
+			player->leadService->OnRecordsChanged(CybReplayDownload::Kind::WR, cyberCourse);
 		}
 	}
 }

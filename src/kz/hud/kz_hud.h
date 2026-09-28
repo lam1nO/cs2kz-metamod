@@ -202,7 +202,7 @@ struct MHUDLayoutPrefs
 	bool pbPro {};
 	bool wrNub {};
 	bool wrPro {};
-	// Дельта в строке таймера (hudTimerCompare): 0 выкл, 1 к PB, 2 к WR (AWR-путь `!lead`).
+	// Дельта в строке таймера (hudTimerCompare): 0 выкл, 1 к PB, 2 к WR (путь `!lead wr`, не AWR).
 	i32 timerCompare {};
 	Color deltaAhead {};
 	Color deltaBehind {};
