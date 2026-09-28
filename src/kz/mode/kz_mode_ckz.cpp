@@ -27,7 +27,9 @@ CConVarRef<f32> sv_standable_normal("sv_standable_normal");
 // тик вверх по рампе, до 1.45 на отдельных участках). Фикс отдаёт отложенную часть сразу, но
 // только пока игрок скользит по склону: в свободном полёте конечная скорость шага та же, а сдвиг
 // позиции поменял бы дистанции джампстатов.
-CConVar<bool> kz_ckz_slide_go("kz_ckz_slide_go", FCVAR_NONE, "CKZ: воздушное ускорение на склонах как в CS:GO (без отложенной части)", true);
+// Доля отложенного остатка, которую отдаём сразу: 1 — как в GO, 0 — ванильная CS2, между — линейно
+// (по реплеям 29.09: 0.5 даёт ~53 % помощи GO). Подбирается на лету через RCON.
+CConVar<float> kz_ckz_slide_go("kz_ckz_slide_go", FCVAR_NONE, "CKZ: доля отложенного воздушного прироста на склонах, отдаваемая сразу (0 = CS2, 1 = CS:GO)", 1.0f);
 
 static u64 g_slideFixCalls {};
 static f64 g_slideFixSum {};
@@ -36,10 +38,10 @@ static u64 g_slideFixAnomalies[3] {};
 
 CON_COMMAND_F(kz_ckz_slide_stats, "CKZ: сколько раз фикс слайдов отдал отложенное ускорение (со сбросом)", FCVAR_NONE)
 {
-	Msg("[CKZ] slide_go calls=%llu mean_deferred=%.3f anomalies(back/perp/big)=%llu/%llu/%llu enabled=%d\n",
+	Msg("[CKZ] slide_go calls=%llu mean_deferred=%.3f anomalies(back/perp/big)=%llu/%llu/%llu k=%.3f\n",
 		(unsigned long long)g_slideFixCalls, g_slideFixCalls ? g_slideFixSum / g_slideFixCalls : 0.0,
 		(unsigned long long)g_slideFixAnomalies[0], (unsigned long long)g_slideFixAnomalies[1], (unsigned long long)g_slideFixAnomalies[2],
-		(int)kz_ckz_slide_go.Get());
+		kz_ckz_slide_go.Get());
 	g_slideFixCalls = 0;
 	g_slideFixSum = 0.0;
 	g_slideFixAnomalies[0] = g_slideFixAnomalies[1] = g_slideFixAnomalies[2] = 0;
@@ -1069,7 +1071,8 @@ void KZClassicModeService::OnAirAcceleratePost(Vector wishdir, f32 wishspeed, f3
 {
 	// Склон — по TryPlayerMove ПРОШЛОГО шага: AirAccelerate идёт раньше TryPlayerMove своего шага.
 	// Первый шаг касания поэтому проходит по-старому; дальше игрок касается склона каждый шаг.
-	if (!this->touchedSlopeLastMove || !kz_ckz_slide_go.Get())
+	f32 share = Clamp(kz_ckz_slide_go.Get(), 0.0f, 1.0f);
+	if (!this->touchedSlopeLastMove || share <= 0.0f)
 	{
 		return;
 	}
@@ -1091,13 +1094,14 @@ void KZClassicModeService::OnAirAcceleratePost(Vector wishdir, f32 wishspeed, f3
 		g_slideFixAnomalies[anomaly]++;
 		return;
 	}
-	mv->m_vecVelocity += deferred;
+	Vector moved = deferred * share;
+	mv->m_vecVelocity += moved;
 	// В CS2 отложенная часть в outWishVel не попадает, в GO весь прирост шёл туда. Берём как в GO:
 	// читатели outWishVel (детект прыжка, телеметрия) смотрят его только вокруг OnJump*.
-	mv->m_outWishVel += deferred;
-	mv->m_vecFrameVelocityDelta = this->preAirAccelFrameDelta;
+	mv->m_outWishVel += moved;
+	mv->m_vecFrameVelocityDelta = this->preAirAccelFrameDelta + (deferred - moved);
 	g_slideFixCalls++;
-	g_slideFixSum += deferred.Length();
+	g_slideFixSum += moved.Length();
 }
 
 void KZClassicModeService::OnWaterMove()
