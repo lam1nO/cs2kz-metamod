@@ -130,33 +130,6 @@ struct SpeedInfo
 	bool onGround {};
 };
 
-// Собственные cl_crosshair* значения игрока (Task 10): дефолты игры, пока не ответит клиент
-// на запрос через utils/cvarquery.h (порт с апстрима 08.09 — прежний путь через внешний
-// metamod-плагин ClientCvarValue на флоте не работал вовсе, плагина там нет).
-struct MHUDCrosshairSettings
-{
-	f32 size {5.0f};
-	f32 thickness {0.5f};
-	f32 gap {-2.0f};
-	// cl_crosshair_outlinethickness апдейт CS2 25470087 убрал: толщина обводки больше не
-	// настраивается игроком, игра рисует её единицей. Поле оставлено, чтобы не трогать расчёт.
-	f32 outlineThickness {1.0f};
-	i32 r {50}, g {250}, b {50};
-	// Из cl_crosshaircolor_a. Прежние cl_crosshairalpha и cl_crosshairusealpha убраны, как и
-	// пресеты cl_crosshaircolor: цвет теперь только покомпонентный.
-	i32 alpha {200};
-	// cl_crosshair_screen_height — база, от которой клиент масштабирует размеры (раньше 480).
-	i32 screenHeight {480};
-	bool drawOutline {true};
-	bool dot {false};
-	bool tStyle {false};
-	// false — клиент ещё ни разу не ответил на cvarquery::Query: поля выше —
-	// хардкод-дефолты игры, НЕ настройки этого игрока. ApplyCrosshair обязан читать их только
-	// когда true, иначе крестик красится «чужими» cl_crosshair* — тот же класс бага, что
-	// fail-open в CyberSkins (пустой ответ приняли за настоящее значение).
-	bool confirmed {};
-};
-
 // Кэш префов layout-худа (реализация — Task 5, GetLayoutPrefs/RefreshLayoutPrefs);
 // UpdateLayoutElement (Task 4) читает уже этот тип, объявление обязано быть раньше реализации.
 struct MHUDLayoutPrefs
@@ -255,11 +228,6 @@ struct MHUDLayoutPrefs
 	};
 
 	ReplayMenu replayMenu {};
-
-	// Крестик (Task 10) — независим от элементов худа выше, но живёт в той же структуре
-	// префов: ключи те же, что читает RefreshLayoutPrefs.
-	bool crosshair {};
-	i32 crosshairScale {100}; // единиц раскладки на девайс-пиксель, в процентах
 };
 
 class KZHUDService : public KZBaseService
@@ -605,18 +573,7 @@ public:
 	// спектейте), настройки/язык/сама сущность — за this->player (см. MHUDSettingsSource).
 	bool UpdateHudLayout(KZPlayer *source);
 
-	// Крестик (Task 10): реплика cl_crosshair* игрока панелями xh_* той же сущности —
-	// отдельной сущности не заводим (панель одна на слот, EnsureOwnedLayout). Не MHUDElement:
-	// у крестика нет текста, вся текстово-шрифтовая машинерия UpdateLayoutElement не подходит.
-	void ApplyCrosshair(CCSCustomHudLayout *layout, bool show, bool force);
-	// Первый опрос — сразу на коннекте (см. kz_player.cpp/OnPlayerFullyConnect), дальше сам
-	// себя переставляет таймером (StartCrosshairPolling), чтобы игрок, сменивший
-	// cl_crosshair* посреди карты, увидел актуальную копию без реконнекта.
-	void QueryCrosshairCvars();
-	void OnCrosshairCvarValue(const char *name, const char *value);
-	void StartCrosshairPolling();
-
-	// === Меню настроек panorama-худа и крестика (Task 11/2 реестра) ===================
+	// === Меню настроек panorama-худа (Task 11/2 реестра) ===================
 	// Живёт на СВОЕЙ сущности custom_hud_layout (menu.vxml_c), отдельной от this->ownedLayout
 	// (mhud.vxml_c): худ остаётся видимым и обновляется, пока меню открыто поверх него, а общий
 	// кэш классов/переменных развёл бы состояния разных разметок по одним и тем же панелям.
@@ -1065,35 +1022,6 @@ private:
 	// Текст одного слота страницы (var — индекс в RPMENU_VARS) с диф-кэшем.
 	void SetReplayMenuVar(CCSCustomHudLayout *layout, i32 var, const char *text, bool force);
 
-	// Кэш класс-суффиксов крестика (Task 10) — та же ловушка, что у layoutElements[]/
-	// layoutKeys: живёт ТОЛЬКО вместе с сущностью, обнулять в DestroyOwnedLayout, иначе
-	// следующий владелец слота (реконнект/новый игрок) унаследует чужие xh-* классы, и
-	// ApplyCrosshair решит, что менять уже нечего — крестик молча не появится.
-	// -1 — класс ещё не выставлен ни разу (в отличие от size-полей выше INT_MIN здесь не
-	// нужен: любое реальное значение крестика неотрицательно).
-	struct LayoutCrosshairState
-	{
-		i32 shown {-1};
-		i32 armLength {-1};
-		i32 thickness {-1};
-		i32 margin {-1};
-		i32 marginFar {-1};
-		i32 outline {-1};
-		i32 opacity {-1};
-		i32 dot {-1};
-		i32 noTopArm {-1};
-		const char *colorClass {};
-	};
-
-	// Собственные cl_crosshair* игрока — наполняется OnCrosshairCvarValue по ответам клиента на
-	// cvarquery::Query, ApplyCrosshair читает как есть (дефолты игры, пока клиент не ответил).
-	MHUDCrosshairSettings crosshair {};
-	// Круги опроса, на которые клиент не ответил НИ РАЗУ (сбрасывается в StartCrosshairPolling):
-	// гейт confirmed держит крестик невидимым молча, поэтому по достижении лимита пишем warn с
-	// reason=no_client_response — см. QueryCrosshairCvars.
-	i32 crosshairUnansweredPolls {};
-	LayoutCrosshairState layoutCrosshair {};
-
 	// === Пять элементов panorama-худа (Task 6) — перенесены с апстрима, адаптации: наши
 	// геттеры текста (GetTimerText/GetCheckpointText), this->GetLayoutPrefs() вместо GetPrefs(),
 	// this->IsLayoutElementEnabled() вместо IsMHUDElementEnabled(). source — источник ДАННЫХ
@@ -1152,7 +1080,7 @@ private:
 
 	// === Редактор !hud (layout/editor.cpp) — состояние ===============================
 	bool editorOpen {};
-	i32 editorSelected {-1}; // LayoutElement, KZ_EDITOR_CROSSHAIR_ROW (панель прицела) или -1 — ничего не выбрано
+	i32 editorSelected {-1}; // LayoutElement или -1 — ничего не выбрано
 	i32 editorStep {1};      // шаг стрелок позиции: 1 или 5 процентов
 	f64 editorOpenedAt {};   // curtime открытия — живой плейсхолдер таймера
 	// Диф-кэш реплики худа на сущности меню (e_*/x_* панели) — свой, отдельный от кэша настоящего
@@ -1164,8 +1092,8 @@ private:
 	LayoutKeysState editorKeys {};
 	LayoutExtraState editorExtra {};
 
-	// Диф-кэш применённых классов сущности меню — та же ловушка, что у layoutElements/layoutKeys/
-	// layoutCrosshair: живёт ТОЛЬКО вместе со своей сущностью, обнуляется в EnsureMenuLayout при
+	// Диф-кэш применённых классов сущности меню — та же ловушка, что у layoutElements/layoutKeys:
+	// живёт ТОЛЬКО вместе со своей сущностью, обнуляется в EnsureMenuLayout при
 	// создании. Стартовые значения обязаны совпадать с классами разметки cyber/options.xml
 	// (opt_root/edit_root/попапы/строки/вкладки — hidden, строки — t-none, ep_step1 — on).
 	struct MenuAppliedState
@@ -1207,6 +1135,7 @@ private:
 		bool etOn[KZ_EDITOR_LIST_ROWS] {};
 		bool elSel[KZ_EDITOR_LIST_ROWS] {};
 		bool eSel[KZ_EDITOR_ITEMS] {};
+		bool retiredRowHidden {};
 		bool propsHidden {true};
 		bool propsFlip {};
 		bool epOn {};
@@ -1229,7 +1158,6 @@ private:
 		bool epSrowHidden {true};
 		// Строки позиции/шага/кегля/шрифта/цвета/прозрачности/обводки (ep_prow_*): разметка
 		// заводит их видимыми, прячет их только панель прицела.
-		bool epStdRowHidden[7] {};
 		bool epGrowHidden {true};
 		bool epSgOn[3] {};
 

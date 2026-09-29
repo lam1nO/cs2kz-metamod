@@ -29,11 +29,9 @@ static_global i32 g_mapStripedCT = 0;
 static_global i32 g_mapSkippedT = 0;
 static_global i32 g_mapStripedT = 0;
 static_global i32 g_mapJoinTeam = 0;
-static_global i32 g_mapHidden = 0;
 static_global i32 g_totalSkipped = 0;
 static_global i32 g_totalStriped = 0;
 static_global i32 g_totalJoinTeam = 0;
-static_global i32 g_totalHidden = 0;
 
 static_global class : public KZOptionServiceEventListener
 {
@@ -100,13 +98,6 @@ void KZPistolService::UpdatePistol(bool force)
 	{
 		return;
 	}
-	// Don't swap the weapon while the player is hiding it
-	// UpdatePistol() will be called when they toggle hide weapon off.
-	if (player->quietService->ShouldHideWeapon() && !force)
-	{
-		return;
-	}
-
 	// Выданное через !ak/!he оружие обязано пережить RemoveAllItems ниже. Сначала
 	// выбрасываем из списка то, чего в руках уже нет (игрок выкинул на G), — иначе
 	// перевыдача вернула бы выброшенное обратно и дроп выглядел бы сломанным.
@@ -201,19 +192,18 @@ void KZPistolService::UpdatePistol(bool force)
 // смены карты берётся командой kz_pistol_spawn_stats ниже.
 void KZPistolService::OnActivateServer()
 {
-	if (g_mapSkippedCT || g_mapStripedCT || g_mapSkippedT || g_mapStripedT || g_mapJoinTeam || g_mapHidden)
+	if (g_mapSkippedCT || g_mapStripedCT || g_mapSkippedT || g_mapStripedT || g_mapJoinTeam)
 	{
 		KZ_LOG_INFO(LogChannel::Misc,
-					"[cyb] pistol_spawn_stats scope=map skipped_ct=%i striped_ct=%i skipped_t=%i striped_t=%i jointeam=%i hidden=%i "
+					"[cyb] pistol_spawn_stats scope=map skipped_ct=%i striped_ct=%i skipped_t=%i striped_t=%i jointeam=%i "
 					"total_skipped=%i total_striped=%i\n",
-					g_mapSkippedCT, g_mapStripedCT, g_mapSkippedT, g_mapStripedT, g_mapJoinTeam, g_mapHidden, g_totalSkipped, g_totalStriped);
+					g_mapSkippedCT, g_mapStripedCT, g_mapSkippedT, g_mapStripedT, g_mapJoinTeam, g_totalSkipped, g_totalStriped);
 	}
 	g_mapSkippedCT = 0;
 	g_mapStripedCT = 0;
 	g_mapSkippedT = 0;
 	g_mapStripedT = 0;
 	g_mapJoinTeam = 0;
-	g_mapHidden = 0;
 }
 
 // Спавн живого игрока в играющей команде. Вся развилка здесь, а не в hooks.cpp: гейт и
@@ -248,16 +238,6 @@ void KZPistolService::OnPlayerSpawn(bool changingTeam)
 		g_totalSkipped++;
 		return;
 	}
-	// Отдельным числом, а не в striped: UpdatePistol без force на таком игроке выходит по
-	// гейту !hideweapon, сущностей не трогает, и считать его страйпом — исказить измерение.
-	// И не в skipped: там «гейт спас», а здесь руки как раз неправильные, просто чинить их
-	// нечем — прятание сделано фильтром трансмита, сущности на месте.
-	if (this->player->quietService->ShouldHideWeapon())
-	{
-		g_mapHidden++;
-		g_totalHidden++;
-		return;
-	}
 	if (ct)
 	{
 		g_mapStripedCT++;
@@ -283,10 +263,9 @@ CON_COMMAND_F(kz_pistol_spawn_stats, "Print how often the spawn loadout gate ski
 		KZ_LOG_WARN(LogChannel::Misc, "[cyb] pistol_spawn_stats_denied reason=not_server slot=%d\n", context.GetPlayerSlot().Get());
 		return;
 	}
-	Msg("pistol_spawns map_skipped_ct=%i map_striped_ct=%i map_skipped_t=%i map_striped_t=%i map_jointeam=%i map_hidden=%i total_skipped=%i "
-		"total_striped=%i total_jointeam=%i total_hidden=%i\n",
-		g_mapSkippedCT, g_mapStripedCT, g_mapSkippedT, g_mapStripedT, g_mapJoinTeam, g_mapHidden, g_totalSkipped, g_totalStriped, g_totalJoinTeam,
-		g_totalHidden);
+	Msg("pistol_spawns map_skipped_ct=%i map_striped_ct=%i map_skipped_t=%i map_striped_t=%i map_jointeam=%i total_skipped=%i "
+		"total_striped=%i total_jointeam=%i\n",
+		g_mapSkippedCT, g_mapStripedCT, g_mapSkippedT, g_mapStripedT, g_mapJoinTeam, g_totalSkipped, g_totalStriped, g_totalJoinTeam);
 }
 
 i32 KZPistolService::GetTeam()

@@ -96,16 +96,15 @@ static_function void OutlineOnActivate(KZPlayer *player, i64 tag)
 // зовёт RefreshLayoutPrefs сразу после onActivate кнопки. В General своей кнопки «сбросить
 // страницу» нет: там лежит общий Reset All (ниже), а HudType не сбрасывается вовсе — у его
 // Choice-пункта нет префа, и ResetNode такие пункты пропускает.
-// Слоты: по одному на КАЖДЫЙ элемент LAYOUT_ELEMENTS (включая «Прогресс»), затем прицел
-// (Count) и меню реплея (Count + 1) — см. RPMENU_RESET_SLOT ниже. Слоты живут только в памяти
+// Слоты: по одному на КАЖДЫЙ элемент LAYOUT_ELEMENTS (включая «Прогресс»), затем меню
+// реплея (Count) — см. RPMENU_RESET_SLOT ниже. Слоты живут только в памяти
 // (статический массив, наполняется при регистрации реестра), в префах не хранятся — рост
-// Count сдвигает номера двух последних безнаказанно.
+// Count сдвигает номер последнего безнаказанно.
 // С ужатия раздела (план hud-editor-options, Task 8) слот элемента указывает на его узел в
 // СКРЫТОЙ подкатегории (HiddenElements) — кнопки на нём нет, сброс элемента зовёт редактор !hud.
-// С 27.09 последняя видимая страница с кнопкой сброса (прицел) тоже ушла в редактор: кнопок
-// сброса страниц в окне нет, слоты читают только «Сбросить всё» и ep_reset редактора.
-static_global KZOptNode *s_resettableNodes[(i32)LayoutElement::Count + 2] {};
-static constexpr i32 RPMENU_RESET_SLOT = (i32)LayoutElement::Count + 1;
+// Кнопок сброса страниц в окне нет, слоты читают только «Сбросить всё» и ep_reset редактора.
+static_global KZOptNode *s_resettableNodes[(i32)LayoutElement::Count + 1] {};
+static constexpr i32 RPMENU_RESET_SLOT = (i32)LayoutElement::Count;
 
 // Узлы, которые «Сбросить всё» накрывает сверх s_resettableNodes и General: после ужатия
 // раздела позиция карточки реплея уехала в свой скрытый узел, отдельно от видимой страницы
@@ -136,7 +135,7 @@ static_function void SaveUndoBeforeReset(KZPlayer *player)
 // Живёт в General, а не на родительской категории «Худ»: у категории с подкатегориями своих
 // пунктов не бывает вовсе (ActiveMenuNode, layout/menu.cpp — родитель возвращает NULL, пока не
 // выбрана подкатегория), так что пункт на ней был бы недостижим для игрока.
-// Сбрасывает страницы всех элементов LAYOUT_ELEMENTS + прицел + меню реплея (s_resettableNodes),
+// Сбрасывает страницы всех элементов LAYOUT_ELEMENTS + меню реплея (s_resettableNodes),
 // разъехавшиеся после ужатия узлы (s_extraResetNodes) и саму General.
 // HudType при этом НЕ сбрасывается: его Choice-пункт зарегистрирован без prefKey, а ResetNode
 // пункты без префа пропускает — иначе «сбросить оформление» могло бы выключить игроку худ.
@@ -498,15 +497,4 @@ void KZHUDService::InitMenuPrefs()
 	s_extraResetNodes[EXTRA_RESET_RPMENU_POS] = rpmenuPos;
 	KZ::menu::AddPosition(rpmenuPos, "HUD - Menu Label Position", "rpmenuPosX", "rpmenuPosY", RPMENU_DEF_POS_X, RPMENU_DEF_POS_Y);
 
-	// Прицел — строка el10 списка редактора (тумблер) и его панель свойств (масштаб). Узел — в
-	// слоте Count: его сбрасывают ep_reset панели прицела и «Сбросить всё». Кнопки сброса на
-	// узле нет — в окне его не видно.
-	KZOptNode *crosshair = KZ::menu::AddSub(hidden, "HUD - Menu Cat Crosshair");
-	crosshair->hiddenFromMenu = true;
-	s_resettableNodes[(i32)LayoutElement::Count] = crosshair;
-	// Дефолт true синхронизирован с текущими настройками игрока (задача hud-defaults).
-	KZ::menu::AddToggle(crosshair, "HUD - Menu Label Enabled", "mhudCrosshair", true);
-	KZ::menu::AddSize(crosshair, "HUD - Menu Label Scale", "mhudCrosshairScale", 100, 0, 500);
-	KZ::menu::SetItemUnit(crosshair, "%");
-	KZ::menu::SetItemPref(crosshair, "mhudCrosshairScale", KZOptStorage::Int, 100);
 }

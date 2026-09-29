@@ -247,6 +247,8 @@ bool KZPlugin::Unload(char *error, size_t maxlen)
 	// Layout-худ (custom_hud_layout) не гасится сам по себе, в отличие от particle-сущностей —
 	// снести явно, иначе висит в мире после выгрузки плагина.
 	KZHUDService::LayoutCleanup();
+	// Камеры !hideweapon — тоже сущности мира: без сноса пешка осталась бы без вьюмодели.
+	KZQuietService::Cleanup();
 	g_pPlayerManager->Cleanup();
 	KZDatabaseService::Cleanup();
 	KZGlobalService::Cleanup();

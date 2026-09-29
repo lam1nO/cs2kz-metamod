@@ -11,8 +11,7 @@
 //     PB/WR, showpos и курс — настоящие, если есть.
 //   - edit_grid — 64×36 кнопок g{c}_{r}: клик ставит ВЫБРАННЫЙ элемент центром в ячейку. Классов и
 //     переменных на ячейки сервер не ставит никогда (бюджет интернирования, menu.cpp).
-//   - edit_list — строки элементов el{i} (клик выбирает) с тумблерами et{i}; el10 — прицел (своя
-//     панель свойств, на сетке и реплике его нет), «Сбросить всё» (через confirm_popup), «Готово».
+//   - edit_list — строки элементов el{i} (клик выбирает) с тумблерами et{i}, «Сбросить всё» (через confirm_popup), «Готово».
 //   - edit_props — свойства выбранного: стрелки с шагом 1/5, кегль, шрифт (list_popup), цвет
 //     (color_popup), цвета дельты (только таймер), прозрачность, обводка, сброс элемента и общие
 //     строки поведения: тумблеры ep_trow*, степпер ep_srow, сегменты ep_grow (у кого что —
@@ -165,14 +164,12 @@ static_global const EditorToggleDef EDITOR_PBWR_TOGGLES[] =
 static_assert(KZ_ARRAYSIZE(EDITOR_KEYS_TOGGLES) <= KZ_EDITOR_TROWS, "строк ep_trow в разметке восемь");
 static_assert(KZ_ARRAYSIZE(EDITOR_PRESPEED_TOGGLES) <= KZ_EDITOR_TROWS, "строк ep_trow в разметке восемь");
 
-// editorSelected == KZ_EDITOR_CROSSHAIR_ROW — панель прицела (строка el10): не элемент худа, на
-// реплике и сетке его нет, у панели только тумблер ep_on и масштаб ep_srow.
 static_function bool IsEditorElement(i32 sel)
 {
 	return sel >= 0 && sel < (i32)LayoutElement::Count;
 }
 
-// Тумблеры панели свойств выбранного элемента; у прочих (и у прицела) строк ep_trow нет.
+// Тумблеры панели свойств выбранного элемента; у прочих строк ep_trow нет.
 static_function const EditorToggleDef *GetEditorToggles(i32 element, i32 &count)
 {
 #define KZ_EDITOR_TOGGLES_CASE(e, table) \
@@ -232,22 +229,11 @@ static_function i32 GetEditorSegCurrent(i32 sel, const MHUDLayoutPrefs &prefs)
 	return sel == (i32)LayoutElement::Timer ? prefs.timerCompare : prefs.keysIdle;
 }
 
-// Степпер ep_srow: у клавиш — интервал, у прицела — масштаб.
+// Степпер ep_srow — только у клавиш (интервал).
 static_function bool HasEditorStepper(i32 sel)
 {
-	return sel == (i32)LayoutElement::Keys || sel == KZ_EDITOR_CROSSHAIR_ROW;
+	return sel == (i32)LayoutElement::Keys;
 }
-
-// Масштаб прицела: 0..500 шагом 10 (те же границы, что у пункта в узле и у читателя).
-#define KZ_EDITOR_XHAIR_SCALE_STEP 10
-#define KZ_EDITOR_XHAIR_SCALE_MAX  500
-
-// Строки панели свойств, у которых нет смысла для прицела (позиция, шаг, кегль, шрифт, цвет,
-// прозрачность, обводка): у прицела нет места на экране и текста. Скрываются классом hidden.
-static_global const char *const EDITOR_STD_ROW_IDS[] = {"ep_prow_pos", "ep_prow_step",  "ep_prow_size",   "ep_prow_font",
-														 "ep_prow_color", "ep_prow_op", "ep_prow_outline"};
-#define KZ_EDITOR_STD_ROWS 7
-static_assert(KZ_ARRAYSIZE(EDITOR_STD_ROW_IDS) == KZ_EDITOR_STD_ROWS, "кэш epStdRowHidden — по строке на id");
 
 // Видимая область экрана в процентах от центра (см. шапку).
 #define KZ_EDITOR_POS_MIN (-50)
@@ -383,7 +369,7 @@ void KZHUDService::RenderEditor()
 
 	this->RenderEditorReplica(layout, false);
 
-	// Список элементов: on = элемент включён (и у строки, и у её тумблера). Строка el10 — прицел.
+	// Список элементов: on = элемент включён (и у строки, и у её тумблера).
 	for (i32 i = 0; i < KZ_EDITOR_ITEMS; i++)
 	{
 		const EditorReplicaDef &r = EDITOR_REPLICA[i];
@@ -394,33 +380,23 @@ void KZHUDService::RenderEditor()
 		this->SetMenuBoolClass(layout, EtPanel(i), "on", this->menuApplied.etOn[i], enabled);
 		this->SetMenuBoolClass(layout, r.buttonId, "sel", this->menuApplied.eSel[i], i == this->editorSelected);
 	}
-	{
-		const i32 i = KZ_EDITOR_CROSSHAIR_ROW;
-		this->SetMenuVar(layout, ElPanel(i), EnVar(i), phrase("HUD Editor - Element Crosshair").c_str());
-		this->SetMenuBoolClass(layout, ElPanel(i), "on", this->menuApplied.elOn[i], prefs.crosshair);
-		this->SetMenuBoolClass(layout, EtPanel(i), "on", this->menuApplied.etOn[i], prefs.crosshair);
-	}
-	// sel — строка выбранного (элемента или прицела), on — по-прежнему «включён»: это разные
+	// Реплики прицела больше нет (прицел родной, см. KZQuietService::UpdateWeaponCamera).
+	this->SetMenuBoolClass(layout, KZ_EDITOR_RETIRED_ROW, "hidden", this->menuApplied.retiredRowHidden, true);
+	// sel — строка выбранного элемента, on — по-прежнему «включён»: это разные
 	// состояния, у выключенного элемента выбранной строка быть может.
 	for (i32 i = 0; i < KZ_EDITOR_LIST_ROWS; i++)
 	{
 		this->SetMenuBoolClass(layout, ElPanel(i), "sel", this->menuApplied.elSel[i], i == this->editorSelected);
 	}
 
-	// Панель свойств — только при выбранном элементе или прицеле.
+	// Панель свойств — только при выбранном элементе.
 	const i32 sel = this->editorSelected;
-	const bool isCrosshair = sel == KZ_EDITOR_CROSSHAIR_ROW;
 	const bool isElement = IsEditorElement(sel);
-	const bool hasSel = isElement || isCrosshair;
-	if (hasSel)
+	if (isElement)
 	{
 		char buf[48];
-		this->SetMenuVar(layout, "edit_props", "pn", phrase(isCrosshair ? "HUD Editor - Element Crosshair" : EDITOR_REPLICA[sel].nameKey).c_str());
-		this->SetMenuBoolClass(layout, "ep_on", "on", this->menuApplied.epOn, isCrosshair ? prefs.crosshair : prefs.elements[sel].enabled);
-		for (i32 k = 0; k < KZ_EDITOR_STD_ROWS; k++)
-		{
-			this->SetMenuBoolClass(layout, EDITOR_STD_ROW_IDS[k], "hidden", this->menuApplied.epStdRowHidden[k], isCrosshair);
-		}
+		this->SetMenuVar(layout, "edit_props", "pn", phrase(EDITOR_REPLICA[sel].nameKey).c_str());
+		this->SetMenuBoolClass(layout, "ep_on", "on", this->menuApplied.epOn, prefs.elements[sel].enabled);
 		if (isElement)
 		{
 			const LayoutElementDef &def = LAYOUT_ELEMENTS[sel];
@@ -490,12 +466,6 @@ void KZHUDService::RenderEditor()
 				this->SetMenuVar(layout, "edit_props", "ps", buf);
 			}
 		}
-		else if (isCrosshair)
-		{
-			this->SetMenuVar(layout, "edit_props", "psl", phrase("HUD - Menu Label Scale").c_str());
-			V_snprintf(buf, sizeof(buf), "%i%%", prefs.crosshairScale);
-			this->SetMenuVar(layout, "edit_props", "ps", buf);
-		}
 		const EditorSegDef *seg = GetEditorSegments(sel);
 		if (seg)
 		{
@@ -513,7 +483,7 @@ void KZHUDService::RenderEditor()
 						  && KZ::hudfmt::ClampEditorPos(prefs.elements[sel].y) > KZ_EDITOR_FLIP_FROM;
 		this->SetMenuBoolClass(layout, "edit_props", "flip", this->menuApplied.propsFlip, flip);
 	}
-	this->SetMenuBoolClass(layout, "edit_props", "hidden", this->menuApplied.propsHidden, !hasSel);
+	this->SetMenuBoolClass(layout, "edit_props", "hidden", this->menuApplied.propsHidden, !isElement);
 
 	this->RenderMenuPopups(layout);
 	// Смена класса панели не доезжает до стилей детей без полного пересчёта (см. RenderMenu).
@@ -747,14 +717,6 @@ void KZHUDService::EditorToggleOutline()
 
 void KZHUDService::EditorToggleElement(i32 element)
 {
-	if (element == KZ_EDITOR_CROSSHAIR_ROW)
-	{
-		// Прицел: тот же преф, что у пункта «Вкл» его узла, дефолт true (layout/prefs.cpp).
-		this->player->optionService->SetPreferenceBool("mhudCrosshair", !this->GetOwnLayoutPrefs().crosshair);
-		this->RefreshLayoutPrefs();
-		this->RenderEditor();
-		return;
-	}
 	if (!IsEditorElement(element))
 	{
 		return;
@@ -768,16 +730,14 @@ void KZHUDService::EditorToggleElement(i32 element)
 
 void KZHUDService::EditorResetSelected()
 {
-	if (!IsEditorElement(this->editorSelected) && this->editorSelected != KZ_EDITOR_CROSSHAIR_ROW)
+	if (!IsEditorElement(this->editorSelected))
 	{
 		return;
 	}
 	// Узел элемента в скрытой категории — тот, где лежит его пункт позиции (xKey нигде больше
 	// не регистрируется). ResetNode пишет дефолты всех пунктов узла (вкл., позиция, кегль,
 	// шрифт, обводка, прозрачность, цвета) — ровно прежняя кнопка «Сброс» страницы элемента.
-	// У прицела узел свой (скрытый «Прицел» в hud_prefs.cpp) — ищем его по ключу масштаба.
-	KZOptNode *node = KZMenuFindNodeByPref(this->editorSelected == KZ_EDITOR_CROSSHAIR_ROW ? "mhudCrosshairScale"
-																							: LAYOUT_ELEMENTS[this->editorSelected].xKey);
+	KZOptNode *node = KZMenuFindNodeByPref(LAYOUT_ELEMENTS[this->editorSelected].xKey);
 	if (!node)
 	{
 		KZ_LOG_WARN(LogChannel::General, "[cyb] hud_editor_reset_denied reason=node_not_found element=%i slot=%i\n", this->editorSelected,
@@ -816,27 +776,10 @@ void KZHUDService::EditorTogglePref(i32 row)
 }
 
 // Степпер ep_srow. Клавиши — ступени интервала: авто (-1) → 0 → 2 → … → 24; с нечётного (из
-// обмена/БД) шаг вниз уходит на ближайшее чётное снизу, а не мимо нуля сразу в «авто». Прицел —
-// масштаб 0..500 шагом 10; значение не на сетке шага (из БД/старого окна с шагом 1) сперва
-// округляется к ближайшему кратному, иначе вся шкала сдвинулась бы на остаток.
+// обмена/БД) шаг вниз уходит на ближайшее чётное снизу, а не мимо нуля сразу в «авто».
 void KZHUDService::EditorStepPref(i32 dir)
 {
 	const MHUDLayoutPrefs &prefs = this->GetOwnLayoutPrefs();
-	if (this->editorSelected == KZ_EDITOR_CROSSHAIR_ROW)
-	{
-		const i32 scale = prefs.crosshairScale;
-		const i32 snapped = (scale + KZ_EDITOR_XHAIR_SCALE_STEP / 2) / KZ_EDITOR_XHAIR_SCALE_STEP * KZ_EDITOR_XHAIR_SCALE_STEP;
-		const i32 next = Clamp(snapped + dir * KZ_EDITOR_XHAIR_SCALE_STEP, 0, KZ_EDITOR_XHAIR_SCALE_MAX);
-		if (next == scale)
-		{
-			return;
-		}
-		// Int — тот же тип, что читает RefreshLayoutPrefs.
-		this->player->optionService->SetPreferenceInt("mhudCrosshairScale", next);
-		this->RefreshLayoutPrefs();
-		this->RenderEditor();
-		return;
-	}
 	if (this->editorSelected != (i32)LayoutElement::Keys)
 	{
 		return;
@@ -905,7 +848,7 @@ bool KZHUDService::HandleEditorClick(const char *id)
 			return true;
 		}
 	}
-	// el{i} — выбор строки (элемент или, у el10, панель прицела), et{i} — её тумблер. et вложен в
+	// el{i} — выбор строки элемента, et{i} — её тумблер. et вложен в
 	// el: что движок шлёт на клик по вложенной кнопке — одну или обе — вживую не проверено. Выбор
 	// идемпотентен, а повтор тумблера того же элемента в тот же тик гасится.
 	if ((id[0] == 'e' && (id[1] == 'l' || id[1] == 't')) && V_isdigit(id[2]))

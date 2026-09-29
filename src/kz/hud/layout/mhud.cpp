@@ -13,7 +13,6 @@
 //     keysSquare/keysOverlapAxis/keysOverlapGlow/keysPressed-цвет заведены (см. kz_hud.h,
 //     layout/prefs.cpp); имена полей местами короче апстримных (Glow/Fill вместо
 //     GlowEnabled/FillEnabled), классы разметки и дефолты — те же.
-//   - ApplyCrosshair (Task 10) — реализация в отдельном layout/crosshair.cpp, вызов отсюда.
 #include "kz/hud/layout/layout.h"
 #include "kz/hud/layout/panorama_tables.h" // FindColorEntry/ResolveColorClass — key-glow-N и осевая тонировка клавиш
 #include "kz/language/kz_language.h"
@@ -930,21 +929,6 @@ bool KZHUDService::UpdateHudLayout(KZPlayer *source)
 	// showPanel=false в БД panorama иначе гасла бы целиком и молча, без лога и без способа
 	// включить обратно. Единственный переключатель видимости panorama — сам hudType, а он уже
 	// проверен вызывающим (usePanorama в DrawPanels) — здесь элементы всегда показываются.
-	//
-	// Крестик независим от элементов ниже: у него свой тумблер (mhudCrosshair), и применяется
-	// он тем же вызовом — самостоятельная настройка, не часть видимости элементов.
-	//
-	// В спектейте крестик гасим ВСЕГДА, отдельным префом это не закрывается. Панель рисует
-	// реплику cl_crosshair* ПОЛУЧАТЕЛЯ (this->crosshair наполняется опросом его клиента), а не
-	// наблюдаемого, и в наблюдении игра своего прицела не рисует вовсе — то есть на чужом
-	// экране висел бы заведомо посторонний крестик. Мимикрия (mhudMimicSpec) тут не помощник:
-	// она подменяет ПРЕФЫ (GetLayoutPrefs), а конвары клиента подменить нечем, так что
-	// «крестик наблюдаемого» всё равно вышел бы своей формы — поэтому крестик из мимикрии
-	// исключён и решает только факт наблюдения.
-	// source != this->player — это ровно «получатель наблюдает за другим» (см. DrawPanels:
-	// source — наблюдаемый при спектейте, иначе сам получатель). Мёртвый без цели наблюдения
-	// сюда не доходит: там DestroyOwnedLayout (kz_player.cpp).
-	this->ApplyCrosshair(layout, /* show */ source == this->player, force);
 
 	// SpeedInfo — общий расчёт (Task 6/R3): копировать расчёт сюда запрещено (см.
 	// KZHUDService::GetSpeedInfo в kz_hud.h/kz_hud.cpp) — иначе показания скорости panorama-

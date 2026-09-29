@@ -16,7 +16,7 @@
 //     поэтому редактор открывает те же попапы на пунктах скрытых узлов элементов.
 //   - GetPreferenceColor/SetPreferenceColor в базе нет (R2): цвет читается GetMHUDColorPref и
 //     пишется симметричным SetMHUDColorPref (ниже) — преф хранит упакованный int.
-//   - Позиция/размер элемента читаются через Float, прозрачность и crosshairScale — через Int
+//   - Позиция/размер элемента читаются через Float, прозрачность — через Int
 //     (KZOptItem::storage выбирает аксессор, см. GetIntPref ниже).
 //
 // ВАЖНО про захват ввода: SetInputCaptureEnabled(slot, true) в OpenLayoutMenu()/OpenHudEditor()

@@ -143,7 +143,6 @@ def configure_main(sdk_target, sdk, cxx):
     os.path.join(builder.sourcePath, 'src', 'kz', 'hud', 'layout', 'prefs.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'hud', 'layout', 'defaults.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'hud', 'layout', 'mhud.cpp'),
-    os.path.join(builder.sourcePath, 'src', 'kz', 'hud', 'layout', 'crosshair.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'hud', 'layout', 'menu.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'hud', 'layout', 'rpmenu.cpp'),
 

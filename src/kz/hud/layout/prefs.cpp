@@ -175,12 +175,6 @@ void KZHUDService::RefreshLayoutPrefs()
 	// (origin/master:src/kz/hud/kz_hud.h:127, preferences.cpp:61).
 	this->layoutPrefs.mimicSpec = opts->GetPreferenceBool("mhudMimicSpec", false);
 
-	// Крестик (Task 10) — самостоятельный тумблер, не элемент LAYOUT_ELEMENTS: у него нет
-	// текста/шрифта/позиции в процентах, только масштаб (crosshairScale, доли device-пикселя).
-	// Дефолт true — синхронизирован с текущими настройками игрока (задача hud-defaults).
-	this->layoutPrefs.crosshair = opts->GetPreferenceBool("mhudCrosshair", true);
-	this->layoutPrefs.crosshairScale = panorama::SnapToStep((i32)opts->GetPreferenceInt("mhudCrosshairScale", 100), 0, 500);
-
 	// Меню реплея: обе настройки — индексы/ступени, страница применяет их классами
 	// (.rp-scale--N и .rp-pos--<slug> на панели replay_card). Остальные ключи rpmenu* удалены
 	// 17.09.2026 как мёртвые — см. layout.h.

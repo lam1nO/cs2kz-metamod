@@ -4,6 +4,7 @@
 #include "cs_gameevents.pb.h"
 
 #include "sdk/entity/cparticlesystem.h"
+#include "sdk/entity/ccscustomplayercamera.h"
 #include "sdk/services.h"
 
 #include "kz_quiet.h"
@@ -69,7 +70,6 @@ void KZ::quiet::OnCheckTransmit(CCheckTransmitInfo **pInfo, int infoCount)
 			continue;
 		}
 		targetPlayer->quietService->UpdateHideState();
-		CCSPlayerPawn *targetPlayerPawn = targetPlayer->GetPlayerPawn();
 
 		EntityInstanceByClassIter_t iterParticleSystem(NULL, "info_particle_system");
 
@@ -205,20 +205,6 @@ void KZ::quiet::OnCheckTransmit(CCheckTransmitInfo **pInfo, int infoCount)
 			 pawn = pawn->m_pEntity->m_pNextByClass ? static_cast<CCSPlayerPawn *>(pawn->m_pEntity->m_pNextByClass->m_pInstance) : nullptr)
 		// clang-format on
 		{
-			if (targetPlayerPawn == pawn && targetPlayer->quietService->ShouldHideWeapon())
-			{
-				auto pVecWeapons = pawn->m_pWeaponServices->m_hMyWeapons();
-
-				FOR_EACH_VEC(*pVecWeapons, i)
-				{
-					auto pWeapon = (*pVecWeapons)[i].Get();
-
-					if (pWeapon)
-					{
-						pTransmitInfo->m_pTransmitEdict->Clear(pWeapon->entindex());
-					}
-				}
-			}
 			// Bit is not even set, don't bother.
 			if (!pTransmitInfo->m_pTransmitEdict->IsBitSet(pawn->entindex()))
 			{
@@ -537,25 +523,84 @@ SCMD(kz_hideweapon, SCFL_PLAYER)
 void KZQuietService::ToggleHideWeapon()
 {
 	this->hideWeapon = !this->hideWeapon;
-	this->SendFullUpdate();
 	this->player->optionService->SetPreferenceBool("hideWeapon", this->hideWeapon);
 	this->player->languageService->PrintChat(true, false,
 											 this->hideWeapon ? "Quiet Option - Show Weapon - Disable" : "Quiet Option - Show Weapon - Enable");
-	if (!this->hideWeapon)
+}
+
+void KZQuietService::OnPhysicsSimulatePost()
+{
+	this->UpdateWeaponCamera();
+}
+
+// Перенесено с апстрима (67fce546). Раньше оружие прятали фильтром трансмита, и вместе с ним
+// клиент терял настоящий прицел — его подменяла panorama-реплика, которая расходится с игрой на
+// каждом апдейте прицела CS2. Кастомная камера, следящая за глазами, — view entity пешки, и при ней
+// клиент не рисует вьюмодель; само оружие по-прежнему передаётся, так что прицел остаётся родным.
+void KZQuietService::UpdateWeaponCamera()
+{
+	CCSPlayerPawn *pawn = this->player->GetPlayerPawn();
+	if (!this->hideWeapon || !pawn || !pawn->IsAlive())
 	{
-		this->player->pistolService->UpdatePistol();
+		this->ReleaseWeaponCamera();
+		return;
+	}
+	CCSCustomPlayerCamera *camera = static_cast<CCSCustomPlayerCamera *>(this->weaponCamera.Get());
+	if (!camera || camera->m_hPawn().Get() != pawn)
+	{
+		this->ReleaseWeaponCamera();
+		camera = CCSCustomPlayerCamera::Create(pawn);
+		if (!camera)
+		{
+			return;
+		}
+		// GetCustomCamera() ищет камеру пешки по designer name: так скрипт карты не получит нашу,
+		// а заспавнит свою.
+		camera->m_pEntity->m_designerName = GameEntitySystem()->AllocPooledString("kz_weapon_camera");
+		camera->SetFollowConfig(pawn, true);
+		this->weaponCamera = camera->GetRefEHandle();
+	}
+	CPlayer_CameraServices *cameraServices = pawn->m_pCameraServices();
+	if (!cameraServices)
+	{
+		return;
+	}
+	// Берём вид, только пока его никто не держит: камера карты или point_viewcontrol в приоритете,
+	// а оружие прячется снова, как только они его отпустят.
+	CBaseEntity *viewEntity = cameraServices->m_hViewEntity().Get();
+	if (!viewEntity || viewEntity == pawn)
+	{
+		camera->SetMode(CUSTOM_CAMERA_MODE_FOLLOW_POSITION);
 	}
 }
 
-void KZQuietService::OnPhysicsSimulatePost() {}
+void KZQuietService::ReleaseWeaponCamera()
+{
+	// На выходе сервера системы сущностей уже нет.
+	if (CCSCustomPlayerCamera *camera = GameEntitySystem() ? static_cast<CCSCustomPlayerCamera *>(this->weaponCamera.Get()) : nullptr)
+	{
+		// Снимает view entity, только если это всё ещё наша камера.
+		camera->SetMode(CUSTOM_CAMERA_MODE_DISABLED);
+		g_pKZUtils->RemoveEntity(camera);
+	}
+	this->weaponCamera.Term();
+}
+
+void KZQuietService::Cleanup()
+{
+	for (i32 i = 0; i < MAXPLAYERS; i++)
+	{
+		KZPlayer *player = g_pKZPlayerManager->ToPlayer(CPlayerSlot(i));
+		if (player && player->quietService)
+		{
+			player->quietService->ReleaseWeaponCamera();
+		}
+	}
+}
 
 void KZQuietService::OnPlayerPreferencesLoaded()
 {
 	this->hideWeapon = this->player->optionService->GetPreferenceBool("hideWeapon", false);
-	if (this->hideWeapon)
-	{
-		this->SendFullUpdate();
-	}
 	bool newShouldHide = this->player->optionService->GetPreferenceBool("hideOtherPlayers", false);
 	if (!newShouldHide && this->hideOtherPlayers && this->player->IsInGame())
 	{
