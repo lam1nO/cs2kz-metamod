@@ -1,4 +1,5 @@
 #pragma once
+#include <cmath>
 #include "version_gen.h"
 
 #include "kz_mode.h"
@@ -210,6 +211,25 @@ class KZTimerModeService : public KZModeService
 
 	// Keep track of TryPlayerMove path for triggerfixing.
 	bool airMoving {};
+
+	// ---- 0.279.0: KZT как в CS:GO (сетка ускорения, слайды, перф) ----
+	// Воздушный TryPlayerMove прошлого шага упёрся в склон (гейт фикса слайдов, как в CKZ).
+	bool touchedSlopeLastMove {};
+	Vector preAirAccelFrameDelta = vec3_origin;
+	// Сетка 1/128: номер окна (тик*2 + половина), в котором уже выдана порция ускорения.
+	i64 lastAAWindow {-1};
+	// Счётчики текущей фазы полёта — в строку [kzt-go] при отрыве.
+	i32 phaseAAWindows {};
+	i32 phaseAASkipped {};
+	i32 phaseSlideMoves {};
+	f32 phaseSlideSum {};
+	// Приземление, закрывшее фазу: высота относительно прошлого отрыва и вертикальная скорость.
+	f32 landHeight {NAN};
+	f32 landVz {};
+	// Длительность куска движения, в котором зарегистрировано приземление (для окна перфа).
+	f32 landStepDt {};
+	// Для высоты: z прошлого отрыва; NAN — отрыва ещё не было (после телепорта/спавна).
+	f32 lastTakeoffZ {NAN};
 	CUtlVector<Vector> tpmTriggerFixOrigins;
 
 public:
@@ -234,6 +254,7 @@ public:
 	virtual void OnAirMove() override;
 	virtual void OnAirMovePost() override;
 	virtual void OnAirAccelerate(Vector &wishdir, f32 &wishspeed, f32 &accel) override;
+	virtual void OnAirAcceleratePost(Vector wishdir, f32 wishspeed, f32 accel) override;
 	virtual void OnWaterMove() override;
 	virtual void OnWaterMovePost() override;
 	virtual void OnStartTouchGround() override;
@@ -282,4 +303,10 @@ public:
 	void ReduceDuckSlowdown();
 
 	void SlopeFix();
+
+	// Момент приземления для перфа: когда игрок ФАКТИЧЕСКИ стоит на земле по движку
+	// (см. комментарий в .cpp). kind — тип приземления для логов.
+	f32 PerfLandTime(const char **kind = nullptr, bool *inclusive = nullptr);
+	// Ключ «то же приземление» для велмода: landingTimeActual, но никогда не NaN.
+	f32 SafeLandKey();
 };

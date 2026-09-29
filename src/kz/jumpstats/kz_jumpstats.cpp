@@ -429,6 +429,39 @@ void Jump::UpdateAACallPost(Vector wishdir, f32 wishspeed, f32 accel)
 {
 	// Use the latest parameters, just in case they changed.
 	Strafe *strafe = this->GetCurrentStrafe();
+	if (accel <= 0.0f)
+	{
+		// Кусок без ускорения: KZT (kz_kzt_aa_grid) выдаёт одну порцию на окно 1/128 первому куску окна,
+		// остальные куски окна идут с accel=0. Это не попытка стрейфа: как отдельный вызов он дал бы
+		// нулевой прирост → промах в sync/BA и gain 0/0 = NaN. Время куска отдаём предыдущему вызову
+		// (та же порция окна), его accel уменьшаем так, чтобы accel·duration — порция окна — не изменился.
+		f32 dur = MAX(this->player->currentMoveData->m_flSubtickEndFraction - this->player->currentMoveData->m_flSubtickStartFraction, 0.0f)
+				  * ENGINE_FIXED_TICK_INTERVAL;
+		i32 n = strafe->aaCalls.Count();
+		if (n >= 2 && dur > 0.0f)
+		{
+			AACall &prev = strafe->aaCalls[n - 2];
+			if (prev.duration > 0.0f)
+			{
+				prev.accel *= prev.duration / (prev.duration + dur);
+			}
+			prev.duration += dur;
+			prev.endFraction = this->player->currentMoveData->m_flSubtickEndFraction;
+		}
+		strafe->aaCalls.RemoveMultipleFromTail(1);
+		if (strafe->jump->trackingRelease)
+		{
+			if (this->player->currentMoveData->m_flForwardMove > 0)
+			{
+				strafe->jump->release += g_pKZUtils->GetGlobals()->frametime;
+			}
+			else
+			{
+				strafe->jump->trackingRelease = false;
+			}
+		}
+		return;
+	}
 	AACall *call = &strafe->aaCalls.Tail();
 	QAngle currentAngle;
 	this->player->GetAngles(&currentAngle);

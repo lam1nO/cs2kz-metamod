@@ -1,3 +1,4 @@
+#include <cmath>
 #include "cs_usercmd.pb.h"
 #include "kz_mode_kzt.h"
 #include "utils/addresses.h"
@@ -23,7 +24,7 @@ CConVarRef<f32> sv_standable_normal("sv_standable_normal");
 CConVar<bool> kz_kzt_takeoff_speed("kz_kzt_takeoff_speed", FCVAR_NONE,
                                    "KZT: скорость отрыва бхопа по формуле от скорости касания", true);
 CConVar<float> kz_kzt_perf_window("kz_kzt_perf_window", FCVAR_NONE,
-                                  "KZT: окно перфа в секундах после физического касания", 0.0078125f);
+                                  "KZT: окно перфа в секундах после приземления (см. kz_kzt_perf_land_ground)", 0.0078125f);
 CConVar<bool> kz_kzt_subtick_debug("kz_kzt_subtick_debug", FCVAR_NONE,
                                    "KZT: пер-хоповый леджер [kzt-v2] в консоль сервера (временная телеметрия)", false);
 // Высота перфа над обычным прыжком. Ровно +1 юнит: обычный прыжок 55.83 (в даке 64.83),
@@ -33,6 +34,71 @@ CConVar<float> kz_kzt_perf_height_bonus("kz_kzt_perf_height_bonus", FCVAR_NONE, 
 // (до 0.974) дали только буферные пре-клики, которые строгое правило v2 считает промахом.
 // В GOKZ HitPerf структурный и такие прыжки включал — отсюда версия для сравнения.
 CConVar<bool> kz_kzt_perf_structural("kz_kzt_perf_structural", FCVAR_NONE, "KZT: перф по-GOKZ (структурный)", false);
+
+// ---- 0.279.0: KZT как в CS:GO ----
+// 1) Слайды. AirAccelerate CS2 сразу отдаёт не больше половины прироста, остаток кладёт в
+//    m_vecFrameVelocityDelta и прибавляет ПОСЛЕ среза об рампу — подъём по склону тяжелее, чем в GO.
+//    На склоне отдаём долю k остатка сразу (1 = как в GO). Та же правка, что в CKZ (kz_ckz_slide_go).
+CConVar<float> kz_kzt_slide_go("kz_kzt_slide_go", FCVAR_NONE, "KZT: доля отложенного воздушного прироста на склонах, отдаваемая сразу (0 = CS2, 1 = CS:GO)", 1.0f);
+// 2) Сетка ускорения. «Честный субтик» режет тик на куски по каждому клику, а лимит прироста в Source —
+//    на КАЖДЫЙ шаг: на рампе срез после куска освобождает лимит заново, и спам колесом = лишняя скорость.
+//    В GO шаг был строго раз в 1/128 с. Одна порция ускорения на окно 1/128 (первый кусок окна, клавиши
+//    на начало окна — как в GO, где нажатие вступает в силу со следующего шага), остальные куски окна —
+//    без ускорения. Время прыжков/кликов не трогаем. 0 — выкл, 1 — только на склонах, 2 — весь воздух.
+CConVar<i32> kz_kzt_aa_grid("kz_kzt_aa_grid", FCVAR_NONE, "KZT: ускорение в воздухе по сетке 1/128 (0 выкл, 1 склоны, 2 весь воздух)", 2);
+// 3) Перф. Момент приземления для окна перфа = когда игрок ФАКТИЧЕСКИ стоит на земле по движку, а не
+//    прогноз «когда бы коснулся» (при прилипании к полу с зазора до 2 u прогноз уезжает в будущее, в
+//    прошлое на сотни мс или в NaN — на блоках ~45–56 u перф был невозможен в принципе).
+CConVar<bool> kz_kzt_perf_land_ground("kz_kzt_perf_land_ground", FCVAR_NONE, "KZT: окно перфа от момента, когда игрок стоит на земле по движку", true);
+// Логи: строка [kzt-go] на каждый прыжок (перф старым и новым правилом, высота, фаза полёта).
+CConVar<bool> kz_kzt_go_log("kz_kzt_go_log", FCVAR_NONE, "KZT: строка [kzt-go] на каждый прыжок (проверка фикса и сравнение с GO)", true);
+
+// Счётчики для RCON kz_kzt_go_stats (со сбросом). Корзины высоты приземления относительно прошлого отрыва.
+static const f32 kKztHeightEdges[] = {-8.0f, 8.0f, 32.0f, 44.0f, 57.0f};
+static const char *kKztHeightNames[] = {"<-8", "-8..8", "8..32", "32..44", "44..57", ">57"};
+struct KztGoStats
+{
+	u64 aaCalls, aaWindows, aaSkipped, aaScaled, aaAnomaly;
+	u64 togClamped;
+	u64 slideMoves, slideAnom[3];
+	f64 slideSum;
+	u64 jumps[6], perfOld[6], perfNew[6];
+	u64 landTouch, landExact, landFuture, landPast, landNan;
+};
+static KztGoStats g_kztGo {};
+
+CON_COMMAND_F(kz_kzt_go_stats, "KZT: счётчики фиксов 0.279.0 — сетка ускорения, слайды, перф по высотам (со сбросом)", FCVAR_NONE)
+{
+	KztGoStats &g = g_kztGo;
+	Msg("[kzt-go] stats grid=%d slide_k=%.2f perf_ground=%d | aa: calls=%llu windows=%llu skipped=%llu scaled=%llu anomaly=%llu | tog_clamped=%llu | slide: moves=%llu "
+		"mean=%.3f anomalies(back/perp/big)=%llu/%llu/%llu | land: touch=%llu exact=%llu future=%llu past=%llu nan=%llu\n",
+		kz_kzt_aa_grid.Get(), kz_kzt_slide_go.Get(), (int)kz_kzt_perf_land_ground.Get(), (unsigned long long)g.aaCalls,
+		(unsigned long long)g.aaWindows, (unsigned long long)g.aaSkipped, (unsigned long long)g.aaScaled, (unsigned long long)g.aaAnomaly,
+		(unsigned long long)g.togClamped, (unsigned long long)g.slideMoves,
+		g.slideMoves ? g.slideSum / g.slideMoves : 0.0, (unsigned long long)g.slideAnom[0], (unsigned long long)g.slideAnom[1],
+		(unsigned long long)g.slideAnom[2], (unsigned long long)g.landTouch, (unsigned long long)g.landExact, (unsigned long long)g.landFuture,
+		(unsigned long long)g.landPast, (unsigned long long)g.landNan);
+	for (int b = 0; b < 6; b++)
+	{
+		if (g.jumps[b])
+		{
+			Msg("[kzt-go] stats height %s: jumps=%llu perf_old=%llu (%.1f%%) perf_new=%llu (%.1f%%)\n", kKztHeightNames[b], (unsigned long long)g.jumps[b],
+				(unsigned long long)g.perfOld[b], 100.0 * g.perfOld[b] / g.jumps[b], (unsigned long long)g.perfNew[b], 100.0 * g.perfNew[b] / g.jumps[b]);
+		}
+	}
+	fflush(stdout);
+	g = {};
+}
+
+static_function bool KztIsSlidePlane(const Vector &normal)
+{
+	f32 standableZ = 0.7f;
+	if (sv_standable_normal.IsValidRef() && sv_standable_normal.IsConVarDataAvailable())
+	{
+		standableZ = sv_standable_normal.Get();
+	}
+	return normal.z > 0.03125f && normal.z < standableZ;
+}
 
 bool KZTimerModePlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool late)
 {
@@ -129,6 +195,14 @@ void KZTimerModeService::Reset()
 
 	this->airMoving = {};
 	this->tpmTriggerFixOrigins.RemoveAll();
+	this->touchedSlopeLastMove = {};
+	this->preAirAccelFrameDelta = vec3_origin;
+	this->lastAAWindow = -1;
+	this->phaseAAWindows = this->phaseAASkipped = this->phaseSlideMoves = 0;
+	this->phaseSlideSum = 0.0f;
+	this->landHeight = NAN;
+	this->landVz = this->landStepDt = 0.0f;
+	this->lastTakeoffZ = NAN;
 
 	for (int i = 0; i < 4; i++)
 	{
@@ -231,6 +305,10 @@ void KZTimerModeService::OnStopTouchGround()
 {
 	if (this->player->GetMoveType() != MOVETYPE_WALK)
 	{
+		// Лестница/ноклип: высоту следующего приземления не от чего считать, фаза полёта — новая.
+		this->lastTakeoffZ = NAN;
+		this->phaseAAWindows = this->phaseAASkipped = this->phaseSlideMoves = 0;
+		this->phaseSlideSum = 0.0f;
 		return;
 	}
 
@@ -249,10 +327,20 @@ void KZTimerModeService::OnStopTouchGround()
 	// касания (landingTimeActual: трейс-фракция/ледж/прогноз, вычисляет core).
 	// inPerf ПЕРЕЗАПИСЫВАЕМ (как в базе): один флаг гейтит кап, HUD и старт таймера.
 	f32 curtime = g_pKZUtils->GetGlobals()->curtime;
-	f32 realTog = this->player->takeoffTime - this->player->landingTimeActual;
+	// 0.279.0: момент приземления — когда игрок стоит на земле по движку (PerfLandTime), а не прогноз.
+	const char *landKind = "?";
+	bool landInclusive = false;
+	f32 landRef = this->PerfLandTime(&landKind, &landInclusive);
+	// Нижняя граница окна перфа: строго после удара о пол; для прилипания — включительно с допуском 0.1 мс.
+	const f32 perfLower = landInclusive ? -1e-4f : 0.0f;
+	f32 realTog = this->player->takeoffTime - landRef;
 	if (realTog < 0.0f)
 	{
 		realTog = 0.0f; // fp-люфт fraction-пути
+		if (!this->player->IsFakeClient())
+		{
+			g_kztGo.togClamped++;
+		}
 	}
 	// Клик, вызвавший этот прыжок — последний валидный пресс не позже отрыва.
 	f32 pressTime = -1.0f;
@@ -264,13 +352,17 @@ void KZTimerModeService::OnStopTouchGround()
 			pressTime = t;
 		}
 	}
-	f32 pressDt = pressTime > 0.0f ? pressTime - this->player->landingTimeActual : -1.0f;
+	f32 pressDt = pressTime > 0.0f ? pressTime - landRef : -1.0f;
+	// Старое правило (прогноз касания) — только для лога и статистики «было/стало».
+	f32 pressDtOld = pressTime > 0.0f ? pressTime - this->player->landingTimeActual : -1.0f;
+	bool perfOldRule = this->player->jumped && pressTime > 0.0f && pressDtOld > 0.0f && pressDtOld <= kz_kzt_perf_window.Get()
+					   && !this->player->possibleLadderHop && !this->player->takeoffFromLadder;
 
 	// Перф — клик СТРОГО ПОСЛЕ касания в окне. Буферный пре-клик прыгает (движок,
 	// как предсказал клиент — «землит» не возвращается), но классифицируется промахом
 	// и идёт в общую формулу скорости — осознанный отход от GOKZ (у них HitPerf
 	// структурный и включал буферные прессы), решение пользователя 2026-07-19.
-	bool perf = this->player->jumped && pressTime > 0.0f && pressDt > 0.0f
+	bool perf = this->player->jumped && pressTime > 0.0f && pressDt > perfLower
 				&& pressDt <= kz_kzt_perf_window.Get() && !this->player->possibleLadderHop && !this->player->takeoffFromLadder;
 	// Версия «как GOKZ»: перф структурный, буферный пре-клик тоже перф. Меняет НЕ только
 	// высоту — тем же флагом гейтятся перф-модель скорости (ноль трения, кап 380), HUD и
@@ -295,7 +387,7 @@ void KZTimerModeService::OnStopTouchGround()
 	// буферный прыжок происходит в сегменте, где OnProcessMovement ещё видел воздух —
 	// без принудительной итерации велмод протухал (>0.2с) и промахи залипали на 250
 	// (леджер srv-5: ceil=250 в 366 из 383 промахов).
-	if (this->player->jumped && this->velModTouchIterTime != this->player->landingTimeActual)
+	if (this->player->jumped && this->velModTouchIterTime != this->SafeLandKey())
 	{
 		// GO-паритет наземного времени: same-tick касание получает столько 128-тиков
 		// велмода, сколько реально пробыло на земле (те же кванты, что k формулы);
@@ -305,7 +397,7 @@ void KZTimerModeService::OnStopTouchGround()
 		{
 			this->effectivePreVelMod = this->CalcPrestrafeVelMod(true);
 		}
-		this->velModTouchIterTime = this->player->landingTimeActual;
+		this->velModTouchIterTime = this->SafeLandKey();
 		// Форс гасит остаток бюджета темпа: иначе то же наземное время отработается
 		// второй раз натуральным путём в OnProcessMovement (сегмент мог получить 0
 		// итераций и оставить время в аккумуляторе) — ровно тот переразгон, против
@@ -493,10 +585,68 @@ void KZTimerModeService::OnStopTouchGround()
 			dbgHalf, this->velModTickSegments, this->velModTickIters, dbgTakeoffDz, velocity.z, dbgBump, structuralPerf ? 1 : 0, strictPerf ? 1 : 0);
 		fflush(stdout);
 	}
+
+	// 0.279.0: проверка фиксов и данные для сравнения с GO. Перф в GO от высоты блока не зависит —
+	// в статистике по корзинам высоты perf_new должен быть ровным, perf_old проваливался на 45–56 u.
+	if (this->player->jumped && !this->player->takeoffFromLadder && !this->player->IsFakeClient())
+	{
+		i32 bucket = 5;
+		if (std::isfinite(this->landHeight))
+		{
+			for (int b = 0; b < 5; b++)
+			{
+				if (this->landHeight < kKztHeightEdges[b])
+				{
+					bucket = b;
+					break;
+				}
+			}
+		}
+		else
+		{
+			bucket = -1;
+		}
+		if (bucket >= 0)
+		{
+			g_kztGo.jumps[bucket]++;
+			g_kztGo.perfOld[bucket] += perfOldRule ? 1 : 0;
+			g_kztGo.perfNew[bucket] += strictPerf ? 1 : 0;
+			switch (landKind[0])
+			{
+				case 't': g_kztGo.landTouch++; break;
+				case 'e': g_kztGo.landExact++; break;
+				case 'f': g_kztGo.landFuture++; break;
+				case 'p': g_kztGo.landPast++; break;
+				case 'n': g_kztGo.landNan++; break;
+			}
+		}
+		if (kz_kzt_go_log.GetBool())
+		{
+			f32 shiftMs = (this->player->landingTimeActual - this->player->landingTime) * 1000.0f;
+			Msg("[kzt-go] jump %llu h=%.1f vz=%.0f land=%s shift_ms=%.2f press_ms_old=%.2f press_ms_new=%.2f perf_old=%d perf_new=%d perf=%d "
+				"window_ms=%.2f aa_win=%d aa_skip=%d slide_n=%d slide_du=%.1f takeoff=%.0f grid=%d k=%.2f\n",
+				(unsigned long long)this->player->GetSteamId64(), this->landHeight, this->landVz, landKind, shiftMs, pressDtOld * 1000.0f,
+				pressDt * 1000.0f, perfOldRule ? 1 : 0, strictPerf ? 1 : 0, perf ? 1 : 0, kz_kzt_perf_window.Get() * 1000.0f, this->phaseAAWindows,
+				this->phaseAASkipped, this->phaseSlideMoves, this->phaseSlideSum, velocity.Length2D(), kz_kzt_aa_grid.Get(), kz_kzt_slide_go.Get());
+			fflush(stdout);
+		}
+	}
+	// Новая фаза полёта: счётчики с нуля, высота следующего приземления — от этого отрыва.
+	this->phaseAAWindows = this->phaseAASkipped = this->phaseSlideMoves = 0;
+	this->phaseSlideSum = 0.0f;
+	this->lastTakeoffZ = this->player->takeoffOrigin.z;
 }
 
 void KZTimerModeService::OnStartTouchGround()
 {
+	this->touchedSlopeLastMove = false;
+	// Прыжок в том же окне 1/128 после приземления — новая фаза полёта, порция ей положена.
+	this->lastAAWindow = -1;
+	this->landStepDt = g_pKZUtils->GetGlobals()->frametime;
+	// Для логов/статистики перфа: высота ПОЛА приземления относительно пола прошлого отрыва (отрыв
+	// нормализован к полу; landingOrigin при прилипании висит до 2 u над полом).
+	this->landHeight = std::isfinite(this->lastTakeoffZ) ? this->player->GetGroundPosition() - this->lastTakeoffZ : NAN;
+	this->landVz = this->player->landingVelocity.z;
 	this->SlopeFix();
 	// Захват скорости касания — строго ПОСЛЕ SlopeFix (на склонах он переписывает
 	// горизонталь, конвертируя падение в буст). Привязка к landingTime рвёт
@@ -694,7 +844,7 @@ void KZTimerModeService::OnProcessMovement()
 		if (iterations > 0 && velModOnGround)
 		{
 			// Касание получило наземную итерацию — форс в прыжке не нужен
-			this->velModTouchIterTime = this->player->landingTimeActual;
+			this->velModTouchIterTime = this->SafeLandKey();
 		}
 	}
 }
@@ -718,6 +868,7 @@ void KZTimerModeService::OnProcessMovementPost()
 	if (!this->didTPM)
 	{
 		this->lastValidPlane = vec3_origin;
+		this->touchedSlopeLastMove = false;
 	}
 	f32 velMod = this->originalMaxSpeed > 0.0f ? (SPEED_NORMAL * this->effectivePreVelMod) / this->originalMaxSpeed : 1.0f;
 	if (this->player->GetPlayerPawn()->m_flVelocityModifier() != velMod)
@@ -1120,6 +1271,7 @@ void KZTimerModeService::OnTryPlayerMove(Vector *pFirstDest, trace_t *pFirstTrac
 	this->tpmTriggerFixOrigins.RemoveAll();
 	this->overrideTPM = false;
 	this->didTPM = true;
+	this->touchedSlopeLastMove = false;
 	CCSPlayerPawn *pawn = this->player->GetPlayerPawn();
 
 	f32 timeLeft = g_pKZUtils->GetGlobals()->frametime;
@@ -1269,6 +1421,11 @@ void KZTimerModeService::OnTryPlayerMove(Vector *pFirstDest, trace_t *pFirstTrac
 				this->lastValidPlane = pm.m_vHitNormal;
 			}
 			potentiallyStuck = pm.m_flFraction == 0.0f;
+		}
+
+		if (this->airMoving && pm.m_flFraction < 1.0f && KztIsSlidePlane(pm.m_vHitNormal))
+		{
+			this->touchedSlopeLastMove = true;
 		}
 
 		if (pm.m_flFraction * velocity.Length() > 0.03125f || pm.m_flFraction > 0.03125f)
@@ -1458,6 +1615,154 @@ void KZTimerModeService::OnAirAccelerate(Vector &wishdir, f32 &wishspeed, f32 &a
 	{
 		wishspeed /= this->effectivePreVelMod;
 	}
+
+	CMoveData *mv = this->player->currentMoveData;
+	// Боты (реплеи) в счётчики не идут: пишем в пустышку.
+	static KztGoStats botSink;
+	KztGoStats &st = this->player->IsFakeClient() ? botSink : g_kztGo;
+	st.aaCalls++;
+	// Сетка 1/128 (kz_kzt_aa_grid). Окно — по номеру тика и доле тика из CMoveData (точные), а не по
+	// curtime: у f32-curtime разрешение падает с аптаймом до миллисекунд, окно всего 7.8 мс.
+	i32 grid = kz_kzt_aa_grid.Get();
+	f32 frametime = g_pKZUtils->GetGlobals()->frametime;
+	f32 start = mv->m_flSubtickStartFraction, end = mv->m_flSubtickEndFraction;
+	bool fractionsOk = frametime > 0.0f && start >= 0.0f && end <= 1.0001f && end > start
+					   && fabsf((end - start) * ENGINE_FIXED_TICK_INTERVAL - frametime) < 1e-4f;
+	if (grid > 0 && (grid >= 2 || this->touchedSlopeLastMove))
+	{
+		// Окно — по КОНЦУ куска: кусок, перешагнувший середину тика (полутикового деления не было),
+		// закрывает второе окно, и следующий кусок во втором окне порцию не получит повторно.
+		i64 tickBase = (i64)mv->m_nTickCount * 2;
+		i64 window = tickBase + (end > 0.5f + 1e-4f ? 1 : 0);
+		bool windowStart = fabsf(start) < 1e-4f || fabsf(start - 0.5f) < 1e-4f;
+		bool repeat = fractionsOk && window <= this->lastAAWindow;
+		if (repeat && windowStart)
+		{
+			// Кусок начинается на границе окна, а окно уже «выдано» — так быть не должно (догон нескольких
+			// команд за тик, сдвиг полей после апдейта CS2). Не отнимаем стрейф: выдаём порцию, считаем аномалию.
+			repeat = false;
+			st.aaAnomaly++;
+		}
+		if (!fractionsOk)
+		{
+			// Поля CMoveData не сходятся с frametime — сетку не применяем (движок как есть), считаем аномалию.
+			st.aaAnomaly++;
+		}
+		else if (repeat)
+		{
+			// Порция этого окна уже выдана первым куском — клик порезал окно, в GO этого шага не было.
+			accel = 0.0f;
+			st.aaSkipped++;
+			this->phaseAASkipped++;
+		}
+		else
+		{
+			this->lastAAWindow = window;
+			st.aaWindows++;
+			this->phaseAAWindows++;
+			// Порция за ВСЁ окно, как один шаг GO длиной 1/128: движок считает прирост ∝ frametime куска.
+			const f32 windowDt = ENGINE_FIXED_TICK_INTERVAL * 0.5f;
+			if (frametime < windowDt - 1e-6f)
+			{
+				accel *= windowDt / frametime;
+				st.aaScaled++;
+			}
+		}
+	}
+	this->preAirAccelFrameDelta = mv->m_vecFrameVelocityDelta;
+}
+
+void KZTimerModeService::OnAirAcceleratePost(Vector wishdir, f32 wishspeed, f32 accel)
+{
+	// Слайды как в GO (как kz_ckz_slide_go в CKZ): склон задет воздушным TryPlayerMove прошлого шага.
+	f32 share = Clamp(kz_kzt_slide_go.Get(), 0.0f, 1.0f);
+	if (!this->touchedSlopeLastMove || share <= 0.0f || accel <= 0.0f)
+	{
+		return;
+	}
+	CMoveData *mv = this->player->currentMoveData;
+	static KztGoStats botSink;
+	KztGoStats &st = this->player->IsFakeClient() ? botSink : g_kztGo;
+	Vector deferred = mv->m_vecFrameVelocityDelta - this->preAirAccelFrameDelta;
+	if (deferred == vec3_origin)
+	{
+		return;
+	}
+	// Страховка от чужой раскладки CMoveData и правок Valve (как в CKZ).
+	f32 along = deferred.Dot(wishdir);
+	f32 fullAccel = accel * wishspeed * this->player->GetMoveServices()->m_flSurfaceFriction() * g_pKZUtils->GetGlobals()->frametime;
+	i32 anomaly = along <= 0.0f ? 0 : (deferred - wishdir * along).Length() > 0.01f ? 1 : along > 0.5f * fullAccel + 0.01f ? 2 : -1;
+	if (anomaly >= 0)
+	{
+		st.slideAnom[anomaly]++;
+		return;
+	}
+	Vector moved = deferred * share;
+	mv->m_vecVelocity += moved;
+	mv->m_outWishVel += moved;
+	mv->m_vecFrameVelocityDelta = this->preAirAccelFrameDelta + (deferred - moved);
+	st.slideMoves++;
+	st.slideSum += moved.Length();
+	this->phaseSlideMoves++;
+	this->phaseSlideSum += moved.Length();
+}
+
+// Момент приземления для окна перфа. landingTimeActual (core, mv_player.cpp) при ударе о пол посреди шага —
+// честный момент удара (в пределах шага, в прошлом относительно landingTime). Но если движок «прилепил»
+// игрока к полу с зазора до 2 u, core прогнозирует касание формулой падения, и на заходе на блок (подъём,
+// зависание у верхушки) прогноз уходит в будущее, на сотни мс в прошлое или в NaN — перф невозможен при
+// любом клике. Правило как в GO (перф = прыжок на первом тике на земле): если прогноз вне шага приземления,
+// момент приземления = когда движок поставил игрока на землю (landingTime). kind — тип для логов.
+f32 KZTimerModeService::PerfLandTime(const char **kind, bool *inclusive)
+{
+	f32 actual = this->player->landingTimeActual;
+	f32 ground = this->player->landingTime;
+	f32 stepDt = this->landStepDt > 0.0f ? this->landStepDt : ENGINE_FIXED_TICK_INTERVAL * 0.5f;
+	const char *k;
+	bool inStep = false;
+	if (!std::isfinite(actual))
+	{
+		k = "nan";
+	}
+	else if (actual > ground + 1e-5f)
+	{
+		k = "future";
+	}
+	else if (actual < ground - stepDt - 1e-5f)
+	{
+		k = "past";
+	}
+	else if (actual < ground - 1e-6f)
+	{
+		k = "touch";
+		inStep = true;
+	}
+	else
+	{
+		k = "exact";
+	}
+	if (kind)
+	{
+		*kind = k;
+	}
+	if (inclusive)
+	{
+		// Прилипание к полу (зазор до 2 u) / ледж: опора — момент постановки на землю (конец куска). В v2
+		// кусок часто кончается на клике, и прыжок этого клика стартует в следующем куске с pressDt≈0 (разные
+		// f32-формулы времени) — нижнюю границу окна делаем включительной с допуском (см. OnStopTouchGround).
+		*inclusive = !inStep && kz_kzt_perf_land_ground.Get();
+	}
+	if (inStep || !kz_kzt_perf_land_ground.Get())
+	{
+		return actual;
+	}
+	return ground;
+}
+
+f32 KZTimerModeService::SafeLandKey()
+{
+	f32 actual = this->player->landingTimeActual;
+	return std::isfinite(actual) ? actual : this->player->landingTime;
 }
 
 void KZTimerModeService::OnWaterMove()
@@ -1472,6 +1777,13 @@ void KZTimerModeService::OnWaterMovePost()
 
 void KZTimerModeService::OnTeleport(const Vector *newPosition, const QAngle *newAngles, const Vector *newVelocity)
 {
+	if (newPosition || newVelocity)
+	{
+		// Касание склона и высота прошлого отрыва к новому месту отношения не имеют.
+		this->touchedSlopeLastMove = false;
+		this->lastTakeoffZ = NAN;
+		this->landHeight = NAN;
+	}
 	if (!this->player->processingMovement)
 	{
 		// Внешний телепорт (чекпоинт, !start, !tp и т.п.): HandleTeleport двигает
