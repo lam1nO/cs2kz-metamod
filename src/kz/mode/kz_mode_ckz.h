@@ -170,6 +170,9 @@ class KZClassicModeService : public KZModeService
 
 	// Keep track of TryPlayerMove path for triggerfixing.
 	bool airMoving {};
+	// Слайды как в GO: воздушный TryPlayerMove прошлого шага упёрся в склон (см. OnAirAcceleratePost).
+	bool touchedSlopeLastMove {};
+	Vector preAirAccelFrameDelta = vec3_origin;
 	CUtlVector<Vector> tpmTriggerFixOrigins;
 
 public:
@@ -193,6 +196,8 @@ public:
 	virtual void OnDuckPost() override;
 	virtual void OnAirMove() override;
 	virtual void OnAirMovePost() override;
+	virtual void OnAirAccelerate(Vector &wishdir, f32 &wishspeed, f32 &accel) override;
+	virtual void OnAirAcceleratePost(Vector wishdir, f32 wishspeed, f32 accel) override;
 	virtual void OnWaterMove() override;
 	virtual void OnWaterMovePost() override;
 	virtual void OnStartTouchGround() override;
