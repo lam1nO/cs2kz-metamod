@@ -230,6 +230,17 @@ class KZTimerModeService : public KZModeService
 	f32 landStepDt {};
 	// Для высоты: z прошлого отрыва; NAN — отрыва ещё не было (после телепорта/спавна).
 	f32 lastTakeoffZ {NAN};
+	// 0.280.0: момент приземления на сетке 1/128 (как тик GO). Сдвиг от landingTime в секундах;
+	// NAN — не посчитан (приземление не в конце куска движения), тогда правило 0.279.0.
+	f32 perfGridOffset {NAN};
+	f32 perfGridLandKey {-1.0f};
+	const char *perfGridKind {"fb"};
+	f32 perfGridEndFrac {-1.0f};
+	f32 perfGridStartFrac {-1.0f};
+	// Начало воздушного TryPlayerMove текущего куска — путь игрока внутри куска.
+	Vector tpmStartOriginGrid = vec3_origin;
+	Vector tpmStartVelocityGrid = vec3_origin;
+	bool inCategorize {};
 	CUtlVector<Vector> tpmTriggerFixOrigins;
 
 public:
@@ -250,6 +261,7 @@ public:
 	virtual void OnPlayerMove() override;
 	virtual void OnProcessMovementPost() override;
 	virtual void OnCategorizePosition(bool bStayOnGround) override;
+	virtual void OnCategorizePositionPost(bool bStayOnGround) override;
 	virtual void OnDuckPost() override;
 	virtual void OnAirMove() override;
 	virtual void OnAirMovePost() override;
@@ -285,6 +297,9 @@ public:
 	// неотличимо от «пол ровно под ногами» — нормализация высоты на этом навесила бы
 	// бонус поверх неизвестного зазора. Возвращает false, если пол не найден.
 	bool FindGroundZ(const Vector &origin, f32 &groundZ);
+	// Окно перфа по сетке 1/128: где в GO игрок встал бы на землю (см. OnStartTouchGround).
+	void ComputePerfGrid();
+	i32 GroundAtGridPoint(f32 dt);
 
 	void CheckVelocityQuantization();
 	void RemoveCrouchJumpBind();

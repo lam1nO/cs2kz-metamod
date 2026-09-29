@@ -50,6 +50,11 @@ CConVar<i32> kz_kzt_aa_grid("kz_kzt_aa_grid", FCVAR_NONE, "KZT: ускорени
 //    прогноз «когда бы коснулся» (при прилипании к полу с зазора до 2 u прогноз уезжает в будущее, в
 //    прошлое на сотни мс или в NaN — на блоках ~45–56 u перф был невозможен в принципе).
 CConVar<bool> kz_kzt_perf_land_ground("kz_kzt_perf_land_ground", FCVAR_NONE, "KZT: окно перфа от момента, когда игрок стоит на земле по движку", true);
+// 3б) 0.280.0: окно перфа ровно 7.8 мс, как в GO. Движок проверяет землю в конце каждого куска, а клик режет
+//    кусок — прилипший игрок «вставал на землю» ровно в момент клика, и клик засчитывался (окно фактически
+//    ~11–12 мс). В GO землю проверяли раз в 1/128 с: момент приземления = граница 1/128, на которой игрок
+//    стоял бы на земле (путь куска + трасса вниз на 2 u, как CategorizePosition). 0 — правило 0.279.0.
+CConVar<bool> kz_kzt_perf_grid("kz_kzt_perf_grid", FCVAR_NONE, "KZT: момент приземления для перфа на сетке 1/128, как тик GO", true);
 // Логи: строка [kzt-go] на каждый прыжок (перф старым и новым правилом, высота, фаза полёта).
 CConVar<bool> kz_kzt_go_log("kz_kzt_go_log", FCVAR_NONE, "KZT: строка [kzt-go] на каждый прыжок (проверка фикса и сравнение с GO)", true);
 
@@ -64,12 +69,17 @@ struct KztGoStats
 	f64 slideSum;
 	u64 jumps[6], perfOld[6], perfNew[6];
 	u64 landTouch, landExact, landFuture, landPast, landNan;
+	u64 perfV279[6];
+	u64 gridOn, gridPrev, gridNext, gridBlocked, gridFallback;
 };
 static KztGoStats g_kztGo {};
 
 CON_COMMAND_F(kz_kzt_go_stats, "KZT: счётчики фиксов 0.279.0 — сетка ускорения, слайды, перф по высотам (со сбросом)", FCVAR_NONE)
 {
 	KztGoStats &g = g_kztGo;
+	Msg("[kzt-go] stats perf_grid=%d | land_grid: on=%llu prev=%llu next=%llu blocked=%llu fallback=%llu\n", (int)kz_kzt_perf_grid.Get(),
+		(unsigned long long)g.gridOn, (unsigned long long)g.gridPrev, (unsigned long long)g.gridNext, (unsigned long long)g.gridBlocked,
+		(unsigned long long)g.gridFallback);
 	Msg("[kzt-go] stats grid=%d slide_k=%.2f perf_ground=%d | aa: calls=%llu windows=%llu skipped=%llu scaled=%llu anomaly=%llu | tog_clamped=%llu | slide: moves=%llu "
 		"mean=%.3f anomalies(back/perp/big)=%llu/%llu/%llu | land: touch=%llu exact=%llu future=%llu past=%llu nan=%llu\n",
 		kz_kzt_aa_grid.Get(), kz_kzt_slide_go.Get(), (int)kz_kzt_perf_land_ground.Get(), (unsigned long long)g.aaCalls,
@@ -82,8 +92,9 @@ CON_COMMAND_F(kz_kzt_go_stats, "KZT: счётчики фиксов 0.279.0 — �
 	{
 		if (g.jumps[b])
 		{
-			Msg("[kzt-go] stats height %s: jumps=%llu perf_old=%llu (%.1f%%) perf_new=%llu (%.1f%%)\n", kKztHeightNames[b], (unsigned long long)g.jumps[b],
-				(unsigned long long)g.perfOld[b], 100.0 * g.perfOld[b] / g.jumps[b], (unsigned long long)g.perfNew[b], 100.0 * g.perfNew[b] / g.jumps[b]);
+			Msg("[kzt-go] stats height %s: jumps=%llu perf_old=%llu (%.1f%%) perf_v279=%llu (%.1f%%) perf_new=%llu (%.1f%%)\n", kKztHeightNames[b],
+				(unsigned long long)g.jumps[b], (unsigned long long)g.perfOld[b], 100.0 * g.perfOld[b] / g.jumps[b], (unsigned long long)g.perfV279[b],
+				100.0 * g.perfV279[b] / g.jumps[b], (unsigned long long)g.perfNew[b], 100.0 * g.perfNew[b] / g.jumps[b]);
 		}
 	}
 	fflush(stdout);
@@ -203,6 +214,12 @@ void KZTimerModeService::Reset()
 	this->landHeight = NAN;
 	this->landVz = this->landStepDt = 0.0f;
 	this->lastTakeoffZ = NAN;
+	this->perfGridOffset = NAN;
+	this->perfGridLandKey = -1.0f;
+	this->perfGridKind = "fb";
+	this->perfGridEndFrac = this->perfGridStartFrac = -1.0f;
+	this->tpmStartOriginGrid = this->tpmStartVelocityGrid = vec3_origin;
+	this->inCategorize = false;
 
 	for (int i = 0; i < 4; i++)
 	{
@@ -353,6 +370,20 @@ void KZTimerModeService::OnStopTouchGround()
 		}
 	}
 	f32 pressDt = pressTime > 0.0f ? pressTime - landRef : -1.0f;
+	// Правило 0.279.0 (опора — конец куска приземления) — для лога и отката kz_kzt_perf_grid 0.
+	const f32 pressDtV279 = pressDt;
+	const bool perfV279Rule = this->player->jumped && pressTime > 0.0f && pressDtV279 > perfLower && pressDtV279 <= kz_kzt_perf_window.Get()
+							  && !this->player->possibleLadderHop && !this->player->takeoffFromLadder;
+	// 0.280.0: опора — граница 1/128, на которой игрок встал бы на землю в GO (ComputePerfGrid). Разность времён
+	// считаем до сдвига: f32-curtime на большом аптайме теряет доли мс, сдвиг прибавлять к нему нельзя.
+	bool gridUsed = kz_kzt_perf_grid.Get() && kz_kzt_perf_land_ground.Get() && std::isfinite(this->perfGridOffset)
+					&& this->perfGridLandKey == this->player->landingTime;
+	if (gridUsed && pressTime > 0.0f)
+	{
+		pressDt = (pressTime - this->player->landingTime) - this->perfGridOffset;
+	}
+	// Клик ровно на границе сетки относится к следующему тику (в GO — к команде тика на земле): включительно.
+	const f32 perfLowerNow = gridUsed ? -1e-4f : perfLower;
 	// Старое правило (прогноз касания) — только для лога и статистики «было/стало».
 	f32 pressDtOld = pressTime > 0.0f ? pressTime - this->player->landingTimeActual : -1.0f;
 	bool perfOldRule = this->player->jumped && pressTime > 0.0f && pressDtOld > 0.0f && pressDtOld <= kz_kzt_perf_window.Get()
@@ -362,7 +393,7 @@ void KZTimerModeService::OnStopTouchGround()
 	// как предсказал клиент — «землит» не возвращается), но классифицируется промахом
 	// и идёт в общую формулу скорости — осознанный отход от GOKZ (у них HitPerf
 	// структурный и включал буферные прессы), решение пользователя 2026-07-19.
-	bool perf = this->player->jumped && pressTime > 0.0f && pressDt > perfLower
+	bool perf = this->player->jumped && pressTime > 0.0f && pressDt > perfLowerNow
 				&& pressDt <= kz_kzt_perf_window.Get() && !this->player->possibleLadderHop && !this->player->takeoffFromLadder;
 	// Версия «как GOKZ»: перф структурный, буферный пре-клик тоже перф. Меняет НЕ только
 	// высоту — тем же флагом гейтятся перф-модель скорости (ноль трения, кап 380), HUD и
@@ -611,6 +642,7 @@ void KZTimerModeService::OnStopTouchGround()
 			g_kztGo.jumps[bucket]++;
 			g_kztGo.perfOld[bucket] += perfOldRule ? 1 : 0;
 			g_kztGo.perfNew[bucket] += strictPerf ? 1 : 0;
+			g_kztGo.perfV279[bucket] += perfV279Rule ? 1 : 0;
 			switch (landKind[0])
 			{
 				case 't': g_kztGo.landTouch++; break;
@@ -624,10 +656,14 @@ void KZTimerModeService::OnStopTouchGround()
 		{
 			f32 shiftMs = (this->player->landingTimeActual - this->player->landingTime) * 1000.0f;
 			Msg("[kzt-go] jump %llu h=%.1f vz=%.0f land=%s shift_ms=%.2f press_ms_old=%.2f press_ms_new=%.2f perf_old=%d perf_new=%d perf=%d "
-				"window_ms=%.2f aa_win=%d aa_skip=%d slide_n=%d slide_du=%.1f takeoff=%.0f grid=%d k=%.2f\n",
+				"window_ms=%.2f aa_win=%d aa_skip=%d slide_n=%d slide_du=%.1f takeoff=%.0f grid=%d k=%.2f gl=%s g_ms=%.2f sf=%.3f ef=%.3f p279_ms=%.2f "
+				"perf279=%d\n",
 				(unsigned long long)this->player->GetSteamId64(), this->landHeight, this->landVz, landKind, shiftMs, pressDtOld * 1000.0f,
 				pressDt * 1000.0f, perfOldRule ? 1 : 0, strictPerf ? 1 : 0, perf ? 1 : 0, kz_kzt_perf_window.Get() * 1000.0f, this->phaseAAWindows,
-				this->phaseAASkipped, this->phaseSlideMoves, this->phaseSlideSum, velocity.Length2D(), kz_kzt_aa_grid.Get(), kz_kzt_slide_go.Get());
+				this->phaseAASkipped, this->phaseSlideMoves, this->phaseSlideSum, velocity.Length2D(), kz_kzt_aa_grid.Get(), kz_kzt_slide_go.Get(),
+				!kz_kzt_perf_grid.Get() ? "off" : (gridUsed || !std::isfinite(this->perfGridOffset)) ? this->perfGridKind : "fb_key",
+				gridUsed ? this->perfGridOffset * 1000.0f : 0.0f, this->perfGridStartFrac,
+				this->perfGridEndFrac, pressDtV279 * 1000.0f, perfV279Rule ? 1 : 0);
 			fflush(stdout);
 		}
 	}
@@ -643,6 +679,7 @@ void KZTimerModeService::OnStartTouchGround()
 	// Прыжок в том же окне 1/128 после приземления — новая фаза полёта, порция ей положена.
 	this->lastAAWindow = -1;
 	this->landStepDt = g_pKZUtils->GetGlobals()->frametime;
+	this->ComputePerfGrid();
 	// Для логов/статистики перфа: высота ПОЛА приземления относительно пола прошлого отрыва (отрыв
 	// нормализован к полу; landingOrigin при прилипании висит до 2 u над полом).
 	this->landHeight = std::isfinite(this->lastTakeoffZ) ? this->player->GetGroundPosition() - this->lastTakeoffZ : NAN;
@@ -1279,6 +1316,8 @@ void KZTimerModeService::OnTryPlayerMove(Vector *pFirstDest, trace_t *pFirstTrac
 	Vector start, velocity, end;
 	this->player->GetOrigin(&start);
 	this->player->GetVelocity(&velocity);
+	this->tpmStartOriginGrid = start;
+	this->tpmStartVelocityGrid = velocity;
 
 	this->tpmTriggerFixOrigins.AddToTail(start);
 	if (velocity.Length() == 0.0f)
@@ -1541,8 +1580,15 @@ void KZTimerModeService::OnTryPlayerMovePost(Vector *pFirstDest, trace_t *pFirst
 	}
 }
 
+void KZTimerModeService::OnCategorizePositionPost(bool bStayOnGround)
+{
+	this->inCategorize = false;
+}
+
 void KZTimerModeService::OnCategorizePosition(bool bStayOnGround)
 {
+	// Приземление внутри CategorizePosition после TryPlayerMove = проверка земли в конце куска (ComputePerfGrid).
+	this->inCategorize = true;
 	// Already on the ground?
 	// If we are already colliding on a standable valid plane, we don't want to do the check.
 	if (bStayOnGround || this->lastValidPlane.Length() < EPSILON || this->lastValidPlane.z > 0.7f)
@@ -1757,6 +1803,108 @@ f32 KZTimerModeService::PerfLandTime(const char **kind, bool *inclusive)
 		return actual;
 	}
 	return ground;
+}
+
+// Где в GO игрок встал бы на землю. Движок нашёл землю в конце куска [start, end] (доли тика); GO проверял землю
+// только на границах 1/128 (доли 0, 0.5, 1). Штатно куски не перешагивают границ (OnPhysicsSimulatePost ставит
+// принудительный шаг на середину тика, на каждой границе движок сам проверяет землю) — тогда приземление на
+// ближайшей границе после конца куска. Если середины не было и граница внутри куска — эмулируем проверку там:
+// путь — прямая от начала воздушного TryPlayerMove, модель сверяется с движком на конце куска.
+void KZTimerModeService::ComputePerfGrid()
+{
+	this->perfGridOffset = NAN;
+	this->perfGridKind = "fb";
+	this->perfGridLandKey = this->player->landingTime;
+	this->perfGridStartFrac = this->perfGridEndFrac = -1.0f;
+	CMoveData *mv = this->player->currentMoveData;
+	f32 frametime = g_pKZUtils->GetGlobals()->frametime;
+	bool atMoveEnd = this->inCategorize && this->didTPM && this->player->processingMovement && mv;
+	f32 start = atMoveEnd ? mv->m_flSubtickStartFraction : -1.0f;
+	f32 end = atMoveEnd ? mv->m_flSubtickEndFraction : -1.0f;
+	bool fractionsOk = atMoveEnd && frametime > 0.0f && start >= -1e-4f && end <= 1.0001f && end > start
+					   && fabsf((end - start) * ENGINE_FIXED_TICK_INTERVAL - frametime) < 1e-4f;
+	static KztGoStats sink;
+	KztGoStats &st = this->player->IsFakeClient() ? sink : g_kztGo;
+	if (!fractionsOk)
+	{
+		st.gridFallback++;
+		return;
+	}
+	this->perfGridStartFrac = start;
+	this->perfGridEndFrac = end;
+	const f32 eps = 1e-4f;
+	if (fabsf(end - 0.5f) < eps || fabsf(end - 1.0f) < eps)
+	{
+		// Кусок кончился на границе — это и есть проверка GO.
+		this->perfGridOffset = 0.0f;
+		this->perfGridKind = "on";
+		st.gridOn++;
+		return;
+	}
+	f32 next = end < 0.5f ? 0.5f : 1.0f;
+	f32 prev = next - 0.5f;
+	i32 atPrev = 0;
+	// prev не позже начала куска: там (или позже, в начале куска) движок уже проверял землю — не стоял.
+	if (start < prev - eps)
+	{
+		// Кусок начался раньше границы prev (не было шага на середине тика) — эмулируем проверку земли на ней.
+		// Сверка модели пути с движком: на конце куска игрок по модели обязан стоять на земле.
+		if (this->GroundAtGridPoint((end - start) * ENGINE_FIXED_TICK_INTERVAL) != 1)
+		{
+			this->perfGridKind = "fb_model";
+			st.gridFallback++;
+			return;
+		}
+		atPrev = this->GroundAtGridPoint((prev - start) * ENGINE_FIXED_TICK_INTERVAL);
+	}
+	if (atPrev == 1)
+	{
+		this->perfGridOffset = (prev - end) * ENGINE_FIXED_TICK_INTERVAL;
+		this->perfGridKind = "prev";
+		st.gridPrev++;
+	}
+	else
+	{
+		this->perfGridOffset = (next - end) * ENGINE_FIXED_TICK_INTERVAL;
+		this->perfGridKind = atPrev == 2 ? "blocked" : "next";
+		(atPrev == 2 ? st.gridBlocked : st.gridNext)++;
+	}
+}
+
+// Стоял бы игрок на земле через dt секунд от начала воздушного TryPlayerMove куска: 1 — да, 0 — нет,
+// 2 — путь упёрся в стену/застрял (модель не годится, считаем «нет»).
+i32 KZTimerModeService::GroundAtGridPoint(f32 dt)
+{
+	f32 standableZ = 0.7f;
+	if (sv_standable_normal.IsValidRef() && sv_standable_normal.IsConVarDataAvailable())
+	{
+		standableZ = sv_standable_normal.Get();
+	}
+	bbox_t bounds;
+	this->player->GetBBoxBounds(&bounds);
+	CTraceFilterPlayerMovementCS filter(this->player->GetPlayerPawn());
+	Vector from = this->tpmStartOriginGrid;
+	Vector to = from + this->tpmStartVelocityGrid * dt;
+	trace_t tr;
+	INavPhysicsInterface::TraceShape(Ray_t(bounds.mins, bounds.maxs), from, to, &filter, &tr);
+	if (tr.m_bStartInSolid)
+	{
+		return 2;
+	}
+	if (tr.m_flFraction < 1.0f)
+	{
+		// Упёрся в пол по пути — к моменту dt уже стоит на нём.
+		return tr.m_vHitNormal.z >= standableZ ? 1 : 2;
+	}
+	// Как CategorizePosition: пол в пределах 2 u под ногами.
+	Vector down = to;
+	down.z -= 2.0f;
+	INavPhysicsInterface::TraceShape(Ray_t(bounds.mins, bounds.maxs), to, down, &filter, &tr);
+	if (tr.m_bStartInSolid)
+	{
+		return 2;
+	}
+	return tr.m_flFraction < 1.0f && tr.m_vHitNormal.z >= standableZ ? 1 : 0;
 }
 
 f32 KZTimerModeService::SafeLandKey()
