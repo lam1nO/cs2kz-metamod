@@ -49,6 +49,9 @@ namespace scmd
 
 	META_RES OnClientCommand(CPlayerSlot &slot, const CCommand &args);
 	META_RES OnDispatchConCommand(ConCommandRef cmd, const CCommandContext &ctx, const CCommand &args);
+	// «.cmd» и голое «cmd» в say/say_team переписывает в «!cmd» прямо в args — звать ДО всех
+	// обработчиков say (см. utils/chat_trigger.h).
+	void NormalizeChatTrigger(ConCommandRef cmd, const CCommandContext &ctx, const CCommand &args);
 } // namespace scmd
 
 class SCmdRegister

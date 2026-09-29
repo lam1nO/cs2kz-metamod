@@ -2,6 +2,7 @@
 #include "common.h"
 #include "utils/utils.h"
 #include "simplecmds.h"
+#include "chat_trigger.h"
 #include "../kz/kz.h"
 #include "../kz/language/kz_language.h"
 #include "../kz/option/kz_option.h"
@@ -544,6 +545,99 @@ static_function bool DispatchChatByName(CCSPlayerController *controller, const C
 		}
 	}
 	return matched;
+}
+
+// Есть ли в реестре команда с таким чат-именем (без kz_-префикса).
+static_function bool IsRegisteredChatName(const char *word)
+{
+	for (i32 i = 0; i < g_cmdManager.cmdCount; i++)
+	{
+		const Scmd &cmd = g_cmdManager.cmds[i];
+		const char *name = cmd.hasConsolePrefix ? cmd.name + strlen(SCMD_CONSOLE_PREFIX) : cmd.name;
+		if (!V_stricmp(word, name))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+static_function bool IsValidConCommand(const char *prefix, const char *word)
+{
+	char name[SCMD_MAX_NAME_LEN];
+	V_snprintf(name, sizeof(name), "%s%s", prefix, word);
+	V_strlower(name);
+	return g_pCVar && g_pCVar->FindConCommand(name).IsValidRef();
+}
+
+// Команда форка или CSSharp-плагина (css_<слово>: !ws, !mcustom, !maps). Голые «rtv»/
+// «nominate» GG1 ловит сам из player_chat, их не трогаем. Точке этого мало: у GG1 команды
+// без css_ (rtv, nominate, nextmap), поэтому для «.» годится любая ConCommand — «!»-строку
+// CSSharp всё равно отдаёт только своим обработчикам, движковую команду она не исполнит.
+static_function bool IsKnownChatWord(const char *word, chattrigger::Form form, void *)
+{
+	if (IsRegisteredChatName(word) || IsValidConCommand("css_", word))
+	{
+		return true;
+	}
+	if (form != chattrigger::FORM_DOT)
+	{
+		return false;
+	}
+	if (IsValidConCommand("", word))
+	{
+		return true;
+	}
+	// «.» в русской раскладке — клавиша «/», так что «.кем» — обычный случай. Здесь только
+	// решаем, команда ли это: саму строку перекодируют обработчики «!» (ниже и в GG1).
+	// Без префикса кириллицу не ремапим: «к» стало бы «r» (рестарт), как было у GG1 с «кем».
+	char latin[SCMD_MAX_NAME_LEN];
+	return RemapCyrillicToLatin(word, latin, sizeof(latin))
+		   && (IsRegisteredChatName(latin) || IsValidConCommand("css_", latin) || IsValidConCommand("", latin));
+}
+
+void scmd::NormalizeChatTrigger(ConCommandRef cmd, const CCommandContext &ctx, const CCommand &args)
+{
+	if (!cmd.IsValidRef() || args.ArgC() < 2 || !utils::GetController(ctx.GetPlayerSlot()))
+	{
+		return;
+	}
+	const char *commandName = cmd.GetName();
+	if (V_stricmp(commandName, "say") && V_stricmp(commandName, "say_team"))
+	{
+		return;
+	}
+
+	// Текст — как его берёт kz_misc: ArgS без обрамляющих кавычек.
+	const char *argS = args.ArgS();
+	i32 argLen = strlen(argS);
+	if (argLen >= 2 && argS[0] == '"' && argS[argLen - 1] == '"')
+	{
+		argS++;
+		argLen -= 2;
+	}
+	if (argLen <= 0 || argLen >= SCMD_MAX_CHAT_LEN)
+	{
+		return;
+	}
+	char text[SCMD_MAX_CHAT_LEN];
+	V_strncpy(text, argS, argLen + 1);
+
+	char rewritten[SCMD_MAX_CHAT_LEN];
+	if (!chattrigger::Rewrite(text, IsKnownChatWord, nullptr, rewritten, sizeof(rewritten)))
+	{
+		return;
+	}
+	// В кавычках, как шлёт клиент: CSSharp (DetourHostSay) срезает с ArgS ровно одну
+	// открывающую кавычку, а токенайзер без кавычек порезал бы строку на ':' и скобках.
+	char line[SCMD_MAX_CHAT_LEN];
+	if (V_snprintf(line, sizeof(line), "%s \"%s\"", commandName, rewritten) >= (i32)sizeof(line) - 1)
+	{
+		return;
+	}
+	// Тот же CCommand доходит до kz_misc, scmd, движкового say и Host_Say CSSharp — правка
+	// на месте нужна, чтобы все они увидели «!»-строку.
+	const_cast<CCommand &>(args).Tokenize(line);
 }
 
 META_RES scmd::OnDispatchConCommand(ConCommandRef cmd, const CCommandContext &ctx, const CCommand &args)

@@ -2,8 +2,8 @@
 {
 	"Command List - Chat Header"
 	{
-		"en"		"{gold}Available commands (type in chat):"
-		"ru"		"{gold}Доступные команды (введите в чат):"
+		"en"		"{gold}Available commands (type in chat with !, . or /, or just the name):"
+		"ru"		"{gold}Доступные команды (в чат через !, . или / либо просто названием):"
 	}
 	// Заголовки категорий для чат-версии !help (whitelist).
 	"Help Category - Checkpoints"

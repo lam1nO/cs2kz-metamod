@@ -864,6 +864,7 @@ static_function void Hook_DispatchConCommand(ConCommandRef cmd, const CCommandCo
 	{
 		RETURN_META(result);
 	}
+	scmd::NormalizeChatTrigger(cmd, ctx, args);
 	if (KZOptionService::GetOptionInt("overridePlayerChat", true))
 	{
 		KZ::misc::ProcessConCommand(cmd, ctx, args);

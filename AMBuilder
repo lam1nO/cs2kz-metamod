@@ -68,6 +68,7 @@ def configure_main(sdk_target, sdk, cxx):
     os.path.join(builder.sourcePath, 'src', 'utils', 'detours.cpp'),
     os.path.join(builder.sourcePath, 'src', 'utils', 'schema.cpp'),
     os.path.join(builder.sourcePath, 'src', 'utils', 'simplecmds.cpp'),
+    os.path.join(builder.sourcePath, 'src', 'utils', 'chat_trigger.cpp'),
     os.path.join(builder.sourcePath, 'src', 'utils', 'ctimer.cpp'),
     os.path.join(builder.sourcePath, 'src', 'utils', 'http.cpp'),
     os.path.join(builder.sourcePath, 'src', 'utils', 'async_file_io.cpp'),

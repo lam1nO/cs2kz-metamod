@@ -2281,6 +2281,21 @@ Mapping API регистрирует их как родные триггеры �
   `ProcessConCommand` (наш лог чата, `PrintConsoleAll`, racing `chat_message`) — это не «просто
   отключить префиксы».
 
+## Чат-команды без «!»: точка и голое имя (`src/utils/chat_trigger.*`)
+
+Игрок subfeer (28.09) пишет команды без префикса и капсом (`MAPTOP`, `RTV`); в русской раскладке
+на клавише «/» стоит «.». `scmd::NormalizeChatTrigger` первым делом в `Hook_DispatchConCommand`
+переписывает say `".cmd ..."` и `"cmd ..."` в `"!cmd ..."` **в самом CCommand** — дальше строку
+видят kz_misc (не ретранслирует), scmd, движковый say и `DetourHostSay` CSSharp (тот же объект),
+то есть «.» и голое имя работают ровно как «!», включая CSSharp-плагины (!ws, !mcustom, !maps).
+
+- Голое слово — только команда форка или `css_<слово>`. Голые `rtv`/`nominate` GG1 ловит сам из
+  `player_chat`, их не трогаем. Кириллица без префикса не ремапится («к» → `r` = рестарт).
+- Голыми НЕ работают `nc` (noclip, «nice»), `b` (бонус), `hm`, `o` — ломали бы ран посреди чата.
+- Точка шире: любая ConCommand (у GG1 `rtv`/`nominate` без css_) и кириллица по раскладке.
+- Строки с `"` не переписываются. Host-тест:
+  `g++ -std=c++17 -O1 -Wall tests/chat_trigger_test.cpp src/utils/chat_trigger.cpp -o /tmp/ct && /tmp/ct`.
+
 ## VPROF: убран `VPROF_EXIT_SCOPE()` (апдейт CS2 22.09.2026, билд 25470087)
 
 Билд 25470087 убрал из `libtier0.so` символ `CVProfile::ExitScope()` — остались
