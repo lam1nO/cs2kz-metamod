@@ -79,6 +79,9 @@ static_global struct
 	i32 errorFlags;
 	i32 errorCount;
 	char errors[32][256];
+	// Сколько из errors/errorFlags уже ушло в лог: таймер печатает только новое.
+	i32 errorsLogged;
+	i32 errorFlagsLogged;
 
 	bool hasJumpstatArea;
 	Vector jumpstatAreaPos;
@@ -90,7 +93,6 @@ static_global struct
 } g_mappingApi;
 
 static_global CTimer<> *g_errorTimer;
-static_global const char *g_errorPrefix = "{darkred} ERROR: ";
 static_global const char *g_triggerNames[] = {"Disabled",   "Modifier",   "Reset Checkpoints", "Single Bhop Reset", "Antibhop",
 											  "Start zone", "End zone",   "Split zone",        "Checkpoint zone",   "Stage zone",
 											  "Teleport",   "Multi bhop", "Single bhop",       "Sequential bhop"};
@@ -129,20 +131,27 @@ static_function void Mapi_Error(const char *format, ...)
 	g_mappingApi.errorCount++;
 }
 
+// Ошибки разметки карты — дело мапера, а не игроков: апстрим раз в минуту высыпал их красным
+// в общий чат всем (kz_kiwislide: повёрнутые триггеры старта/финиша). У нас — только в лог
+// сервера, каждая строка один раз за карту.
 static_function f64 Mapi_PrintErrors()
 {
-	if (g_mappingApi.errorFlags & MAPI_ERR_TOO_MANY_TRIGGERS)
+	i32 newFlags = g_mappingApi.errorFlags & ~g_mappingApi.errorFlagsLogged;
+	if (newFlags & MAPI_ERR_TOO_MANY_TRIGGERS)
 	{
-		utils::CPrintChatAll("%sToo many Mapping API triggers! Maximum is %i!", g_errorPrefix, g_mappingApi.triggers.Count());
+		KZ_LOG_WARN(LogChannel::General, "[cyb] mapapi_error Too many Mapping API triggers! Maximum is %i!\n", g_mappingApi.triggers.Count());
 	}
-	if (g_mappingApi.errorFlags & MAPI_ERR_TOO_MANY_COURSES)
+	if (newFlags & MAPI_ERR_TOO_MANY_COURSES)
 	{
-		utils::CPrintChatAll("%sToo many Courses! Maximum is %i!", g_errorPrefix, g_mappingApi.courseDescriptors.Count());
+		KZ_LOG_WARN(LogChannel::General, "[cyb] mapapi_error Too many Courses! Maximum is %i!\n", g_mappingApi.courseDescriptors.Count());
 	}
-	for (i32 i = 0; i < g_mappingApi.errorCount; i++)
+	g_mappingApi.errorFlagsLogged |= newFlags;
+
+	for (i32 i = g_mappingApi.errorsLogged; i < g_mappingApi.errorCount; i++)
 	{
-		utils::CPrintChatAll("%s%s", g_errorPrefix, g_mappingApi.errors[i]);
+		KZ_LOG_WARN(LogChannel::General, "[cyb] mapapi_error %s\n", g_mappingApi.errors[i]);
 	}
+	g_mappingApi.errorsLogged = g_mappingApi.errorCount;
 
 	return 60.0;
 }
@@ -1340,14 +1349,14 @@ const KZCourseDescriptor *KZ::mapapi::GetCourseDescriptorFromTrigger(const KzTri
 			course = Mapi_FindCourse(trigger->zone.courseDescriptor);
 			if (!course)
 			{
-				Mapi_Error("%s: Couldn't find course descriptor from name \"%s\"! Trigger's Hammer Id: %i", g_errorPrefix,
-						   trigger->zone.courseDescriptor, trigger->hammerId);
+				Mapi_Error("Couldn't find course descriptor from name \"%s\"! Trigger's Hammer Id: %i", trigger->zone.courseDescriptor,
+						   trigger->hammerId);
 			}
 			else if (course->disabled)
 			{
 				// Курс отключён платформой: ведём себя как «курса нет», но МОЛЧА. Mapi_Error здесь
-				// был бы катастрофой — он копит строки и раз в минуту высыпает их в общий чат
-				// всем игрокам, а касание отключённой зоны это штатное событие, а не ошибка.
+				// был бы шумом — он копит строки и раз в минуту высыпает их в лог сервера,
+				// а касание отключённой зоны это штатное событие, а не ошибка.
 				// Вызывающие (kz/trigger/callbacks.cpp, StartTouch и EndTouch) уже умеют выходить
 				// по !course для зон таймера, поэтому таймер на отключённом курсе не стартует.
 				course = nullptr;
