@@ -214,10 +214,12 @@ struct Recorder
 			tickData.push_back(data);
 			ShiftFrame(tickData.back());
 			totalTicksRecorded++;
-			if (tickData.size() >= FLUSH_INTERVAL_TICKS)
-			{
-				FlushChunkToDisk();
-			}
+			// cybershoke: сброс чанка — НЕ здесь, а после сабтиков этого же тика (PushData<Vec::Tick>).
+			// Апстрим сбрасывал прямо тут: чанк уходил с N тиками и N-1 счётчиками сабтиков,
+			// BuildChunkBuffer дописывал байт из-за конца вектора (мусорный счётчик), а сабтики
+			// сброшенного тика уезжали в следующий чанк. Итог у каждого рана длиннее 15 минут:
+			// сабтиков на 1 больше, чем тиков, после 15-й минуты всё сдвинуто, склейка куска
+			// (kz_partial_replay) отказывала «bad_sections» — и ран терял реплей целиком.
 		}
 		else if constexpr (std::is_same<T, RpEvent>::value)
 		{
@@ -275,6 +277,13 @@ struct Recorder
 			{
 				subtickMoves.push_back(data.subtickMoves[i]);
 			}
+			// Тик записан целиком (кадр + его сабтики) — теперь чанк можно сбрасывать. Условие на
+			// равенство размеров: кадр без сабтиков (если такой путь когда-нибудь появится) не
+			// должен уводить чанк с рассинхроном — тогда сброс просто дождётся следующего тика.
+			if (tickData.size() >= FLUSH_INTERVAL_TICKS && subtickCounts.size() == tickData.size())
+			{
+				FlushChunkToDisk();
+			}
 		}
 		else
 		{
@@ -293,8 +302,11 @@ struct Recorder
 		u32 offset = 0;
 		for (size_t i = 0; i < counts.size(); i++)
 		{
-			out[i].numSubtickMoves = counts[i];
-			for (u8 j = 0; j < counts[i]; j++)
+			// Счётчик сверх MAX_SUBTICK_MOVES (мусор, см. PushData<TickData>) писал бы мимо массива
+			// subtickMoves в соседние элементы, а хвост ходов читал бы за концом moves.
+			const u8 count = (u8)MIN((u32)counts[i], MAX_SUBTICK_MOVES);
+			out[i].numSubtickMoves = count;
+			for (u8 j = 0; j < count && offset < moves.size(); j++)
 			{
 				out[i].subtickMoves[j] = moves[offset++];
 			}

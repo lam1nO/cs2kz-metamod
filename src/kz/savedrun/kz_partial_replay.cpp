@@ -11,6 +11,7 @@
 #include "kz/recording/kz_recording.h"
 #include "kz/replays/compression.h"
 #include "kz/replays/cyb_replay_common.h"
+#include "kz/replays/cyb_subtick_repair.h"
 #include "kz/replays/kz_replay.h"
 #include "kz/timer/kz_timer.h"
 #include "utils/async_file_io.h"
@@ -135,6 +136,10 @@ namespace
 		std::vector<CmdData> cmds;
 		std::vector<u8> cmdSubtickCounts;
 		std::vector<SubtickData::RpSubtickMove> cmdSubtickMoves;
+		// Ремонт лишнего сабтика (см. ParseContainer): индекс мусорного элемента и его счётчик,
+		// -1 — ремонта не было. Только для лога на главном потоке.
+		i64 subtickRepairIdx = -1;
+		u32 subtickRepairCount = 0;
 		// Файл, докачанный из api: копия на диск этого сервера пишется только после того, как
 		// главный поток подтвердил, что ран ещё ждёт кусок (иначе инвалидированный кусок воскрес бы).
 		std::shared_ptr<std::vector<char>> raw;
@@ -205,6 +210,32 @@ namespace
 		{
 			out.reason = "bad_sections";
 			return;
+		}
+		// Запись сборкой с багом сброса чанка (до фикса в Recorder::PushData): у рана длиннее
+		// 15 минут сабтиков на 1 больше кадров. Мусорный элемент стоит на первом сбросе
+		// рекордера, писавшего живую часть: FLUSH_INTERVAL_TICKS-1 от его первого кадра — начала
+		// файла либо кадра сразу за последним стыком (склеенный кусок рекордер вставляет готовым
+		// чанком, живые кадры идут после него). Чиним, а не отказываем: отказ склейки снимает
+		// рекордер, и ран теряет реплей целиком.
+		if (!out.ticks.empty() && subticks.size() == out.ticks.size() + 1)
+		{
+			size_t firstLive = 0;
+			for (size_t i = out.ticks.size(); i-- > 0;)
+			{
+				if (out.ticks[i].post.replayFlags.splice)
+				{
+					firstLive = i + 1;
+					break;
+				}
+			}
+			const size_t garbageIdx = firstLive + Recorder::FLUSH_INTERVAL_TICKS - 1;
+			out.subtickRepairIdx = (i64)garbageIdx;
+			out.subtickRepairCount = garbageIdx < subticks.size() ? (u32)subticks[garbageIdx].numSubtickMoves : 0;
+			if (!KZ::replaysystem::subtickrepair::RepairExtraSubtick<SubtickData, MAX_SUBTICK_MOVES>(subticks, out.ticks.size(), garbageIdx))
+			{
+				out.reason = "bad_sections_subtick_repair";
+				return;
+			}
 		}
 		if (out.ticks.empty() || subticks.size() != out.ticks.size() || cmdSubticks.size() != out.cmds.size())
 		{
@@ -372,6 +403,11 @@ namespace
 			KZ_LOG_INFO(LogChannel::Replays, "[cyb] partial_replay_splice_skipped steam_id=%llu partial=%s reason=run_gone\n",
 						(unsigned long long)ctx.steamId64, ctx.partialId.c_str());
 			return;
+		}
+		if (p->subtickRepairIdx >= 0)
+		{
+			KZ_LOG_INFO(LogChannel::Replays, "[cyb] partial_replay_subtick_repaired steam_id=%llu partial=%s idx=%lld garbage_count=%u\n",
+						(unsigned long long)ctx.steamId64, ctx.partialId.c_str(), (long long)p->subtickRepairIdx, p->subtickRepairCount);
 		}
 		// Живые кадры уже ушли на диск частями (15 минут ожидания куска) — вставить кусок ПЕРЕД ними
 		// нечем. Практически недостижимо, но склеивать «через» сброшенные части нельзя.
