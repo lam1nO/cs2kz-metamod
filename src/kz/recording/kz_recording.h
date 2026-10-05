@@ -220,6 +220,14 @@ struct Recorder
 			// сброшенного тика уезжали в следующий чанк. Итог у каждого рана длиннее 15 минут:
 			// сабтиков на 1 больше, чем тиков, после 15-й минуты всё сдвинуто, склейка куска
 			// (kz_partial_replay) отказывала «bad_sections» — и ран терял реплей целиком.
+			// Аварийный сброс: если кадр когда-нибудь придёт без сабтиков, равенство размеров не
+			// наступит и обычный сброс не случится никогда — память росла бы без предела. Недостающие
+			// счётчики добиваем нулями (ходов у них нет, поток ходов не сдвигается).
+			if (tickData.size() >= 2 * FLUSH_INTERVAL_TICKS && subtickCounts.size() < tickData.size())
+			{
+				subtickCounts.resize(tickData.size(), 0);
+				FlushChunkToDisk();
+			}
 		}
 		else if constexpr (std::is_same<T, RpEvent>::value)
 		{
@@ -305,11 +313,12 @@ struct Recorder
 			// Счётчик сверх MAX_SUBTICK_MOVES (мусор, см. PushData<TickData>) писал бы мимо массива
 			// subtickMoves в соседние элементы, а хвост ходов читал бы за концом moves.
 			const u8 count = (u8)MIN((u32)counts[i], MAX_SUBTICK_MOVES);
-			out[i].numSubtickMoves = count;
-			for (u8 j = 0; j < count && offset < moves.size(); j++)
+			u8 copied = 0;
+			for (; copied < count && offset < moves.size(); copied++)
 			{
-				out[i].subtickMoves[j] = moves[offset++];
+				out[i].subtickMoves[copied] = moves[offset++];
 			}
+			out[i].numSubtickMoves = copied;
 		}
 	}
 
