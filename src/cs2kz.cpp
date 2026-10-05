@@ -211,6 +211,7 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 	if (late)
 	{
 		g_steamAPI.Init();
+		KZ::misc::customchangemap::OnSteamAPIActivated();
 		g_pKZPlayerManager->OnLateLoad();
 		// We need to reset the map for mapping api to properly load in.
 		utils::ResetMap();

@@ -37,6 +37,7 @@
 #include "kz/recording/kz_recording.h"
 #include "kz/replays/kz_replaysystem.h"
 #include "kz/racing/kz_racing.h"
+#include "kz/misc/kz_customchangemap.h"
 #include "utils/utils.h"
 #include "utils/cvarquery.h"
 // Полное определение CServerSideClientBase: хук ниже берёт индекс втаблицы из указателя на
@@ -581,6 +582,7 @@ static_function void Hook_GameServerSteamAPIActivated()
 {
 	g_steamAPI.Init();
 	g_pKZPlayerManager->OnSteamAPIActivated();
+	KZ::misc::customchangemap::OnSteamAPIActivated();
 }
 
 static_function void Hook_GameServerSteamAPIDeactivated() {}

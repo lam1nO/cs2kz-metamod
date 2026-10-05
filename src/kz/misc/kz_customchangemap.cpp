@@ -11,9 +11,27 @@
 
 #include "public/steam/isteamugc.h"
 
+#include <filesystem>
+#include <system_error>
+#include <thread>
+#include <sys/stat.h>
+#include <unordered_set>
+
 #include "tier0/memdbgon.h"
 
 extern CSteamGameServerAPIContext g_steamAPI;
+
+// Карта, лежащая в общем кэше ноды, но неизвестная Steam'у этого процесса. Steam узнаёт
+// об установленных картах только из ACF, а ACF инстанса агент собирает лишь перед
+// docker run: карта, добавленная в пул или обновлённая сторожем после старта, для
+// сервера «не установлена», и смена на неё уходила в DownloadItem — а он внутри
+// игрового процесса отвечает EResult 2/3/37 (srv-12, kz_imaginary, 05.10). Сторож
+// держит кэш равным публикации, поэтому кэш — истина: если vpk на месте, отвечаем
+// «установлена» сами. Хук на vtable ISteamUGC, а не на наш указатель: путь к аддону
+// при смене карты спрашивает libserver (CCSAddonManager), состояние — ещё и MAM;
+// все они на STEAMUGC_INTERFACE_VERSION019, то есть на одной таблице.
+SH_DECL_HOOK1(ISteamUGC, GetItemState, SH_NOATTRIB, 0, uint32, PublishedFileId_t);
+SH_DECL_HOOK5(ISteamUGC, GetItemInstallInfo, SH_NOATTRIB, 0, bool, PublishedFileId_t, uint64 *, char *, uint32, uint32 *);
 
 namespace
 {
@@ -27,6 +45,172 @@ struct CustomMapState
 };
 
 CustomMapState s_state;
+
+int s_itemStateHook = 0;
+int s_installInfoHook = 0;
+std::unordered_set<PublishedFileId_t> s_loggedCacheItems;
+std::thread::id s_mainThread;
+bool s_offThreadLogged = false;
+
+// Стек контекстов SourceHook общий: вызов хука из чужого потока параллельно с главным
+// его портит. По открытому коду все вызовы UGC — из главного потока; libserver закрыт,
+// поэтому на канарейке ловим обратное в лог, а не предполагаем.
+void CheckHookThread(const char *fn)
+{
+	if (!s_offThreadLogged && std::this_thread::get_id() != s_mainThread)
+	{
+		s_offThreadLogged = true;
+		KZ_LOG_WARN(LogChannel::General, "[cyb] workshop_cache_hook_off_main_thread fn=%s\n", fn);
+	}
+}
+
+struct CachedItem
+{
+	std::string folder;
+	uint64 size = 0;
+	uint32 timestamp = 0;
+};
+
+// Каталог воркшопа относительно рабочего каталога процесса: у выделенного сервера он
+// лежит там (см. BuildAddonPath в MAM), cwd = game/bin/linuxsteamrt64.
+const std::filesystem::path &WorkshopContentDir()
+{
+	static std::filesystem::path s_dir = []
+	{
+		std::error_code ec;
+		std::filesystem::path cwd = std::filesystem::current_path(ec);
+		return ec ? std::filesystem::path() : cwd / "steamapps" / "workshop" / "content" / "730";
+	}();
+	return s_dir;
+}
+
+// Подмена допустима ТОЛЬКО в режиме общего кэша: агент монтирует кэш ноды поверх
+// content/730, и его держит равным публикации сторож. В legacy-режиме (srv-3, DM) этот
+// каталог свой у инстанса, обновления качает сам Steam — там «vpk на месте» не значит
+// «актуален», и подмена NeedsUpdate навсегда оставила бы сервер на старой версии.
+bool IsSharedCacheMount()
+{
+	static int s_shared = -1;
+	if (s_shared != -1)
+	{
+		return s_shared == 1;
+	}
+	s_shared = 0;
+#ifdef _LINUX
+	std::error_code ec;
+	std::filesystem::path dir = std::filesystem::canonical(WorkshopContentDir(), ec);
+	FILE *f = ec ? nullptr : fopen("/proc/self/mountinfo", "r");
+	if (f)
+	{
+		// Поле 5 — точка монтирования. Пробелы в путях экранируются (\040), у нас их нет.
+		char line[4096];
+		while (fgets(line, sizeof(line), f))
+		{
+			char mountPoint[2048];
+			if (sscanf(line, "%*s %*s %*s %*s %2047s", mountPoint) == 1 && dir == mountPoint)
+			{
+				s_shared = 1;
+				break;
+			}
+		}
+		fclose(f);
+	}
+#endif
+	KZ_LOG_INFO(LogChannel::General, "[cyb] workshop_cache_mode shared=%d dir=%s\n", s_shared, WorkshopContentDir().string().c_str());
+	return s_shared == 1;
+}
+
+bool FindCachedItem(PublishedFileId_t id, CachedItem *out)
+{
+	namespace fs = std::filesystem;
+	if (WorkshopContentDir().empty())
+	{
+		return false;
+	}
+	std::error_code ec;
+	fs::path dir = WorkshopContentDir() / std::to_string(id);
+
+	// Только Source 2: многочанковый <id>_dir.vpk или одиночный <id>.vpk. Айтемы
+	// CS:GO (_legacy.bin) движок всё равно не смонтирует.
+	fs::path vpk = dir / (std::to_string(id) + "_dir.vpk");
+	if (!fs::is_regular_file(vpk, ec))
+	{
+		vpk = dir / (std::to_string(id) + ".vpk");
+		if (!fs::is_regular_file(vpk, ec))
+		{
+			return false;
+		}
+	}
+	if (!out)
+	{
+		return true;
+	}
+
+	out->folder = dir.string();
+	out->size = 0;
+	// increment(ec), а не range-for: operator++ бросает filesystem_error, и при
+	// -fno-exceptions это std::terminate прямо внутри хука.
+	for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec))
+	{
+		std::error_code fileEc;
+		uintmax_t size = it->file_size(fileEc);
+		if (!fileEc && it->is_regular_file(fileEc))
+		{
+			out->size += size;
+		}
+	}
+	// stat, а не fs::last_write_time: эпоха file_clock в libstdc++ — 2174 год.
+	struct stat st;
+	out->timestamp = stat(vpk.string().c_str(), &st) == 0 && st.st_mtime > 0 ? static_cast<uint32>(st.st_mtime) : 0;
+	return true;
+}
+
+void LogCacheOverride(PublishedFileId_t id, uint32 steamState)
+{
+	if (s_loggedCacheItems.insert(id).second)
+	{
+		// Раз на карту за жизнь процесса: GetItemState зовут на каждой смене карты и в MAM.
+		KZ_LOG_INFO(LogChannel::General, "[cyb] workshop_cache_override id=%llu steam_state=0x%x\n", id, steamState);
+	}
+}
+
+uint32 Hook_GetItemState(PublishedFileId_t id)
+{
+	CheckHookThread("GetItemState");
+	uint32 state = META_RESULT_ORIG_RET(uint32);
+	bool installed = (state & k_EItemStateInstalled) && !(state & k_EItemStateNeedsUpdate);
+	if (installed || (state & k_EItemStateLegacyItem) || !IsSharedCacheMount() || !FindCachedItem(id, nullptr))
+	{
+		RETURN_META_VALUE(MRES_IGNORED, state);
+	}
+	LogCacheOverride(id, state);
+	RETURN_META_VALUE(MRES_OVERRIDE, k_EItemStateInstalled);
+}
+
+bool Hook_GetItemInstallInfo(PublishedFileId_t id, uint64 *punSizeOnDisk, char *pchFolder, uint32 cchFolderSize, uint32 *punTimeStamp)
+{
+	CheckHookThread("GetItemInstallInfo");
+	if (META_RESULT_ORIG_RET(bool))
+	{
+		RETURN_META_VALUE(MRES_IGNORED, true);
+	}
+	CachedItem item;
+	if (!pchFolder || cchFolderSize == 0 || !IsSharedCacheMount() || !FindCachedItem(id, &item) || item.folder.size() >= cchFolderSize)
+	{
+		RETURN_META_VALUE(MRES_IGNORED, false);
+	}
+	V_strncpy(pchFolder, item.folder.c_str(), cchFolderSize);
+	if (punSizeOnDisk)
+	{
+		*punSizeOnDisk = item.size;
+	}
+	if (punTimeStamp)
+	{
+		*punTimeStamp = item.timestamp;
+	}
+	LogCacheOverride(id, 0);
+	RETURN_META_VALUE(MRES_OVERRIDE, true);
+}
 
 bool IsMapReady(PublishedFileId_t id)
 {
@@ -141,7 +325,29 @@ void KZ::misc::customchangemap::Init()
 	s_downloadHandler.m_CallbackDownloadItemResult.Register(&s_downloadHandler, &CustomMapDownloadHandler::OnDownloadResult);
 }
 
+void KZ::misc::customchangemap::OnSteamAPIActivated()
+{
+	ISteamUGC *ugc = g_steamAPI.SteamUGC();
+	if (!ugc || s_itemStateHook)
+	{
+		return;
+	}
+	s_mainThread = std::this_thread::get_id();
+	s_itemStateHook = SH_ADD_VPHOOK(ISteamUGC, GetItemState, ugc, SH_STATIC(Hook_GetItemState), true);
+	s_installInfoHook = SH_ADD_VPHOOK(ISteamUGC, GetItemInstallInfo, ugc, SH_STATIC(Hook_GetItemInstallInfo), true);
+}
+
 void KZ::misc::customchangemap::Cleanup()
 {
 	s_downloadHandler.m_CallbackDownloadItemResult.Unregister();
+	if (s_itemStateHook)
+	{
+		SH_REMOVE_HOOK_ID(s_itemStateHook);
+		s_itemStateHook = 0;
+	}
+	if (s_installInfoHook)
+	{
+		SH_REMOVE_HOOK_ID(s_installInfoHook);
+		s_installInfoHook = 0;
+	}
 }
