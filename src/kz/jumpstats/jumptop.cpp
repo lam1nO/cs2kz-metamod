@@ -624,6 +624,11 @@ void KZ::jumptop::OnJumpFinish(KZPlayer *player, Jump *jump)
 void KZ::jumptop::StoreReplay(const UUID_t &uuid, const std::vector<char> &buffer)
 {
 	std::string uuidStr = uuid.ToString();
+	// Прыжок уже удалён из админки (kz_jumptop_forget пришёл раньше буфера) — ни файла, ни базы.
+	if (IsForgotten(uuidStr))
+	{
+		return;
+	}
 	// Локальная копия — чтобы !jumptop на этом же инстансе играл без похода в базу.
 	char path[512];
 	V_snprintf(path, sizeof(path), KZ_REPLAY_PATH "/%s.replay", uuidStr.c_str());
@@ -1306,7 +1311,8 @@ CON_COMMAND_F(kz_jumptop_forget, "Забыть удалённые прыжки: 
 		if (!IsForgotten(uuid))
 		{
 			g_forgottenReplays.push_back(uuid);
-			while (g_forgottenReplays.size() > 64)
+			// api шлёт UUID пачками по 10 — 256 с запасом держит недавние удаления.
+			while (g_forgottenReplays.size() > 256)
 			{
 				g_forgottenReplays.pop_front();
 			}
