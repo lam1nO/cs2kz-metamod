@@ -107,12 +107,13 @@ constexpr char sql_jumptop_getpbs[] = R"(
 
 // Место прыжка в топе: сколько ДРУГИХ игроков имеют строку лучше (дистанционный топ — по
 // дистанции; блочный — по блоку, затем по дистанции), плюс общее число игроков в топе.
-// Параметры: Mode, JumpType, IsBlockJump, Block, Block, Distance, SteamID64, Mode, JumpType, IsBlockJump.
+// Ровно равная дистанция — первенство у более ранней строки (меньший ID), иначе #1 получили бы оба.
+// Параметры: Mode, JumpType, IsBlockJump, Block, Block, Distance, Distance, ID, SteamID64, Mode, JumpType, IsBlockJump.
 constexpr char sql_jumptop_rank[] = R"(
     SELECT
         (SELECT COUNT(DISTINCT j.SteamID64) FROM Jumptop j
             WHERE j.Mode = %d AND j.JumpType = %d AND j.IsBlockJump = %d AND j.Removed = 0
-                AND (j.Block > %d OR (j.Block = %d AND j.Distance > %.6f))
+                AND (j.Block > %d OR (j.Block = %d AND (j.Distance > %.6f OR (j.Distance = %.6f AND j.ID < %u))))
                 AND j.SteamID64 <> %llu AND )" JUMPTOP_NOT_BANNED_SQL R"(),
         (SELECT COUNT(DISTINCT j.SteamID64) FROM Jumptop j
             WHERE j.Mode = %d AND j.JumpType = %d AND j.IsBlockJump = %d AND j.Removed = 0 AND )" JUMPTOP_NOT_BANNED_SQL R"()

@@ -313,7 +313,7 @@ namespace
 			return;
 		}
 		char rank[2048];
-		V_snprintf(rank, sizeof(rank), sql_jumptop_rank, modeID, jumpType, isBlock ? 1 : 0, block, block, distance, steamID64, modeID, jumpType,
+		V_snprintf(rank, sizeof(rank), sql_jumptop_rank, modeID, jumpType, isBlock ? 1 : 0, block, block, distance, distance, id, steamID64, modeID, jumpType,
 				   isBlock ? 1 : 0);
 		Transaction txn;
 		txn.queries.push_back(rank);
