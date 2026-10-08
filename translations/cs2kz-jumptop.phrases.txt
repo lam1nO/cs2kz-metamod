@@ -1,0 +1,109 @@
+"Phrases"
+{
+	// =====[ JUMPTOP ]=====
+	"Jumptop - Block Word"
+	{
+		"en"		"block"
+		"ru"		"блок"
+	}
+	"Jumptop - Kind Distance"
+	{
+		"en"		"distance"
+		"ru"		"дистанция"
+	}
+	"Jumptop - Kind Block"
+	{
+		"en"		"blocks"
+		"ru"		"блоки"
+	}
+	"Jumptop - New PB"
+	{
+		"#format"	"jump:s,mode:s,place:d,total:d"
+		"en"		"{purple}Jumptop {grey}| New PB: {default}{jump} {grey}[{mode}] — {gold}#{place}{grey} of {total}"
+		"ru"		"{purple}Джамптоп {grey}| Новый личный рекорд: {default}{jump} {grey}[{mode}] — {gold}#{place}{grey} из {total}"
+	}
+	"Jumptop - New Server Record"
+	{
+		"#format"	"player:s,jump:s,mode:s"
+		"en"		"{purple}Jumptop {grey}| {lime}{player}{grey} set a {gold}NEW SERVER RECORD{grey}: {default}{jump} {grey}[{mode}]"
+		"ru"		"{purple}Джамптоп {grey}| {lime}{player}{grey} — {gold}НОВЫЙ РЕКОРД СЕРВЕРА{grey}: {default}{jump} {grey}[{mode}]"
+	}
+	"Jumptop - Menu Title"
+	{
+		"#format"	"mode:s"
+		"en"		"Jumptop [{mode}]"
+		"ru"		"Джамптоп [{mode}]"
+	}
+	"Jumptop - Menu Mode"
+	{
+		"#format"	"mode:s"
+		"en"		"Mode: {mode} (switch)"
+		"ru"		"Режим: {mode} (сменить)"
+	}
+	"Jumptop - Top Title"
+	{
+		"#format"	"type:s,kind:s,mode:s"
+		"en"		"Top {type} — {kind} [{mode}]"
+		"ru"		"Топ {type} — {kind} [{mode}]"
+	}
+	"Jumptop - Empty"
+	{
+		"#format"	"type:s,kind:s,mode:s"
+		"en"		"{purple}Jumptop {grey}| No jumps yet: {default}{type} {kind} {grey}[{mode}]"
+		"ru"		"{purple}Джамптоп {grey}| Пока пусто: {default}{type} {kind} {grey}[{mode}]"
+	}
+	"Jumptop - See Console"
+	{
+		"en"		"{purple}Jumptop {grey}| The top is printed to console."
+		"ru"		"{purple}Джамптоп {grey}| Топ выведен в консоль."
+	}
+	"Jumptop - Usage"
+	{
+		"en"		"{purple}Jumptop {grey}| Usage: {default}!jumptop <lj|bh|mbh|wj|laj|lah|jb> [block] [ckz|kzt|vnl]"
+		"ru"		"{purple}Джамптоп {grey}| Использование: {default}!jumptop <lj|bh|mbh|wj|laj|lah|jb> [block] [ckz|kzt|vnl]"
+	}
+	"Jumptop - Database Unavailable"
+	{
+		"en"		"{purple}Jumptop {grey}| {darkred}Database is unavailable right now."
+		"ru"		"{purple}Джамптоп {grey}| {darkred}База сейчас недоступна."
+	}
+	"Jumptop - No Replay"
+	{
+		"en"		"{purple}Jumptop {grey}| No replay for this jump."
+		"ru"		"{purple}Джамптоп {grey}| У этого прыжка нет реплея."
+	}
+	"Jumptop - Jump Not Found"
+	{
+		"#format"	"id:d"
+		"en"		"{purple}Jumptop {grey}| Jump #{id} not found."
+		"ru"		"{purple}Джамптоп {grey}| Прыжок #{id} не найден."
+	}
+	"Jumptop - Info Printed"
+	{
+		"#format"	"player:s,jump:s,mode:s,id:d"
+		"en"		"{purple}Jumptop {grey}| {lime}{player}{grey}: {default}{jump} {grey}[{mode}] #{id} — full stats in console."
+		"ru"		"{purple}Джамптоп {grey}| {lime}{player}{grey}: {default}{jump} {grey}[{mode}] #{id} — полная статистика в консоли."
+	}
+	"Jumptop - Info Usage"
+	{
+		"en"		"{purple}Jumptop {grey}| Usage: {default}!jumpinfo <id>{grey}, {default}!jumpreplay <id>{grey} (id is in the top printout in console)"
+		"ru"		"{purple}Джамптоп {grey}| Использование: {default}!jumpinfo <id>{grey}, {default}!jumpreplay <id>{grey} (id — в выводе топа в консоли)"
+	}
+	"Jumptop - PBs"
+	{
+		"#format"	"player:s,mode:s,list:s"
+		"en"		"{purple}Jumptop {grey}| {lime}{player}{grey} [{mode}]: {default}{list}"
+		"ru"		"{purple}Джамптоп {grey}| {lime}{player}{grey} [{mode}]: {default}{list}"
+	}
+	"Jumptop - No PBs"
+	{
+		"#format"	"player:s,mode:s"
+		"en"		"{purple}Jumptop {grey}| {lime}{player}{grey} has no jumps in the top yet [{mode}]."
+		"ru"		"{purple}Джамптоп {grey}| У {lime}{player}{grey} пока нет прыжков в топе [{mode}]."
+	}
+	"Jumptop - Player Not Found"
+	{
+		"en"		"{purple}Jumptop {grey}| Player not found."
+		"ru"		"{purple}Джамптоп {grey}| Игрок не найден."
+	}
+}

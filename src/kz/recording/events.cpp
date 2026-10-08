@@ -6,6 +6,7 @@
 #include "kz/global/kz_global.h"
 #include "kz/option/kz_option.h"
 #include "kz/prac/kz_prac.h"
+#include "kz/jumpstats/jumptop.h"
 
 extern CConVar<i32> kz_replay_recording_min_jump_tier;
 
@@ -365,6 +366,53 @@ void KZRecordingService::OnJumpFinish(Jump *jump)
 	}
 }
 
+void KZRecordingService::MarkJumpForJumptop(const UUID_t &uuid, Jump *jump)
+{
+	JumpRecorder *target = nullptr;
+	for (auto &recorder : this->jumpRecorders)
+	{
+		if (recorder.uuid == uuid)
+		{
+			target = &recorder;
+			break;
+		}
+	}
+	if (!target)
+	{
+		this->EnsureCircularRecorderInitialized();
+		this->jumpRecorders.push_back(JumpRecorder(jump));
+		target = &this->jumpRecorders.back();
+		target->uuid = uuid;
+	}
+	target->jumptop = true;
+	// Блок в заголовке реплея (апстрим всегда пишет -1).
+	if (jump->GetBlock() > 0.0f)
+	{
+		target->replayHeader.mutable_jump()->set_block_distance((i32)jump->GetBlock());
+	}
+}
+
+void KZRecordingService::QueueJumpRecorderWrite(JumpRecorder &&recorder)
+{
+	if (!fileWriter)
+	{
+		return;
+	}
+	bool jumptop = recorder.jumptop;
+	auto recorderPtr = std::make_unique<JumpRecorder>(std::move(recorder));
+	this->CopyWeaponsToRecorder(recorderPtr.get());
+	if (!jumptop)
+	{
+		fileWriter->QueueWriteToFile(std::move(recorderPtr));
+		return;
+	}
+	// clang-format off
+	fileWriter->QueueWrite(std::move(recorderPtr),
+		[](const UUID_t &uuid, f32 duration, std::vector<char> &&buffer) { KZ::jumptop::StoreReplay(uuid, buffer); },
+		[](const char *error) { KZ_LOG_WARN(LogChannel::Recording, "[cyb] jumptop_replay_serialize_failed error=%s\n", error); });
+	// clang-format on
+}
+
 void KZRecordingService::OnClientDisconnect()
 {
 	for (auto &recorder : this->runRecorders)
@@ -379,12 +427,7 @@ void KZRecordingService::OnClientDisconnect()
 	this->runRecorders.clear();
 	for (auto &recorder : this->jumpRecorders)
 	{
-		if (fileWriter)
-		{
-			auto recorderPtr = std::make_unique<JumpRecorder>(std::move(recorder));
-			this->CopyWeaponsToRecorder(recorderPtr.get());
-			fileWriter->QueueWriteToFile(std::move(recorderPtr));
-		}
+		this->QueueJumpRecorderWrite(std::move(recorder));
 	}
 	this->jumpRecorders.clear();
 

@@ -378,12 +378,7 @@ void KZRecordingService::CheckRecorders()
 		{
 			// Stop this recorder and queue for async write
 			KZ_LOG_DEBUG(LogChannel::Recording, "Jump recorder stopped\n");
-			if (fileWriter)
-			{
-				auto recorderPtr = std::make_unique<JumpRecorder>(std::move(recorder));
-				this->CopyWeaponsToRecorder(recorderPtr.get());
-				fileWriter->QueueWriteToFile(std::move(recorderPtr));
-			}
+			this->QueueJumpRecorderWrite(std::move(recorder));
 			it = this->jumpRecorders.erase(it);
 		}
 		else

@@ -3,6 +3,7 @@
 #include "utils/simplecmds.h"
 
 #include "kz_jumpstats.h"
+#include "jumptop.h"
 #include "kz/anticheat/kz_anticheat.h"
 #include "kz/mode/kz_mode.h"
 #include "kz/style/kz_style.h"
@@ -1062,6 +1063,8 @@ void KZJumpstatsService::EndJump()
 	{
 		KZJumpstatsService::AnnounceJump(jump);
 		this->player->recordingService->OnJumpFinish(jump);
+		// Джамптоп — после записи прыжка: ему нужен UUID этого прыжка (lastJumpUUID).
+		KZ::jumptop::OnJumpFinish(this->player, jump);
 	}
 	this->player->anticheatService->OnJumpFinish(jump);
 }

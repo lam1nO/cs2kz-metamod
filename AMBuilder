@@ -144,6 +144,7 @@ def configure_main(sdk_target, sdk, cxx):
     os.path.join(builder.sourcePath, 'src', 'kz', 'hud', 'layout', 'rpmenu.cpp'),
 
     os.path.join(builder.sourcePath, 'src', 'kz', 'jumpstats', 'kz_jumpstats.cpp'),
+    os.path.join(builder.sourcePath, 'src', 'kz', 'jumpstats', 'jumptop.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'jumpstats', 'block_tracking.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'jumpstats', 'strafe_graph.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'jumpstats', 'jump_reporting.cpp'),

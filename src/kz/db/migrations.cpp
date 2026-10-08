@@ -17,6 +17,7 @@
 #include "queries/times.h"
 #include "queries/savedruns.h"
 #include "queries/hudshares.h"
+#include "queries/jumptop.h"
 
 #include "vendor/sql_mm/src/public/sql_mm.h"
 #include "vendor/sql_mm/src/public/sqlite_mm.h"
@@ -49,6 +50,8 @@ static_global const std::string mysqlMigrations[] =
 	trimString(mysql_bans_create),
 	trimString(mysql_savedruns_create),
 	trimString(mysql_hudshares_create),
+	trimString(mysql_jumptop_create),
+	trimString(mysql_jumptop_replays_create),
 };
 
 static_global const std::string sqliteMigrations[] = 
@@ -68,6 +71,8 @@ static_global const std::string sqliteMigrations[] =
 	trimString(sqlite_bans_create),
 	trimString(sqlite_savedruns_create),
 	trimString(sqlite_hudshares_create),
+	trimString(sqlite_jumptop_create),
+	trimString(sqlite_jumptop_replays_create),
 };
 
 // clang-format on

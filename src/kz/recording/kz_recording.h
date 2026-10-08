@@ -393,6 +393,9 @@ struct RunRecorder : public Recorder
 struct JumpRecorder : public Recorder
 {
 	JumpRecorder(Jump *jump);
+	// Прыжок — новый PB джамптопа (KZ::jumptop): по остановке буфер уходит в базу
+	// (KZ::jumptop::StoreReplay), а не только файлом в kzreplays/.
+	bool jumptop = false;
 };
 
 struct CheaterRecorder : public Recorder
@@ -523,6 +526,12 @@ public:
 	{
 		return lastJumpUUID;
 	}
+
+	// Джамптоп: реплей прыжка с этим UUID обязателен (новый PB). Если рекордер прыжка не
+	// заведён (тир ниже kz_replay_recording_min_jump_tier) — заводим, и помечаем его.
+	void MarkJumpForJumptop(const UUID_t &uuid, Jump *jump);
+	// Остановленный jump-рекордер → файл (обычный) либо буфер в базу (джамптоп).
+	void QueueJumpRecorderWrite(JumpRecorder &&recorder);
 
 	enum class RecorderType
 	{

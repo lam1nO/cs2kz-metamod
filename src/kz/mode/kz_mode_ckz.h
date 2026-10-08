@@ -93,10 +93,13 @@ class KZClassicModeService : public KZModeService
 	using KZModeService::KZModeService;
 
 	f32 distanceTiers[JUMPTYPE_COUNT - 3][DISTANCETIER_COUNT] = {
-		{217.0f, 265.0f, 270.0f, 275.0f, 280.0f, 284.0f}, // LJ
+		// LJ: Wrecker 282, а не 284 (решение пользователя 08.10, как в KZT с 09.08).
+		{217.0f, 265.0f, 270.0f, 275.0f, 280.0f, 282.0f}, // LJ
 		{217.0f, 275.0f, 280.0f, 287.0f, 292.0f, 295.0f}, // BH
 		{217.0f, 275.0f, 280.0f, 287.0f, 292.0f, 295.0f}, // MBH
-		{217.0f, 275.0f, 280.0f, 287.0f, 292.0f, 295.0f}, // WJ
+		// WJ (решение пользователя 08.10): meh 0–269.9, impressive 270, perfect 275, godlike 280,
+		// ownage 285, wrecker 289+. Meh = 0 — как в KZT, любой валидный WJ ≥ Meh.
+		{0.0f, 270.0f, 275.0f, 280.0f, 285.0f, 289.0f}, // WJ
 		{120.0f, 160.0f, 170.0f, 180.0f, 190.0f, 200.0f}, // LAJ
 		{217.0f, 260.0f, 265.0f, 270.0f, 275.0f, 278.0f}, // LAH
 		{217.0f, 275.0f, 280.0f, 287.0f, 292.0f, 295.0f}, // JB
