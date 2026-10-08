@@ -348,17 +348,29 @@ namespace
 				{
 					return;
 				}
-				// Строка PB — как в GOKZ, только самому игроку; место в топе видно в !jumptop.
-				if (player)
+				// Строка PB — как в GOKZ. Самому игроку всегда; остальным — если у них включён преф
+				// jsBroadcastPB (дефолт on, «Джампстаты» и «Игра → Сообщения» в !options). На WR остальным
+				// уходит только строка WR ниже, без дубля PB.
+				for (i32 i = 0; i <= MAXPLAYERS; i++)
 				{
+					KZPlayer *target = g_pKZPlayerManager->ToPlayer(i);
+					if (!target || !target->IsInGame() || target->IsFakeClient() || target->IsCSTV())
+					{
+						continue;
+					}
+					bool self = target == player;
+					if (!self && (place == 1 || !target->optionService->GetPreferenceBool("jsBroadcastPB", true)))
+					{
+						continue;
+					}
 					if (isBlock)
 					{
-						player->languageService->PrintChat(true, false, "Jumptop - New Block PB", name.c_str(), block, jumpTypeStr[jumpType], distance,
+						target->languageService->PrintChat(true, false, "Jumptop - New Block PB", name.c_str(), block, jumpTypeStr[jumpType], distance,
 														   mode.c_str());
 					}
 					else
 					{
-						player->languageService->PrintChat(true, false, "Jumptop - New PB", name.c_str(), jumpTypeStr[jumpType], distance, mode.c_str());
+						target->languageService->PrintChat(true, false, "Jumptop - New PB", name.c_str(), jumpTypeStr[jumpType], distance, mode.c_str());
 					}
 				}
 				if (place != 1)

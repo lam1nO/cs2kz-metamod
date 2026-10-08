@@ -116,6 +116,11 @@ void KZJumpstatsMenu_Register()
 						(i64)JSTierChoice::BroadcastSoundMinTier);
 	KZ::menu::SetItemPref(cat, "jsBroadcastSoundMinTier", KZOptStorage::Int, DistanceTier_Godlike);
 
+	// Чужие PB джамптопа в чате. Тот же преф стоит и в «Игра → Сообщения» (local_prefs.cpp) —
+	// одна переключалка в двух местах (решение пользователя 08.10); реестр KZ::prefs дубль ключа
+	// отбрасывает сам.
+	KZ::menu::AddToggle(cat, "Jumpstats - Menu Label BroadcastPB", "jsBroadcastPB", true);
+
 	KZ::menu::AddToggle(cat, "Jumpstats - Menu Label Failstats", "jsFailstats", true);
 	// Не было в старом !js-меню — см. шапку файла.
 	KZ::menu::AddToggle(cat, "Jumpstats - Menu Label FailstatsConsole", "jsFailstatsConsole", true);

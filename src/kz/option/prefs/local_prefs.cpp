@@ -115,6 +115,8 @@ void KZLocalOptionsMenu_Register()
 	// --- Messages --------------------------------------------------------------------------
 	KZOptNode *messages = KZ::menu::AddSub(game, "Options - Menu Cat Messages");
 	KZ::menu::AddToggle(messages, "Options - Menu Label MissedTime", "missedTimeAnnounce", true);
+	// Чужие PB джамптопа — тот же преф, что в разделе «Джампстаты» (jumpstats_prefs.cpp).
+	KZ::menu::AddToggle(messages, "Jumpstats - Menu Label BroadcastPB", "jsBroadcastPB", true);
 	// mapOverlay — строки "[CS2KZ] split|N|время" в КОНСОЛЬ (kz_timer.cpp, 7 мест): их читают
 	// внешние оверлеи стримеров, в игре ничего не рисуется. Преф жив и переключался только
 	// командой `!mapoverlay` — пункта в меню у него не было. Голый AddToggle: кэша нет, читатели

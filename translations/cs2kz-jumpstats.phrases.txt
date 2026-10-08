@@ -1187,6 +1187,12 @@
 		"chi"		"播报最低等级 (控制台)"
 		"ua"		"Мін. тир трансляції (консоль)"
 	}
+	"Jumpstats - Menu Label BroadcastPB"
+	{
+		"en"		"Other players' jump PBs in chat"
+		"ru"		"Чужие PB прыжков в чате"
+		"ua"		"Чужі PB стрибків у чаті"
+	}
 	"Jumpstats - Menu Label Failstats"
 	{
 		"en"		"Failstats"
