@@ -191,7 +191,7 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 	CybAliasSync::Init();
 	KZRecordingService::Init();
 
-	Msg("[CS2KZ] load: детуры встали\n");
+	Msg("[CS2KZ] load: хуки встали\n");
 	ismm->AddListener(this, this);
 	KZ::mapapi::Init();
 	KZ::mode::InitModeManager();

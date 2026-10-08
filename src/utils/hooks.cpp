@@ -593,10 +593,10 @@ static KHook::Return<bool> FireEventPre(IGameEventManager2 *pThis, IGameEvent *e
 			// листенеры событие получают как обычно; лог [cyb] player_join/leave живёт
 			// в клиент-хуках (ClientPutInServerPre/ClientDisconnectPost) и не тронут.
 			// xuid берём из самого события — состояние игрока на этих эпохах ещё/уже
-			// неполное. Переигрываем вызов с bDontBroadcast=true через KHook::Recall — та же
-			// семантика, что RETURN_META_VALUE_NEWPARAMS при SourceHook: цепочка хуков
-			// перезапускается с новым аргументом, поэтому без guard по bDontBroadcast была бы
-			// рекурсия.
+			// неполное. Переигрываем вызов с bDontBroadcast=true через KHook::Recall — аналог
+			// RETURN_META_VALUE_NEWPARAMS при SourceHook: цепочка продолжается со следующего хука
+			// с новым аргументом. Guard по bDontBroadcast оставлен как страховка от повторного
+			// входа.
 			if (!bDontBroadcast && KZInvisibleService::IsInvisibleSteamId(event->GetUint64("xuid")))
 			{
 				return KHook::Recall(&IGameEventManager2::FireEvent, KHook::Return<bool> {KHook::Action::Ignore, true}, pThis, event, true);
@@ -1544,6 +1544,23 @@ bool hooks::Initialize(char *error, size_t maxlen)
 		return false;
 	}
 
+	// Втаблицы — тоже до первого хука: не нашлась (сменилось имя класса после апдейта) — честный
+	// отказ загрузки, а не разыменование nullptr внутри AddGlobal.
+	void *networkGameServerVtbl = modules::engine->FindVirtualTable("CNetworkGameServer");
+	void *serverSideClientVtbl = modules::engine->FindVirtualTable("CServerSideClient");
+	void *entityDebugGameSystemVtbl = modules::server->FindVirtualTable("CEntityDebugGameSystem");
+	void *gameEntitySystemVtbl = modules::server->FindVirtualTable("CGameEntitySystem");
+	void *spawnGroupMgrVtbl = modules::server->FindVirtualTable("CSpawnGroupMgrGameSystem");
+	void *moveServicesVtbl = modules::server->FindVirtualTable("CCSPlayer_MovementServices");
+	void *playerControllerVtbl = modules::server->FindVirtualTable("CCSPlayerController");
+	if (!networkGameServerVtbl || !serverSideClientVtbl || !entityDebugGameSystemVtbl || !gameEntitySystemVtbl || !spawnGroupMgrVtbl
+		|| !moveServicesVtbl || !playerControllerVtbl)
+	{
+		snprintf(error, maxlen, "Failed to resolve one or more virtual tables required for hooking.");
+		KZ_LOG_WARN(LogChannel::General, "%s\n", error);
+		return false;
+	}
+
 	playerManager = static_cast<MovementPlayerManager *>(g_pPlayerManager);
 
 	// Entity hooks
@@ -1609,7 +1626,7 @@ bool hooks::Initialize(char *error, size_t maxlen)
 
 	// Hooks by searching virtual tables
 	{
-		void *vtable = modules::engine->FindVirtualTable("CNetworkGameServer");
+		void *vtable = networkGameServerVtbl;
 		activateServerHook.Configure(&CNetworkGameServerBase::ActivateServer);
 		activateServerHook.AddGlobal((CNetworkGameServerBase *)&vtable);
 
@@ -1618,14 +1635,13 @@ bool hooks::Initialize(char *error, size_t maxlen)
 	}
 
 	{
-		void *vtable = modules::engine->FindVirtualTable("CServerSideClient");
+		void *vtable = serverSideClientVtbl;
 		respondCvarValueHook.Configure(&CServerSideClientBase::ProcessRespondCvarValue);
 		respondCvarValueHook.AddGlobal((CServerSideClientBase *)&vtable);
-
 	}
 
 	{
-		void *vtable = modules::server->FindVirtualTable("CEntityDebugGameSystem");
+		void *vtable = entityDebugGameSystemVtbl;
 		serverGamePostSimulateHook.Configure(&IGameSystem::OnServerGamePostSimulate);
 		serverGamePostSimulateHook.AddGlobal((IGameSystem *)&vtable);
 
@@ -1634,21 +1650,29 @@ bool hooks::Initialize(char *error, size_t maxlen)
 	}
 
 	{
-		void *vtable = modules::server->FindVirtualTable("CGameEntitySystem");
+		void *vtable = gameEntitySystemVtbl;
 		entitySystemSpawnHook.Configure(&CEntitySystem::Spawn);
 		entitySystemSpawnHook.AddGlobal((CEntitySystem *)&vtable);
 	}
 
 	{
-		void *vtable = modules::server->FindVirtualTable("CSpawnGroupMgrGameSystem");
+		void *vtable = spawnGroupMgrVtbl;
 		createLoadingSpawnGroupHook.Configure(&CSpawnGroupMgrGameSystem::CreateLoadingSpawnGroup);
 		createLoadingSpawnGroupHook.AddGlobal((CSpawnGroupMgrGameSystem *)&vtable);
 	}
 
 	{
-		void *vtable = modules::server->FindVirtualTable("CCSPlayer_MovementServices");
+		void *vtable = moveServicesVtbl;
 		playerRunCommandHook.AddGlobal((CCSPlayer_MovementServices *)&vtable);
 		finishMoveHook.AddGlobal((CCSPlayer_MovementServices *)&vtable);
+	}
+
+	{
+		// На всю втаблицу контроллера, как прежний SH_ADD_MANUALVPHOOK: поштучный Add из
+		// HookEntities (round_prestart) пропускал всех, кто зашёл позже начала раунда, — у них
+		// не срабатывали пауза при уходе в спек, prac и невидимки (OnChangeTeamPost).
+		void *vtable = playerControllerVtbl;
+		changeTeamHook.AddGlobal((CCSPlayerController *)&vtable);
 	}
 
 	// Signature-based hooks
@@ -1707,11 +1731,7 @@ void hooks::Cleanup()
 // ============================================================
 void hooks::AddEntityHooks(CBaseEntity *entity)
 {
-	if (!V_stricmp(entity->GetClassname(), "cs_player_controller"))
-	{
-		changeTeamHook.Add(static_cast<CCSPlayerController *>(entity));
-	}
-	else if (KZTriggerService::IsValidTrigger(entity) || !V_stricmp(entity->GetClassname(), "player"))
+	if (KZTriggerService::IsValidTrigger(entity) || !V_stricmp(entity->GetClassname(), "player"))
 	{
 		startTouchHook.Add(entity);
 		touchHook.Add(entity);
