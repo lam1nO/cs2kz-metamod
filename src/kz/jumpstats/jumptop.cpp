@@ -348,10 +348,18 @@ namespace
 				{
 					return;
 				}
+				// Строка PB — как в GOKZ, только самому игроку; место в топе видно в !jumptop.
 				if (player)
 				{
-					std::string label = JumpLabel(player->languageService->GetLanguage(), jumpType, isBlock, block, distance);
-					player->languageService->PrintChat(true, false, "Jumptop - New PB", label.c_str(), mapName.c_str(), mode.c_str(), place, total);
+					if (isBlock)
+					{
+						player->languageService->PrintChat(true, false, "Jumptop - New Block PB", name.c_str(), block, jumpTypeStr[jumpType], distance,
+														   mode.c_str());
+					}
+					else
+					{
+						player->languageService->PrintChat(true, false, "Jumptop - New PB", name.c_str(), jumpTypeStr[jumpType], distance, mode.c_str());
+					}
 				}
 				if (place != 1)
 				{

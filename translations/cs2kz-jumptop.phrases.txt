@@ -18,10 +18,18 @@
 	}
 	"Jumptop - New PB"
 	{
-		// Новый PB в джамптопе: LJ 265.1234 на kz_map [CKZ] | #3/17
-		"#format"	"jump:s,map:s,mode:s,place:d,total:d"
-		"en"		"{grey}New jumptop PB: {default}{jump}{grey} on {default}{map} {grey}[{purple}{mode}{grey}] | #{default}{place}{grey}/{default}{total}"
-		"ru"		"{grey}Новый PB в джамптопе: {default}{jump}{grey} на {default}{map} {grey}[{purple}{mode}{grey}] | #{default}{place}{grey}/{default}{total}"
+		// Как в GOKZ (gokz-localdb «Jump Record»), видит только сам игрок.
+		// Bill set a new Long Jump PB of 265.1234 [CKZ]
+		"#format"	"player:s,jump_type:s,distance:.4f,mode:s"
+		"en"		"{lime}{player} {grey}set a new {default}{jump_type} {yellow}PB {grey}of {default}{distance} {grey}[{purple}{mode}{grey}]"
+		"ru"		"{lime}{player} {grey}поставил новый {default}{jump_type} {yellow}PB {grey}на {default}{distance} {grey}[{purple}{mode}{grey}]"
+	}
+	"Jumptop - New Block PB"
+	{
+		// Как в GOKZ («Block Jump Record»). Bill set a new 260 Block Long Jump PB of 266.2586 [CKZ]
+		"#format"	"player:s,block:d,jump_type:s,distance:.4f,mode:s"
+		"en"		"{lime}{player} {grey}set a new {green}{block} Block {default}{jump_type} {yellow}PB {grey}of {default}{distance} {grey}[{purple}{mode}{grey}]"
+		"ru"		"{lime}{player} {grey}поставил новый {green}{block} Block {default}{jump_type} {yellow}PB {grey}на {default}{distance} {grey}[{purple}{mode}{grey}]"
 	}
 	"Jumptop - New World Record"
 	{
