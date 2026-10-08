@@ -279,7 +279,7 @@ SCMD(kz_help, SCFL_MISC | SCFL_HELP)
 			PrintCategoryCommands(player, i, false);
 		}
 	}
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 bool scmd::RegisterCmd(const char *name, scmd::Callback_t *callback, const char *descKey, u64 flags)
@@ -389,9 +389,9 @@ bool scmd::UnregisterCmd(const char *name)
 	return false;
 }
 
-META_RES scmd::OnClientCommand(CPlayerSlot &slot, const CCommand &args)
+bool scmd::OnClientCommand(CPlayerSlot &slot, const CCommand &args)
 {
-	META_RES result = MRES_IGNORED;
+	bool result = false;
 	if (!GameEntitySystem())
 	{
 		return result;
@@ -402,7 +402,7 @@ META_RES scmd::OnClientCommand(CPlayerSlot &slot, const CCommand &args)
 	KZPlayer *player = controller ? g_pKZPlayerManager->ToPlayer(controller) : nullptr;
 	if (!controller || !player)
 	{
-		return MRES_IGNORED;
+		return false;
 	}
 
 	// Игрок нажал G. Ловим здесь, потому что игрового события дропа форк не слушает, а
@@ -426,10 +426,10 @@ META_RES scmd::OnClientCommand(CPlayerSlot &slot, const CCommand &args)
 		{
 			if (!CanRunCommand(player, g_cmdManager.cmds[i].flags))
 			{
-				return MRES_SUPERCEDE;
+				return true;
 			}
 			result = g_cmdManager.cmds[i].callback(controller, &args);
-			if (result == MRES_SUPERCEDE)
+			if (result)
 			{
 				return result;
 			}
@@ -511,7 +511,7 @@ static_function bool RemapCyrillicToLatin(const char *in, char *out, int outSize
 // Проходит реестр и вызывает колбэки всех команд с чат-именем cmdName (имя без
 // kz_-префикса и без триггера). Возвращает true, если хоть одна сматчилась.
 // suppress ← true, если чат-строку надо проглотить (тихий триггер '/' либо колбэк
-// вернул MRES_SUPERCEDE); на первом же supercede обход прекращается — как в исходной
+// вернул true); на первом же supercede обход прекращается — как в исходной
 // логике диспатча.
 static_function bool DispatchChatByName(CCSPlayerController *controller, const CCommand &cmdArgs, const char *cmdName, char trigger, bool &suppress)
 {
@@ -536,8 +536,8 @@ static_function bool DispatchChatByName(CCSPlayerController *controller, const C
 				return true;
 			}
 			matched = true;
-			META_RES res = cmds[i].callback(controller, &cmdArgs);
-			if (trigger == SCMD_CHAT_SILENT_TRIGGER || res == MRES_SUPERCEDE)
+			bool res = cmds[i].callback(controller, &cmdArgs);
+			if (trigger == SCMD_CHAT_SILENT_TRIGGER || res)
 			{
 				suppress = true;
 				break;
@@ -640,9 +640,9 @@ void scmd::NormalizeChatTrigger(ConCommandRef cmd, const CCommandContext &ctx, c
 	const_cast<CCommand &>(args).Tokenize(line);
 }
 
-META_RES scmd::OnDispatchConCommand(ConCommandRef cmd, const CCommandContext &ctx, const CCommand &args)
+bool scmd::OnDispatchConCommand(ConCommandRef cmd, const CCommandContext &ctx, const CCommand &args)
 {
-	META_RES result = MRES_IGNORED;
+	bool result = false;
 	if (!GameEntitySystem())
 	{
 		return result;
@@ -654,7 +654,7 @@ META_RES scmd::OnDispatchConCommand(ConCommandRef cmd, const CCommandContext &ct
 	KZPlayer *player = controller ? g_pKZPlayerManager->ToPlayer(controller) : nullptr;
 	if (!cmd.IsValidRef() || !controller || !player)
 	{
-		return MRES_IGNORED;
+		return false;
 	}
 	const char *commandName = cmd.GetName();
 
@@ -690,26 +690,26 @@ META_RES scmd::OnDispatchConCommand(ConCommandRef cmd, const CCommandContext &ct
 				KZ_LOG_WARN(LogChannel::Player, "[cyb] chat_dropped steam_id=%llu slot=%d reason=not_in_game text=\"%s\"\n",
 							claimedId, (i32)slot.Get(), text);
 			}
-			return MRES_SUPERCEDE;
+			return true;
 		}
 
 		if (args.ArgC() < 2)
 		{
 			// no argument somehow
-			return MRES_IGNORED;
+			return false;
 		}
 
 		if (args[1][0] != SCMD_CHAT_TRIGGER && args[1][0] != SCMD_CHAT_SILENT_TRIGGER)
 		{
 			// no chat command trigger
-			return MRES_IGNORED;
+			return false;
 		}
 
 		i32 argLen = strlen(args[1]);
 		if (argLen < 1)
 		{
 			// arg is too short!
-			return MRES_IGNORED;
+			return false;
 		}
 
 		CCommand cmdArgs;
@@ -755,7 +755,7 @@ META_RES scmd::OnDispatchConCommand(ConCommandRef cmd, const CCommandContext &ct
 		if (suppress)
 		{
 			// don't send chat message
-			return MRES_SUPERCEDE;
+			return true;
 		}
 
 		// Неизвестную команду НЕ проглатываем: `!`-команды есть и у соседних плагинов
@@ -782,10 +782,10 @@ META_RES scmd::OnDispatchConCommand(ConCommandRef cmd, const CCommandContext &ct
 			{
 				if (!CanRunCommand(player, cmds[i].flags))
 				{
-					return MRES_SUPERCEDE;
+					return true;
 				}
-				META_RES result = g_cmdManager.cmds[i].callback(controller, &args);
-				if (result == MRES_SUPERCEDE)
+				bool result = g_cmdManager.cmds[i].callback(controller, &args);
+				if (result)
 				{
 					return result;
 				}
@@ -793,5 +793,5 @@ META_RES scmd::OnDispatchConCommand(ConCommandRef cmd, const CCommandContext &ct
 		}
 	}
 
-	return MRES_IGNORED;
+	return false;
 }

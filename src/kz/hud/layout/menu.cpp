@@ -1607,7 +1607,7 @@ SCMD(kz_hudmenu, SCFL_HUD | SCFL_PREFERENCE)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player)
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	if (player->hudService->IsHudEditorOpen())
 	{
@@ -1617,7 +1617,7 @@ SCMD(kz_hudmenu, SCFL_HUD | SCFL_PREFERENCE)
 	{
 		player->hudService->OpenHudEditor();
 	}
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD_LINK(kz_hm, kz_hudmenu);

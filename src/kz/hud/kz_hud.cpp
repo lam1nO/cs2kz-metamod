@@ -1,4 +1,4 @@
-#include "../kz.h"
+#include "kz/kz.h"
 #include "cs2kz.h"
 #include "kz_hud.h"
 #include "sdk/datatypes.h"
@@ -2124,7 +2124,7 @@ SCMD(kz_showpos, SCFL_HUD | SCFL_PREFERENCE)
 	bool next = !player->optionService->GetPreferenceBool("showPos", false);
 	player->optionService->SetPreferenceBool("showPos", next);
 	player->languageService->PrintChat(true, false, next ? "HUD Option - Show Pos - Enable" : "HUD Option - Show Pos - Disable");
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD(kz_panel, SCFL_HUD)
@@ -2143,12 +2143,12 @@ SCMD(kz_panel, SCFL_HUD)
 			{
 				player->languageService->PrintChat(true, false, "HUD Option - Compact Panel - Disable");
 			}
-			return MRES_SUPERCEDE;
+			return true;
 		}
 		else
 		{
 			player->languageService->PrintChat(true, false, "Panel Command Usage");
-			return MRES_SUPERCEDE;
+			return true;
 		}
 	}
 	// Без аргумента: включить/выключить худ целиком. Роль бывшего тумблера showPanel теперь
@@ -2163,7 +2163,7 @@ SCMD(kz_panel, SCFL_HUD)
 		player->hudService->SetHudType(KZHUDService::HUD_TYPE_OFF);
 		player->languageService->PrintChat(true, false, "HUD Option - Info Panel - Disable");
 	}
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 // !hud — без аргументов открывает/закрывает редактор худа (спека 2026-09-26-hud-editor-options
@@ -2174,7 +2174,7 @@ SCMD(kz_hud, SCFL_HUD | SCFL_PREFERENCE)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player)
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	if (args->ArgC() < 2)
 	{
@@ -2186,15 +2186,15 @@ SCMD(kz_hud, SCFL_HUD | SCFL_PREFERENCE)
 		{
 			player->hudService->OpenHudEditor();
 		}
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	if (KZ_STREQI(args->Arg(1), "panel"))
 	{
 		// Отдельной субкомандой, а не в сводке: сводка печаталась ТОЛЬКО когда cs2menus не
 		// загружен, то есть на живом сервере была недостижима.
 		player->hudService->PrintPanelDiagnostics();
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	player->languageService->PrintChat(true, false, "HUD Command Usage");
-	return MRES_SUPERCEDE;
+	return true;
 }

@@ -426,9 +426,9 @@ SCMD(kz_rpmenu, SCFL_REPLAY | SCFL_HELP)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player)
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	const bool hidden = player->hudService->ToggleReplayMenuHidden();
 	player->languageService->PrintChat(true, false, hidden ? "Replay Panel - Hidden" : "Replay Panel - Shown");
-	return MRES_SUPERCEDE;
+	return true;
 }

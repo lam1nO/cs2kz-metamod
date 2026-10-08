@@ -28,12 +28,12 @@ SCMD(kz_fov, SCFL_PLAYER | SCFL_PREFERENCE | SCFL_HELP)
 		if (newFOV < minFOV || newFOV > maxFOV)
 		{
 			player->languageService->PrintChat(true, false, "Error Message (Invalid FOV)", args->ArgS(), minFOV, maxFOV);
-			return MRES_SUPERCEDE;
+			return true;
 		}
 
 		player->fovService->SetFOV(newFOV);
 	}
 
 	player->languageService->PrintChat(true, false, "FOV - Show", player->fovService->GetFOV());
-	return MRES_SUPERCEDE;
+	return true;
 }

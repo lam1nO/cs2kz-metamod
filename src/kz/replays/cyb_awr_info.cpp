@@ -198,13 +198,13 @@ SCMD(kz_awr, SCFL_RECORD | SCFL_HELP)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player)
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	if (!AwrCooldownPassed(player))
 	{
 		// Молча: отсечка защищает сеть, а не воспитывает игрока, и своя фраза на неё
 		// превратила бы спам командой в спам ответами.
-		return MRES_SUPERCEDE;
+		return true;
 	}
 
 	const AwrHeader header = BuildHeader(player);
@@ -256,5 +256,5 @@ SCMD(kz_awr, SCFL_RECORD | SCFL_HELP)
 											   PrintOutcome(uid, header, CybAwrInfo::Classify(404, false, wrInfo.status), 0, 0);
 										   });
 		});
-	return MRES_SUPERCEDE;
+	return true;
 }

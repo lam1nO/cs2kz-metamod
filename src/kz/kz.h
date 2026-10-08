@@ -293,7 +293,7 @@ namespace KZ
 		// точка форс-спавна затёрла бы место, откуда он реально уходил наблюдать.
 		void JoinTeam(KZPlayer *player, int newTeam, bool restorePos = true, bool savePos = true);
 		void ProcessConCommand(ConCommandRef cmd, const CCommandContext &ctx, const CCommand &args);
-		META_RES CheckBlockedRadioCommands(const char *cmd);
+		bool CheckBlockedRadioCommands(const char *cmd);
 		void OnRoundStart();
 		void InitTimeLimit();
 		void EnforceTimeLimit();

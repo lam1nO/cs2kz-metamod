@@ -2594,13 +2594,13 @@ SCMD(kz_lead, SCFL_REPLAY | SCFL_HELP)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player)
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	const char *arg = args->ArgC() >= 2 ? args->Arg(1) : "awr";
 	if (KZ_STREQI(arg, "off"))
 	{
 		player->leadService->Disable("command");
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	CybReplayDownload::Kind kind = CybReplayDownload::Kind::AWR;
 	if (KZ_STREQI(arg, "wr"))
@@ -2612,5 +2612,5 @@ SCMD(kz_lead, SCFL_REPLAY | SCFL_HELP)
 		kind = CybReplayDownload::Kind::PB;
 	}
 	player->leadService->Toggle(kind);
-	return MRES_SUPERCEDE;
+	return true;
 }

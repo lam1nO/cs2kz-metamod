@@ -754,5 +754,5 @@ SCMD(kz_rank, SCFL_PLAYER | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	player->profileService->PrintRank();
-	return MRES_SUPERCEDE;
+	return true;
 }

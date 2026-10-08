@@ -301,7 +301,7 @@ SCMD(kz_spec, SCFL_SPEC | SCFL_HELP)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player)
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 
 	// !spec <подстрока ника> — спек по совпадению (точное имя приоритетно).
@@ -310,10 +310,10 @@ SCMD(kz_spec, SCFL_SPEC | SCFL_HELP)
 		if (!player->specService->CanSpectate())
 		{
 			player->languageService->PrintChat(true, false, "Spectate Failure (Generic)");
-			return MRES_SUPERCEDE;
+			return true;
 		}
 		player->specService->SpectatePlayer(args->Arg(1));
-		return MRES_SUPERCEDE;
+		return true;
 	}
 
 	// !spec без аргументов — тоггл: спектатор возвращается в игру на сохранённое место.
@@ -327,17 +327,17 @@ SCMD(kz_spec, SCFL_SPEC | SCFL_HELP)
 		{
 			player->languageService->PrintChat(true, false, "Spec - No Saved Position");
 		}
-		return MRES_SUPERCEDE;
+		return true;
 	}
 
 	// Живой (или мёртвый вне спека) — свободная камера из своей точки.
 	if (!player->specService->CanSpectate())
 	{
 		player->languageService->PrintChat(true, false, "Spectate Failure (Generic)");
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	player->specService->SpectatePlayer("@me");
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD(kz_specs, SCFL_SPEC)
@@ -348,7 +348,7 @@ SCMD(kz_specs, SCFL_SPEC)
 	if (!targetPlayer)
 	{
 		player->languageService->PrintChat(true, false, "Spectator List (None)");
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	CUtlVector<CUtlString> spectatorList;
 	targetPlayer->specService->GetSpectatorList(spectatorList, player);
@@ -384,7 +384,7 @@ SCMD(kz_specs, SCFL_SPEC)
 											   spectatorListString.Get());
 		}
 	}
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD_LINK(kz_speclist, kz_specs);

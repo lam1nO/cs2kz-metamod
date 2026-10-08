@@ -239,5 +239,5 @@ SCMD(kz_goto, SCFL_PLAYER | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	player->gotoService->GotoPlayer(args->ArgS());
-	return MRES_SUPERCEDE;
+	return true;
 }

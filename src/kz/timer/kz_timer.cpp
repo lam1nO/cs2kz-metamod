@@ -861,7 +861,7 @@ SCMD(kz_timerstopsound, SCFL_TIMER | SCFL_PREFERENCE)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	player->timerService->ToggleTimerStopSound();
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD_LINK(kz_tss, kz_timerstopsound);
@@ -1005,7 +1005,7 @@ SCMD(kz_safeguard, SCFL_TIMER | SCFL_PREFERENCE)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	player->timerService->ToggleSafeguard();
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD_LINK(kz_safe, kz_safeguard);
@@ -1015,7 +1015,7 @@ SCMD(kz_pro, SCFL_TIMER | SCFL_PREFERENCE | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	player->timerService->ToggleProSafeguard();
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 void KZTimerService::Reset()
@@ -1224,26 +1224,26 @@ SCMD(kz_stop, SCFL_TIMER | SCFL_HELP)
 	{
 		if (!player->timerService->CheckSafeguard(RESET_CONFIRM_STOP))
 		{
-			return MRES_SUPERCEDE;
+			return true;
 		}
 		player->savedRunService->InvalidateCurrent("stop");
 		player->timerService->TimerStop(true, "stop");
 	}
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD(kz_pause, SCFL_TIMER | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	player->timerService->TogglePause();
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD(kz_comparelevel, SCFL_RECORD | SCFL_TIMER | SCFL_PREFERENCE | SCFL_GLOBAL)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	player->timerService->SetCompareTarget(args->Arg(1));
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 static_function KZTimerService::CompareType GetCompareTypeFromString(const char *typeString)
@@ -2585,7 +2585,7 @@ SCMD(kz_recordvolume, SCFL_TIMER | SCFL_GLOBAL | SCFL_PREFERENCE)
 	f32 volume = Clamp((f32)utils::StringToFloat(args->Arg(1)), 0.0f, 2.0f);
 	player->optionService->SetPreferenceFloat("recordVolume", volume);
 	player->languageService->PrintChat(true, false, "Record Volume Set", volume);
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD(kz_mapoverlay, SCFL_TIMER | SCFL_PREFERENCE)
@@ -2596,5 +2596,5 @@ SCMD(kz_mapoverlay, SCFL_TIMER | SCFL_PREFERENCE)
 	// clang-format off
 	player->languageService->PrintChat(true, false, player->optionService->GetPreferenceBool("mapOverlay") ? "Map Overlay Enabled" : "Map Overlay Disabled");
 	// clang-format on
-	return MRES_SUPERCEDE;
+	return true;
 }

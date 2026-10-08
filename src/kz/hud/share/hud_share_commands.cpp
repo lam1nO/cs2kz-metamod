@@ -106,7 +106,7 @@ void KZ::hudshare::IssueShareCode(KZPlayer *player)
 SCMD(kz_hudshare, SCFL_HUD | SCFL_PREFERENCE)
 {
 	KZ::hudshare::IssueShareCode(g_pKZPlayerManager->ToPlayer(controller));
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD(kz_hudget, SCFL_HUD | SCFL_PREFERENCE)
@@ -114,18 +114,18 @@ SCMD(kz_hudget, SCFL_HUD | SCFL_PREFERENCE)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player)
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	if (args->ArgC() < 2)
 	{
 		player->languageService->PrintChat(true, false, "HUD Share - Usage Get");
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	if (!player->GetClient())
 	{
 		// userID нужен колбэку БД для безопасного резолва игрока после async round-trip.
 		player->languageService->PrintChat(true, false, "HUD Share - Not Ready");
-		return MRES_SUPERCEDE;
+		return true;
 	}
 
 	char code[KZ::hudshare::CODE_LENGTH + 1];
@@ -133,7 +133,7 @@ SCMD(kz_hudget, SCFL_HUD | SCFL_PREFERENCE)
 	{
 		KZ_LOG_WARN(LogChannel::Option, "[cyb] hud_share_get_failed reason=code_invalid steam_id=%llu\n", player->GetSteamId64(false));
 		player->languageService->PrintChat(true, false, "HUD Share - Code Invalid");
-		return MRES_SUPERCEDE;
+		return true;
 	}
 
 	const CPlayerUserId userID = player->GetClient()->GetUserID();
@@ -177,7 +177,7 @@ SCMD(kz_hudget, SCFL_HUD | SCFL_PREFERENCE)
 			pl->languageService->PrintChat(true, false, "HUD Share - Not Ready");
 		});
 
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 // Забрать худ наблюдаемого. Транспорта у команды нет вовсе (ни БД, ни кода): снимок снимается
@@ -189,10 +189,10 @@ SCMD(kz_hudtake, SCFL_HUD | SCFL_PREFERENCE)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player)
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	KZ::hudshare::TakeFromSpectated(player);
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD(kz_hudundo, SCFL_HUD | SCFL_PREFERENCE)
@@ -200,16 +200,16 @@ SCMD(kz_hudundo, SCFL_HUD | SCFL_PREFERENCE)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player)
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	if (!KZ::hudshare::HasUndo(player))
 	{
 		player->languageService->PrintChat(true, false, "HUD Share - Undo Empty");
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	// Отчёт игроку и лог печатает сам Apply — здесь добавлять нечего.
 	KZ::hudshare::ApplyUndo(player);
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 // === Выгрузка настроек текстом (второй путь обмена, спека §4: «оба пути») ====================
@@ -311,5 +311,5 @@ void KZ::hudshare::ExportToConsole(KZPlayer *player)
 SCMD(kz_hudexport, SCFL_HUD | SCFL_PREFERENCE)
 {
 	KZ::hudshare::ExportToConsole(g_pKZPlayerManager->ToPlayer(controller));
-	return MRES_SUPERCEDE;
+	return true;
 }

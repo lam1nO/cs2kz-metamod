@@ -2,6 +2,9 @@
 
 #include "common.h"
 #include "cs2kz.h"
+// Типы игрока/триггера раньше приходили транзитивно через utils/detours.h (снят вместе с funchook).
+#include "player/player.h"
+#include "sdk/entity/cbasetrigger.h"
 #include "addresses.h"
 #include "logging.h"
 #include "gameconfig.h"
@@ -19,7 +22,6 @@
 #include "gametrace.h"
 
 #include "module.h"
-#include "detours.h"
 #include "virtual.h"
 
 #include "steam/steam_gameserver.h"
@@ -101,17 +103,11 @@ bool utils::Initialize(ISmmAPI *ismm, char *error, size_t maxlen)
 	utils::UnlockConVars();
 	utils::UnlockConCommands();
 	utils::UpdateServerVersion();
-	if (!InitDetours())
-	{
-		V_snprintf(error, maxlen, "Failed to resolve or install one or more detours.");
-		return false;
-	}
 	return true;
 }
 
 void utils::Cleanup()
 {
-	FlushAllDetours();
 }
 
 CBaseEntity *utils::FindEntityByClassname(CEntityInstance *start, const char *name)

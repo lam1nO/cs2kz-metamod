@@ -8,7 +8,6 @@
 #include "utils/hooks.h"
 #include "utils/gameconfig.h"
 #include "utils/async_file_io.h"
-#include "utils/detours.h" // FlushAllDetours — уборка перед отказом Load()
 
 #include "movement/movement.h"
 #include "kz/kz.h"
@@ -98,14 +97,6 @@ static void AbortLoggingCleanup()
 	g_KZLoggingListener.CheckFile();
 }
 
-static void AbortLoadCleanup()
-{
-	FlushAllDetours();
-	ConVar_Unregister();
-	ix::uninitNetSystem();
-	AbortLoggingCleanup();
-}
-
 bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool late)
 {
 	setlocale(LC_ALL, "en_US.utf8");
@@ -148,16 +139,18 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 	}
 
 	Msg("[CS2KZ] load: cvars ok\n");
-	hooks::Initialize();
-	ix::initNetSystem();
-	Msg("[CS2KZ] load: hooks ok, ставим детуры движения\n");
-	if (!movement::InitDetours())
+	// KHook (Metamod API 18): hooks::Initialize резолвит ВСЕ сигнатуры до первого хука
+	// (апстрим 2a81023) — отказ здесь ничего в игре не пропатчил, поэтому сворачиваем только
+	// конвары и логирование. Прежние две фазы CREATE/ENABLE_DETOUR и FlushAllDetours ушли вместе
+	// с funchook.
+	if (!hooks::Initialize(error, maxlen))
 	{
-		snprintf(error, maxlen, "Failed to install one or more movement detours.");
-		KZ_LOG_WARN(LogChannel::General, "%s\n", error);
-		AbortLoadCleanup();
+		ConVar_Unregister();
+		AbortLoggingCleanup();
 		return false;
 	}
+	ix::initNetSystem();
+	Msg("[CS2KZ] load: hooks ok\n");
 	KZCheckpointService::Init();
 	KZPracService::Init();
 	KZTimerService::Init();

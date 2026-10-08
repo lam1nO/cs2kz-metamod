@@ -1445,7 +1445,7 @@ SCMD(kz_replay, SCFL_REPLAY | SCFL_HELP)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!g_pFullFileSystem || !player)
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 
 	// `full` — необязательный модификатор в любом месте ПОСЛЕ вида (`!replay pb full`,
@@ -1477,7 +1477,7 @@ SCMD(kz_replay, SCFL_REPLAY | SCFL_HELP)
 	if (argc < 2)
 	{
 		player->languageService->PrintChat(true, false, "Replay - Usage Command");
-		return MRES_SUPERCEDE;
+		return true;
 	}
 
 	const char *arg1 = argv[1];
@@ -1504,7 +1504,7 @@ SCMD(kz_replay, SCFL_REPLAY | SCFL_HELP)
 		if (targetSteamId64 == 0 && argc < 3)
 		{
 			player->languageService->PrintChat(true, false, "Error Message (Player Not Found)", player->GetName());
-			return MRES_SUPERCEDE;
+			return true;
 		}
 		if (argc >= 3)
 		{
@@ -1521,28 +1521,28 @@ SCMD(kz_replay, SCFL_REPLAY | SCFL_HELP)
 				// выглядел как «нет такого игрока» вообще (жалоба 17.09): называем причину и
 				// два рабочих пути — SteamID64 либо `!replay <ник>` (поиск по базе платформы).
 				player->languageService->PrintChat(true, false, "Replay - Target Not Online", targetArg);
-				return MRES_SUPERCEDE;
+				return true;
 			}
 		}
 		CybReplayDownload::RequestAndPlay(player, isPbProKind ? CybReplayDownload::Kind::PBPro : CybReplayDownload::Kind::PB, targetSteamId64);
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	// AWR — рекорд сети ПОСЛЕ вырезки телепорт-петель. Аргументов курса/режима в v1 нет:
 	// ключ, как у `wr`, — текущий курс и режим игрока.
 	if (KZ_STREQI(arg1, "awr"))
 	{
 		CybReplayDownload::RequestAndPlay(player, CybReplayDownload::Kind::AWR, 0);
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	if (KZ_STREQI(arg1, "wr"))
 	{
 		CybReplayDownload::RequestAndPlay(player, CybReplayDownload::Kind::WR, 0);
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	if (KZ_STREQI(arg1, "wrpro"))
 	{
 		CybReplayDownload::RequestAndPlay(player, CybReplayDownload::Kind::WRPro, 0);
-		return MRES_SUPERCEDE;
+		return true;
 	}
 
 	// Остались ТОЛЬКО серверные виды (локальная БД плагина) — они и раньше работали без
@@ -1566,12 +1566,12 @@ SCMD(kz_replay, SCFL_REPLAY | SCFL_HELP)
 		if (KZ_STREQI(arg1, kw.keyword))
 		{
 			LoadReplayForRecord(player, kw.type, argc >= 3 ? argv[2] : "", argc >= 4 ? argv[3] : "");
-			return MRES_SUPERCEDE;
+			return true;
 		}
 	}
 
 	LoadReplay(player, arg1);
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD(kz_rpgoto, SCFL_REPLAY)
@@ -1579,17 +1579,17 @@ SCMD(kz_rpgoto, SCFL_REPLAY)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player)
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 
 	if (args->ArgC() < 2)
 	{
 		player->languageService->PrintChat(true, false, "Replay - Usage Goto Time");
-		return MRES_SUPERCEDE;
+		return true;
 	}
 
 	KZ::replaysystem::commands::JumpToReplayTime(player, args->ArgS());
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD(kz_rpgototick, SCFL_REPLAY)
@@ -1597,17 +1597,17 @@ SCMD(kz_rpgototick, SCFL_REPLAY)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player)
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 
 	if (args->ArgC() < 2)
 	{
 		player->languageService->PrintChat(true, false, "Replay - Usage Goto Tick");
-		return MRES_SUPERCEDE;
+		return true;
 	}
 
 	KZ::replaysystem::commands::JumpToReplayTick(player, args->Arg(1));
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD(kz_rpspeed, SCFL_REPLAY)
@@ -1615,7 +1615,7 @@ SCMD(kz_rpspeed, SCFL_REPLAY)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player)
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 
 	if (args->ArgC() < 2)
@@ -1627,7 +1627,7 @@ SCMD(kz_rpspeed, SCFL_REPLAY)
 		KZ::replaysystem::commands::FormatReplaySpeed(KZ::replaysystem::data::KZ_REPLAY_SPEED_MIN, minText, sizeof(minText));
 		KZ::replaysystem::commands::FormatReplaySpeed(KZ::replaysystem::data::KZ_REPLAY_SPEED_MAX, maxText, sizeof(maxText));
 		player->languageService->PrintChat(true, false, "Replay - Speed Current", speedText, minText, maxText);
-		return MRES_SUPERCEDE;
+		return true;
 	}
 
 	char *endPtr = nullptr;
@@ -1635,11 +1635,11 @@ SCMD(kz_rpspeed, SCFL_REPLAY)
 	if (endPtr == args->Arg(1) || *endPtr != '\0' || !(speed > 0.0f))
 	{
 		player->languageService->PrintChat(true, false, "Replay - Invalid Speed");
-		return MRES_SUPERCEDE;
+		return true;
 	}
 
 	KZ::replaysystem::commands::SetReplaySpeed(player, speed);
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD(kz_rpstep, SCFL_REPLAY)
@@ -1647,7 +1647,7 @@ SCMD(kz_rpstep, SCFL_REPLAY)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player)
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 
 	// Без аргумента — шаг на один кадр вперёд: это основной жест покадрового просмотра.
@@ -1659,7 +1659,7 @@ SCMD(kz_rpstep, SCFL_REPLAY)
 		if (endPtr == args->Arg(1) || *endPtr != '\0' || parsed == 0)
 		{
 			player->languageService->PrintChat(true, false, "Replay - Invalid Step");
-			return MRES_SUPERCEDE;
+			return true;
 		}
 		// Кламп ДО приведения к i32: без него !rpstep 99999999999 (strtol → LONG_MAX)
 		// после среза давал бы −1, то есть шаг НАЗАД вместо «в конец записи».
@@ -1669,7 +1669,7 @@ SCMD(kz_rpstep, SCFL_REPLAY)
 	}
 
 	KZ::replaysystem::commands::StepReplay(player, frames);
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD(kz_rpinfo, SCFL_REPLAY)
@@ -1677,11 +1677,11 @@ SCMD(kz_rpinfo, SCFL_REPLAY)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player)
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 
 	KZ::replaysystem::commands::GetReplayInfo(player);
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD_LINK(kz_rpseek, kz_rpgoto);
@@ -1691,11 +1691,11 @@ SCMD(kz_rppause, SCFL_REPLAY)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player)
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 
 	KZ::replaysystem::commands::ToggleReplayPause(player);
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD(kz_rploadprogress, SCFL_REPLAY)
@@ -1703,11 +1703,11 @@ SCMD(kz_rploadprogress, SCFL_REPLAY)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player)
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 
 	KZ::replaysystem::commands::CheckReplayLoadProgress(player);
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD(kz_rpcancelload, SCFL_REPLAY)
@@ -1715,11 +1715,11 @@ SCMD(kz_rpcancelload, SCFL_REPLAY)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player)
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 
 	KZ::replaysystem::commands::CancelReplayLoad(player);
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD(kz_replays, SCFL_REPLAY)
@@ -1727,11 +1727,11 @@ SCMD(kz_replays, SCFL_REPLAY)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player)
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 
 	KZ::replaysystem::commands::ListReplays(player, args->ArgS());
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD(kz_rphidelegs, SCFL_REPLAY)
@@ -1739,8 +1739,8 @@ SCMD(kz_rphidelegs, SCFL_REPLAY)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player)
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	KZ::replaysystem::commands::ToggleLegsVisibility(player);
-	return MRES_SUPERCEDE;
+	return true;
 }

@@ -935,12 +935,12 @@ SCMD(kz_zone, SCFL_HIDDEN)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player->zonesService)
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	if (args->ArgC() < 2)
 	{
 		PrintUsage(player);
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	const char *sub = args->Arg(1);
 
@@ -958,7 +958,7 @@ SCMD(kz_zone, SCFL_HIDDEN)
 		if (factor <= 0.0f || factor > 10.0f)
 		{
 			player->PrintChat(true, false, "{grey}Зоны:{default} множитель прыжка — число от 0 до 10, например {yellow}!zone booster 1.35{default}.");
-			return MRES_SUPERCEDE;
+			return true;
 		}
 		player->zonesService->BeginOrFinish(KZ_CYBER_ZONE_MODIFIER, factor);
 	}
@@ -981,7 +981,7 @@ SCMD(kz_zone, SCFL_HIDDEN)
 		if (args->ArgC() < 3)
 		{
 			player->PrintChat(true, false, "{grey}Зоны:{default} !zone remove <номер из !zone list>");
-			return MRES_SUPERCEDE;
+			return true;
 		}
 		player->zonesService->RemoveZone(atoi(args->Arg(2)));
 	}
@@ -997,7 +997,7 @@ SCMD(kz_zone, SCFL_HIDDEN)
 	{
 		PrintUsage(player);
 	}
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 // Вход в игровой редактор зон и курсов. Тоже SCFL_HIDDEN — см. обоснование у kz_zone выше.
@@ -1006,8 +1006,8 @@ SCMD(kz_zones, SCFL_HIDDEN)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player->zonesService)
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	KZ::zones::OpenZonesMenu(player);
-	return MRES_SUPERCEDE;
+	return true;
 }

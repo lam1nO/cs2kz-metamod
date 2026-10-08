@@ -107,7 +107,7 @@ SCMD(kz_noclip, SCFL_PLAYER)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player->noclipService->IsNoclipping() && !player->timerService->CheckSafeguard(RESET_CONFIRM_NOCLIP))
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	player->noclipService->ToggleNoclip();
 	if (player->noclipService->IsNoclipping())
@@ -118,7 +118,7 @@ SCMD(kz_noclip, SCFL_PLAYER)
 	{
 		player->languageService->PrintChat(true, false, "Noclip - Disable");
 	}
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD_LINK(kz_nc, kz_noclip);

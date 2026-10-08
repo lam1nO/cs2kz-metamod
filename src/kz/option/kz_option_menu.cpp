@@ -59,7 +59,7 @@ SCMD(kz_options, SCFL_PLAYER | SCFL_PREFERENCE | SCFL_HELP)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player)
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	// Открытый редактор !hud окно не «переключает», а сменяет: OpenLayoutMenu сам закрывает
 	// редактор (одна сущность — один режим, §4.5).
@@ -71,7 +71,7 @@ SCMD(kz_options, SCFL_PLAYER | SCFL_PREFERENCE | SCFL_HELP)
 	{
 		player->hudService->OpenLayoutMenu();
 	}
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 // Короткий алиас !o. Без SCFL_HELP: в чат-списке !help остаётся одна строка !options

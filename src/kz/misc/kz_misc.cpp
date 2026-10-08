@@ -46,7 +46,7 @@ SCMD(kz_hidelegs, SCFL_PLAYER | SCFL_PREFERENCE)
 	{
 		player->languageService->PrintChat(true, false, "Quiet Option - Hide Player Legs - Disable");
 	}
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD(kz_hide, SCFL_PLAYER | SCFL_PREFERENCE)
@@ -61,7 +61,7 @@ SCMD(kz_hide, SCFL_PLAYER | SCFL_PREFERENCE)
 	{
 		player->languageService->PrintChat(true, false, "Quiet Option - Show Players - Enable");
 	}
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD(kz_end, SCFL_MAP | SCFL_HELP)
@@ -72,7 +72,7 @@ SCMD(kz_end, SCFL_MAP | SCFL_HELP)
 	// как и !r, просто в другой конец курса.
 	if (player->pracService->RejectMapTeleport("teleport_to_end"))
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 
 	// If the player specify a course name, we first check if it's valid or not.
@@ -83,7 +83,7 @@ SCMD(kz_end, SCFL_MAP | SCFL_HELP)
 		if (!course || !course || !course->hasEndPosition)
 		{
 			player->languageService->PrintChat(true, false, "No End Position For Course", args->ArgS());
-			return MRES_SUPERCEDE;
+			return true;
 		}
 	}
 
@@ -102,7 +102,7 @@ SCMD(kz_end, SCFL_MAP | SCFL_HELP)
 		{
 			CUtlString courseName = player->timerService->GetCourse()->GetName();
 			player->languageService->PrintChat(true, false, "No End Position For Course", courseName.Get());
-			return MRES_SUPERCEDE;
+			return true;
 		}
 	}
 
@@ -125,7 +125,7 @@ SCMD(kz_end, SCFL_MAP | SCFL_HELP)
 	else
 	{
 		player->languageService->PrintChat(true, false, "No Active Course");
-		return MRES_SUPERCEDE;
+		return true;
 	}
 
 	if (shouldTeleport)
@@ -133,7 +133,7 @@ SCMD(kz_end, SCFL_MAP | SCFL_HELP)
 		// !end — не рестарт: окно свободного рестарта на него не распространяется.
 		if (!player->timerService->CheckSafeguard(RESET_CONFIRM_END))
 		{
-			return MRES_SUPERCEDE;
+			return true;
 		}
 		player->timerService->TimerStop(true, "teleport_to_end");
 		// Как и !r: телепорт к концу снимает паузу у живого игрока, иначе он
@@ -156,7 +156,7 @@ SCMD(kz_end, SCFL_MAP | SCFL_HELP)
 		}
 		player->Teleport(&tpOrigin, &tpAngles, &vec3_origin);
 	}
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 void KZ::misc::TeleportToCourse(KZPlayer *player, const KZCourseDescriptor *course, bool confirmReset)
@@ -295,7 +295,7 @@ SCMD(kz_restart, SCFL_TIMER | SCFL_MAP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	KZ::misc::HandleTeleportToCourse(player, args);
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD_LINK(kz_r, kz_restart, SCFL_HELP);
@@ -307,7 +307,7 @@ SCMD(kz_lj, SCFL_JUMPSTATS | SCFL_MAP | SCFL_HELP)
 	// Тот же запрет: телепорт в jumpstat-зону уводит игрока с отрабатываемого элемента.
 	if (player->pracService->RejectMapTeleport("jumpstat_area"))
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 
 	Vector destPos;
@@ -316,7 +316,7 @@ SCMD(kz_lj, SCFL_JUMPSTATS | SCFL_MAP | SCFL_HELP)
 	{
 		if (!player->timerService->CheckSafeguard(RESET_CONFIRM_JUMPSTAT_AREA))
 		{
-			return MRES_SUPERCEDE;
+			return true;
 		}
 		player->timerService->TimerStop(true, "jumpstat_area");
 		player->Teleport(&destPos, &destAngles, &vec3_origin);
@@ -326,7 +326,7 @@ SCMD(kz_lj, SCFL_JUMPSTATS | SCFL_MAP | SCFL_HELP)
 		player->languageService->PrintChat(true, false, "No Jumpstat Area Found", args->ArgS());
 	}
 
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD_LINK(kz_ljarea, kz_lj);
@@ -361,11 +361,11 @@ SCMD(kz_playercheck, SCFL_PLAYER)
 	if (!targetPlayer)
 	{
 		player->languageService->PrintChat(true, false, "Error Message (Player Not Found)", args->ArgS());
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	player->languageService->PrintChat(
 		true, false, targetPlayer->IsAuthenticated() ? "Player Authenticated (Steam)" : "Player Not Authenticated (Steam)", targetPlayer->GetName());
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD_LINK(kz_pc, kz_playercheck);
@@ -416,7 +416,7 @@ SCMD(jointeam, SCFL_HIDDEN)
 		if (player->IsAlive() && newTeam != currentTeam && player->pracService->RejectMapTeleport("team_change"))
 		{
 			CloseTeamMenu(player);
-			return MRES_SUPERCEDE;
+			return true;
 		}
 	}
 	if (newTeam == CS_TEAM_SPECTATOR || newTeam == CS_TEAM_NONE)
@@ -426,7 +426,7 @@ SCMD(jointeam, SCFL_HIDDEN)
 			// Апстрим: меню закрыли, в наблюдатели не пустили, игроку ни слова — снаружи
 			// это тоже «нажал, и ничего не произошло».
 			CloseTeamMenu(player);
-			return MRES_SUPERCEDE;
+			return true;
 		}
 		// Меню выбора команды клиент закрывает сам, только когда его команда стала
 		// настоящей (T/CT/спектатор). Невидимка наблюдает из CS_TEAM_NONE, и такой
@@ -444,16 +444,16 @@ SCMD(jointeam, SCFL_HIDDEN)
 	else if (player->IsAlive() && !player->timerService->CheckSafeguard(RESET_CONFIRM_TEAM_CHANGE))
 	{
 		CloseTeamMenu(player);
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	KZ::misc::JoinTeam(player, newTeam, true);
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD(switchhands, SCFL_HIDDEN)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
-	return MRES_IGNORED;
+	return false;
 }
 
 SCMD_LINK(switchhandsleft, switchhands);

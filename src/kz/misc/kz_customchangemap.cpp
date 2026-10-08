@@ -30,8 +30,15 @@ extern CSteamGameServerAPIContext g_steamAPI;
 // «установлена» сами. Хук на vtable ISteamUGC, а не на наш указатель: путь к аддону
 // при смене карты спрашивает libserver (CCSAddonManager), состояние — ещё и MAM;
 // все они на STEAMUGC_INTERFACE_VERSION019, то есть на одной таблице.
-SH_DECL_HOOK1(ISteamUGC, GetItemState, SH_NOATTRIB, 0, uint32, PublishedFileId_t);
-SH_DECL_HOOK5(ISteamUGC, GetItemInstallInfo, SH_NOATTRIB, 0, bool, PublishedFileId_t, uint64 *, char *, uint32, uint32 *);
+//
+// KHook (Metamod API 18): решение принимается в PRE — оригинал зовём сами через CallOriginal и
+// отдаём Supersede со своим значением (тот же приём, что апстрим в ProcessUsercmds). Так не
+// зависим от того, как KHook трактует Override в POST.
+static KHook::Return<uint32> GetItemStatePre(ISteamUGC *pThis, PublishedFileId_t id);
+static KHook::Virtual<ISteamUGC, uint32, PublishedFileId_t> s_itemStateHook(GetItemStatePre, nullptr);
+static KHook::Return<bool> GetItemInstallInfoPre(ISteamUGC *pThis, PublishedFileId_t id, uint64 *punSizeOnDisk, char *pchFolder, uint32 cchFolderSize,
+												 uint32 *punTimeStamp);
+static KHook::Virtual<ISteamUGC, bool, PublishedFileId_t, uint64 *, char *, uint32, uint32 *> s_installInfoHook(GetItemInstallInfoPre, nullptr);
 
 namespace
 {
@@ -46,15 +53,14 @@ struct CustomMapState
 
 CustomMapState s_state;
 
-int s_itemStateHook = 0;
-int s_installInfoHook = 0;
+bool s_ugcHooked = false;
 std::unordered_set<PublishedFileId_t> s_loggedCacheItems;
 std::thread::id s_mainThread;
 bool s_offThreadLogged = false;
 
-// Стек контекстов SourceHook общий: вызов хука из чужого потока параллельно с главным
-// его портит. По открытому коду все вызовы UGC — из главного потока; libserver закрыт,
-// поэтому на канарейке ловим обратное в лог, а не предполагаем.
+// При SourceHook общий стек контекстов портился от вызова хука из чужого потока; KHook держит
+// свои мьютексы, но наш FindCachedItem и s_loggedCacheItems не потокобезопасны. По открытому
+// коду все вызовы UGC — из главного потока; libserver закрыт, поэтому ловим обратное в лог.
 void CheckHookThread(const char *fn)
 {
 	if (!s_offThreadLogged && std::this_thread::get_id() != s_mainThread)
@@ -174,30 +180,33 @@ void LogCacheOverride(PublishedFileId_t id, uint32 steamState)
 	}
 }
 
-uint32 Hook_GetItemState(PublishedFileId_t id)
+} // namespace
+
+static KHook::Return<uint32> GetItemStatePre(ISteamUGC *pThis, PublishedFileId_t id)
 {
 	CheckHookThread("GetItemState");
-	uint32 state = META_RESULT_ORIG_RET(uint32);
+	uint32 state = s_itemStateHook.CallOriginal(pThis, id);
 	bool installed = (state & k_EItemStateInstalled) && !(state & k_EItemStateNeedsUpdate);
 	if (installed || (state & k_EItemStateLegacyItem) || !IsSharedCacheMount() || !FindCachedItem(id, nullptr))
 	{
-		RETURN_META_VALUE(MRES_IGNORED, state);
+		return {KHook::Action::Supersede, state};
 	}
 	LogCacheOverride(id, state);
-	RETURN_META_VALUE(MRES_OVERRIDE, k_EItemStateInstalled);
+	return {KHook::Action::Supersede, k_EItemStateInstalled};
 }
 
-bool Hook_GetItemInstallInfo(PublishedFileId_t id, uint64 *punSizeOnDisk, char *pchFolder, uint32 cchFolderSize, uint32 *punTimeStamp)
+static KHook::Return<bool> GetItemInstallInfoPre(ISteamUGC *pThis, PublishedFileId_t id, uint64 *punSizeOnDisk, char *pchFolder, uint32 cchFolderSize,
+												 uint32 *punTimeStamp)
 {
 	CheckHookThread("GetItemInstallInfo");
-	if (META_RESULT_ORIG_RET(bool))
+	if (s_installInfoHook.CallOriginal(pThis, id, punSizeOnDisk, pchFolder, cchFolderSize, punTimeStamp))
 	{
-		RETURN_META_VALUE(MRES_IGNORED, true);
+		return {KHook::Action::Supersede, true};
 	}
 	CachedItem item;
 	if (!pchFolder || cchFolderSize == 0 || !IsSharedCacheMount() || !FindCachedItem(id, &item) || item.folder.size() >= cchFolderSize)
 	{
-		RETURN_META_VALUE(MRES_IGNORED, false);
+		return {KHook::Action::Supersede, false};
 	}
 	V_strncpy(pchFolder, item.folder.c_str(), cchFolderSize);
 	if (punSizeOnDisk)
@@ -209,8 +218,11 @@ bool Hook_GetItemInstallInfo(PublishedFileId_t id, uint64 *punSizeOnDisk, char *
 		*punTimeStamp = item.timestamp;
 	}
 	LogCacheOverride(id, 0);
-	RETURN_META_VALUE(MRES_OVERRIDE, true);
+	return {KHook::Action::Supersede, true};
 }
+
+namespace
+{
 
 bool IsMapReady(PublishedFileId_t id)
 {
@@ -328,26 +340,26 @@ void KZ::misc::customchangemap::Init()
 void KZ::misc::customchangemap::OnSteamAPIActivated()
 {
 	ISteamUGC *ugc = g_steamAPI.SteamUGC();
-	if (!ugc || s_itemStateHook)
+	if (!ugc || s_ugcHooked)
 	{
 		return;
 	}
 	s_mainThread = std::this_thread::get_id();
-	s_itemStateHook = SH_ADD_VPHOOK(ISteamUGC, GetItemState, ugc, SH_STATIC(Hook_GetItemState), true);
-	s_installInfoHook = SH_ADD_VPHOOK(ISteamUGC, GetItemInstallInfo, ugc, SH_STATIC(Hook_GetItemInstallInfo), true);
+	// AddGlobal — хук на втаблицу (как SH_ADD_VPHOOK): libserver и MAM держат свои указатели.
+	s_itemStateHook.Configure(&ISteamUGC::GetItemState);
+	s_itemStateHook.AddGlobal(ugc);
+	s_installInfoHook.Configure(&ISteamUGC::GetItemInstallInfo);
+	s_installInfoHook.AddGlobal(ugc);
+	s_ugcHooked = true;
 }
 
 void KZ::misc::customchangemap::Cleanup()
 {
 	s_downloadHandler.m_CallbackDownloadItemResult.Unregister();
-	if (s_itemStateHook)
+	if (s_ugcHooked)
 	{
-		SH_REMOVE_HOOK_ID(s_itemStateHook);
-		s_itemStateHook = 0;
-	}
-	if (s_installInfoHook)
-	{
-		SH_REMOVE_HOOK_ID(s_installInfoHook);
-		s_installInfoHook = 0;
+		s_itemStateHook.ClearHooks();
+		s_installInfoHook.ClearHooks();
+		s_ugcHooked = false;
 	}
 }

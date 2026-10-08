@@ -17,7 +17,7 @@ RUN sed -i '/debian-security/d' /etc/apt/sources.list 2>/dev/null || true; \
       command -v git >/dev/null || apt install -y git; \
       python3 -m pip --version || curl -sSf https://bootstrap.pypa.io/pip/3.9/get-pip.py | python3; }
 RUN git clone https://github.com/alliedmodders/ambuild
-RUN pip install ./ambuild
+RUN cd ambuild && python3 setup.py install
 RUN git config --global --add safe.directory /app
 
 COPY . .

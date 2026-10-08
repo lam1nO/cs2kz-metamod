@@ -1877,7 +1877,7 @@ SCMD(kz_courses, SCFL_MAP | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	OpenCoursesMenu(player);
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD(kz_course, SCFL_MAP)
@@ -1891,7 +1891,7 @@ SCMD(kz_course, SCFL_MAP)
 	{
 		KZ::misc::HandleTeleportToCourse(player, args);
 	}
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 static_function const KZCourseDescriptor *FindBonusCourse(i32 n)
@@ -1908,13 +1908,13 @@ static_function const KZCourseDescriptor *FindBonusCourse(i32 n)
 	return nullptr;
 }
 
-static_function META_RES GotoBonus(CCSPlayerController *controller, i32 n)
+static_function bool GotoBonus(CCSPlayerController *controller, i32 n)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	// Как и в меню !courses: причина отказа должна быть prac, а не «у бонуса нет стартпозиции».
 	if (player->pracService->RejectMapTeleport("teleport_to_start"))
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	const KZCourseDescriptor *course = (n >= 1) ? FindBonusCourse(n) : nullptr;
 	if (!course)
@@ -1922,16 +1922,16 @@ static_function META_RES GotoBonus(CCSPlayerController *controller, i32 n)
 		char num[16];
 		V_snprintf(num, sizeof(num), "%d", n);
 		player->languageService->PrintChat(true, false, "Bonus Not Found", num);
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	if (!course->hasStartPosition)
 	{
 		// Бонус есть, но маппер не задал стартовую позицию — честное сообщение.
 		player->languageService->PrintChat(true, false, "No Start Position For Course", course->name);
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	KZ::misc::TeleportToCourse(player, course, false);
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD(kz_main, SCFL_MAP)
@@ -1940,16 +1940,16 @@ SCMD(kz_main, SCFL_MAP)
 	// Как и в !b*/меню !courses: сначала prac, потом уже причина «нет стартпозиции».
 	if (player->pracService->RejectMapTeleport("teleport_to_start"))
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	const KZCourseDescriptor *course = KZ::course::GetFirstCourse();
 	if (!course || !course->hasStartPosition)
 	{
 		player->languageService->PrintChat(true, false, "No Start Position For Course", "Main");
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	KZ::misc::TeleportToCourse(player, course, false);
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD(kz_b, SCFL_MAP)
@@ -2211,7 +2211,7 @@ SCMD(kz_mapinfo, SCFL_MAP | SCFL_GLOBAL | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	PrintCurrentMapCoursesInfo(player);
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 SCMD_LINK(kz_mi, kz_mapinfo)
@@ -2345,5 +2345,5 @@ SCMD(kz_tier, SCFL_MAP | SCFL_GLOBAL | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	PrintCourseTier(player, args);
-	return MRES_SUPERCEDE;
+	return true;
 }

@@ -749,17 +749,17 @@ void KZWeaponService::OnProcessUsercmds(PlayerCommand *cmds, int numcmds)
 	}
 }
 
-static_function META_RES GiveByCommand(CCSPlayerController *controller, const char *cmdName)
+static_function bool GiveByCommand(CCSPlayerController *controller, const char *cmdName)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!KZWeaponService::Enabled())
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	const WeaponInfo_t *info = KZWeaponService::FindByCommand(cmdName);
 	if (!info)
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	switch (player->weaponService->GiveWeapon(*info))
 	{
@@ -767,21 +767,21 @@ static_function META_RES GiveByCommand(CCSPlayerController *controller, const ch
 			break;
 		case GiveResult::SlotBusy:
 			player->languageService->PrintChat(true, false, "Weapon Slot Busy");
-			return MRES_SUPERCEDE;
+			return true;
 		case GiveResult::LimitHit:
 			player->languageService->PrintChat(true, false, "Weapon Limit Reached");
-			return MRES_SUPERCEDE;
+			return true;
 		case GiveResult::Internal:
 			// Отказ по нашей вине — в лог с машинно-читаемым reason (CLAUDE.md), и игроку
 			// не «ты мёртв»: он жив, сломалось у нас.
 			KZ_LOG_ERROR(LogChannel::Misc, "[cyb] weapon_give_failed steam_id=%llu weapon=%s reason=give_internal\n", player->GetSteamId64(false),
 						 info->className);
 			player->languageService->PrintChat(true, false, "Weapon Give Internal Error");
-			return MRES_SUPERCEDE;
+			return true;
 		case GiveResult::NotAlive:
 		default:
 			player->languageService->PrintChat(true, false, "Weapon Give Failed");
-			return MRES_SUPERCEDE;
+			return true;
 	}
 	if (info->slot == WeaponSlotKind::Grenade)
 	{
@@ -791,7 +791,7 @@ static_function META_RES GiveByCommand(CCSPlayerController *controller, const ch
 	{
 		player->languageService->PrintChat(true, false, "Weapon Given");
 	}
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 // Счётчик осиротевших стволов в мире — наблюдаемость под утечку от mp_death_drop_gun 1.
@@ -851,7 +851,7 @@ SCMD(kz_knife, SCFL_MISC | SCFL_PLAYER | SCFL_HELP)
 	if (!player->IsAlive() || !player->IsInGame())
 	{
 		player->languageService->PrintChat(true, false, "Weapon Give Failed");
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	auto pawn = player->GetPlayerPawn();
 	auto weaponServices = pawn ? pawn->m_pWeaponServices() : nullptr;
@@ -859,7 +859,7 @@ SCMD(kz_knife, SCFL_MISC | SCFL_PLAYER | SCFL_HELP)
 	if (!weaponServices || !itemServices)
 	{
 		player->languageService->PrintChat(true, false, "Weapon Give Internal Error");
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	// Уже есть — молча ничего не делаем: вторая выдача положила бы нож на землю
 	// (слот занят), и уборщик тут же его снёс бы. Сверяемся по classname, как это
@@ -871,7 +871,7 @@ SCMD(kz_knife, SCFL_MISC | SCFL_PLAYER | SCFL_HELP)
 		if (weapon && (KZ_STREQI(weapon->GetClassname(), "weapon_knife") || KZ_STREQI(weapon->GetClassname(), "weapon_knife_t")))
 		{
 			player->languageService->PrintChat(true, false, "Knife Already Held");
-			return MRES_SUPERCEDE;
+			return true;
 		}
 	}
 	// Модель и скин ставит хук лоадаута (cyber-skins) поверх выдачи — здесь только
@@ -884,10 +884,10 @@ SCMD(kz_knife, SCFL_MISC | SCFL_PLAYER | SCFL_HELP)
 		KZ_LOG_ERROR(LogChannel::Misc, "[cyb] knife_give_failed steam_id=%llu weapon=%s reason=give_returned_null\n", player->GetSteamId64(false),
 					 className);
 		player->languageService->PrintChat(true, false, "Weapon Give Internal Error");
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	player->languageService->PrintChat(true, false, "Knife Given");
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 // Список доступного оружия. Единственная видимая в !help команда этого сервиса.
@@ -897,7 +897,7 @@ SCMD(kz_guns, SCFL_MISC | SCFL_PLAYER | SCFL_HELP)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!KZWeaponService::Enabled())
 	{
-		return MRES_SUPERCEDE;
+		return true;
 	}
 	player->languageService->PrintChat(true, false, "Weapon List Chat");
 	player->PrintConsole(false, false, "");
@@ -913,7 +913,7 @@ SCMD(kz_guns, SCFL_MISC | SCFL_PLAYER | SCFL_HELP)
 			player->PrintConsole(false, false, "!%s", s_weapons[i].cmd);
 		}
 	}
-	return MRES_SUPERCEDE;
+	return true;
 }
 
 // Одна команда на каждую строку каталога. Имя callback'а обязано совпадать с именем
