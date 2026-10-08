@@ -255,9 +255,28 @@ namespace
 	constexpr size_t maxPendingReplays = 16;
 	std::deque<std::pair<std::string, std::vector<char>>> g_pendingReplays;
 	std::deque<std::string> g_qualifiedReplays;
+	// UUID прыжков, удалённых из админки (kz_jumptop_forget): буфер их реплея может прийти уже ПОСЛЕ
+	// удаления (рекордер останавливается через 2 с после прыжка) — тогда его не пишем. Ограничено.
+	std::deque<std::string> g_forgottenReplays;
+
+	bool IsForgotten(const std::string &uuid)
+	{
+		for (auto &f : g_forgottenReplays)
+		{
+			if (f == uuid)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
 
 	void QualifyReplay(const std::string &uuid)
 	{
+		if (IsForgotten(uuid))
+		{
+			return;
+		}
 		for (auto it = g_pendingReplays.begin(); it != g_pendingReplays.end(); ++it)
 		{
 			if (it->first == uuid)
@@ -283,6 +302,10 @@ namespace
 
 	void OfferReplayBuffer(const std::string &uuid, const std::vector<char> &buffer)
 	{
+		if (IsForgotten(uuid))
+		{
+			return;
+		}
 		for (auto it = g_qualifiedReplays.begin(); it != g_qualifiedReplays.end(); ++it)
 		{
 			if (*it == uuid)
@@ -1223,6 +1246,11 @@ static_function void SetJumpRemoved(i32 id, bool removed)
 
 CON_COMMAND_F(kz_jumptop_remove, "Снять прыжок с джамптопа по ID (строка и реплей остаются в базе).", FCVAR_NONE)
 {
+	// Игрокам не отдаём, как и прочие настоящие ConCommand форка (канон — kz_invisible.cpp).
+	if (utils::GetController(context.GetPlayerSlot()))
+	{
+		return;
+	}
 	if (args.ArgC() != 2)
 	{
 		META_CONPRINTF("Usage: kz_jumptop_remove <id>\n");
@@ -1233,10 +1261,87 @@ CON_COMMAND_F(kz_jumptop_remove, "Снять прыжок с джамптопа 
 
 CON_COMMAND_F(kz_jumptop_restore, "Вернуть снятый прыжок в джамптоп по ID.", FCVAR_NONE)
 {
+	if (utils::GetController(context.GetPlayerSlot()))
+	{
+		return;
+	}
 	if (args.ArgC() != 2)
 	{
 		META_CONPRINTF("Usage: kz_jumptop_restore <id>\n");
 		return;
 	}
 	SetJumpRemoved(V_StringToInt32(args.Arg(1), 0), false);
+}
+
+// Админка удалила прыжок(и) игрока из базы (api, DELETE /admin/v1/kz/jumps) и рассылает это по
+// всем kz-серверам. Здесь: перечитать кэш PB игрока, если он на этом сервере (иначе до реконнекта
+// ему не засчитывались бы честные прыжки ниже удалённого), удалить локальные файлы реплея и не
+// дать позднему буферу реплея доехать в базу. Ответ «kz_jumptop_forget: ok» — подтверждение для api.
+CON_COMMAND_F(kz_jumptop_forget, "Забыть удалённые прыжки: kz_jumptop_forget <steamid64> [replayUuid ...]", FCVAR_NONE)
+{
+	if (utils::GetController(context.GetPlayerSlot()))
+	{
+		return;
+	}
+	if (args.ArgC() < 2)
+	{
+		META_CONPRINTF("Usage: kz_jumptop_forget <steamid64> [replayUuid ...]\n");
+		return;
+	}
+	u64 steamID64 = strtoull(args.Arg(1), nullptr, 10);
+	if (steamID64 == 0)
+	{
+		META_CONPRINTF("kz_jumptop_forget: bad steamid\n");
+		return;
+	}
+	i32 files = 0;
+	for (i32 i = 2; i < args.ArgC(); i++)
+	{
+		UUID_t parsed;
+		if (!UUID_t::FromString(args.Arg(i), &parsed))
+		{
+			continue;
+		}
+		std::string uuid = parsed.ToString();
+		if (!IsForgotten(uuid))
+		{
+			g_forgottenReplays.push_back(uuid);
+			while (g_forgottenReplays.size() > 64)
+			{
+				g_forgottenReplays.pop_front();
+			}
+		}
+		for (auto it = g_pendingReplays.begin(); it != g_pendingReplays.end();)
+		{
+			it = it->first == uuid ? g_pendingReplays.erase(it) : it + 1;
+		}
+		for (auto it = g_qualifiedReplays.begin(); it != g_qualifiedReplays.end();)
+		{
+			it = *it == uuid ? g_qualifiedReplays.erase(it) : it + 1;
+		}
+		char path[512];
+		V_snprintf(path, sizeof(path), KZ_REPLAY_PATH "/%s.replay", uuid.c_str());
+		if (g_pFullFileSystem->FileExists(path))
+		{
+			utils::RemoveFile(path);
+			files++;
+		}
+		V_snprintf(path, sizeof(path), KZ_REPLAY_DOWNLOADS_PATH "/%s.replay", uuid.c_str());
+		if (g_pFullFileSystem->FileExists(path))
+		{
+			utils::RemoveFile(path);
+			files++;
+		}
+	}
+	KZPlayer *player = g_pKZPlayerManager->SteamIdToPlayer(steamID64, false);
+	bool reloaded = false;
+	if (player && !player->IsFakeClient())
+	{
+		LoadPBs(player, steamID64);
+		reloaded = true;
+	}
+	KZ_LOG_INFO(LogChannel::DB, "[cyb] jumptop_forget steam_id=%llu replays=%d files=%d pb_reloaded=%d\n", steamID64, args.ArgC() - 2, files,
+				reloaded ? 1 : 0);
+	// Msg, как у kz_db_status: этот вывод возвращается в ответ RCON, по нему api считает подтверждения.
+	Msg("kz_jumptop_forget: ok\n");
 }
