@@ -361,9 +361,17 @@ void KZJumpstatsService::BroadcastJumpToChat(KZPlayer *target, Jump *jump)
 	bool validBroadcastTier = tier >= broadcastTier;
 	if (broadcastEnabled && validBroadcastTier)
 	{
-		// Бродкаст джампстата в чат отключён (cyber): дальний прыжок другого игрока
-		// больше не печатается всем в чат как серверный спам. Звук и запись в консоль
-		// оставлены — это не чат-шум и завязаны на личные настройки получателя.
+		// Чужой прыжок в чат — по личному порогу получателя (jsBroadcastMinTier, меню !js; дефолт
+		// godlike). С 01.07 по 08.10 строка была вырезана как «серверный шум», а настройка в меню
+		// осталась и ничего не делала — вернули по просьбе пользователя.
+		// clang-format off
+		target->languageService->PrintChat(true, false, "Broadcast Jumpstat Chat Report",
+			jump->GetJumpPlayer()->GetName(),
+			distanceTierColors[tier],
+			jump->GetDistance(),
+			jumpTypeStr[jump->GetReportJumpType()],
+			jump->GetJumpPlayer()->modeService->GetModeShortName());
+		// clang-format on
 		KZJumpstatsService::PrintJumpToConsole(target, jump);
 		KZJumpstatsService::PlayJumpstatSound(target, jump, true);
 	}

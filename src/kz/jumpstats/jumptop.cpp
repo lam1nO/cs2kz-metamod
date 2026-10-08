@@ -357,8 +357,8 @@ namespace
 				{
 					return;
 				}
-				// Как WR рана (submission.cpp): «поставил новый WORLD RECORD», звук kz.holyshit всем,
-				// громкость — преф recordVolume.
+				// Текст как у WR рана (submission.cpp): «поставил новый WORLD RECORD». Без звука —
+				// решение пользователя 08.10: рекорд прыжка объявляется только текстом.
 				for (i32 i = 0; i <= MAXPLAYERS; i++)
 				{
 					KZPlayer *other = g_pKZPlayerManager->ToPlayer(i);
@@ -369,7 +369,6 @@ namespace
 					std::string label = JumpLabel(other->languageService->GetLanguage(), jumpType, isBlock, block, distance);
 					other->languageService->PrintChat(true, false, "Jumptop - New World Record", name.c_str(), label.c_str(), mapName.c_str(),
 													  mode.c_str());
-					utils::PlaySoundToClient(other->GetPlayerSlot(), "kz.holyshit", other->optionService->GetPreferenceFloat("recordVolume", 1.0f));
 				}
 			},
 			[steamID64, jumpType](std::string error, int failIndex)
