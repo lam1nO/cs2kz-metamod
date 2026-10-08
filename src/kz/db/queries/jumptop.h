@@ -148,7 +148,7 @@ constexpr char sql_jumptop_getjump[] = R"(
 // Личные рекорды для !jspb: лучшая строка игрока в каждом (тип, вид) для одного режима.
 // Параметры: SteamID64, Mode.
 constexpr char sql_jumptop_getplayerbests[] = R"(
-    SELECT t.ID, t.JumpType, t.IsBlockJump, t.Block, t.Distance, t.Strafes, t.Sync, t.Pre, t.Max, t.Airtime
+    SELECT t.ID, t.JumpType, t.IsBlockJump, t.Block, t.Distance, t.Strafes, t.Sync, t.Pre, t.Max, t.Airtime, t.MapName
         FROM (
             SELECT j.*, ROW_NUMBER() OVER (PARTITION BY j.JumpType, j.IsBlockJump ORDER BY j.Block DESC, j.Distance DESC, j.ID ASC) AS rn
                 FROM Jumptop j

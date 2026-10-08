@@ -18,15 +18,18 @@
 	}
 	"Jumptop - New PB"
 	{
-		"#format"	"jump:s,mode:s,place:d,total:d"
-		"en"		"{purple}Jumptop {grey}| New PB: {default}{jump} {grey}[{mode}] — {gold}#{place}{grey} of {total}"
-		"ru"		"{purple}Джамптоп {grey}| Новый личный рекорд: {default}{jump} {grey}[{mode}] — {gold}#{place}{grey} из {total}"
+		// Новый PB в джамптопе: LJ 265.1234 на kz_map [CKZ] | #3/17
+		"#format"	"jump:s,map:s,mode:s,place:d,total:d"
+		"en"		"{grey}New jumptop PB: {default}{jump}{grey} on {default}{map} {grey}[{purple}{mode}{grey}] | #{default}{place}{grey}/{default}{total}"
+		"ru"		"{grey}Новый PB в джамптопе: {default}{jump}{grey} на {default}{map} {grey}[{purple}{mode}{grey}] | #{default}{place}{grey}/{default}{total}"
 	}
-	"Jumptop - New Server Record"
+	"Jumptop - New World Record"
 	{
-		"#format"	"player:s,jump:s,mode:s"
-		"en"		"{purple}Jumptop {grey}| {lime}{player}{grey} set a {gold}NEW SERVER RECORD{grey}: {default}{jump} {grey}[{mode}]"
-		"ru"		"{purple}Джамптоп {grey}| {lime}{player}{grey} — {gold}НОВЫЙ РЕКОРД СЕРВЕРА{grey}: {default}{jump} {grey}[{mode}]"
+		// Как WR рана («Beat Course Info - New Server Record»): рекорд нашей сети = WORLD RECORD.
+		// Bill set a new WORLD RECORD: LJ 284.1234 on kz_map [CKZ]
+		"#format"	"player:s,jump:s,map:s,mode:s"
+		"en"		"{lime}{player}{grey} set a new {red}WORLD RECORD{grey}: {default}{jump}{grey} on {default}{map} {grey}[{purple}{mode}{grey}]"
+		"ru"		"{lime}{player}{grey} поставил новый {red}WORLD RECORD{grey}: {default}{jump}{grey} на {default}{map} {grey}[{purple}{mode}{grey}]"
 	}
 	"Jumptop - Menu Title"
 	{
@@ -49,67 +52,67 @@
 	"Jumptop - Empty"
 	{
 		"#format"	"type:s,kind:s,mode:s"
-		"en"		"{purple}Jumptop {grey}| No jumps yet: {default}{type} {kind} {grey}[{mode}]"
-		"ru"		"{purple}Джамптоп {grey}| Пока пусто: {default}{type} {kind} {grey}[{mode}]"
+		"en"		"{grey}No jumps yet: {default}{type} {kind} {grey}[{mode}]"
+		"ru"		"{grey}Пока пусто: {default}{type} {kind} {grey}[{mode}]"
 	}
 	"Jumptop - See Console"
 	{
-		"en"		"{purple}Jumptop {grey}| The top is printed to console."
-		"ru"		"{purple}Джамптоп {grey}| Топ выведен в консоль."
+		"en"		"{grey}The top is printed to console."
+		"ru"		"{grey}Топ выведен в консоль."
 	}
 	"Jumptop - Usage"
 	{
-		"en"		"{purple}Jumptop {grey}| Usage: {default}!jumptop <lj|bh|mbh|wj|laj|lah|jb> [block] [ckz|kzt|vnl]"
-		"ru"		"{purple}Джамптоп {grey}| Использование: {default}!jumptop <lj|bh|mbh|wj|laj|lah|jb> [block] [ckz|kzt|vnl]"
+		"en"		"{grey}Usage: {default}!jumptop <lj|bh|mbh|wj|laj|lah|jb> [block] [ckz|kzt|vnl]"
+		"ru"		"{grey}Использование: {default}!jumptop <lj|bh|mbh|wj|laj|lah|jb> [block] [ckz|kzt|vnl]"
 	}
 	"Jumptop - Database Unavailable"
 	{
-		"en"		"{purple}Jumptop {grey}| {darkred}Database is unavailable right now."
-		"ru"		"{purple}Джамптоп {grey}| {darkred}База сейчас недоступна."
+		"en"		"{darkred}Database is unavailable right now."
+		"ru"		"{darkred}База сейчас недоступна."
 	}
 	"Jumptop - No Replay"
 	{
-		"en"		"{purple}Jumptop {grey}| No replay for this jump."
-		"ru"		"{purple}Джамптоп {grey}| У этого прыжка нет реплея."
+		"en"		"{grey}No replay for this jump."
+		"ru"		"{grey}У этого прыжка нет реплея."
 	}
 	"Jumptop - Jump Not Found"
 	{
 		"#format"	"id:d"
-		"en"		"{purple}Jumptop {grey}| Jump #{id} not found."
-		"ru"		"{purple}Джамптоп {grey}| Прыжок #{id} не найден."
+		"en"		"{grey}Jump #{id} not found."
+		"ru"		"{grey}Прыжок #{id} не найден."
 	}
 	"Jumptop - Info Printed"
 	{
 		"#format"	"player:s,jump:s,mode:s,id:d"
-		"en"		"{purple}Jumptop {grey}| {lime}{player}{grey}: {default}{jump} {grey}[{mode}] #{id} — full stats in console."
-		"ru"		"{purple}Джамптоп {grey}| {lime}{player}{grey}: {default}{jump} {grey}[{mode}] #{id} — полная статистика в консоли."
+		"en"		"{lime}{player}{grey}: {default}{jump} {grey}[{mode}] #{id} — full stats in console."
+		"ru"		"{lime}{player}{grey}: {default}{jump} {grey}[{mode}] #{id} — полная статистика в консоли."
 	}
 	"Jumptop - Info Usage"
 	{
-		"en"		"{purple}Jumptop {grey}| Usage: {default}!jumpinfo <id>{grey}, {default}!jumpreplay <id>{grey} (id is in the top printout in console)"
-		"ru"		"{purple}Джамптоп {grey}| Использование: {default}!jumpinfo <id>{grey}, {default}!jumpreplay <id>{grey} (id — в выводе топа в консоли)"
+		"en"		"{grey}Usage: {default}!jumpinfo <id>{grey}, {default}!jumpreplay <id>{grey} (id is in the top printout in console)"
+		"ru"		"{grey}Использование: {default}!jumpinfo <id>{grey}, {default}!jumpreplay <id>{grey} (id — в выводе топа в консоли)"
 	}
 	"Jumptop - PBs"
 	{
 		"#format"	"player:s,mode:s,list:s"
-		"en"		"{purple}Jumptop {grey}| {lime}{player}{grey} [{mode}]: {default}{list}"
-		"ru"		"{purple}Джамптоп {grey}| {lime}{player}{grey} [{mode}]: {default}{list}"
+		"en"		"{lime}{player}{grey} [{mode}]: {default}{list}"
+		"ru"		"{lime}{player}{grey} [{mode}]: {default}{list}"
 	}
 	"Jumptop - No PBs"
 	{
 		"#format"	"player:s,mode:s"
-		"en"		"{purple}Jumptop {grey}| {lime}{player}{grey} has no jumps in the top yet [{mode}]."
-		"ru"		"{purple}Джамптоп {grey}| У {lime}{player}{grey} пока нет прыжков в топе [{mode}]."
+		"en"		"{lime}{player}{grey} has no jumps in the top yet [{mode}]."
+		"ru"		"{grey}У {lime}{player}{grey} пока нет прыжков в топе [{mode}]."
 	}
 	"Jumptop - Player Not Found"
 	{
-		"en"		"{purple}Jumptop {grey}| Player not found."
-		"ru"		"{purple}Джамптоп {grey}| Игрок не найден."
+		"en"		"{grey}Player not found."
+		"ru"		"{grey}Игрок не найден."
 	}
 	"Jumptop - Replay Other Map"
 	{
 		"#format"	"map:s"
-		"en"		"{purple}Jumptop {grey}| The replay plays only on its map: {default}{map}"
-		"ru"		"{purple}Джамптоп {grey}| Реплей играет только на своей карте: {default}{map}"
+		"en"		"{grey}The replay plays only on its map: {default}{map}"
+		"ru"		"{grey}Реплей играет только на своей карте: {default}{map}"
 	}
 }

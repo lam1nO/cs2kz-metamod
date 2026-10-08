@@ -213,23 +213,6 @@ namespace
 		return d.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 	}
 
-	void PlaySoundToAll(const char *sound)
-	{
-		for (i32 i = 0; i <= MAXPLAYERS; i++)
-		{
-			KZPlayer *other = g_pKZPlayerManager->ToPlayer(i);
-			if (!other || !other->IsInGame() || other->IsFakeClient())
-			{
-				continue;
-			}
-			if (!other->optionService->GetPreferenceBool("jsReporting", true))
-			{
-				continue;
-			}
-			utils::PlaySoundToClient(other->GetPlayerSlot(), sound, other->optionService->GetPreferenceFloat("jsVolume", 0.75f));
-		}
-	}
-
 	void InsertReplayRow(const std::string &uuidStr, const std::vector<char> &buffer)
 	{
 		if (!KZDatabaseService::IsReady())
@@ -317,47 +300,38 @@ namespace
 	}
 
 	// Вставка строки PB и сразу место в топе — одной транзакцией.
-	void SubmitPB(KZPlayer *player, i32 modeID, i32 jumpType, bool isBlock, i32 block, Jump *jump, const std::string &replayUuid,
-				  const std::string &details)
+	// Место в топе и объявление — по базе ПОСЛЕ коммита вставки. Не в той же транзакции: там
+	// чтение шло бы по снимку, и две почти одновременные вставки на разных серверах (284 и 283)
+	// не видели бы друг друга — WR засчитался бы обоим. После коммита второй сервер видит
+	// чужую строку. Кэш «WR на момент захода» не используется вовсе — рекорд спрашивается у
+	// общей базы на каждом PB.
+	void AnnouncePB(CPlayerUserId userID, const std::string &name, u64 steamID64, i32 modeID, i32 jumpType, bool isBlock, i32 block,
+					f64 distance, const std::string &replayUuid, const std::string &mapName, u32 id)
 	{
-		ISQLConnection *db = KZDatabaseService::GetDatabaseConnection();
-		std::string map = db->Escape(g_pKZUtils->GetCurrentMapName().Get());
-		std::string server = db->Escape(ServerID());
-		std::string cleanDetails = db->Escape(details.c_str());
-		u64 steamID64 = player->GetSteamId64();
-		f64 distance = jump->GetDistance();
-
-		std::vector<char> insert(cleanDetails.size() + map.size() + 1024);
-		V_snprintf(insert.data(), (int)insert.size(), sql_jumptop_insert, steamID64, modeID, jumpType, isBlock ? 1 : 0, block, distance,
-				   jump->GetStrafeCount(), (f64)jump->GetSync(), (f64)jump->GetTakeoffSpeed(), (f64)jump->GetMaxSpeed(), (f64)jump->airtime,
-				   (f64)jump->GetMaxHeight(), (f64)jump->GetOffset(), map.c_str(), server.c_str(), replayUuid.c_str(), cleanDetails.c_str());
-
+		if (!KZDatabaseService::IsReady())
+		{
+			return;
+		}
 		char rank[2048];
 		V_snprintf(rank, sizeof(rank), sql_jumptop_rank, modeID, jumpType, isBlock ? 1 : 0, block, block, distance, steamID64, modeID, jumpType,
 				   isBlock ? 1 : 0);
-
 		Transaction txn;
-		txn.queries.push_back(insert.data());
 		txn.queries.push_back(rank);
-
-		CPlayerUserId userID = player->GetClient()->GetUserID();
-		std::string name = player->GetName();
 		// clang-format off
-		db->ExecuteTransaction(
+		KZDatabaseService::GetDatabaseConnection()->ExecuteTransaction(
 			txn,
-			[userID, name, steamID64, modeID, jumpType, isBlock, block, distance, replayUuid](std::vector<ISQLQuery *> queries)
+			[userID, name, steamID64, modeID, jumpType, isBlock, block, distance, replayUuid, mapName, id](std::vector<ISQLQuery *> queries)
 			{
-				u32 id = queries[0]->GetInsertId();
 				i32 place = 0;
 				i32 total = 0;
-				ISQLResult *result = queries[1]->GetResultSet();
+				ISQLResult *result = queries[0]->GetResultSet();
 				if (result && result->FetchRow())
 				{
 					place = result->GetInt(0) + 1;
 					total = result->GetInt(1);
 				}
-				KZ_LOG_INFO(LogChannel::DB, "[cyb] jumptop_pb id=%u steam_id=%llu mode=%d type=%d block=%d dist=%.4f place=%d total=%d\n", id,
-							steamID64, modeID, jumpType, isBlock ? block : 0, distance, place, total);
+				KZ_LOG_INFO(LogChannel::DB, "[cyb] jumptop_pb id=%u steam_id=%llu mode=%d type=%d block=%d dist=%.4f map=%s place=%d total=%d\n", id,
+							steamID64, modeID, jumpType, isBlock ? block : 0, distance, mapName.c_str(), place, total);
 
 				// Реплей в базу — только прыжку из топа: PB новичка обновляется каждые несколько прыжков,
 				// и хранить реплей каждого значило бы бесконечно растить общую MySQL.
@@ -377,22 +351,62 @@ namespace
 				if (player)
 				{
 					std::string label = JumpLabel(player->languageService->GetLanguage(), jumpType, isBlock, block, distance);
-					player->languageService->PrintChat(true, false, "Jumptop - New PB", label.c_str(), mode.c_str(), place, total);
+					player->languageService->PrintChat(true, false, "Jumptop - New PB", label.c_str(), mapName.c_str(), mode.c_str(), place, total);
 				}
-				if (place == 1)
+				if (place != 1)
 				{
-					for (i32 i = 0; i <= MAXPLAYERS; i++)
-					{
-						KZPlayer *other = g_pKZPlayerManager->ToPlayer(i);
-						if (!other || !other->IsInGame() || other->IsFakeClient())
-						{
-							continue;
-						}
-						std::string label = JumpLabel(other->languageService->GetLanguage(), jumpType, isBlock, block, distance);
-						other->languageService->PrintChat(true, false, "Jumptop - New Server Record", name.c_str(), label.c_str(), mode.c_str());
-					}
-					PlaySoundToAll(distanceTierSounds[DistanceTier_Wrecker]);
+					return;
 				}
+				// Как WR рана (submission.cpp): «поставил новый WORLD RECORD», звук kz.holyshit всем,
+				// громкость — преф recordVolume.
+				for (i32 i = 0; i <= MAXPLAYERS; i++)
+				{
+					KZPlayer *other = g_pKZPlayerManager->ToPlayer(i);
+					if (!other || !other->IsInGame() || other->IsFakeClient() || other->IsCSTV())
+					{
+						continue;
+					}
+					std::string label = JumpLabel(other->languageService->GetLanguage(), jumpType, isBlock, block, distance);
+					other->languageService->PrintChat(true, false, "Jumptop - New World Record", name.c_str(), label.c_str(), mapName.c_str(),
+													  mode.c_str());
+					utils::PlaySoundToClient(other->GetPlayerSlot(), "kz.holyshit", other->optionService->GetPreferenceFloat("recordVolume", 1.0f));
+				}
+			},
+			[steamID64, jumpType](std::string error, int failIndex)
+			{
+				KZ_LOG_ERROR(LogChannel::DB, "[cyb] jumptop_rank_failed reason=db steam_id=%llu type=%d error=%s\n", steamID64, jumpType,
+							 error.c_str());
+			});
+		// clang-format on
+	}
+
+	void SubmitPB(KZPlayer *player, i32 modeID, i32 jumpType, bool isBlock, i32 block, Jump *jump, const std::string &replayUuid,
+				  const std::string &details)
+	{
+		ISQLConnection *db = KZDatabaseService::GetDatabaseConnection();
+		std::string mapName = g_pKZUtils->GetCurrentMapName().Get();
+		std::string map = db->Escape(mapName.c_str());
+		std::string server = db->Escape(ServerID());
+		std::string cleanDetails = db->Escape(details.c_str());
+		u64 steamID64 = player->GetSteamId64();
+		f64 distance = jump->GetDistance();
+
+		std::vector<char> insert(cleanDetails.size() + map.size() + 1024);
+		V_snprintf(insert.data(), (int)insert.size(), sql_jumptop_insert, steamID64, modeID, jumpType, isBlock ? 1 : 0, block, distance,
+				   jump->GetStrafeCount(), (f64)jump->GetSync(), (f64)jump->GetTakeoffSpeed(), (f64)jump->GetMaxSpeed(), (f64)jump->airtime,
+				   (f64)jump->GetMaxHeight(), (f64)jump->GetOffset(), map.c_str(), server.c_str(), replayUuid.c_str(), cleanDetails.c_str());
+
+		Transaction txn;
+		txn.queries.push_back(insert.data());
+
+		CPlayerUserId userID = player->GetClient()->GetUserID();
+		std::string name = player->GetName();
+		// clang-format off
+		db->ExecuteTransaction(
+			txn,
+			[userID, name, steamID64, modeID, jumpType, isBlock, block, distance, replayUuid, mapName](std::vector<ISQLQuery *> queries)
+			{
+				AnnouncePB(userID, name, steamID64, modeID, jumpType, isBlock, block, distance, replayUuid, mapName, queries[0]->GetInsertId());
 			},
 			[steamID64, jumpType](std::string error, int failIndex)
 			{
@@ -808,21 +822,23 @@ namespace
 					i32 block = r->GetInt(3);
 					f64 distance = ResultDouble(r, 4);
 					char text[256];
+					// Карта — в каждой строке: реплей прыжка играет только на ней.
+					const char *map = r->GetString(11) ? r->GetString(11) : "";
 					if (isBlock)
 					{
-						V_snprintf(text, sizeof(text), "#%d  %d (%.4f)  %s", place, block, distance, alias.c_str());
+						V_snprintf(text, sizeof(text), "#%d  %d (%.4f)  %s  · %s", place, block, distance, alias.c_str(), map);
 					}
 					else
 					{
-						V_snprintf(text, sizeof(text), "#%d  %.4f  %s", place, distance, alias.c_str());
+						V_snprintf(text, sizeof(text), "#%d  %.4f  %s  · %s", place, distance, alias.c_str(), map);
 					}
 					char info[16];
 					V_snprintf(info, sizeof(info), "%d", id);
 					rows.emplace_back(text, info);
 					utils::PrintConsole(player->GetController(),
-										"%s | %llu | strafes %d | sync %.1f%% | pre %.2f | max %.2f | air %.3f | %s | id %d\n", text,
+										"%s | %llu | strafes %d | sync %.1f%% | pre %.2f | max %.2f | air %.3f | id %d\n", text,
 										(u64)r->GetInt64(1), r->GetInt(5), ResultDouble(r, 6) * 100.0, ResultDouble(r, 7), ResultDouble(r, 8),
-										ResultDouble(r, 9), r->GetString(11) ? r->GetString(11) : "", id);
+										ResultDouble(r, 9), id);
 				}
 				if (rows.empty())
 				{
@@ -988,8 +1004,9 @@ namespace
 				while (r && r->FetchRow())
 				{
 					std::string label = JumpLabel(lang, r->GetInt(1), r->GetInt(2) != 0, r->GetInt(3), ResultDouble(r, 4));
-					utils::PrintConsole(player->GetController(), "[jumptop #%d] %s %s | strafes %d | sync %.1f%% | pre %.2f | max %.2f | air %.3f\n",
-										r->GetInt(0), label.c_str(), mode.c_str(), r->GetInt(5), ResultDouble(r, 6) * 100.0, ResultDouble(r, 7),
+					const char *map = r->GetString(10) ? r->GetString(10) : "";
+					utils::PrintConsole(player->GetController(), "[jumptop #%d] %s %s | %s | strafes %d | sync %.1f%% | pre %.2f | max %.2f | air %.3f\n",
+										r->GetInt(0), label.c_str(), mode.c_str(), map, r->GetInt(5), ResultDouble(r, 6) * 100.0, ResultDouble(r, 7),
 										ResultDouble(r, 8), ResultDouble(r, 9));
 					if (!line.empty())
 					{
