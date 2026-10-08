@@ -1063,10 +1063,14 @@ void KZJumpstatsService::EndJump()
 	{
 		KZJumpstatsService::AnnounceJump(jump);
 		this->player->recordingService->OnJumpFinish(jump);
-		// Джамптоп — после записи прыжка: ему нужен UUID этого прыжка (lastJumpUUID).
-		KZ::jumptop::OnJumpFinish(this->player, jump);
 	}
 	this->player->anticheatService->OnJumpFinish(jump);
+	// Джамптоп — после записи прыжка (нужен UUID этого прыжка, lastJumpUUID) и после античита:
+	// детектор может забанить именно за этот прыжок, и тогда он в топ не идёт (isBanned).
+	if (!this->player->pracService->IsInPrac())
+	{
+		KZ::jumptop::OnJumpFinish(this->player, jump);
+	}
 }
 
 void KZJumpstatsService::HandleTeleport()

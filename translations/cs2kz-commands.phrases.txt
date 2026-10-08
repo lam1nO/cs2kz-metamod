@@ -828,6 +828,16 @@
 		"de"		"Liste derzeitige Zuschauer im Chat auf."
 		"es"		"Enumerar espectadores actuales en el chat."
 	}
+	"Command Description - kz_jumptop"
+	{
+		"en"		"Jumpstat top: best jumps by type and mode, select a row to watch its replay."
+		"ru"		"Джамптоп: лучшие прыжки по типам и режимам, выбор строки — реплей прыжка."
+	}
+	"Command Description - kz_jspb"
+	{
+		"en"		"Your (or a player's) jumpstat personal bests in the current mode."
+		"ru"		"Личные рекорды прыжков (свои или игрока) в текущем режиме."
+	}
 	"Command Description - kz_goto"
 	{
 		"en"		"Go to a player."

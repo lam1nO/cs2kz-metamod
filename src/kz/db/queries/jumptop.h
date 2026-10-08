@@ -123,7 +123,8 @@ constexpr char sql_jumptop_rank[] = R"(
 // одна сортировка годится обоим видам.
 // Параметры: Mode, JumpType, IsBlockJump, Limit.
 constexpr char sql_jumptop_gettop[] = R"(
-    SELECT t.ID, t.SteamID64, COALESCE(p.Alias, ''), t.Block, t.Distance, t.Strafes, t.Sync, t.Pre, t.Max, t.Airtime, t.ReplayUUID
+    SELECT t.ID, t.SteamID64, COALESCE(p.Alias, ''), t.Block, t.Distance, t.Strafes, t.Sync, t.Pre, t.Max, t.Airtime, t.ReplayUUID,
+        t.MapName
         FROM (
             SELECT j.*, ROW_NUMBER() OVER (PARTITION BY j.SteamID64 ORDER BY j.Block DESC, j.Distance DESC, j.ID ASC) AS rn
                 FROM Jumptop j

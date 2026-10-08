@@ -106,4 +106,10 @@
 		"en"		"{purple}Jumptop {grey}| Player not found."
 		"ru"		"{purple}Джамптоп {grey}| Игрок не найден."
 	}
+	"Jumptop - Replay Other Map"
+	{
+		"#format"	"map:s"
+		"en"		"{purple}Jumptop {grey}| The replay plays only on its map: {default}{map}"
+		"ru"		"{purple}Джамптоп {grey}| Реплей играет только на своей карте: {default}{map}"
+	}
 }
