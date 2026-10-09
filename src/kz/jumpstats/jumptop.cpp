@@ -15,6 +15,7 @@
 #include "utils/simplecmds.h"
 #include "utils/utils.h"
 #include "utils/json.h"
+#include "utils/tables.h"
 
 #include "filesystem.h"
 #include "vendor/sql_mm/src/public/sql_mm.h"
@@ -152,6 +153,7 @@ namespace
 		d["originalJumpType"] = jump->originalJumpType;
 		d["distance"] = jump->GetDistance();
 		d["block"] = jump->GetBlock();
+		d["miss"] = jump->GetMiss();
 		d["edge"] = jump->GetEdge(false);
 		d["landingEdge"] = jump->GetEdge(true);
 		d["offset"] = jump->GetOffset();
@@ -208,6 +210,12 @@ namespace
 			strafes.push_back(js);
 		}
 		d["strafeList"] = strafes;
+		// График клавиш и мыши — тот же, что в обычном отчёте в консоли (для разбора на АХК).
+		std::string strafeLeft, strafeRight, mouseLeft, mouseRight;
+		if (jump->BuildConsoleStrafeMouseGraph(strafeLeft, strafeRight, mouseLeft, mouseRight))
+		{
+			d["graph"] = {{"strafeLeft", strafeLeft}, {"strafeRight", strafeRight}, {"mouseLeft", mouseLeft}, {"mouseRight", mouseRight}};
+		}
 
 		// Битый UTF-8 (имя карты) не должен уронить сервер: исключения выключены, throw = abort.
 		return d.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
@@ -714,6 +722,230 @@ static_function void PlayJumpReplay(KZPlayer *player, const std::string &uuid)
 }
 
 /*
+ * Полная статистика прыжка из базы — в формате обычного отчёта о прыжке в консоли
+ * (KZJumpstatsService::PrintJumpToConsole): сводка, две строки деталей, таблица стрейфов, график.
+ * Сверху строка джамптопа (номер, карта, сервер, дата), снизу SteamID и UUID реплея.
+ */
+struct StoredJump
+{
+	i32 id;
+	u64 steamID64;
+	std::string alias;
+	i32 mode;
+	i32 type;
+	bool isBlock;
+	i32 block;
+	f64 distance;
+	std::string map;
+	std::string server;
+	std::string replay;
+	std::string created;
+	bool removed;
+	std::string details;
+};
+
+static_function f64 JsonNum(const nlohmann::json &j, const char *key, f64 def = 0.0)
+{
+	auto it = j.find(key);
+	return (it != j.end() && it->is_number()) ? it->get<f64>() : def;
+}
+
+static_function std::string JsonStr(const nlohmann::json &j, const char *key)
+{
+	auto it = j.find(key);
+	return (it != j.end() && it->is_string()) ? it->get<std::string>() : "";
+}
+
+// Как Jump::GetReleaseString(false): отпускание W относительно отрыва, в тиках.
+static_function std::string ReleaseString(f64 ticks)
+{
+	if (ticks < -20)
+	{
+		return "";
+	}
+	if (ticks > 10)
+	{
+		return " | ✗ W";
+	}
+	if (ticks == 0)
+	{
+		return " | ✓ W";
+	}
+	char buf[64];
+	V_snprintf(buf, sizeof(buf), " | %s%.1f W", ticks > 0 ? "+" : "", ticks);
+	return buf;
+}
+
+static_global const char *storedColumnKeys[] = {"#.",
+												"Sync",
+												"Gain",
+												"",
+												"Loss",
+												"",
+												"Max",
+												"Air Time",
+												"Bad Angles (Short)",
+												"Overlap (Short)",
+												"Dead Air (Short)",
+												"Width (Short)",
+												"Average Gain (Short)",
+												"Gain Efficiency (Short)",
+												"Angle Ratio"};
+
+static_function void PrintStoredJumpReport(KZPlayer *target, const StoredJump &s)
+{
+	const char *lang = target->languageService->GetLanguage();
+	const char *typeShort = (s.type >= 0 && s.type < JUMPTYPE_COUNT) ? jumpTypeShortStr[s.type] : "?";
+	const char *typeLong = (s.type >= 0 && s.type < JUMPTYPE_COUNT) ? jumpTypeStr[s.type] : "?";
+	std::string modeName = ModeShortName(s.mode);
+
+	char head[512];
+	char blockPart[32] = "";
+	if (s.isBlock)
+	{
+		V_snprintf(blockPart, sizeof(blockPart), " · %d block", s.block);
+	}
+	V_snprintf(head, sizeof(head), "\n[Jumptop #%d] %s%s · %s · %s · %s · %s%s\n", s.id, typeShort, blockPart, modeName.c_str(), s.map.c_str(),
+			   s.server.c_str(), s.created.c_str(), s.removed ? " · REMOVED" : "");
+	utils::PrintConsole(target->GetController(), "%s", head);
+
+	nlohmann::json d = nlohmann::json::parse(s.details, nullptr, false);
+	if (d.is_discarded() || !d.is_object())
+	{
+		d = nlohmann::json::object();
+	}
+
+	target->languageService->PrintConsole(false, false, "Jumpstats Report - Console Summary", s.alias.c_str(), s.distance, typeLong, "");
+
+	std::string modeStyle = JsonStr(d, "mode");
+	if (modeStyle.empty())
+	{
+		modeStyle = modeName;
+	}
+	std::string blockStr, edgeStr, landingEdgeStr, missStr;
+	if (JsonNum(d, "edge", -1.0) >= 0.0)
+	{
+		edgeStr = KZLanguageService::PrepareMessageWithLang(lang, "Jumpstat Report - Console Segment - Edge", JsonNum(d, "edge"));
+	}
+	if (JsonNum(d, "landingEdge") > 0.0)
+	{
+		landingEdgeStr = KZLanguageService::PrepareMessageWithLang(lang, "Jumpstat Report - Console Segment - Landing Edge", JsonNum(d, "landingEdge"));
+	}
+	if (JsonNum(d, "block") > 0.0)
+	{
+		blockStr = KZLanguageService::PrepareMessageWithLang(lang, "Jumpstat Report - Console Segment - Block", JsonNum(d, "block"));
+	}
+	if (JsonNum(d, "miss") > 0.0)
+	{
+		missStr = KZLanguageService::PrepareMessageWithLang(lang, "Jumpstat Report - Console Segment - Miss", JsonNum(d, "miss"));
+	}
+	std::string releaseStr;
+	if ((s.type == JumpType_LongJump || s.type == JumpType_LadderJump || s.type == JumpType_WeirdJump) && d.contains("releaseTicks"))
+	{
+		releaseStr = ReleaseString(JsonNum(d, "releaseTicks"));
+	}
+	i32 strafeCount = (i32)JsonNum(d, "strafes");
+	// clang-format off
+	target->languageService->PrintConsole(false, false, "Jumpstat Report - Console Details 1",
+		modeStyle.c_str(),
+		blockStr.c_str(),
+		edgeStr.c_str(),
+		landingEdgeStr.c_str(),
+		missStr.c_str(),
+		strafeCount,
+		KZLanguageService::PrepareMessageWithLang(lang, strafeCount > 1 ? "Strafes" : "Strafe").c_str(),
+		JsonNum(d, "sync") * 100.0,
+		JsonNum(d, "pre"),
+		JsonNum(d, "max"),
+		JsonNum(d, "badAngles") * 100.0,
+		JsonNum(d, "overlap") * 100.0,
+		JsonNum(d, "deadAir") * 100.0,
+		JsonNum(d, "height"),
+		releaseStr.c_str()
+	);
+	target->languageService->PrintConsole(false, false, "Jumpstat Report - Console Details 2",
+		JsonNum(d, "gainEff") * 100.0,
+		JsonNum(d, "airPath"),
+		JsonNum(d, "deviation"),
+		JsonNum(d, "width"),
+		JsonNum(d, "airtime"),
+		JsonNum(d, "offset"),
+		JsonNum(d, "duckEnd"),
+		JsonNum(d, "duck")
+	);
+	// clang-format on
+
+	auto list = d.find("strafeList");
+	if (list != d.end() && list->is_array() && !list->empty())
+	{
+		CUtlString headers[KZ_ARRAYSIZE(storedColumnKeys)];
+		for (u32 i = 0; i < KZ_ARRAYSIZE(storedColumnKeys); i++)
+		{
+			headers[i] = target->languageService->PrepareMessage(storedColumnKeys[i]).c_str();
+		}
+		utils::Table<KZ_ARRAYSIZE(storedColumnKeys)> table("", headers);
+		u32 row = 0;
+		for (const nlohmann::json &st : *list)
+		{
+			if (!st.is_object())
+			{
+				continue;
+			}
+			f64 duration = JsonNum(st, "duration");
+			f64 gain = JsonNum(st, "gain");
+			f64 maxGain = JsonNum(st, "maxGain");
+			char num[8], sync[16], gainS[16], extGain[16], loss[16], extLoss[16], maxS[16], dur[16];
+			char ba[16], ol[16], da[16], width[16], avgGain[16], gainEff[16], ar[32];
+			V_snprintf(num, sizeof(num), "%u.", row + 1);
+			V_snprintf(sync, sizeof(sync), "%.0f%%%%", JsonNum(st, "sync") * 100.0);
+			V_snprintf(gainS, sizeof(gainS), "%.2f", gain);
+			V_snprintf(extGain, sizeof(extGain), "(+%.2f)", fabs(JsonNum(st, "externalGain")));
+			V_snprintf(loss, sizeof(loss), "-%.2f", fabs(JsonNum(st, "loss")));
+			V_snprintf(extLoss, sizeof(extLoss), "(-%.2f)", fabs(JsonNum(st, "externalLoss")));
+			V_snprintf(maxS, sizeof(maxS), "%.2f", JsonNum(st, "maxSpeed"));
+			V_snprintf(dur, sizeof(dur), "%.3f", duration);
+			V_snprintf(ba, sizeof(ba), "%.1f", JsonNum(st, "badAngles") * ENGINE_FIXED_TICK_RATE);
+			V_snprintf(ol, sizeof(ol), "%.1f", JsonNum(st, "overlap") * ENGINE_FIXED_TICK_RATE);
+			V_snprintf(da, sizeof(da), "%.1f", JsonNum(st, "deadAir") * ENGINE_FIXED_TICK_RATE);
+			V_snprintf(width, sizeof(width), "%.1f", fabs(JsonNum(st, "width")));
+			V_snprintf(avgGain, sizeof(avgGain), "%.2f", duration > 0.0 ? gain / duration * ENGINE_FIXED_TICK_INTERVAL : 0.0);
+			V_snprintf(gainEff, sizeof(gainEff), "%.0f%%%%", maxGain > 0.0 ? gain / maxGain * 100.0 : 0.0);
+			if (st.contains("arAverage"))
+			{
+				V_snprintf(ar, sizeof(ar), "%.2f/%.2f/%.2f", JsonNum(st, "arAverage"), JsonNum(st, "arMedian"), JsonNum(st, "arMax"));
+			}
+			else
+			{
+				V_snprintf(ar, sizeof(ar), "N/A");
+			}
+			table.SetRow(row, num, sync, gainS, extGain, loss, extLoss, maxS, dur, ba, ol, da, width, avgGain, gainEff, ar);
+			row++;
+		}
+		target->PrintConsole(false, false, table.GetHeader());
+		for (u32 i = 0; i < table.GetNumEntries(); i++)
+		{
+			target->PrintConsole(false, false, table.GetLine(i));
+		}
+	}
+
+	// График клавиш и мыши — только у прыжков, записанных с cyb.271 (раньше не сохранялся).
+	auto graph = d.find("graph");
+	if (graph != d.end() && graph->is_object())
+	{
+		target->languageService->PrintConsole(false, false, "Jumpstat Report - Console Graph - Strafe Keys");
+		target->languageService->PrintConsole(false, false, "Jumpstat Report - Console Graph - Left", JsonStr(*graph, "strafeLeft").c_str());
+		target->languageService->PrintConsole(false, false, "Jumpstat Report - Console Graph - Right", JsonStr(*graph, "strafeRight").c_str());
+		target->languageService->PrintConsole(false, false, "Jumpstat Report - Console Graph - Mouse Movement");
+		target->languageService->PrintConsole(false, false, "Jumpstat Report - Console Graph - Left", JsonStr(*graph, "mouseLeft").c_str());
+		target->languageService->PrintConsole(false, false, "Jumpstat Report - Console Graph - Right", JsonStr(*graph, "mouseRight").c_str());
+	}
+
+	char tail[256];
+	V_snprintf(tail, sizeof(tail), "SteamID %llu · replay %s\n\n", s.steamID64, s.replay.empty() ? "—" : s.replay.c_str());
+	utils::PrintConsole(target->GetController(), "%s", tail);
+}
+
+/*
  * !jumpinfo <id> — строка топа целиком в консоль (разбор на АХК).
  */
 static_function void PrintJumpInfo(KZPlayer *player, i32 id, bool andReplay)
@@ -744,35 +976,27 @@ static_function void PrintJumpInfo(KZPlayer *player, i32 id, bool andReplay)
 				player->languageService->PrintChat(true, false, "Jumptop - Jump Not Found", id);
 				return;
 			}
-			u64 steamID64 = (u64)r->GetInt64(1);
-			std::string alias = r->GetString(2) ? r->GetString(2) : "";
-			i32 mode = r->GetInt(3);
-			i32 type = r->GetInt(4);
-			bool isBlock = r->GetInt(5) != 0;
-			i32 block = r->GetInt(6);
-			f64 distance = ResultDouble(r, 7);
-			std::string replay = r->GetString(17) ? r->GetString(17) : "";
-			std::string label = JumpLabel(player->languageService->GetLanguage(), type, isBlock, block, distance);
-			std::string modeName = ModeShortName(mode);
+			StoredJump sj;
+			sj.id = id;
+			sj.steamID64 = (u64)r->GetInt64(1);
+			sj.alias = r->GetString(2) ? r->GetString(2) : "";
+			sj.mode = r->GetInt(3);
+			sj.type = r->GetInt(4);
+			sj.isBlock = r->GetInt(5) != 0;
+			sj.block = r->GetInt(6);
+			sj.distance = ResultDouble(r, 7);
+			sj.map = r->GetString(15) ? r->GetString(15) : "";
+			sj.server = r->GetString(16) ? r->GetString(16) : "";
+			sj.replay = r->GetString(17) ? r->GetString(17) : "";
+			sj.details = r->GetString(18) ? r->GetString(18) : "";
+			sj.removed = r->GetInt(19) != 0;
+			sj.created = r->GetString(20) ? r->GetString(20) : "";
+			PrintStoredJumpReport(player, sj);
 
-			char line[1024];
-			V_snprintf(line, sizeof(line),
-					   "[jumptop #%d] %s %s | %s (%llu) | strafes %d | sync %.1f%% | pre %.2f | max %.2f | air %.3f | height %.2f | offset %.2f"
-					   " | map %s | server %s | replay %s | %s%s\n",
-					   id, label.c_str(), modeName.c_str(), alias.c_str(), steamID64, r->GetInt(8), ResultDouble(r, 9) * 100.0,
-					   ResultDouble(r, 10), ResultDouble(r, 11), ResultDouble(r, 12), ResultDouble(r, 13), ResultDouble(r, 14),
-					   r->GetString(15) ? r->GetString(15) : "", r->GetString(16) ? r->GetString(16) : "", replay.c_str(),
-					   r->GetString(20) ? r->GetString(20) : "", r->GetInt(19) ? " | REMOVED" : "");
-			utils::PrintConsole(player->GetController(), "%s", line);
-			// Полная статистика (JSON по стрейфам) — кусками: строка консоли ограничена.
-			const char *details = r->GetString(18) ? r->GetString(18) : "";
-			std::string all = details;
-			for (size_t off = 0; off < all.size(); off += 900)
-			{
-				utils::PrintConsole(player->GetController(), "%s", all.substr(off, 900).c_str());
-			}
-			utils::PrintConsole(player->GetController(), "\n");
-
+			const std::string &alias = sj.alias;
+			const std::string &replay = sj.replay;
+			std::string label = JumpLabel(player->languageService->GetLanguage(), sj.type, sj.isBlock, sj.block, sj.distance);
+			std::string modeName = ModeShortName(sj.mode);
 			player->languageService->PrintChat(true, false, "Jumptop - Info Printed", alias.c_str(), label.c_str(), modeName.c_str(), id);
 			if (andReplay && !replay.empty())
 			{
@@ -1113,9 +1337,9 @@ namespace
 						V_snprintf(blockPrefix, sizeof(blockPrefix), "%d %s ", block, blockWord.c_str());
 					}
 					utils::PrintConsole(player->GetController(),
-										"#%d %s%.4f | %s (%llu) | %s | strafes %d | sync %.1f%% | pre %.2f | max %.2f | air %.3f | id %d\n", place,
-										blockPrefix, distance, alias.c_str(), (u64)r->GetInt64(1), map, r->GetInt(5),
-										ResultDouble(r, 6) * 100.0, pre, ResultDouble(r, 8), ResultDouble(r, 9), id);
+										"%2d. %s%.4f  %s  | %s | %d Strafes | %.1f%% Sync | %.2f Pre | %.2f Max | %.3f Airtime | !jumpinfo %d\n",
+										place, blockPrefix, distance, alias.c_str(), map, r->GetInt(5), ResultDouble(r, 6) * 100.0, pre,
+										ResultDouble(r, 8), ResultDouble(r, 9), id);
 				}
 				delete tiers;
 				if (rows.empty())
