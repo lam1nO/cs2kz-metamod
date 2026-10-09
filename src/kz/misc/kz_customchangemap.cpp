@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <system_error>
 #include <thread>
+#include <ctime>
 #include <sys/stat.h>
 #include <unordered_set>
 
@@ -39,6 +40,8 @@ static KHook::Virtual<ISteamUGC, uint32, PublishedFileId_t> s_itemStateHook(GetI
 static KHook::Return<bool> GetItemInstallInfoPre(ISteamUGC *pThis, PublishedFileId_t id, uint64 *punSizeOnDisk, char *pchFolder, uint32 cchFolderSize,
 												 uint32 *punTimeStamp);
 static KHook::Virtual<ISteamUGC, bool, PublishedFileId_t, uint64 *, char *, uint32, uint32 *> s_installInfoHook(GetItemInstallInfoPre, nullptr);
+static KHook::Return<bool> DownloadItemPre(ISteamUGC *pThis, PublishedFileId_t id, bool bHighPriority);
+static KHook::Virtual<ISteamUGC, bool, PublishedFileId_t, bool> s_downloadItemHook(DownloadItemPre, nullptr);
 
 namespace
 {
@@ -55,6 +58,7 @@ CustomMapState s_state;
 
 bool s_ugcHooked = false;
 std::unordered_set<PublishedFileId_t> s_loggedCacheItems;
+std::unordered_set<PublishedFileId_t> s_loggedSuppressedDownloads;
 std::thread::id s_mainThread;
 bool s_offThreadLogged = false;
 
@@ -199,15 +203,20 @@ static KHook::Return<bool> GetItemInstallInfoPre(ISteamUGC *pThis, PublishedFile
 												 uint32 *punTimeStamp)
 {
 	CheckHookThread("GetItemInstallInfo");
-	if (s_installInfoHook.CallOriginal(pThis, id, punSizeOnDisk, pchFolder, cchFolderSize, punTimeStamp))
-	{
-		return {KHook::Action::Supersede, true};
-	}
+	// Кэш спрашиваем ПЕРВЫМ, даже если Steam считает карту установленной: после обновления
+	// карты сторожем ACF инстанса держит старую запись, и Steam отдаёт старое время установки.
+	// CDedicatedServerWorkshopManager (libserver) сверяет его со временем публикации, видит
+	// «устарела» и зовёт DownloadItem — а докачка внутри контейнера падает (EResult 37,
+	// «Staging library folder not found»), смена карты молча не происходит (09.10, kz_dankality).
 	CachedItem item;
 	if (!pchFolder || cchFolderSize == 0 || !IsSharedCacheMount() || !FindCachedItem(id, &item) || item.folder.size() >= cchFolderSize)
 	{
-		return {KHook::Action::Supersede, false};
+		return {KHook::Action::Supersede, s_installInfoHook.CallOriginal(pThis, id, punSizeOnDisk, pchFolder, cchFolderSize, punTimeStamp)};
 	}
+	// Время установки — «сейчас», а не mtime vpk: сторож кладёт новую сборку раньше, чем Steam
+	// поднимает time_updated публикации (метаданные правятся позже контента), и любое
+	// «честное» время из кэша менеджер всё равно счёл бы устаревшим. Кэш — истина (см. выше).
+	item.timestamp = static_cast<uint32>(time(nullptr));
 	V_strncpy(pchFolder, item.folder.c_str(), cchFolderSize);
 	if (punSizeOnDisk)
 	{
@@ -218,6 +227,23 @@ static KHook::Return<bool> GetItemInstallInfoPre(ISteamUGC *pThis, PublishedFile
 		*punTimeStamp = item.timestamp;
 	}
 	LogCacheOverride(id, 0);
+	return {KHook::Action::Supersede, true};
+}
+
+// Докачку карты, которая уже лежит в общем кэше, не запускаем вовсе: её держит актуальной
+// сторож ноды, а внутри игрового процесса докачка в общий кэш падает (см. GetItemInstallInfoPre).
+// Отвечаем «запрос принят» — тот же ответ, что Steam даёт на уже установленный предмет.
+static KHook::Return<bool> DownloadItemPre(ISteamUGC *pThis, PublishedFileId_t id, bool bHighPriority)
+{
+	CheckHookThread("DownloadItem");
+	if (!IsSharedCacheMount() || !FindCachedItem(id, nullptr))
+	{
+		return {KHook::Action::Supersede, s_downloadItemHook.CallOriginal(pThis, id, bHighPriority)};
+	}
+	if (s_loggedSuppressedDownloads.insert(id).second)
+	{
+		KZ_LOG_INFO(LogChannel::General, "[cyb] workshop_download_suppressed id=%llu reason=in_shared_cache\n", id);
+	}
 	return {KHook::Action::Supersede, true};
 }
 
@@ -350,6 +376,8 @@ void KZ::misc::customchangemap::OnSteamAPIActivated()
 	s_itemStateHook.AddGlobal(ugc);
 	s_installInfoHook.Configure(&ISteamUGC::GetItemInstallInfo);
 	s_installInfoHook.AddGlobal(ugc);
+	s_downloadItemHook.Configure(&ISteamUGC::DownloadItem);
+	s_downloadItemHook.AddGlobal(ugc);
 	s_ugcHooked = true;
 }
 
@@ -360,6 +388,7 @@ void KZ::misc::customchangemap::Cleanup()
 	{
 		s_itemStateHook.ClearHooks();
 		s_installInfoHook.ClearHooks();
+		s_downloadItemHook.ClearHooks();
 		s_ugcHooked = false;
 	}
 }
