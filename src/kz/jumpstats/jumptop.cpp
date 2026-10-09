@@ -799,14 +799,23 @@ static_function void PrintJumpInfo(KZPlayer *player, i32 id, bool andReplay)
 }
 
 /*
- * Меню !jumptop: [режим] + 14 пунктов (7 типов × дистанция/блоки) → топ-20 → выбор строки =
- * статистика в консоль и реплей ботом (как в GOKZ).
+ * Меню !jumptop: корень (режим и вид топа листаются A/D + 7 типов) → топ-20 → карточка прыжка
+ * (статистика, реплей ботом, полная статистика в консоль). R в топе и карточке — шаг назад.
  */
 namespace
 {
 	MenuHandle g_rootMenu[MAXPLAYERS + 1] = {};
 	MenuHandle g_topMenu[MAXPLAYERS + 1] = {};
+	MenuHandle g_cardMenu[MAXPLAYERS + 1] = {};
 	i32 g_menuMode[MAXPLAYERS + 1] = {};
+	bool g_menuBlock[MAXPLAYERS + 1] = {};
+	// Карта прыжка в открытой карточке: реплей играет только на ней, перепроверяем при выборе.
+	std::string g_cardMap[MAXPLAYERS + 1];
+
+	// Строки корня: 0 — режим, 1 — вид топа, дальше типы прыжков по порядку.
+	constexpr int rootRowMode = 0;
+	constexpr int rootRowBoard = 1;
+	constexpr int rootRowFirstType = 2;
 
 	void ResetMenu(MenuHandle *slotMenu)
 	{
@@ -817,7 +826,198 @@ namespace
 		}
 	}
 
-	void OpenRootMenu(KZPlayer *player, i32 modeID);
+	// R в child возвращает в parent. AddSubMenu ставит связь только вместе с пунктом-ссылкой,
+	// а топ и карточка строятся асинхронно после выбора — пункт сразу убираем, связь остаётся.
+	void LinkParent(MenuHandle parent, MenuHandle child)
+	{
+		if (parent == kInvalidMenuHandle || child == kInvalidMenuHandle)
+		{
+			return;
+		}
+		int item = g_pMenus->AddSubMenu(parent, "", child, "");
+		if (item >= 0)
+		{
+			g_pMenus->RemoveItem(parent, item);
+		}
+	}
+
+	bool IsSlotValid(int slot)
+	{
+		return slot >= 0 && slot <= MAXPLAYERS;
+	}
+
+	// Цвет тира — как у отчёта о прыжке в чате; пороги режима топа, а не режима смотрящего.
+	std::string TierColored(KZModeService *tiers, i32 jumpType, f64 distance, f64 pre, const char *text)
+	{
+		DistanceTier tier = tiers ? tiers->GetDistanceTier((JumpType)jumpType, (f32)distance, (f32)pre) : DistanceTier_Meh;
+		if (tier == DistanceTier_None)
+		{
+			tier = DistanceTier_Meh;
+		}
+		char tagged[128];
+		V_snprintf(tagged, sizeof(tagged), "%s%s{default}", distanceTierColors[tier], text);
+		char out[128];
+		if (!utils::CFormat(out, sizeof(out), tagged))
+		{
+			return text;
+		}
+		// CFormat ставит пробел в начало (для чата) — в меню он лишний.
+		return out[0] == ' ' ? out + 1 : out;
+	}
+
+	// «2026-10-09 12:34:56» → «09.10.2026».
+	std::string ShortDate(const char *created)
+	{
+		if (!created || V_strlen(created) < 10)
+		{
+			return "";
+		}
+		char buf[16];
+		V_snprintf(buf, sizeof(buf), "%.2s.%.2s.%.4s", created + 8, created + 5, created);
+		return buf;
+	}
+
+	void OpenRootMenu(KZPlayer *player, i32 modeID, bool isBlock);
+	void ShowTop(KZPlayer *player, i32 modeID, i32 jumpType, bool isBlock);
+
+	void OnCardMenuSelect(MenuHandle menu, int slot, int item)
+	{
+		KZPlayer *player = g_pKZPlayerManager->ToPlayer(CPlayerSlot(slot));
+		const char *info = g_pMenus->GetItemInfo(menu, item);
+		if (!player || !info || !info[0] || !IsSlotValid(slot))
+		{
+			return;
+		}
+		std::string action = info;
+		if (action.rfind("c:", 0) == 0)
+		{
+			PrintJumpInfo(player, V_StringToInt32(action.c_str() + 2, 0), false);
+		}
+		else if (action.rfind("r:", 0) == 0)
+		{
+			// Карточка могла пережить смену карты, пока висела.
+			if (!KZ_STREQI(g_cardMap[slot].c_str(), g_pKZUtils->GetCurrentMapName().Get()))
+			{
+				player->languageService->PrintChat(true, false, "Jumptop - Replay Other Map", g_cardMap[slot].c_str());
+				return;
+			}
+			g_pMenus->CancelMenu(slot);
+			PlayJumpReplay(player, action.substr(2));
+		}
+	}
+
+	void OpenCard(KZPlayer *player, i32 id, MenuHandle parent)
+	{
+		if (!KZDatabaseService::IsReady())
+		{
+			player->languageService->PrintChat(true, false, "Jumptop - Database Unavailable");
+			return;
+		}
+		char query[1024];
+		V_snprintf(query, sizeof(query), sql_jumptop_getjump, id);
+		Transaction txn;
+		txn.queries.push_back(query);
+		CPlayerUserId userID = player->GetClient()->GetUserID();
+		// clang-format off
+		KZDatabaseService::GetDatabaseConnection()->ExecuteTransaction(
+			txn,
+			[userID, id, parent](std::vector<ISQLQuery *> queries)
+			{
+				KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
+				if (!player || g_pMenus == nullptr)
+				{
+					return;
+				}
+				int slot = player->GetPlayerSlot().Get();
+				if (!IsSlotValid(slot))
+				{
+					return;
+				}
+				ISQLResult *r = queries[0]->GetResultSet();
+				if (!r || !r->FetchRow())
+				{
+					player->languageService->PrintChat(true, false, "Jumptop - Jump Not Found", id);
+					return;
+				}
+				const char *lang = player->languageService->GetLanguage();
+				std::string alias = r->GetString(2) ? r->GetString(2) : "";
+				i32 type = r->GetInt(4);
+				bool isBlock = r->GetInt(5) != 0;
+				i32 block = r->GetInt(6);
+				f64 distance = ResultDouble(r, 7);
+				std::string map = r->GetString(15) ? r->GetString(15) : "";
+				std::string replay = r->GetString(17) ? r->GetString(17) : "";
+				const char *typeStr = (type >= 0 && type < JUMPTYPE_COUNT) ? jumpTypeShortStr[type] : "?";
+
+				char title[192];
+				if (isBlock)
+				{
+					std::string blockWord = KZLanguageService::PrepareMessageWithLang(lang, "Jumptop - Block Word");
+					V_snprintf(title, sizeof(title), "%s · %s %d %s (%.2f)", alias.c_str(), typeStr, block, blockWord.c_str(), distance);
+				}
+				else
+				{
+					V_snprintf(title, sizeof(title), "%s · %s %.2f", alias.c_str(), typeStr, distance);
+				}
+
+				ResetMenu(&g_cardMenu[slot]);
+				MenuHandle m = g_pMenus->CreateMenu(MenuType::Default, title, &OnCardMenuSelect);
+				if (m == kInvalidMenuHandle)
+				{
+					return;
+				}
+				std::string date = ShortDate(r->GetString(20));
+				std::string where = date.empty() ? map : map + " · " + date;
+				g_pMenus->AddItem(m, where.c_str(), "", true);
+				std::string stats1 = KZLanguageService::PrepareMessageWithLang(lang, "Jumptop - Card Stats", r->GetInt(8), ResultDouble(r, 9) * 100.0);
+				g_pMenus->AddItem(m, stats1.c_str(), "", true);
+				std::string stats2 = KZLanguageService::PrepareMessageWithLang(lang, "Jumptop - Card Speed", ResultDouble(r, 10), ResultDouble(r, 11));
+				g_pMenus->AddItem(m, stats2.c_str(), "", true);
+
+				g_cardMap[slot] = map;
+				int startItem = 4;
+				if (replay.empty())
+				{
+					std::string text = KZLanguageService::PrepareMessageWithLang(lang, "Jumptop - Card No Replay");
+					g_pMenus->AddItem(m, text.c_str(), "", true);
+				}
+				else if (!KZ_STREQI(map.c_str(), g_pKZUtils->GetCurrentMapName().Get()))
+				{
+					std::string text = KZLanguageService::PrepareMessageWithLang(lang, "Jumptop - Card Replay Other Map", map.c_str());
+					g_pMenus->AddItem(m, text.c_str(), "", true);
+				}
+				else
+				{
+					std::string text = KZLanguageService::PrepareMessageWithLang(lang, "Jumptop - Card Replay");
+					std::string info = "r:" + replay;
+					startItem = g_pMenus->AddItem(m, text.c_str(), info.c_str(), false);
+				}
+				std::string consoleText = KZLanguageService::PrepareMessageWithLang(lang, "Jumptop - Card Console");
+				char info[24];
+				V_snprintf(info, sizeof(info), "c:%d", id);
+				g_pMenus->AddItem(m, consoleText.c_str(), info, false);
+
+				// Первые строки — справка, курсор сразу на действии (реплей, если он доступен).
+				g_pMenus->SetStartItem(m, startItem);
+				g_pMenus->SetCloseOnSelect(m, false);
+				// Топ к этому моменту мог пересоздаться (повторный !jumptop) — тогда «назад» некуда.
+				if (parent != kInvalidMenuHandle && parent == g_topMenu[slot])
+				{
+					LinkParent(parent, m);
+				}
+				g_cardMenu[slot] = m;
+				g_pMenus->DisplayMenu(m, slot, 0);
+			},
+			[userID](std::string error, int failIndex)
+			{
+				KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
+				if (player)
+				{
+					player->languageService->PrintChat(true, false, "Jumptop - Database Unavailable");
+				}
+			});
+		// clang-format on
+	}
 
 	void OnTopMenuSelect(MenuHandle menu, int slot, int item)
 	{
@@ -827,10 +1027,12 @@ namespace
 		{
 			return;
 		}
-		PrintJumpInfo(player, V_StringToInt32(info, 0), true);
+		// Вернувшись из карточки по R, курсор встанет на тот же прыжок.
+		g_pMenus->SetStartItem(menu, item);
+		OpenCard(player, V_StringToInt32(info, 0), menu);
 	}
 
-	void ShowTop(KZPlayer *player, i32 modeID, i32 jumpType, bool isBlock)
+	void ShowTop(KZPlayer *player, i32 modeID, i32 jumpType, bool isBlock, MenuHandle parent)
 	{
 		if (!KZDatabaseService::IsReady())
 		{
@@ -845,7 +1047,7 @@ namespace
 		// clang-format off
 		KZDatabaseService::GetDatabaseConnection()->ExecuteTransaction(
 			txn,
-			[userID, modeID, jumpType, isBlock](std::vector<ISQLQuery *> queries)
+			[userID, modeID, jumpType, isBlock, parent](std::vector<ISQLQuery *> queries)
 			{
 				KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
 				if (!player)
@@ -855,11 +1057,18 @@ namespace
 				const char *lang = player->languageService->GetLanguage();
 				std::string mode = ModeShortName(modeID);
 				std::string kind = KZLanguageService::PrepareMessageWithLang(lang, isBlock ? "Jumptop - Kind Block" : "Jumptop - Kind Distance");
-				std::string title = KZLanguageService::PrepareMessageWithLang(lang, "Jumptop - Top Title", jumpTypeShortStr[jumpType], kind.c_str(), mode.c_str());
+				std::string title = KZLanguageService::PrepareMessageWithLang(lang, isBlock ? "Jumptop - Top Title Block" : "Jumptop - Top Title",
+																			  jumpTypeStr[jumpType], mode.c_str());
+				std::string blockWord = KZLanguageService::PrepareMessageWithLang(lang, "Jumptop - Block Word");
+
+				// Пороги тиров — у сервиса режима ТОПА (смотрящий может стоять в другом режиме).
+				// Сервис временный: только для GetDistanceTier, без Init — как в смене режима.
+				auto modeInfo = KZ::mode::GetModeInfoFromDatabaseID(modeID);
+				KZModeService *tiers = modeInfo.factory ? modeInfo.factory(player) : nullptr;
 
 				ISQLResult *r = queries[0]->GetResultSet();
 				std::vector<std::pair<std::string, std::string>> rows;
-				utils::PrintConsole(player->GetController(), "\n%s\n", title.c_str());
+				utils::PrintConsole(player->GetController(), "\n%s %s\n", title.c_str(), kind.c_str());
 				i32 place = 0;
 				while (r && r->FetchRow())
 				{
@@ -868,36 +1077,48 @@ namespace
 					std::string alias = r->GetString(2) ? r->GetString(2) : "";
 					i32 block = r->GetInt(3);
 					f64 distance = ResultDouble(r, 4);
-					char text[256];
-					// Карта — в каждой строке: реплей прыжка играет только на ней.
+					f64 pre = ResultDouble(r, 7);
 					const char *map = r->GetString(11) ? r->GetString(11) : "";
+					char value[64];
 					if (isBlock)
 					{
-						V_snprintf(text, sizeof(text), "#%d  %d (%.4f)  %s  · %s", place, block, distance, alias.c_str(), map);
+						V_snprintf(value, sizeof(value), "%d %s", block, blockWord.c_str());
 					}
 					else
 					{
-						V_snprintf(text, sizeof(text), "#%d  %.4f  %s  · %s", place, distance, alias.c_str(), map);
+						V_snprintf(value, sizeof(value), "%.2f", distance);
+					}
+					std::string colored = TierColored(tiers, jumpType, distance, pre, value);
+					char text[256];
+					if (isBlock)
+					{
+						V_snprintf(text, sizeof(text), "%d. %s · %.2f  %s", place, colored.c_str(), distance, alias.c_str());
+					}
+					else
+					{
+						V_snprintf(text, sizeof(text), "%d. %s  %s", place, colored.c_str(), alias.c_str());
 					}
 					char info[16];
 					V_snprintf(info, sizeof(info), "%d", id);
 					rows.emplace_back(text, info);
 					utils::PrintConsole(player->GetController(),
-										"%s | %llu | strafes %d | sync %.1f%% | pre %.2f | max %.2f | air %.3f | id %d\n", text,
-										(u64)r->GetInt64(1), r->GetInt(5), ResultDouble(r, 6) * 100.0, ResultDouble(r, 7), ResultDouble(r, 8),
-										ResultDouble(r, 9), id);
+										"#%d %s %.4f | %s (%llu) | %s | strafes %d | sync %.1f%% | pre %.2f | max %.2f | air %.3f | id %d\n", place,
+										isBlock ? value : "", distance, alias.c_str(), (u64)r->GetInt64(1), map, r->GetInt(5),
+										ResultDouble(r, 6) * 100.0, pre, ResultDouble(r, 8), ResultDouble(r, 9), id);
 				}
+				delete tiers;
 				if (rows.empty())
 				{
 					player->languageService->PrintChat(true, false, "Jumptop - Empty", jumpTypeShortStr[jumpType], kind.c_str(), mode.c_str());
 					return;
 				}
 				int slot = player->GetPlayerSlot().Get();
-				if (g_pMenus == nullptr || slot < 0 || slot > MAXPLAYERS)
+				if (g_pMenus == nullptr || !IsSlotValid(slot))
 				{
 					player->languageService->PrintChat(true, false, "Jumptop - See Console");
 					return;
 				}
+				ResetMenu(&g_cardMenu[slot]);
 				ResetMenu(&g_topMenu[slot]);
 				MenuHandle m = g_pMenus->CreateMenu(MenuType::Default, title.c_str(), &OnTopMenuSelect);
 				if (m == kInvalidMenuHandle)
@@ -908,7 +1129,11 @@ namespace
 				{
 					g_pMenus->AddItem(m, row.first.c_str(), row.second.c_str(), false);
 				}
-				g_pMenus->SetCloseOnSelect(m, true);
+				g_pMenus->SetCloseOnSelect(m, false);
+				if (parent != kInvalidMenuHandle && parent == g_rootMenu[slot])
+				{
+					LinkParent(parent, m);
+				}
 				g_topMenu[slot] = m;
 				g_pMenus->DisplayMenu(m, slot, 0);
 			},
@@ -924,7 +1149,13 @@ namespace
 		// clang-format on
 	}
 
-	i32 NextModeID(i32 modeID)
+	void ShowTop(KZPlayer *player, i32 modeID, i32 jumpType, bool isBlock)
+	{
+		ShowTop(player, modeID, jumpType, isBlock, kInvalidMenuHandle);
+	}
+
+	// Следующий/предыдущий режим джамптопа из загруженных (dir = +1/-1).
+	i32 StepModeID(i32 modeID, i32 dir)
 	{
 		i32 count = KZ_ARRAYSIZE(jumptopModes);
 		i32 current = -1;
@@ -935,9 +1166,13 @@ namespace
 				current = i;
 			}
 		}
+		if (current < 0)
+		{
+			current = dir > 0 ? count - 1 : 0;
+		}
 		for (i32 step = 1; step <= count; step++)
 		{
-			i32 id = KZ::mode::GetModeInfo(CUtlString(jumptopModes[(current + step + count) % count])).databaseID;
+			i32 id = KZ::mode::GetModeInfo(CUtlString(jumptopModes[((current + dir * step) % count + count) % count])).databaseID;
 			if (id >= 0)
 			{
 				return id;
@@ -946,58 +1181,96 @@ namespace
 		return modeID;
 	}
 
+	std::string RootModeText(const char *lang, i32 modeID)
+	{
+		return KZLanguageService::PrepareMessageWithLang(lang, "Jumptop - Menu Mode", ModeShortName(modeID).c_str());
+	}
+
+	std::string RootBoardText(const char *lang, bool isBlock)
+	{
+		return KZLanguageService::PrepareMessageWithLang(lang, isBlock ? "Jumptop - Menu Board Block" : "Jumptop - Menu Board Distance");
+	}
+
+	// A/D на строках режима и вида топа; E на них (и чат-меню, где A/D нет) — шаг вперёд.
+	void StepRootRow(MenuHandle menu, int slot, int item, i32 dir)
+	{
+		KZPlayer *player = g_pKZPlayerManager->ToPlayer(CPlayerSlot(slot));
+		if (!player || !IsSlotValid(slot))
+		{
+			return;
+		}
+		const char *lang = player->languageService->GetLanguage();
+		if (item == rootRowMode)
+		{
+			g_menuMode[slot] = StepModeID(g_menuMode[slot], dir);
+			g_pMenus->SetItemText(menu, item, RootModeText(lang, g_menuMode[slot]).c_str());
+		}
+		else if (item == rootRowBoard)
+		{
+			g_menuBlock[slot] = !g_menuBlock[slot];
+			g_pMenus->SetItemText(menu, item, RootBoardText(lang, g_menuBlock[slot]).c_str());
+		}
+	}
+
+	void OnRootMenuAdjust(MenuHandle menu, int slot, int item, float delta, float minValue, float maxValue)
+	{
+		StepRootRow(menu, slot, item, delta < 0 ? -1 : 1);
+	}
+
 	void OnRootMenuSelect(MenuHandle menu, int slot, int item)
 	{
 		KZPlayer *player = g_pKZPlayerManager->ToPlayer(CPlayerSlot(slot));
 		const char *info = g_pMenus->GetItemInfo(menu, item);
-		if (!player || !info || !info[0] || slot < 0 || slot > MAXPLAYERS)
+		if (!player || !info || !info[0] || !IsSlotValid(slot))
 		{
 			return;
 		}
-		if (V_strcmp(info, "mode") == 0)
+		if (item == rootRowMode || item == rootRowBoard)
 		{
-			OpenRootMenu(player, NextModeID(g_menuMode[slot]));
+			StepRootRow(menu, slot, item, 1);
 			return;
 		}
-		i32 code = V_StringToInt32(info, -1);
-		if (code < 0)
+		i32 type = V_StringToInt32(info, -1);
+		if (type < 0)
 		{
 			return;
 		}
-		ShowTop(player, g_menuMode[slot], code / 2, (code % 2) == 1);
+		// Вернувшись из топа по R, курсор встанет на тот же тип.
+		g_pMenus->SetStartItem(menu, item);
+		ShowTop(player, g_menuMode[slot], type, g_menuBlock[slot], menu);
 	}
 
-	void OpenRootMenu(KZPlayer *player, i32 modeID)
+	void OpenRootMenu(KZPlayer *player, i32 modeID, bool isBlock)
 	{
 		int slot = player->GetPlayerSlot().Get();
-		if (slot < 0 || slot > MAXPLAYERS)
+		if (!IsSlotValid(slot))
 		{
 			return;
 		}
+		ResetMenu(&g_cardMenu[slot]);
+		ResetMenu(&g_topMenu[slot]);
 		ResetMenu(&g_rootMenu[slot]);
 		g_menuMode[slot] = modeID;
+		g_menuBlock[slot] = isBlock;
 		const char *lang = player->languageService->GetLanguage();
-		std::string mode = ModeShortName(modeID);
-		std::string title = KZLanguageService::PrepareMessageWithLang(lang, "Jumptop - Menu Title", mode.c_str());
+		std::string title = KZLanguageService::PrepareMessageWithLang(lang, "Jumptop - Menu Title");
 		MenuHandle m = g_pMenus->CreateMenu(MenuType::Default, title.c_str(), &OnRootMenuSelect);
 		if (m == kInvalidMenuHandle)
 		{
 			return;
 		}
-		std::string modeItem = KZLanguageService::PrepareMessageWithLang(lang, "Jumptop - Menu Mode", mode.c_str());
-		g_pMenus->AddItem(m, modeItem.c_str(), "mode", false);
-		std::string blockWord = KZLanguageService::PrepareMessageWithLang(lang, "Jumptop - Kind Block");
+		// Значение строк держим сами (g_menuMode/g_menuBlock), границы движку не нужны.
+		g_pMenus->AddAdjustableItem(m, RootModeText(lang, modeID).c_str(), "mode", 1.0f, -1.0f, 1.0f);
+		g_pMenus->AddAdjustableItem(m, RootBoardText(lang, isBlock).c_str(), "board", 1.0f, -1.0f, 1.0f);
 		for (i32 type = JumpType_LongJump; type <= JumpType_Jumpbug; type++)
 		{
 			char info[8];
-			V_snprintf(info, sizeof(info), "%d", type * 2);
+			V_snprintf(info, sizeof(info), "%d", type);
 			g_pMenus->AddItem(m, jumpTypeStr[type], info, false);
-			char blockText[64];
-			V_snprintf(blockText, sizeof(blockText), "%s — %s", jumpTypeShortStr[type], blockWord.c_str());
-			V_snprintf(info, sizeof(info), "%d", type * 2 + 1);
-			g_pMenus->AddItem(m, blockText, info, false);
 		}
-		g_pMenus->SetCloseOnSelect(m, true);
+		g_pMenus->SetAdjustCallback(m, &OnRootMenuAdjust);
+		g_pMenus->SetStartItem(m, rootRowFirstType);
+		g_pMenus->SetCloseOnSelect(m, false);
 		g_rootMenu[slot] = m;
 		g_pMenus->DisplayMenu(m, slot, 0);
 	}
@@ -1130,7 +1403,7 @@ SCMD(kz_jumptop, SCFL_JUMPSTATS | SCFL_RECORD | SCFL_HELP)
 		player->languageService->PrintChat(true, false, "Jumptop - Usage");
 		return true;
 	}
-	OpenRootMenu(player, modeID);
+	OpenRootMenu(player, modeID, isBlock);
 	return true;
 }
 

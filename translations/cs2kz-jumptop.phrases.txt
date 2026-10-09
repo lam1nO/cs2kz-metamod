@@ -41,21 +41,69 @@
 	}
 	"Jumptop - Menu Title"
 	{
-		"#format"	"mode:s"
-		"en"		"Jumptop [{mode}]"
-		"ru"		"Джамптоп [{mode}]"
+		"en"		"Jumptop"
+		"ru"		"Джамптоп"
 	}
 	"Jumptop - Menu Mode"
 	{
 		"#format"	"mode:s"
-		"en"		"Mode: {mode} (switch)"
-		"ru"		"Режим: {mode} (сменить)"
+		"en"		"Mode: {mode}"
+		"ru"		"Режим: {mode}"
+	}
+	"Jumptop - Menu Board Distance"
+	{
+		"en"		"Top: by distance"
+		"ru"		"Топ: по дистанции"
+	}
+	"Jumptop - Menu Board Block"
+	{
+		"en"		"Top: by block"
+		"ru"		"Топ: по блокам"
 	}
 	"Jumptop - Top Title"
 	{
-		"#format"	"type:s,kind:s,mode:s"
-		"en"		"Top {type} — {kind} [{mode}]"
-		"ru"		"Топ {type} — {kind} [{mode}]"
+		"#format"	"type:s,mode:s"
+		"en"		"{type} · {mode}"
+		"ru"		"{type} · {mode}"
+	}
+	"Jumptop - Top Title Block"
+	{
+		"#format"	"type:s,mode:s"
+		"en"		"{type} · {mode} · blocks"
+		"ru"		"{type} · {mode} · блоки"
+	}
+	"Jumptop - Card Stats"
+	{
+		"#format"	"strafes:d,sync:.1f"
+		"en"		"Strafes {strafes} · Sync {sync}%%"
+		"ru"		"Стрейфы {strafes} · Синк {sync}%%"
+	}
+	"Jumptop - Card Speed"
+	{
+		"#format"	"pre:.2f,max:.2f"
+		"en"		"Pre {pre} · Max {max}"
+		"ru"		"Пре {pre} · Макс {max}"
+	}
+	"Jumptop - Card Replay"
+	{
+		"en"		"▶ Watch replay"
+		"ru"		"▶ Смотреть реплей"
+	}
+	"Jumptop - Card Replay Other Map"
+	{
+		"#format"	"map:s"
+		"en"		"Replay plays on {map}"
+		"ru"		"Реплей — на карте {map}"
+	}
+	"Jumptop - Card No Replay"
+	{
+		"en"		"No replay"
+		"ru"		"Реплея нет"
+	}
+	"Jumptop - Card Console"
+	{
+		"en"		"Full stats to console"
+		"ru"		"Полная статистика в консоль"
 	}
 	"Jumptop - Empty"
 	{
