@@ -846,7 +846,16 @@ namespace
 		return slot >= 0 && slot <= MAXPLAYERS;
 	}
 
+	// Ответ базы пришёл, а игрок уже ушёл из меню, откуда ждал (вышел, открыл другое) — не
+	// перебиваем. Без родителя (прямой !jumptop lj) показываем всегда.
+	bool StillWaitingIn(int slot, MenuHandle parent, MenuHandle current)
+	{
+		return parent == kInvalidMenuHandle || (parent == current && g_pMenus->GetActiveMenu(slot) == parent);
+	}
+
 	// Цвет тира — как у отчёта о прыжке в чате; пороги режима топа, а не режима смотрящего.
+	// Цвет не сбрасываем: значение стоит в конце строки, а сброс ({default}) дал бы жёсткий белый
+	// и съел бы подсветку курсора у остальной строки.
 	std::string TierColored(KZModeService *tiers, i32 jumpType, f64 distance, f64 pre, const char *text)
 	{
 		DistanceTier tier = tiers ? tiers->GetDistanceTier((JumpType)jumpType, (f32)distance, (f32)pre) : DistanceTier_Meh;
@@ -855,7 +864,7 @@ namespace
 			tier = DistanceTier_Meh;
 		}
 		char tagged[128];
-		V_snprintf(tagged, sizeof(tagged), "%s%s{default}", distanceTierColors[tier], text);
+		V_snprintf(tagged, sizeof(tagged), "%s%s", distanceTierColors[tier], text);
 		char out[128];
 		if (!utils::CFormat(out, sizeof(out), tagged))
 		{
@@ -933,8 +942,13 @@ namespace
 				{
 					return;
 				}
+				if (!StillWaitingIn(slot, parent, g_topMenu[slot]))
+				{
+					return;
+				}
 				ISQLResult *r = queries[0]->GetResultSet();
-				if (!r || !r->FetchRow())
+				// Снятый админом, пока висел топ, — как не найденный.
+				if (!r || !r->FetchRow() || r->GetInt(19) != 0)
 				{
 					player->languageService->PrintChat(true, false, "Jumptop - Jump Not Found", id);
 					return;
@@ -1000,8 +1014,7 @@ namespace
 				// Первые строки — справка, курсор сразу на действии (реплей, если он доступен).
 				g_pMenus->SetStartItem(m, startItem);
 				g_pMenus->SetCloseOnSelect(m, false);
-				// Топ к этому моменту мог пересоздаться (повторный !jumptop) — тогда «назад» некуда.
-				if (parent != kInvalidMenuHandle && parent == g_topMenu[slot])
+				if (parent != kInvalidMenuHandle)
 				{
 					LinkParent(parent, m);
 				}
@@ -1068,7 +1081,7 @@ namespace
 
 				ISQLResult *r = queries[0]->GetResultSet();
 				std::vector<std::pair<std::string, std::string>> rows;
-				utils::PrintConsole(player->GetController(), "\n%s %s\n", title.c_str(), kind.c_str());
+				utils::PrintConsole(player->GetController(), "\n%s\n", title.c_str());
 				i32 place = 0;
 				while (r && r->FetchRow())
 				{
@@ -1082,7 +1095,7 @@ namespace
 					char value[64];
 					if (isBlock)
 					{
-						V_snprintf(value, sizeof(value), "%d %s", block, blockWord.c_str());
+						V_snprintf(value, sizeof(value), "%d %s (%.2f)", block, blockWord.c_str(), distance);
 					}
 					else
 					{
@@ -1090,20 +1103,18 @@ namespace
 					}
 					std::string colored = TierColored(tiers, jumpType, distance, pre, value);
 					char text[256];
-					if (isBlock)
-					{
-						V_snprintf(text, sizeof(text), "%d. %s · %.2f  %s", place, colored.c_str(), distance, alias.c_str());
-					}
-					else
-					{
-						V_snprintf(text, sizeof(text), "%d. %s  %s", place, colored.c_str(), alias.c_str());
-					}
+					V_snprintf(text, sizeof(text), "%d. %s  ·  %s", place, alias.c_str(), colored.c_str());
 					char info[16];
 					V_snprintf(info, sizeof(info), "%d", id);
 					rows.emplace_back(text, info);
+					char blockPrefix[32] = "";
+					if (isBlock)
+					{
+						V_snprintf(blockPrefix, sizeof(blockPrefix), "%d %s ", block, blockWord.c_str());
+					}
 					utils::PrintConsole(player->GetController(),
-										"#%d %s %.4f | %s (%llu) | %s | strafes %d | sync %.1f%% | pre %.2f | max %.2f | air %.3f | id %d\n", place,
-										isBlock ? value : "", distance, alias.c_str(), (u64)r->GetInt64(1), map, r->GetInt(5),
+										"#%d %s%.4f | %s (%llu) | %s | strafes %d | sync %.1f%% | pre %.2f | max %.2f | air %.3f | id %d\n", place,
+										blockPrefix, distance, alias.c_str(), (u64)r->GetInt64(1), map, r->GetInt(5),
 										ResultDouble(r, 6) * 100.0, pre, ResultDouble(r, 8), ResultDouble(r, 9), id);
 				}
 				delete tiers;
@@ -1118,6 +1129,10 @@ namespace
 					player->languageService->PrintChat(true, false, "Jumptop - See Console");
 					return;
 				}
+				if (!StillWaitingIn(slot, parent, g_rootMenu[slot]))
+				{
+					return;
+				}
 				ResetMenu(&g_cardMenu[slot]);
 				ResetMenu(&g_topMenu[slot]);
 				MenuHandle m = g_pMenus->CreateMenu(MenuType::Default, title.c_str(), &OnTopMenuSelect);
@@ -1130,7 +1145,7 @@ namespace
 					g_pMenus->AddItem(m, row.first.c_str(), row.second.c_str(), false);
 				}
 				g_pMenus->SetCloseOnSelect(m, false);
-				if (parent != kInvalidMenuHandle && parent == g_rootMenu[slot])
+				if (parent != kInvalidMenuHandle)
 				{
 					LinkParent(parent, m);
 				}
