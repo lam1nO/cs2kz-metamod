@@ -1,5 +1,7 @@
 #include "jumptop.h"
 
+#include <cmath>
+
 #include "cs2kz.h"
 
 #include "kz/kz.h"
@@ -440,6 +442,19 @@ namespace
 		std::string cleanDetails = db->Escape(details.c_str());
 		u64 steamID64 = player->GetSteamId64();
 		f64 distance = jump->GetDistance();
+
+		// %f печатает NaN/inf как «nan»/«inf» — MySQL читает это как имя колонки и отвергает
+		// запрос (Unknown column 'nan', 11.10). Такой прыжок в топ не пишем вовсе.
+		const f64 numbers[] = {distance, (f64)jump->GetSync(), (f64)jump->GetTakeoffSpeed(), (f64)jump->GetMaxSpeed(),
+							   (f64)jump->airtime, (f64)jump->GetMaxHeight(), (f64)jump->GetOffset()};
+		for (f64 v : numbers)
+		{
+			if (!std::isfinite(v))
+			{
+				KZ_LOG_WARN(LogChannel::DB, "[cyb] jumptop_pb_skipped reason=non_finite steam_id=%llu type=%d\n", steamID64, jumpType);
+				return;
+			}
+		}
 
 		std::vector<char> insert(cleanDetails.size() + map.size() + 1024);
 		V_snprintf(insert.data(), (int)insert.size(), sql_jumptop_insert, steamID64, modeID, jumpType, isBlock ? 1 : 0, block, distance,

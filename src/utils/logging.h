@@ -64,11 +64,14 @@ const char *GetServiceChannelName(LoggingChannelID_t channelID);
 		LoggingSystem_Log(channel, LS_WARNING, "[%s] [WARN] " fmt, GetServiceChannelName(channel), ##__VA_ARGS__); \
 	} while (0)
 
+// Уровень LS_WARNING, а не LS_ERROR: политика ответа tier0 по умолчанию отвечает на LS_ERROR
+// LR_ABORT — процесс падает (segv). 10–11.10.2026 так легли 35 серверов: jumptop_pb_failed при
+// сбое MySQL/NaN в запросе писал ERROR и ронял сервер с игроками. Текст [ERROR] сохраняем для грепа.
 #define KZ_LOG_ERROR(service, fmt, ...) \
 	do \
 	{ \
 		const LoggingChannelID_t channel = GetServiceChannel(service); \
-		LoggingSystem_Log(channel, LS_ERROR, "[%s] [ERROR] " fmt, GetServiceChannelName(channel), ##__VA_ARGS__); \
+		LoggingSystem_Log(channel, LS_WARNING, "[%s] [ERROR] " fmt, GetServiceChannelName(channel), ##__VA_ARGS__); \
 	} while (0)
 
 // Logging listener that claims every channel tagged with KZ_LOG_TAG and optionally
