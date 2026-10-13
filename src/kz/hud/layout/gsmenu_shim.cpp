@@ -1049,7 +1049,9 @@ bool KZ::gsmenu::ShimClosedRecently(KZPlayer *player)
 	{
 		return false;
 	}
-	return g_pKZUtils->GetServerGlobals()->tickcount - g_shim->sessions[slot].closedTick <= 1;
+	// Счётчик тактов начинается заново на новой карте — отрицательная разница означает «давно».
+	const i32 d = g_pKZUtils->GetServerGlobals()->tickcount - g_shim->sessions[slot].closedTick;
+	return d >= 0 && d <= 1;
 }
 
 void KZ::gsmenu::ShimDisconnect(KZPlayer *player)
