@@ -302,6 +302,7 @@ namespace KZ::replaysystem::playback
 		// инвариант «прибытия по кадрам == прирост счётчика за окно» сходился. Стыков может быть
 		// несколько (ран восстанавливали не раз) — сдвиг копится.
 		i64 spliceTpShift = 0;
+		u32 spliceArrivals = 0;
 		for (u32 i = 0; i < tickCount; i++)
 		{
 			if (!ticks[i].post.replayFlags.prac)
@@ -314,7 +315,18 @@ namespace KZ::replaysystem::playback
 			frames[i].cpCount = t.checkpoint.checkpointCount;
 			if (i > 0 && ticks[i - 1].post.replayFlags.splice)
 			{
-				spliceTpShift = (i64)frames[i - 1].tpCount + 1 - (i64)t.checkpoint.teleportCount;
+				const i64 newShift = (i64)frames[i - 1].tpCount + 1 - (i64)t.checkpoint.teleportCount;
+				// Прибытие на стыке, добытое сдвигом, а не настоящим ростом счётчика, — только оно
+				// расходится с num_teleports шапки (см. CutResult::spliceArrivals). Считаем лишь
+				// стыки внутри окна рана: прибытия разрез ищет на runStart+1..runEnd. Отрицательный
+				// прирост (счётчик на стыке вырос на 2+, ТП между последним кадром куска и снимком
+				// выхода) НАМЕРЕННО не компенсируется: на кадрах такой стык — одно прибытие, второму
+				// телепорту резать нечего, и сверка шапки обязана его отвергнуть.
+				if (i > runStart && i <= runEnd && newShift > spliceTpShift)
+				{
+					spliceArrivals += (u32)(newShift - spliceTpShift);
+				}
+				spliceTpShift = newShift;
 			}
 			frames[i].tpCount = (i32)((i64)t.checkpoint.teleportCount + spliceTpShift);
 			frames[i].origin[0] = t.post.origin.x;
@@ -332,8 +344,10 @@ namespace KZ::replaysystem::playback
 		// вычитать из него надо кадры, записанные на паузе. Пауза, во время которой кадров не
 		// писали вовсе (`!prac`), в кадрах не существует — и вычитать её не нужно (awr_cut.h).
 		std::vector<awr::Interval> pauses = PauseIntervalsFromEvents(ticks, tickCount, events, numEvents);
-		return awr::ComputeAwrCut(frames.data(), tickCount, pauses.data(), (u32)pauses.size(), timeMs, ENGINE_FIXED_TICK_INTERVAL, runStart, runEnd,
-								  trace);
+		awr::CutResult cut = awr::ComputeAwrCut(frames.data(), tickCount, pauses.data(), (u32)pauses.size(), timeMs, ENGINE_FIXED_TICK_INTERVAL,
+												runStart, runEnd, trace);
+		cut.spliceArrivals = spliceArrivals;
+		return cut;
 	}
 
 	void BuildSkipSegments()

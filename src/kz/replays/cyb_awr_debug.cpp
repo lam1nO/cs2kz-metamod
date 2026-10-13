@@ -261,6 +261,31 @@ CON_COMMAND_F(kz_awr_debug, "Explain the AWR cut of one replay file. Usage: kz_a
 		KZ_LOG_INFO(LogChannel::Replays, "[cyb_awr] debug uuid=%s cut %u..%u\n", uuid.c_str(), d.from, d.to);
 	}
 
+	// Стыки склейки бэкапа печатаем ВСЕГДА, мимо потолка AWR_DEBUG_MAX_ARRIVALS: именно на них
+	// расходятся прибытия и num_teleports шапки (CutResult::spliceArrivals), а у многочасового
+	// рана стык лежит далеко за первыми двумя сотнями прибытий.
+	for (size_t f = 1; f < src.ticks.size(); f++)
+	{
+		if (!src.ticks[f - 1].post.replayFlags.splice)
+		{
+			continue;
+		}
+		const KZ::replaysystem::awr::ArrivalTrace *hit = nullptr;
+		for (const KZ::replaysystem::awr::ArrivalTrace &tr : trace)
+		{
+			if (tr.frame == (u32)f)
+			{
+				hit = &tr;
+				break;
+			}
+		}
+		KZ_LOG_INFO(LogChannel::Replays,
+					"[cyb_awr] debug uuid=%s splice frame=%zu tick=%u in_window=%d traced=%d tp_raw=%d->%d arrival=%d D=%lld via=%c dead=%u..%u\n",
+					uuid.c_str(), f, src.ticks[f].serverTick, (hasWindow && f > runStart && f <= runEnd) ? 1 : 0, trace.empty() ? 0 : 1,
+					src.ticks[f - 1].checkpoint.teleportCount, src.ticks[f].checkpoint.teleportCount, hit ? 1 : 0,
+					hit ? (long long)hit->dest : -1LL, hit ? hit->method : '-', hit ? hit->deadFrom : 0u, hit ? hit->deadTo : 0u);
+	}
+
 	// СВОДКА в ответ команды. Больше в ответ не печатаем: в RCON-контексте вывод уходит
 	// клиенту одним пакетом, и трасса на десятки прибытий его рвёт (bad packet size).
 	Msg("[cyb_awr] kz_awr_debug uuid=%s path=%s ticks=%zu is_run=%d time_ms=%llu\n", uuid.c_str(), path.c_str(), src.ticks.size(), isRun ? 1 : 0,
@@ -276,6 +301,13 @@ CON_COMMAND_F(kz_awr_debug, "Explain the AWR cut of one replay file. Usage: kz_a
 	}
 	Msg("[cyb_awr]   arrivals=%zu teleports=%u ok=%d reason=%s awr_ms=%llu time_ms=%llu cuts=%zu tp_collapsed=%u\n", trace.size(), cut.teleports,
 		cut.ok ? 1 : 0, cut.ok ? "ok" : cut.reason, (unsigned long long)cut.awrMs, (unsigned long long)timeMs, cut.dead.size(), collapsed);
+	// Та же сверка шапки, что у бэкфилла (SendResult): без неё «ok=1» здесь не значит, что бэкфилл
+	// запишет это время, — он отвергнет его как header_tp_mismatch.
+	{
+		const int headerTps = isRun && src.header.run().has_num_teleports() ? src.header.run().num_teleports() : -1;
+		const bool headerOk = headerTps < 0 || (u64)headerTps + cut.spliceArrivals == cut.teleports;
+		Msg("[cyb_awr]   header_tps=%d splice_arrivals=%u header_check=%s\n", headerTps, cut.spliceArrivals, headerOk ? "ok" : "mismatch");
+	}
 	// Инвариант правила: член сшитой цепочки обязан лежать в допуске от её якоря. 0.000 —
 	// сшивок через смену точки нет; больше допуска — дефект разреза.
 	Msg("[cyb_awr]   max_chain_offset=%s u (tol %.1f) at cut %u\n", offsetText, KZ::replaysystem::awr::AWR_SAME_DEST_TOLERANCE,

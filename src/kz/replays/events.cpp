@@ -346,6 +346,18 @@ namespace KZ::replaysystem::events
 										 event->data.teleport.hasVelocity ? (Vector *)&event->data.teleport.velocity : nullptr);
 	}
 
+	// Кадр паузы/возобновления для перемотки — бинарным поиском (serverTick в записи не убывает,
+	// см. playback::TickIndexForServerTick). До 13.10.2026 здесь стояли линейные проходы tickData с
+	// нуля — по два на КАЖДУЮ паузу до цели: на WR kz_kiwiconvulsion (1.37 млн кадров, сотни пауз)
+	// перемотка на 3-м часу занимала ~1.5 с главного потока, а длиннее ~1.56 с CS2 кикает
+	// зрителя (`recv queue overflow 100 messages`, NETWORK_DISCONNECT_OVERFLOW). Кламп к последнему
+	// кадру — страховка: на путях перемотки событие не позже целевого кадра, и кадр всегда находится.
+	static_function u32 TickIndexAtOrAfter(const data::ReplayPlayback *replay, u32 serverTick)
+	{
+		const u32 idx = playback::TickIndexForServerTick(replay->tickData, replay->tickCount, serverTick);
+		return idx < replay->tickCount ? idx : (replay->tickCount > 0 ? replay->tickCount - 1 : 0);
+	}
+
 	void ReprocessEventsUpToTick(data::ReplayPlayback *replay, u32 targetTick)
 	{
 		// Get the bot player for applying changes
@@ -362,10 +374,15 @@ namespace KZ::replaysystem::events
 
 		// Get the server tick of the target tick data
 		u32 targetServerTick = replay->tickData[targetTick].serverTick;
-		u32 currentServerTick = replay->currentTick < replay->tickCount ? replay->tickData[replay->currentTick].serverTick : 0;
 
 		// Optimization: If seeking forward, we only need to process events from current position
-		bool isSeekingForward = (targetTick > replay->currentTick) && replay->currentTick > 0;
+		// Вперёд от ТЕКУЩЕГО события — только если состояние не сброшено: NavigateReplay перед
+		// вызовом всегда делает ResetReplayState (currentEvent = 0, currentTick остаётся старым), и без
+		// проверки currentEvent ветка шла бы с события 0, пропустив сброс режима и стилей ниже.
+		// Сейчас NavigateReplay — единственный вызывающий, поэтому ветка «вперёд» недостижима и путь
+		// всегда полный (с перемоткой O(событий × log кадров) это дёшево). Включать её обратно — только
+		// без ResetReplayState перед вызовом, иначе бот останется со стилями текущей позиции.
+		bool isSeekingForward = (targetTick > replay->currentTick) && replay->currentTick > 0 && replay->currentEvent > 0;
 		u32 startEventIndex = 0;
 		u32 startJumpIndex = 0;
 
@@ -422,16 +439,7 @@ namespace KZ::replaysystem::events
 				// If we're in a pause that extends past our target, add partial pause time
 				if (inPause && inActiveTimerRun && replay->startTime != 0.0f)
 				{
-					// Find tick data indices
-					u32 pauseStartTickIndex = 0;
-					for (u32 j = 0; j < replay->tickCount; j++)
-					{
-						if (replay->tickData[j].serverTick >= pauseStartTick)
-						{
-							pauseStartTickIndex = j;
-							break;
-						}
-					}
+					const u32 pauseStartTickIndex = TickIndexAtOrAfter(replay, pauseStartTick);
 
 					TickData *pauseStartTickData = &replay->tickData[pauseStartTickIndex];
 					TickData *targetTickData = &replay->tickData[targetTick];
@@ -512,26 +520,8 @@ namespace KZ::replaysystem::events
 							if (inActiveTimerRun && inPause)
 							{
 								// Calculate pause duration and add to total
-								u32 pauseStartTickIndex = 0;
-								u32 resumeTickIndex = 0;
-
-								for (u32 j = 0; j < replay->tickCount; j++)
-								{
-									if (replay->tickData[j].serverTick >= pauseStartTick)
-									{
-										pauseStartTickIndex = j;
-										break;
-									}
-								}
-
-								for (u32 j = 0; j < replay->tickCount; j++)
-								{
-									if (replay->tickData[j].serverTick >= event->serverTick)
-									{
-										resumeTickIndex = j;
-										break;
-									}
-								}
+								const u32 pauseStartTickIndex = TickIndexAtOrAfter(replay, pauseStartTick);
+								const u32 resumeTickIndex = TickIndexAtOrAfter(replay, event->serverTick);
 
 								TickData *pauseStartTickData = &replay->tickData[pauseStartTickIndex];
 								TickData *resumeTickData = &replay->tickData[resumeTickIndex];

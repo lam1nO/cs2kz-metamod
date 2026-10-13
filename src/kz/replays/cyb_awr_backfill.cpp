@@ -255,6 +255,8 @@ namespace
 		u32 teleports = 0;
 		// Число ТП из шапки реплея (RunReplayData::num_teleports); -1 = поля нет.
 		i32 headerTeleports = -1;
+		// Прибытия на стыках склейки бэкапа сверх счётчика (CutResult::spliceArrivals): шапка их не знает.
+		u32 spliceArrivals = 0;
 		// Число ВЫРЕЗОВ и число схлопнутых прибытий — ВТОРАЯ метрика приёмки пересчёта.
 		// Разница времён её не заменяет: склейка петель РАЗНЫХ чекпоинтов уменьшает число
 		// вырезов (и даёт секунды разницы), а безобидный сдвиг курсора в полосе допуска —
@@ -961,6 +963,7 @@ namespace
 				res.detail = cut.detail;
 				res.awrMs = cut.awrMs;
 				res.teleports = cut.teleports;
+				res.spliceArrivals = cut.spliceArrivals;
 				res.deadCuts = (u32)cut.dead.size();
 				res.destOffsetMeasured = cut.maxChainDestOffsetMeasured;
 				res.destOffset = cut.maxChainDestOffset;
@@ -1006,10 +1009,16 @@ namespace
 		// awr_ms посчитан не по тому набору кадров. Записать такое время в api хуже, чем
 		// пометить строку посчитанной с awrMs:null: ложный AWR попадёт в витрину и на него
 		// будут смотреть как на правду. Ровно эта проверка ловит любую ошибку выбора окна.
-		if (res.ok && res.headerTeleports >= 0 && (u32)res.headerTeleports != res.teleports)
+		//
+		// Стык склейки рана из бэкапа — тоже прибытие (playback.cpp, ComputeCutForTraced), но счётчик
+		// ТП на нём растёт не всегда, и тогда в num_teleports шапки его нет. Такие прибытия разрез
+		// отдаёт отдельно (spliceArrivals) — шапка сверяется с прибытиями ЗА ИХ ВЫЧЕТОМ. До этой
+		// правки любой рекорд, дважды восстановленный из бэкапа, отвергался на +1 (WR
+		// kz_kiwiconvulsion 13.10: tps=4865 header_tps=4864, стыки 09.10 00:11 и 16:03).
+		if (res.ok && res.headerTeleports >= 0 && (u64)res.headerTeleports + res.spliceArrivals != res.teleports)
 		{
-			KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] invariant uuid=%s reason=header_tp_mismatch tps=%u header_tps=%d\n", res.uuid.c_str(),
-						(unsigned)res.teleports, res.headerTeleports);
+			KZ_LOG_WARN(LogChannel::Replays, "[cyb_awr] invariant uuid=%s reason=header_tp_mismatch tps=%u header_tps=%d splice_arrivals=%u\n",
+						res.uuid.c_str(), (unsigned)res.teleports, res.headerTeleports, (unsigned)res.spliceArrivals);
 			res.ok = false;
 			res.reason = "header_tp_mismatch";
 			res.awrMs = 0;
@@ -1075,9 +1084,10 @@ namespace
 		// вырез кончается на прибытии), поэтому вычитание безопасно.
 		const unsigned collapsed = res.teleports > res.deadCuts ? (unsigned)(res.teleports - res.deadCuts) : 0u;
 		KZ_LOG_INFO(LogChannel::Replays,
-					"[cyb_awr] backfill uuid=%s time_ms=%llu awr_ms=%llu tps=%u dead_n=%u tp_collapsed=%u max_chain_offset=%s max_gap=%s "
+					"[cyb_awr] backfill uuid=%s time_ms=%llu awr_ms=%llu tps=%u splice_arrivals=%u dead_n=%u tp_collapsed=%u max_chain_offset=%s max_gap=%s "
 					"frames=%s ok=%d reason=%s dry=%d%s\n",
-					res.uuid.c_str(), (unsigned long long)res.timeMs, (unsigned long long)res.awrMs, (unsigned)res.teleports, (unsigned)res.deadCuts,
+					res.uuid.c_str(), (unsigned long long)res.timeMs, (unsigned long long)res.awrMs, (unsigned)res.teleports, (unsigned)res.spliceArrivals,
+					(unsigned)res.deadCuts,
 					collapsed, offsetText, maxGapText, framesText, res.ok ? 1 : 0, res.reason, res.dryRun ? 1 : 0, detailSuffix);
 
 		// Сверка кадров с таймером — независимо от ok: она про сам файл, а не про разрез, и
