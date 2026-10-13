@@ -318,7 +318,10 @@ namespace KZ::replaysystem::playback
 				const i64 newShift = (i64)frames[i - 1].tpCount + 1 - (i64)t.checkpoint.teleportCount;
 				// Прибытие на стыке, добытое сдвигом, а не настоящим ростом счётчика, — только оно
 				// расходится с num_teleports шапки (см. CutResult::spliceArrivals). Считаем лишь
-				// стыки внутри окна рана: прибытия разрез ищет на runStart+1..runEnd.
+				// стыки внутри окна рана: прибытия разрез ищет на runStart+1..runEnd. Отрицательный
+				// прирост (счётчик на стыке вырос на 2+, ТП между последним кадром куска и снимком
+				// выхода) НАМЕРЕННО не компенсируется: на кадрах такой стык — одно прибытие, второму
+				// телепорту резать нечего, и сверка шапки обязана его отвергнуть.
 				if (i > runStart && i <= runEnd && newShift > spliceTpShift)
 				{
 					spliceArrivals += (u32)(newShift - spliceTpShift);
