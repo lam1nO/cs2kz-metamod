@@ -58,6 +58,8 @@ namespace KZ::gsmenu
 		std::vector<Chip> filters[KZ_GSMENU_FILTER_GROUPS];
 		std::string headers[KZ_GSMENU_TABLE_COLS];
 		std::vector<Row> rows;
+		bool hasMe = false; // своя строка под чертой (ваш рекорд вне страницы)
+		Row me;
 		std::string page, hint;
 		bool prev = false, next = false;
 	};

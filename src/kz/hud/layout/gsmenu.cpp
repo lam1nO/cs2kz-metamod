@@ -330,9 +330,20 @@ bool KZ::gsmenu::ShowTable(KZPlayer *player, const Table &t, ClickFn onClick)
 		V_snprintf(sub, sizeof(sub), "gr%i_note", i);
 		Var(player, *w, layout, sub, "v", r.note);
 	}
-	// Своя строка под чертой — следующая итерация (нужен отдельный запрос PB игрока).
-	Class(player, *w, layout, "gm_sep", "hidden", true);
-	Class(player, *w, layout, "gm_line", "hidden", true);
+	// Своя строка под чертой — ваш рекорд, когда его нет на текущей странице.
+	Class(player, *w, layout, "gm_sep", "hidden", !t.hasMe);
+	Class(player, *w, layout, "gm_line", "hidden", !t.hasMe);
+	if (t.hasMe)
+	{
+		Var(player, *w, layout, "gm_av", "a", t.me.initial);
+		Swap(player, *w, layout, "gm_av", "avc" + std::to_string(t.me.colour % 8));
+		for (i32 j = 0; j < KZ_GSMENU_TABLE_COLS; j++)
+		{
+			V_snprintf(sub, sizeof(sub), "gm_c%i", j);
+			Var(player, *w, layout, sub, "v", t.me.cells[j]);
+		}
+		Class(player, *w, layout, "gm_go", "hidden", t.me.actions[0].empty());
+	}
 
 	Class(player, *w, layout, "gw_prev", "hidden", !t.prev);
 	Class(player, *w, layout, "gw_next", "hidden", !t.next);
