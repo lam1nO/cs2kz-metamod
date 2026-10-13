@@ -135,12 +135,22 @@ namespace KZ::replaysystem::data
 		std::vector<TickData> ticks;
 		std::vector<RpEvent> events;
 		bool valid = false;
+		// Почему valid=false — для лога вызывающего. too_many_ticks отделён от parse_failed:
+		// это не битый файл, а потолок кадров maxTicks (data.cpp), и путать их в логе нельзя.
+		const char *failReason = "parse_failed";
 	};
 
 	// Разбор буфера файла: только шапка, секция тиков и секция событий. Потокобезопасен
 	// (не трогает g_currentReplay и никакого другого глобального состояния) — зовётся с
 	// рабочего потока воркера бэклога и загрузчика !lead.
-	CutSource LoadCutSourceFromMemory(const char *data, size_t size);
+	//
+	// maxTicks — потолок числа кадров секции тиков (отказ too_many_ticks). Вызывающий выбирает
+	// его сам, потому что у трактов разная параллельность: бэкфилл разбирает по файлу на слот
+	// (KZ_CUT_MAX_TICKS_BACKFILL), а `!lead`/процент/дельта таймера — по потоку на КАЖДОГО
+	// игрока без общего бюджета (KZ_CUT_MAX_TICKS_LEAD). Обоснование чисел — в data.cpp.
+	inline constexpr u64 KZ_CUT_MAX_TICKS_BACKFILL = 4000000ull;
+	inline constexpr u64 KZ_CUT_MAX_TICKS_LEAD = 1000000ull;
+	CutSource LoadCutSourceFromMemory(const char *data, size_t size, u64 maxTicks);
 
 	// Data management functions
 	void LoadReplayAsync(std::string path, LoadSuccessCallback onSuccess, LoadFailureCallback onFailure);

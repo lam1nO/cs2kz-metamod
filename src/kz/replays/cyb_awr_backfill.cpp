@@ -164,7 +164,10 @@ namespace
 	// Замер и худший случай — РАЗНЫЕ величины, путать их нельзя: 60 МиБ это цена слота на
 	// нынешнем распределении файлов, 275 МБ — предел, разрешённый форматом (см. CYBER.md,
 	// «Память разбора»). Потолок по-прежнему держится и на том, что файлы — вывод НАШЕГО
-	// рекордера (лимит аплоада 32 МБ, кадры пишет он сам), а не присланное игроком.
+	// рекордера (кадры пишет он сам), а не присланное игроком. С cyb.274 предел формата вырос:
+	// потолок кадров 4 млн (KZ_CUT_MAX_TICKS_BACKFILL) и лимит аплоада 128 МБ дают до ~1.4 ГБ на
+	// слот, то есть 24 слота на ДЛИННЫХ файлах — ~34 ГБ. Длинный файл — один на карту, но N выше
+	// 8 на ноде с игроками держать нельзя (CYBER.md, «Память разбора»).
 	constexpr i32 AWR_BACKFILL_MAX_CONCURRENCY = 24;
 	// Выше этого значения прогон считается ВЫБОРОЧНЫМ или разгрузочным: на сервере с игроками
 	// столько слотов держать не следует (память и потоки разбора конкурируют с игровым
@@ -931,11 +934,11 @@ namespace
 				// `-fno-exceptions` (AMBuildScript), исключение поймать нечем. Абсурдные
 				// размеры из шапки секций (по ним аллоцируют ReadTickSection и ReadEventsCompressed)
 				// отсекает пре-валидация внутри data::LoadCutSourceFromMemory — она отдаёт
-				// valid=false, и это ровно та же причина отказа parse_failed ниже.
-				KZ::replaysystem::data::CutSource src = KZ::replaysystem::data::LoadCutSourceFromMemory(data.data(), data.size());
+				// valid=false с причиной в failReason (parse_failed или too_many_ticks) — она и уходит ниже.
+				KZ::replaysystem::data::CutSource src = KZ::replaysystem::data::LoadCutSourceFromMemory(data.data(), data.size(), KZ::replaysystem::data::KZ_CUT_MAX_TICKS_BACKFILL);
 				if (!src.valid)
 				{
-					res.reason = "parse_failed";
+					res.reason = src.failReason;
 					PublishResult(res);
 					return;
 				}
@@ -978,7 +981,7 @@ namespace
 	// Отказ, который может исчезнуть после правки НАШЕГО кода, а не свойство файла. Такой
 	// результат нельзя ни писать в api, ни помечать посчитанным — см. SendResult.
 	// Детерминированные отказы (dest_not_found, counter_mismatch, header_tp_mismatch,
-	// no_run_window, parse_failed, not_a_run, http_4xx, empty_file) сюда НЕ входят.
+	// no_run_window, parse_failed, too_many_ticks, not_a_run, http_4xx, empty_file) сюда НЕ входят.
 	bool IsSoftFailure(const char *reason)
 	{
 		// dest_offset_violation — тоже мягкий: нарушен инвариант НАШЕГО правила, значит после

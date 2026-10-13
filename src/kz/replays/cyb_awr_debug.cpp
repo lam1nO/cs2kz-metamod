@@ -147,10 +147,10 @@ CON_COMMAND_F(kz_awr_debug, "Explain the AWR cut of one replay file. Usage: kz_a
 			"frame\n");
 	}
 
-	KZ::replaysystem::data::CutSource src = KZ::replaysystem::data::LoadCutSourceFromMemory(raw.data(), raw.size());
+	KZ::replaysystem::data::CutSource src = KZ::replaysystem::data::LoadCutSourceFromMemory(raw.data(), raw.size(), KZ::replaysystem::data::KZ_CUT_MAX_TICKS_BACKFILL);
 	if (!src.valid)
 	{
-		Msg("[cyb_awr] kz_awr_debug uuid=%s: parse failed (path=%s size=%zu)\n", uuid.c_str(), path.c_str(), raw.size());
+		Msg("[cyb_awr] kz_awr_debug uuid=%s: parse failed reason=%s (path=%s size=%zu)\n", uuid.c_str(), src.failReason, path.c_str(), raw.size());
 		fflush(stdout);
 		return;
 	}
