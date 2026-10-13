@@ -7,6 +7,8 @@
 #include "sdk/navphysicsinterface.h"
 #include "sdk/cglobalsymbol.h"
 #include "sdk/recipientfilters.h"
+#include "utils/logging.h"
+#include "bspflags.h"
 
 void KZPaintService::Reset()
 {
@@ -153,6 +155,26 @@ void KZPaintService::ToggleShowAllPaint()
 // Commands
 
 #define KZ_PAINT_TRACE_DISTANCE 32768.0f
+#define KZ_PAINT_DIAG_INTERVAL  1.0
+
+void KZPaintService::LogPaintTrace(const trace_t &tr, bool hit, const char *how)
+{
+	const f64 now = g_pKZUtils->GetGlobals()->curtime;
+	this->pendingPaintDiag = false;
+	if (now < this->nextPaintDiagTime && this->nextPaintDiagTime - now <= KZ_PAINT_DIAG_INTERVAL)
+	{
+		return;
+	}
+	this->nextPaintDiagTime = now + KZ_PAINT_DIAG_INTERVAL;
+	this->pendingPaintDiag = hit;
+	const char *cls = (hit && tr.m_pEnt) ? tr.m_pEnt->GetClassname() : "-";
+	KZ_LOG_INFO(LogChannel::General,
+				"[cyb] paint_trace steam_id=%llu how=%s first=0x%llx retraced=%d hit=%d frac=%.4f start_solid=%d ent=%s contents=0x%llx "
+				"pos=%.1f/%.1f/%.1f normal=%.2f/%.2f/%.2f\n",
+				this->player->GetSteamId64(), how, (unsigned long long)this->lastFirstContents, this->lastRetraced ? 1 : 0, hit ? 1 : 0, tr.m_flFraction, tr.m_bStartInSolid ? 1 : 0, cls ? cls : "?",
+				(unsigned long long)tr.m_nContents, tr.m_vEndPos.x, tr.m_vEndPos.y, tr.m_vEndPos.z, tr.m_vHitNormal.x, tr.m_vHitNormal.y,
+				tr.m_vHitNormal.z);
+}
 
 bool KZPaintService::TracePaint(trace_t &tr) const
 {
@@ -174,6 +196,22 @@ bool KZPaintService::TracePaint(trace_t &tr) const
 	filter.EnableInteractsExcludeLayer(LAYER_INDEX_CONTENTS_PLAYER_CLIP);
 	filter.EnableInteractsExcludeLayer(LAYER_INDEX_CONTENTS_PLAYER);
 	INavPhysicsInterface::TraceLine(origin, endPos, &filter, &tr);
+	this->lastFirstContents = tr.DidHit() ? tr.m_nContents : 0;
+	this->lastRetraced = false;
+
+	// Луч упёрся в невидимое (nodraw — невидимые стены и блоки KZ-карт) или в небо: декаль там
+	// ложится, но не рисуется, и игрок видит «paint не работает» (жалоба 13.10.2026). Только в этом
+	// случае — второй луч сквозь такие слои, чтобы метка легла на видимую поверхность за ними.
+	// Первый проход обычный: если у видимой геометрии в физике окажется слой NODRAW, безусловное
+	// исключение пропускало бы луч сквозь пол. Что задел первый проход — в paint_trace (first=).
+	if (tr.DidHit() && (tr.m_nContents & (CONTENTS_NODRAW | CONTENTS_SKY)))
+	{
+		filter.EnableInteractsExcludeLayer(LAYER_INDEX_CONTENTS_NODRAW);
+		filter.EnableInteractsExcludeLayer(LAYER_INDEX_CONTENTS_SKY);
+		tr.Init();
+		INavPhysicsInterface::TraceLine(origin, endPos, &filter, &tr);
+		this->lastRetraced = true;
+	}
 
 	return tr.DidHit();
 }
@@ -181,7 +219,9 @@ bool KZPaintService::TracePaint(trace_t &tr) const
 void KZPaintService::PlacePaint()
 {
 	trace_t tr;
-	if (!this->TracePaint(tr))
+	const bool hit = this->TracePaint(tr);
+	this->LogPaintTrace(tr, hit, "manual");
+	if (!hit)
 	{
 		return;
 	}
@@ -190,6 +230,12 @@ void KZPaintService::PlacePaint()
 	this->pendingPaint = true;
 	g_pKZUtils->DecalTrace(&tr, &paintDecal, 0.0f);
 	this->pendingPaint = false;
+	if (this->pendingPaintDiag)
+	{
+		// Перехват PostEvent снимает флаг, увидев событие декаля; не снял — движок декаль не отправил.
+		KZ_LOG_INFO(LogChannel::General, "[cyb] paint_decal steam_id=%llu delivered=0 reason=no_decal_event\n", this->player->GetSteamId64());
+		this->pendingPaintDiag = false;
+	}
 }
 
 void KZPaintService::TryAutoPaint()
@@ -207,8 +253,10 @@ void KZPaintService::TryAutoPaint()
 	this->nextAutoPaintTime = curTime + 0.05;
 
 	trace_t tr;
-	if (!this->TracePaint(tr))
+	const bool hit = this->TracePaint(tr);
+	if (!hit)
 	{
+		this->LogPaintTrace(tr, hit, "auto");
 		return;
 	}
 
@@ -217,10 +265,16 @@ void KZPaintService::TryAutoPaint()
 		return;
 	}
 
+	this->LogPaintTrace(tr, hit, "auto");
 	CGlobalSymbol paintDecal = MakeGlobalSymbol("paint");
 	this->pendingPaint = true;
 	g_pKZUtils->DecalTrace(&tr, &paintDecal, 0.0f);
 	this->pendingPaint = false;
+	if (this->pendingPaintDiag)
+	{
+		KZ_LOG_INFO(LogChannel::General, "[cyb] paint_decal steam_id=%llu delivered=0 reason=no_decal_event\n", this->player->GetSteamId64());
+		this->pendingPaintDiag = false;
+	}
 
 	this->lastAutoPaintPosition = tr.m_vEndPos;
 	this->hasLastAutoPaintPosition = true;

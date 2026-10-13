@@ -1,4 +1,6 @@
 #include "networkbasetypes.pb.h"
+#include "gameevents.pb.h"
+#include "tier1/generichash.h"
 
 #include "common.h"
 #include "cs2kz.h"
@@ -237,6 +239,24 @@ CPlayerSlot utils::GetEntityPlayerSlot(CBaseEntity *entity)
 	}
 }
 
+// Громкость звука, который PlaySoundToClient прямо сейчас отдаёт в EmitSound (-1 — не наш звук).
+// EmitSound постит GE_SosStartSoundEvent синхронно, внутри вызова, — тот же приём, что у paint.
+static f32 s_pendingSoundVolume = -1.0f;
+static bool s_pendingSoundVolumeApplied = false;
+
+// Параметр `public.volume` в упакованном виде саунд-ивента: [hash u32][type u8 = 8 float][size u16][f32].
+static void AppendSoundVolumeParam(std::string &out, f32 volume)
+{
+	constexpr u32 kSoundParamNameSeed = 0x31415926;
+	const u32 hash = MurmurHash2LowerCase("public.volume", kSoundParamNameSeed);
+	const u8 type = 8;
+	const u16 size = sizeof(f32);
+	out.append(reinterpret_cast<const char *>(&hash), sizeof(hash));
+	out.append(reinterpret_cast<const char *>(&type), sizeof(type));
+	out.append(reinterpret_cast<const char *>(&size), sizeof(size));
+	out.append(reinterpret_cast<const char *>(&volume), sizeof(volume));
+}
+
 void utils::PlaySoundToClient(CPlayerSlot player, const char *sound, f32 volume)
 {
 	if (strncmp(sound, "kz.", strlen("kz.")) == 0 && !g_KZPlugin.IsAddonMounted())
@@ -252,8 +272,59 @@ void utils::PlaySoundToClient(CPlayerSlot player, const char *sound, f32 volume)
 	CSingleRecipientFilter filter(player.Get());
 	EmitSound_t soundParams;
 	soundParams.m_pSoundName = sound;
-	soundParams.m_flVolume = volume;
-	g_pKZUtils->EmitSound(filter, player.Get() + 1, soundParams);
+	// m_flVolume НЕ трогаем (VOL_NORM): движок превращает отличное от 1.0 значение в параметр
+	// `public.volume_atten` (дизассемблер libserver, функция под сигнатурой EmitSound), и вместе с
+	// нашим `public.volume` громкость применялась бы дважды и нелинейно — это и было «громкость
+	// не настраивается точно» (жалоба 13.10.2026).
+
+	// Громкость — параметр саунд-ивента `public.volume` (множитель к его собственной громкости,
+	// у kz.* база 0.5 — 200 % дают 1.0). Основной путь — перехват PostEvent дописывает его в САМО
+	// стартовое сообщение и там же ставит источник -1 (utils::OnSosStartSoundEvent): «звук у
+	// слушателя», без позиции и затухания. У звуков kz.* громкость гаснет с расстоянием до источника
+	// (1.0 на нуле → 0 на 2048 юнитах), а источником был контроллер slot+1 — громкость зависела
+	// от того, где игрок/камера наблюдателя. Запасной путь — GE_SosSetSoundEventParams по guid.
+	s_pendingSoundVolume = volume;
+	s_pendingSoundVolumeApplied = false;
+	const SndOpEventGuid_t guid = g_pKZUtils->EmitSound(filter, player.Get() + 1, soundParams);
+	s_pendingSoundVolume = -1.0f;
+	if (s_pendingSoundVolumeApplied || guid.m_nGuid == 0 || volume == 1.0f)
+	{
+		return;
+	}
+	INetworkMessageInternal *netmsg = g_pNetworkMessages->FindNetworkMessageById(GE_SosSetSoundEventParams);
+	if (!netmsg)
+	{
+		return;
+	}
+	auto msg = netmsg->AllocateMessage()->ToPB<CMsgSosSetSoundEventParams>();
+	std::string packed;
+	AppendSoundVolumeParam(packed, volume);
+	msg->set_soundevent_guid((i32)guid.m_nGuid);
+	msg->set_packed_params(packed);
+	CSingleRecipientFilter paramFilter(player.Get());
+	interfaces::pGameEventSystem->PostEventAbstract(0, false, &paramFilter, netmsg, msg, 0);
+	delete msg;
+}
+
+void utils::OnSosStartSoundEvent(CMsgSosStartSoundEvent *msg)
+{
+	if (s_pendingSoundVolume < 0.0f || !msg)
+	{
+		return;
+	}
+	msg->set_source_entity_index(-1);
+	if (s_pendingSoundVolume != 1.0f)
+	{
+		AppendSoundVolumeParam(*msg->mutable_packed_params(), s_pendingSoundVolume);
+	}
+	s_pendingSoundVolumeApplied = true;
+	// Разовая сверка, что старт идёт синхронно внутри EmitSound (иначе работает только запасной путь).
+	static bool logged = false;
+	if (!logged)
+	{
+		logged = true;
+		KZ_LOG_INFO(LogChannel::General, "[cyb] sound_param_inject path=start volume=%.2f\n", s_pendingSoundVolume);
+	}
 }
 
 f32 utils::NormalizeDeg(f32 a)

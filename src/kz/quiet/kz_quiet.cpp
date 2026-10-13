@@ -300,6 +300,13 @@ void KZ::quiet::OnPostEvent(INetworkMessageInternal *pEvent, const CNetMessage *
 				}
 
 				*(uint64 *)clients = paintRecipients;
+				if (painter->paintService->pendingPaintDiag)
+				{
+					painter->paintService->pendingPaintDiag = false;
+					KZ_LOG_INFO(LogChannel::General, "[cyb] paint_decal steam_id=%llu delivered=1 engine_recipients=0x%llx sent=0x%llx self=%d\n",
+								painter->GetSteamId64(), (unsigned long long)currentRecipients, (unsigned long long)paintRecipients,
+								(paintRecipients & (1ull << (i - 1))) ? 1 : 0);
+				}
 
 				Color color = painter->paintService->GetColor();
 				// Game expects ABGR; internal storage and user input are RGBA.
@@ -332,6 +339,9 @@ void KZ::quiet::OnPostEvent(INetworkMessageInternal *pEvent, const CNetMessage *
 		{
 			auto msg = const_cast<CNetMessage *>(pData)->ToPB<CMsgSosStartSoundEvent>();
 			emitterEntIndex = msg->source_entity_index();
+			// После чтения источника: наши звуки перехват переводит на источник -1 («у слушателя»),
+			// а их эмиттер — контроллер, который quiet-фильтр и так не трогает.
+			utils::OnSosStartSoundEvent(msg);
 			break;
 		}
 		// Used by kz_misc to block valve's player say messages.
