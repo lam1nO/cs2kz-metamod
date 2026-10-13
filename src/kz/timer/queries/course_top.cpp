@@ -395,7 +395,7 @@ SCMD(kz_ctop, SCFL_RECORD | SCFL_GLOBAL)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	// Повторный !maptop закрывает окно: под захватом курсора это выход без клика по ✕.
-	if (player && KZ::gsmenu::IsOpen(player))
+	if (player && KZ::gsmenu::IsOpenBy(player, "maptop"))
 	{
 		KZ::gsmenu::Close(player, "command_toggle");
 		return true;
@@ -449,6 +449,8 @@ namespace
 		i32 page = 0;
 		bool pro = true;
 		u64 pendingUid = 0;     // последний перезапрос из окна — показываем только его ответ
+		bool qLocal = true, qGlobal = true; // откуда брала данные команда (!maptop/!gmaptop/!smaptop)
+		u64 baseOffset = 0;                 // o= команды — места считаются от него
 		f64 lastRequery = -1.0; // клики по режимам не чаще 2 в секунду
 		std::vector<std::string> runIds; // строка на экране -> id рана (реплей)
 		CourseTopRequest::CourseTopData data;
@@ -469,14 +471,17 @@ namespace
 		{
 			return;
 		}
-		v.lastRequery = now;
+		if (throttle)
+		{
+			v.lastRequery = now;
+		}
 		// Без кавычек: ParseArgsToKV3 берёт значение до следующего «ключ=» (пробелы в имени курса не
 		// мешают), а кавычки он НЕ снимает — с ними курс искался как "Main" и таблица была пустой.
 		CCommand args;
 		char line[256];
 		V_snprintf(line, sizeof(line), "kz_maptop map=%s course=%s mode=%s l=%llu", v.map.Get(), v.course.Get(), mode, kMaptopLimit);
 		args.Tokenize(line);
-		CourseTopRequest *req = CourseTopRequest::Create<CourseTopRequest>(player, CourseTopRequest::ctopFeatures, true, true, &args);
+		CourseTopRequest *req = CourseTopRequest::Create<CourseTopRequest>(player, CourseTopRequest::ctopFeatures, v.qLocal, v.qGlobal, &args);
 		req->fromWindow = true;
 		v.pendingUid = req->uid;
 	}
@@ -508,6 +513,7 @@ namespace
 				}
 				if (shown++ == k)
 				{
+					v.page = 0;
 					RequeryMaptop(player, mode, true);
 					return;
 				}
@@ -571,7 +577,7 @@ namespace
 		{
 			CourseTopRequest::RunStats &r = list[i];
 			KZ::gsmenu::Row row;
-			const i32 rank = i + 1;
+			const i32 rank = (i32)v.baseOffset + i + 1;
 			row.cells[0] = std::to_string(rank);
 			row.cells[1] = r.name.Get();
 			row.cells[2] = r.GetTime().Get();
@@ -600,7 +606,7 @@ namespace
 			t.prev = v.page > 0;
 			t.next = v.page < pages - 1;
 		}
-		KZ::gsmenu::ShowTable(player, t, OnMaptopClick);
+		KZ::gsmenu::ShowTable(player, t, OnMaptopClick, "maptop");
 	}
 } // namespace
 
@@ -615,7 +621,7 @@ bool CourseTopRequest::ShowWindow()
 	MaptopView &v = g_maptop[player->GetPlayerSlot().Get()];
 	// Ответ на перезапрос из окна — только последний и только пока окно открыто (игрок мог его
 	// закрыть или нащёлкать новые фильтры, пока шёл запрос). true — ответ «обработан», в чат не пишем.
-	if (req->fromWindow && (req->uid != v.pendingUid || !KZ::gsmenu::IsOpen(player)))
+	if (req->fromWindow && (req->uid != v.pendingUid || !KZ::gsmenu::IsOpenBy(player, "maptop")))
 	{
 		return true;
 	}
@@ -632,11 +638,15 @@ bool CourseTopRequest::ShowWindow()
 	{
 		v.page = 0;
 		v.pendingUid = 0; // окно открыто командой — ответы прежних перезапросов из окна уже чужие
+		v.qLocal = req->localStatus != ResponseStatus::DISABLED;
+		v.qGlobal = req->globalStatus != ResponseStatus::DISABLED;
+		v.baseOffset = req->offset;
 	}
 	RenderMaptop(player);
 	// Команда отдала первую страницу — дозапрашиваем полный топ для листания (тихо, без консоли).
 	const bool full = req->limit >= kMaptopLimit;
-	if (!req->fromWindow && !full && KZ::gsmenu::IsOpen(player)
+	// Дозапрос не трогает троттлинг кликов и не делается при o= (там листать от нуля незачем).
+	if (!req->fromWindow && !full && req->offset == 0 && KZ::gsmenu::IsOpenBy(player, "maptop")
 		&& (src.overallData.Count() >= kMaptopPage || src.proData.Count() >= kMaptopPage))
 	{
 		RequeryMaptop(player, v.mode.Get(), false);
@@ -665,7 +675,9 @@ CON_COMMAND_F(kz_gsm_done, "kz_gsm_done <slot> — пройденные игро
 	};
 	if (!player || !player->IsInGame() || !player->GetClient() || !KZDatabaseService::IsReady() || !player->modeService)
 	{
-		sendEnd();
+		char end[48];
+		V_snprintf(end, sizeof(end), "css_gg1_done_end %i fail\n", slot);
+		interfaces::pEngine->ServerCommand(end);
 		return;
 	}
 	const i32 modeID = KZ::mode::GetModeInfo(player->modeService).databaseID;
@@ -718,6 +730,12 @@ CON_COMMAND_F(kz_gsm_done, "kz_gsm_done <slot> — пройденные игро
 		flush();
 		sendEnd();
 	};
-	auto onFailure = [sendEnd](std::string, int) { sendEnd(); };
+	// Сбой — явным признаком: GG1 не примет пустой список за «прошёл всё» и спросит снова.
+	auto onFailure = [slot](std::string, int)
+	{
+		char end[48];
+		V_snprintf(end, sizeof(end), "css_gg1_done_end %i fail\n", slot);
+		interfaces::pEngine->ServerCommand(end);
+	};
 	KZDatabaseService::GetDatabaseConnection()->ExecuteTransaction(txn, onSuccess, onFailure);
 }

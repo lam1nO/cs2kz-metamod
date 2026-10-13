@@ -1761,6 +1761,7 @@ namespace
 			row.colour = (u32)(r.steamID64 % 8);
 			row.wr = i == 0;
 			row.me = r.steamID64 == me;
+			row.noGo = !r.replay;
 			meShown |= row.me;
 			t.rows.push_back(row);
 			v.shownIds.push_back(r.id);
@@ -1803,7 +1804,7 @@ namespace
 			t.prev = v.page > 0;
 			t.next = v.page < pages - 1;
 		}
-		KZ::gsmenu::ShowTable(player, t, OnJumptopWindowClick);
+		KZ::gsmenu::ShowTable(player, t, OnJumptopWindowClick, "jumptop");
 	}
 
 	void QueryJumptopWindow(KZPlayer *player)
@@ -1817,7 +1818,7 @@ namespace
 		Transaction txn;
 		txn.queries.push_back(query);
 		CPlayerUserId userID = player->GetClient()->GetUserID();
-		const bool firstOpen = !KZ::gsmenu::IsOpen(player);
+		const bool firstOpen = !KZ::gsmenu::IsOpenBy(player, "jumptop");
 		// clang-format off
 		KZDatabaseService::GetDatabaseConnection()->ExecuteTransaction(
 			txn,
@@ -1830,7 +1831,7 @@ namespace
 				}
 				JumptopView &v = g_jtView[p->GetPlayerSlot().Get()];
 				// Устаревший ответ или окно уже закрыто (кроме самого первого открытия командой).
-				if (seq != v.pendingQuery || (!firstOpen && !KZ::gsmenu::IsOpen(p)))
+				if (seq != v.pendingQuery || (!firstOpen && !KZ::gsmenu::IsOpenBy(p, "jumptop")))
 				{
 					return;
 				}
@@ -1919,7 +1920,7 @@ SCMD(kz_jumptop, SCFL_JUMPSTATS | SCFL_RECORD | SCFL_HELP)
 		return true;
 	}
 	// Повторный !jumptop при открытом окне закрывает его (под захватом курсора — выход без клика).
-	if (KZ::gsmenu::IsOpen(player))
+	if (KZ::gsmenu::IsOpenBy(player, "jumptop"))
 	{
 		KZ::gsmenu::Close(player, "command_toggle");
 		return true;
