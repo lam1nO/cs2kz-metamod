@@ -5,6 +5,7 @@
 #include "entitykeyvalues.h"
 #include "utils/utils.h"
 #include "utils/cvarquery.h"
+#include "utils/gamesystem.h"
 
 #include "tier0/memdbgon.h"
 
