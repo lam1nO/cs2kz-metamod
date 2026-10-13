@@ -795,8 +795,8 @@ namespace
 	// Защита от битого файла — НЕ языковыми исключениями: форк собирается с
 	// `-fno-exceptions` (AMBuildScript), поймать их нечем в принципе. Абсурдные размеры из
 	// шапок секций (по ним аллоцируют ReadTickSection и ReadEventsCompressed) отсекает пре-валидация внутри
-	// data::LoadCutSourceFromMemory — она отдаёт valid=false, что здесь становится
-	// parse_failed. Это единственное место такой защиты на весь тракт.
+	// data::LoadCutSourceFromMemory — она отдаёт valid=false с причиной (parse_failed или
+	// too_many_ticks — потолок KZ_CUT_MAX_TICKS_LEAD). Это единственное место такой защиты на весь тракт.
 	void BuildPathWorker(std::string filePath, std::shared_ptr<KZLeadService::PendingLoad> pending)
 	{
 		// Допуск взят из снимка (см. PendingLoad::rdpTolerance): конвар живой, а рабочий поток
@@ -815,10 +815,10 @@ namespace
 		}
 		else
 		{
-			data::CutSource src = data::LoadCutSourceFromMemory(bytes.data(), bytes.size());
+			data::CutSource src = data::LoadCutSourceFromMemory(bytes.data(), bytes.size(), data::KZ_CUT_MAX_TICKS_LEAD);
 			if (!src.valid || src.ticks.empty())
 			{
-				failReason = "parse_failed";
+				failReason = src.valid ? "parse_failed" : src.failReason;
 			}
 			else
 			{
