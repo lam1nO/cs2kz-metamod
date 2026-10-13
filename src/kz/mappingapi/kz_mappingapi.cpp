@@ -1863,8 +1863,25 @@ static_function void OpenCoursesMenu(KZPlayer *player)
 	{
 		char info[16];
 		V_snprintf(info, sizeof(info), "%d", ordered[i]->id);
+		// Имя — каноническое по cyber-номеру (Main, Bonus N): названия из разметки бывают переведены
+		// («Главный проход»), а игроки знают курсы по Main/Bonus (решение владельца 13.10). Курсы вне
+		// нумерации (100+) — под своим именем.
+		const i32 num = KZ::course::GetCyberCourseNumber(ordered[i]);
+		char label[64];
+		if (num == 0)
+		{
+			V_strncpy(label, "Main", sizeof(label));
+		}
+		else if (num > 0 && num < 100)
+		{
+			V_snprintf(label, sizeof(label), "Bonus %d", num);
+		}
+		else
+		{
+			V_strncpy(label, ordered[i]->name, sizeof(label));
+		}
 		// Курс без стартовой позиции — неактивный (серый) пункт.
-		g_pMenus->AddItem(m, ordered[i]->name, info, !ordered[i]->hasStartPosition);
+		g_pMenus->AddItem(m, label, info, !ordered[i]->hasStartPosition);
 	}
 
 	// Одноразовый выбор — меню закрывается по клику (в отличие от !options).
