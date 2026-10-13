@@ -126,9 +126,12 @@ void KZHUDService::OnDeathnoticesCvarValue(CPlayerSlot slot, bool ok, const char
 	hud->deathnoticesQueryPending = false;
 	hud->deathnoticesQueryTimeouts = 0;
 	// Не тот статус (cvar защищён/не найден в будущем билде) — это «худ не прячется», panorama.
-	bool hidden = ok && value && atoi(value) != 0;
-	if (hidden != hud->drawOnlyDeathnotices)
+	// Булев cvar Source 2 клиент отдаёт строкой "true"/"false", не "1"/"0".
+	bool hidden = ok && value && (!V_stricmp(value, "true") || atoi(value) != 0);
+	// Первый ответ пишем всегда: по нему видно, что опрос вообще работает и в каком виде приходит значение.
+	if (hidden != hud->drawOnlyDeathnotices || !hud->deathnoticesAnswered)
 	{
+		hud->deathnoticesAnswered = true;
 		KZ_LOG_INFO(LogChannel::General, "[cyb] mhud_deathnotices steam_id=%llu ok=%d value=%s hidden=%d\n", player->GetSteamId64(false), ok,
 					value ? value : "", hidden);
 	}
