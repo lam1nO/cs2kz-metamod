@@ -1581,9 +1581,6 @@ void KZHUDService::ComputeBottomState(KZPlayer *player, KZPlayer *target, Bottom
 {
 	out = BottomPanelState {};
 	KZHUDService *cfg = target->hudService;
-
-	// Меню cs2menus ведёт прослойка (layout/gsmenu_shim.cpp): ввод и перерисовка — каждый такт.
-	KZ::gsmenu::ShimTick(target);
 	const bool isReplay = KZ::replaysystem::IsReplayBot(player);
 	// Язык получателя — часть слепка (kz_language меняет его на месте, без реконнекта).
 	V_strncpy(out.lang, target->languageService->GetLanguage(), sizeof(out.lang));
@@ -1935,6 +1932,9 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 {
 	KZHUDService *cfg = target->hudService;
 
+	// Меню cs2menus ведёт прослойка (layout/gsmenu_shim.cpp): ввод и перерисовка — каждый такт.
+	KZ::gsmenu::ShimTick(target);
+
 	// Меню реплея спектатора (layout/rpmenu.cpp) — до всех ветвлений по типу худа: у него
 	// своя сущность, оно не зависит от hudType получателя и обязано тикать (ввод + рендер),
 	// пока игрок наблюдает бота; само же закрывается, когда player перестал быть ботом.
@@ -1948,6 +1948,14 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 		cfg->DestroyOwnedLayout();
 		cfg->ClearBottomPanel();
 		cfg->TickHudEditor();
+		return;
+	}
+	// Окно перед лицом (layout/gsmenu.cpp, !maptop): худ — другая сущность и рисуется ПОВЕРХ окна
+	// (z-index между сущностями не действует), поэтому на время окна он снесён, как у редактора.
+	if (KZ::gsmenu::IsOpen(target))
+	{
+		cfg->DestroyOwnedLayout();
+		cfg->ClearBottomPanel();
 		return;
 	}
 
