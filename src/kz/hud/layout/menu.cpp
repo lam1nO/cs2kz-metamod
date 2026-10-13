@@ -1435,6 +1435,11 @@ void KZHUDService::OnLayoutMenuClick(uint32 packedHandle, const char *panelId)
 	{
 		return;
 	}
+	// Карточка реплея в режиме мыши (layout/rpmenu.cpp) — своя сущность, сверка хэндла внутри.
+	if (this->HandleReplayClick(packedHandle, panelId))
+	{
+		return;
+	}
 	if (!this->menuOpen && !this->editorOpen)
 	{
 		return;

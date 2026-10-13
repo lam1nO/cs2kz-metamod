@@ -496,9 +496,7 @@ namespace
 		{
 			// Реплей грузит команда !replay — с её проверками, ожиданием загрузки и сообщениями.
 			KZ::gsmenu::Close(player, "watch_replay");
-			char cmd[96];
-			V_snprintf(cmd, sizeof(cmd), "kz_replay %s", v.runIds[row].c_str());
-			interfaces::pEngine->ClientCommand(player->GetPlayerSlot(), cmd);
+			interfaces::pEngine->ClientCommand(player->GetPlayerSlot(), "kz_replay %s", v.runIds[row].c_str());
 		}
 		else if (KZ_STREQ(action, "a1"))
 		{

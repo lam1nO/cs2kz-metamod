@@ -704,8 +704,15 @@ public:
 	// DestroyOwnedLayout: кэш живёт только вместе с сущностью). Зовётся из Reset(),
 	// LayoutCleanup() и CloseReplayMenu().
 	void DestroyOwnedReplayLayout();
+	// Клик по карточке реплея в режиме мыши (тестеры gsmenu): шкала sk0..sk100, строки row_*,
+	// стрелки btn_*, rp_kbd — назад к клавишам. true — клик этой карточки.
+	bool HandleReplayClick(uint32 packedHandle, const char *panelId);
 
 private:
+	// Режим мыши карточки: захват курсора на ownedReplayLayout + класс mouse. Снимается явно на
+	// закрытии (DestroyOwnedReplayLayout) — так же, как захват окна !options.
+	void SetReplayMouse(bool on);
+	void RefreshReplayTips();
 	// Единственная точка расчёта SpeedInfo (Task 6/R3, см. комментарий у struct SpeedInfo):
 	// HTML-путь (BuildVersionCHud) и panorama-layout (layout/mhud.cpp)
 	// обязаны звать ИМЕННО его, копировать расчёт во вторую ветку запрещено. Данные — из
@@ -970,6 +977,8 @@ private:
 	bool replayMenuOpen {};
 	// Спрятано игроком через !rpmenu (см. ToggleReplayMenuHidden).
 	bool replayMenuHidden {};
+	bool replayMouse {};          // включён захват курсора на карточке (R у тестеров gsmenu)
+	std::string replayTipsUuid {}; // запись, для которой выставлены подсказки времени sk*
 	bool replayMenuFailLogged {}; // серия отказов создания сущности уже залогирована (см. rpmenu.cpp)
 	i32 replayMenuRetryTick {};   // тик последнего отказа — повтор создания с бэкоффом
 	i32 replayMenuRow {};        // выбранная строка — индекс в RPMENU_ROWS (порядок СТРАНИЦЫ, не

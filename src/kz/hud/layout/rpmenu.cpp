@@ -28,6 +28,8 @@
 // Меню ВСЕГДА открыто, пока игрок наблюдает реплей-бота с идущим плейбеком: UpdateReplayMenu
 // (тик из DrawPanels) сам открывает и закрывает его; команды нет, cs2menus-меню удалено.
 #include "kz/hud/layout/layout.h"
+#include "kz/hud/layout/gsmenu.h"
+#include "kz/replays/commands.h"
 #include "kz/language/kz_language.h"
 #include "kz/spec/kz_spec.h"
 #include "kz/replays/kz_replaysystem.h"
@@ -541,9 +543,16 @@ void KZHUDService::DestroyOwnedReplayLayout()
 	}
 	if (CBaseEntity *ent = this->ownedReplayLayout.Get())
 	{
+		// Захват режима мыши снимаем ЯВНО, до удаления (как у окна !options).
+		if (this->replayMouse)
+		{
+			((CCSCustomHudLayout *)ent)->SetInputCaptureEnabled(this->player->GetPlayerSlot(), false);
+		}
 		g_pKZUtils->RemoveEntity(ent);
 	}
 	this->ownedReplayLayout = nullptr;
+	this->replayMouse = false;
+	this->replayTipsUuid.clear();
 	this->replayPage = ReplayMenuPageState();
 }
 
@@ -584,6 +593,12 @@ bool KZHUDService::OpenReplayMenu()
 	KZ_LOG_INFO(LogChannel::General, "[cyb] replay_menu_open slot=%i page=%s fill=%i\n", this->player->GetPlayerSlot().Get(),
 				cyb_rpmenu_page.Get().Get() && cyb_rpmenu_page.Get().Get()[0] ? cyb_rpmenu_page.Get().Get() : KZ_RPMENU_LAYOUT, cyb_rpmenu_fill.Get());
 	this->RenderReplayMenu(layout, true);
+	// Подсказка «R — мышь» — только тем, кому включено новое меню (kz_gsmenu_testers).
+	if (KZ::gsmenu::EnabledFor(this->player))
+	{
+		ApplyClass(this->player, layout, "replay_card", "canmouse", true);
+		layout->GetGlobalLayoutState()->MarkFullChanged();
+	}
 	return true;
 }
 
@@ -669,6 +684,13 @@ void KZHUDService::ReadReplayMenuInput()
 	const u64 held = HeldButtons(this->player);
 	const u64 pressed = held & ~this->replayMenuHeld;
 	this->replayMenuHeld = held;
+
+	// R — режим мыши (только тестерам нового меню: без опубликованной разметки шкала не кликабельна).
+	if ((pressed & IN_RELOAD) && KZ::gsmenu::EnabledFor(this->player))
+	{
+		this->SetReplayMouse(true);
+		return;
+	}
 
 	if (pressed & IN_FORWARD)
 	{
@@ -1008,4 +1030,123 @@ void KZHUDService::RenderReplayMenu(CCSCustomHudLayout *layout, bool force)
 		state.classDirty = false;
 		layout->GetGlobalLayoutState()->MarkFullChanged();
 	}
+}
+
+// === Режим мыши (тестеры gsmenu) =============================================================
+
+void KZHUDService::SetReplayMouse(bool on)
+{
+	CBaseEntity *ent = this->ownedReplayLayout.Get();
+	if (!ent || this->replayMouse == on)
+	{
+		return;
+	}
+	CCSCustomHudLayout *layout = (CCSCustomHudLayout *)ent;
+	layout->SetInputCaptureEnabled(this->player->GetPlayerSlot(), on);
+	this->replayMouse = on;
+	ApplyClass(this->player, layout, "replay_card", "mouse", on);
+	layout->GetGlobalLayoutState()->MarkFullChanged();
+	// Пока держим курсор, клавиши до сервера не доходят; маска «удержано» на выходе — текущая,
+	// чтобы R, отпущенная во время мыши, не сработала повторно.
+	this->replayMenuHeld = HeldButtons(this->player);
+	if (on)
+	{
+		this->RefreshReplayTips();
+	}
+	KZ_LOG_INFO(LogChannel::General, "[cyb] replay_menu_mouse on=%i slot=%i\n", (i32)on, this->player->GetPlayerSlot().Get());
+}
+
+// Подсказка времени над каждой из 101 кнопки шкалы — один раз на запись (длительность не меняется).
+void KZHUDService::RefreshReplayTips()
+{
+	CBaseEntity *ent = this->ownedReplayLayout.Get();
+	if (!ent || !KZ::replaysystem::data::IsReplayPlaying())
+	{
+		return;
+	}
+	const std::string uuid = KZ::replaysystem::data::GetCurrentReplay()->uuid.ToString();
+	if (uuid == this->replayTipsUuid)
+	{
+		return;
+	}
+	ReplayMenuStatus status {};
+	KZ::replaysystem::menu::GetReplayMenuStatus(status);
+	if (status.total <= 0.0)
+	{
+		return;
+	}
+	CCSCustomHudLayout *layout = (CCSCustomHudLayout *)ent;
+	char id[8], tip[32];
+	for (i32 i = 0; i <= 100; i++)
+	{
+		V_snprintf(id, sizeof(id), "sk%i", i);
+		utils::FormatTime(status.total * i / 100.0, tip, sizeof(tip));
+		layout->SetDialogVariableString(id, "tt", tip);
+	}
+	this->replayTipsUuid = uuid;
+}
+
+bool KZHUDService::HandleReplayClick(uint32 packedHandle, const char *panelId)
+{
+	CCSCustomHudLayout *layout = CCSCustomHudLayout::FromClickHandle(packedHandle);
+	if (!layout || !panelId || (CBaseEntity *)layout != this->ownedReplayLayout.Get())
+	{
+		return false;
+	}
+	if (!this->replayMenuOpen || !this->replayMouse)
+	{
+		return true;
+	}
+	using KZ::replaysystem::menu::ApplyReplayMenuInput;
+	i32 pct = -1;
+	if (KZ_STREQ(panelId, "rp_kbd"))
+	{
+		this->SetReplayMouse(false);
+	}
+	else if (sscanf(panelId, "sk%d", &pct) == 1 && pct >= 0 && pct <= 100)
+	{
+		ReplayMenuStatus status {};
+		KZ::replaysystem::menu::GetReplayMenuStatus(status);
+		if (status.total > 0.0)
+		{
+			char when[32];
+			utils::FormatTime(status.total * pct / 100.0, when, sizeof(when));
+			KZ::replaysystem::commands::JumpToReplayTime(this->player, when);
+		}
+	}
+	else
+	{
+		struct Map
+		{
+			const char *id;
+			ReplayMenuLine line;
+			ReplayMenuInput input;
+		};
+		static const Map kMap[] = {
+			{"row_play", ReplayMenuLine::Pause, ReplayMenuInput::Select},
+			{"row_restart", ReplayMenuLine::Restart, ReplayMenuInput::Select},
+			{"row_exit", ReplayMenuLine::End, ReplayMenuInput::Select},
+			{"btn_frame_prev", ReplayMenuLine::Step, ReplayMenuInput::Dec},
+			{"btn_frame_next", ReplayMenuLine::Step, ReplayMenuInput::Inc},
+			{"btn_seek_back", ReplayMenuLine::Seek, ReplayMenuInput::Dec},
+			{"btn_seek_fwd", ReplayMenuLine::Seek, ReplayMenuInput::Inc},
+			{"btn_seek_fast_back", ReplayMenuLine::SeekFast, ReplayMenuInput::Dec},
+			{"btn_seek_fast_fwd", ReplayMenuLine::SeekFast, ReplayMenuInput::Inc},
+			{"btn_speed_dec", ReplayMenuLine::Speed, ReplayMenuInput::Dec},
+			{"btn_speed_inc", ReplayMenuLine::Speed, ReplayMenuInput::Inc},
+		};
+		for (const Map &m : kMap)
+		{
+			if (KZ_STREQ(panelId, m.id))
+			{
+				ApplyReplayMenuInput(this->player, m.line, m.input);
+				if (m.line == ReplayMenuLine::End)
+				{
+					this->CloseReplayMenu("end_clicked");
+				}
+				break;
+			}
+		}
+	}
+	return true;
 }
