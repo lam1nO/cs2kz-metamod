@@ -350,8 +350,8 @@ namespace KZ::replaysystem::events
 	// см. playback::TickIndexForServerTick). До 13.10.2026 здесь стояли линейные проходы tickData с
 	// нуля — по два на КАЖДУЮ паузу до цели: на WR kz_kiwiconvulsion (1.37 млн кадров, сотни пауз)
 	// перемотка на 3-м часу занимала ~1.5 с главного потока, а длиннее ~1.56 с CS2 кикает
-	// зрителя (`recv queue overflow 100 messages`, NETWORK_DISCONNECT_OVERFLOW). Кадра нет (событие
-	// за концом записи) — последний кадр; прежний цикл отдавал 0, и пауза выходила отрицательной.
+	// зрителя (`recv queue overflow 100 messages`, NETWORK_DISCONNECT_OVERFLOW). Кламп к последнему
+	// кадру — страховка: на путях перемотки событие не позже целевого кадра, и кадр всегда находится.
 	static_function u32 TickIndexAtOrAfter(const data::ReplayPlayback *replay, u32 serverTick)
 	{
 		const u32 idx = playback::TickIndexForServerTick(replay->tickData, replay->tickCount, serverTick);
@@ -374,12 +374,14 @@ namespace KZ::replaysystem::events
 
 		// Get the server tick of the target tick data
 		u32 targetServerTick = replay->tickData[targetTick].serverTick;
-		u32 currentServerTick = replay->currentTick < replay->tickCount ? replay->tickData[replay->currentTick].serverTick : 0;
 
 		// Optimization: If seeking forward, we only need to process events from current position
 		// Вперёд от ТЕКУЩЕГО события — только если состояние не сброшено: NavigateReplay перед
 		// вызовом всегда делает ResetReplayState (currentEvent = 0, currentTick остаётся старым), и без
 		// проверки currentEvent ветка шла бы с события 0, пропустив сброс режима и стилей ниже.
+		// Сейчас NavigateReplay — единственный вызывающий, поэтому ветка «вперёд» недостижима и путь
+		// всегда полный (с перемоткой O(событий × log кадров) это дёшево). Включать её обратно — только
+		// без ResetReplayState перед вызовом, иначе бот останется со стилями текущей позиции.
 		bool isSeekingForward = (targetTick > replay->currentTick) && replay->currentTick > 0 && replay->currentEvent > 0;
 		u32 startEventIndex = 0;
 		u32 startJumpIndex = 0;
