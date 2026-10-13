@@ -811,7 +811,7 @@ private:
 public:
 	// === Particle-MHUD (hud/particles/particles.cpp) ===================================
 	static void PrecacheParticles(IEntityResourceManifest *pResourceManifest);
-	// Раз в секунду спросить у клиента cl_draw_only_deathnotices (зовёт DrawPanels).
+	// Раз в 0.1 с спросить у клиента cl_draw_only_deathnotices (зовёт DrawPanels).
 	void PollDeathnoticesCvar();
 	static void OnDeathnoticesCvarValue(CPlayerSlot slot, bool ok, const char *value);
 	// Рисовать частицы вместо panorama: cvar у клиента 1 и пункт «Показывать MHUD при скрытии

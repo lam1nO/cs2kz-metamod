@@ -43,9 +43,10 @@ static_global constexpr const char *MHUD_PARTICLE_FONTS[] = {"lato", "verdana"};
 #define MHUD_DEF_KEYS_OFFSET_Y     -6.0f
 #define MHUD_DEF_KEYS_SCALE        0.075f
 
-// Опрос cvar: раз в секунду. Ответа ждём 5 с; клиента, который промолчал, дальше спрашиваем
-// раз в 30 с — пока не ответит снова.
-#define MHUD_DEATHNOTICES_QUERY_INTERVAL       1.0
+// Опрос cvar: раз в 0.1 с (решение владельца 13.10 — переключение без заметной задержки); новый
+// запрос не уходит, пока не пришёл ответ на прежний, то есть фактически не чаще раза за пинг.
+// Ответа ждём 5 с; клиента, который промолчал, дальше спрашиваем раз в 30 с — пока не ответит снова.
+#define MHUD_DEATHNOTICES_QUERY_INTERVAL       0.1
 #define MHUD_DEATHNOTICES_QUERY_TIMEOUT        5.0
 #define MHUD_DEATHNOTICES_QUERY_SILENT_INTERVAL 30.0
 
