@@ -7,6 +7,7 @@
 #include "sdk/navphysicsinterface.h"
 #include "sdk/cglobalsymbol.h"
 #include "sdk/recipientfilters.h"
+#include "utils/logging.h"
 
 void KZPaintService::Reset()
 {
@@ -153,6 +154,25 @@ void KZPaintService::ToggleShowAllPaint()
 // Commands
 
 #define KZ_PAINT_TRACE_DISTANCE 32768.0f
+#define KZ_PAINT_DIAG_INTERVAL  1.0
+
+void KZPaintService::LogPaintTrace(const trace_t &tr, bool hit, const char *how)
+{
+	const f64 now = g_pKZUtils->GetGlobals()->curtime;
+	this->pendingPaintDiag = false;
+	if (now < this->nextPaintDiagTime && this->nextPaintDiagTime - now <= KZ_PAINT_DIAG_INTERVAL)
+	{
+		return;
+	}
+	this->nextPaintDiagTime = now + KZ_PAINT_DIAG_INTERVAL;
+	this->pendingPaintDiag = hit;
+	const char *cls = (hit && tr.m_pEnt) ? tr.m_pEnt->GetClassname() : "-";
+	KZ_LOG_INFO(LogChannel::General,
+				"[cyb] paint_trace steam_id=%llu how=%s hit=%d frac=%.4f start_solid=%d ent=%s contents=0x%llx pos=%.1f/%.1f/%.1f normal=%.2f/%.2f/%.2f\n",
+				this->player->GetSteamId64(), how, hit ? 1 : 0, tr.m_flFraction, tr.m_bStartInSolid ? 1 : 0, cls ? cls : "?",
+				(unsigned long long)tr.m_nContents, tr.m_vEndPos.x, tr.m_vEndPos.y, tr.m_vEndPos.z, tr.m_vHitNormal.x, tr.m_vHitNormal.y,
+				tr.m_vHitNormal.z);
+}
 
 bool KZPaintService::TracePaint(trace_t &tr) const
 {
@@ -173,6 +193,11 @@ bool KZPaintService::TracePaint(trace_t &tr) const
 	CTraceFilterPlayerMovementCS filter(pawn);
 	filter.EnableInteractsExcludeLayer(LAYER_INDEX_CONTENTS_PLAYER_CLIP);
 	filter.EnableInteractsExcludeLayer(LAYER_INDEX_CONTENTS_PLAYER);
+	// Невидимое луч метки пробивает: декаль на nodraw-поверхности (невидимые стены и блоки KZ-карт —
+	// tools/toolsinvisible и т.п.) или на небе ложится, но не рисуется, и игрок видит «paint не
+	// работает» (жалоба 13.10.2026). Метка должна лечь на видимую поверхность за ними.
+	filter.EnableInteractsExcludeLayer(LAYER_INDEX_CONTENTS_NODRAW);
+	filter.EnableInteractsExcludeLayer(LAYER_INDEX_CONTENTS_SKY);
 	INavPhysicsInterface::TraceLine(origin, endPos, &filter, &tr);
 
 	return tr.DidHit();
@@ -181,7 +206,9 @@ bool KZPaintService::TracePaint(trace_t &tr) const
 void KZPaintService::PlacePaint()
 {
 	trace_t tr;
-	if (!this->TracePaint(tr))
+	const bool hit = this->TracePaint(tr);
+	this->LogPaintTrace(tr, hit, "manual");
+	if (!hit)
 	{
 		return;
 	}
@@ -190,6 +217,12 @@ void KZPaintService::PlacePaint()
 	this->pendingPaint = true;
 	g_pKZUtils->DecalTrace(&tr, &paintDecal, 0.0f);
 	this->pendingPaint = false;
+	if (this->pendingPaintDiag)
+	{
+		// Перехват PostEvent снимает флаг, увидев событие декаля; не снял — движок декаль не отправил.
+		KZ_LOG_INFO(LogChannel::General, "[cyb] paint_decal steam_id=%llu delivered=0 reason=no_decal_event\n", this->player->GetSteamId64());
+		this->pendingPaintDiag = false;
+	}
 }
 
 void KZPaintService::TryAutoPaint()
@@ -207,8 +240,10 @@ void KZPaintService::TryAutoPaint()
 	this->nextAutoPaintTime = curTime + 0.05;
 
 	trace_t tr;
-	if (!this->TracePaint(tr))
+	const bool hit = this->TracePaint(tr);
+	if (!hit)
 	{
+		this->LogPaintTrace(tr, hit, "auto");
 		return;
 	}
 
@@ -217,10 +252,16 @@ void KZPaintService::TryAutoPaint()
 		return;
 	}
 
+	this->LogPaintTrace(tr, hit, "auto");
 	CGlobalSymbol paintDecal = MakeGlobalSymbol("paint");
 	this->pendingPaint = true;
 	g_pKZUtils->DecalTrace(&tr, &paintDecal, 0.0f);
 	this->pendingPaint = false;
+	if (this->pendingPaintDiag)
+	{
+		KZ_LOG_INFO(LogChannel::General, "[cyb] paint_decal steam_id=%llu delivered=0 reason=no_decal_event\n", this->player->GetSteamId64());
+		this->pendingPaintDiag = false;
+	}
 
 	this->lastAutoPaintPosition = tr.m_vEndPos;
 	this->hasLastAutoPaintPosition = true;

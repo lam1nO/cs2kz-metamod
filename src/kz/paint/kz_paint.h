@@ -48,6 +48,12 @@ public:
 	void ToggleShowAllPaint();
 
 	bool pendingPaint = false;
+	// Диагностика «paint не видно» (13.10.2026): строка лога о трассе и о доставке декаля, не чаще
+	// раза в KZ_PAINT_DIAG_INTERVAL с на игрока. pendingPaintDiag — строку о доставке пишет перехват
+	// PostEvent (kz_quiet), только для той метки, о трассе которой строка уже ушла.
+	f64 nextPaintDiagTime = 0.0;
+	bool pendingPaintDiag = false;
+	void LogPaintTrace(const trace_t &tr, bool hit, const char *how);
 	bool autoPaintEnabled = false;
 	bool hasLastAutoPaintPosition = false;
 	f64 nextAutoPaintTime = 0.0;

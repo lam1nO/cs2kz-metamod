@@ -4,6 +4,8 @@
 #include "sdk/datatypes.h"
 #include "igameevents.h"
 
+class CMsgSosStartSoundEvent;
+
 // Маркер «наше SayText2» в param3 (инцидент чата 10.09.2026, см. utils_print.cpp / kz_quiet.cpp).
 inline constexpr char KZ_CHAT_OWN_MARKER[] = "cyb";
 
@@ -81,6 +83,8 @@ namespace utils
 
 	// Sounds
 	void PlaySoundToClient(CPlayerSlot player, const char *sound, f32 volume = 1.0f);
+	// Перехват PostEvent: дописать громкость звука PlaySoundToClient в его стартовое сообщение.
+	void OnSosStartSoundEvent(CMsgSosStartSoundEvent *msg);
 
 	// Return true if the spawn found is truly valid (not in the ground or out of bounds)
 	bool IsSpawnValid(const Vector &origin);
