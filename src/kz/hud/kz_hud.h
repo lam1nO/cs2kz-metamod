@@ -3,12 +3,14 @@
 #include "kz/timer/kz_timer.h"
 #include "kz/hud/layout/menu.h"
 #include "entityhandle.h"
+#include "sdk/entity/cparticlesystem.h"
 #include <unordered_map>
 #include <vector>
 
 #define KZ_HUD_TIMER_STOPPED_GRACE_TIME 3.0f
 #define KZ_HUD_ON_GROUND_THRESHOLD      0.07f
 class CCSCustomHudLayout;
+class IEntityResourceManifest;
 struct KZOptItem;
 struct KZOptNode;
 
@@ -367,6 +369,32 @@ private:
 	{
 		return this->player;
 	}
+
+	// === Particle-MHUD: фолбэк при cl_draw_only_deathnotices 1 (hud/particles/particles.cpp) ===
+	// Клиентский cvar прячет весь худ игры вместе с нашей panorama-сущностью, а частицы рисует
+	// мир — их он не трогает. Частицы только живому владельцу: оверлей встаёт по взгляду
+	// владельца и у спектатора уезжает за экран (регрессия cyb.34).
+	CHandle<CParticleSystem> mhudSpeedParticles[2] {};
+	CHandle<CParticleSystem> mhudPrespeedParticles[2] {};
+	CHandle<CParticleSystem> mhudTimerDigitParticles[4] {};
+	CHandle<CParticleSystem> mhudTimerDelimParticles[3] {};
+	CHandle<CParticleSystem> mhudKeysParticle {};
+	// Хоть одна частица создана — дешёвый гейт для CheckTransmit и DestroyAllParticles.
+	bool particlesActive {};
+
+	// Последний ответ клиента на опрос cl_draw_only_deathnotices. Пока ответа нет — false,
+	// то есть panorama (клиент, который не отвечает, худа не лишается).
+	bool drawOnlyDeathnotices {};
+	// Опрос в полёте и когда ушёл: не плодить запросы клиенту, который молчит.
+	bool deathnoticesQueryPending {};
+	f64 deathnoticesQueryTime {};
+	// Сколько опросов подряд ушло без ответа: после первого молчания переспрашиваем реже, иначе
+	// у клиента, который не отвечает вовсе, копились бы ожидающие колбэки cvarquery.
+	i32 deathnoticesQueryTimeouts {};
+
+	void UpdateMHUDSpeedParticles();
+	void UpdateMHUDTimerParticles();
+	void UpdateMHUDKeysParticle();
 
 public:
 	virtual void Reset() override;
@@ -779,6 +807,26 @@ private:
 	// Preference helpers.
 	Color GetMHUDColorPref(const char *name, const Color &defaultColor);
 
+public:
+	// === Particle-MHUD (hud/particles/particles.cpp) ===================================
+	static void PrecacheParticles(IEntityResourceManifest *pResourceManifest);
+	// Раз в секунду спросить у клиента cl_draw_only_deathnotices (зовёт DrawPanels).
+	void PollDeathnoticesCvar();
+	static void OnDeathnoticesCvarValue(CPlayerSlot slot, bool ok, const char *value);
+	// Рисовать частицы вместо panorama: cvar у клиента 1 и пункт «Показывать MHUD при скрытии
+	// худа» (mhudOnHiddenHud) включён.
+	bool WantsParticleMHUD();
+	void UpdateParticles();
+	void DestroyAllParticles();
+
+	bool HasOwnedParticles() const
+	{
+		return this->particlesActive;
+	}
+
+	bool OwnsParticle(const CEntityHandle &handle) const;
+
+private:
 	// === Layout-худ (custom_hud_layout, Task 4) ======================================
 
 	struct LayoutElementState

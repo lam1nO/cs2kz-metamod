@@ -408,6 +408,11 @@ void KZHUDService::Reset()
 	// sv_suppress_viewpunch/view_punch_decay (состояние «уже подавлено» осталось бы от прошлого).
 	this->viewpunchSuppressed = false;
 	this->replayMenuHidden = false;
+	this->DestroyAllParticles();
+	this->drawOnlyDeathnotices = false;
+	this->deathnoticesQueryPending = false;
+	this->deathnoticesQueryTime = 0.0;
+	this->deathnoticesQueryTimeouts = 0;
 	this->showPanel = this->player->optionService->GetPreferenceBool("showPanel", true);
 	this->timerStoppedTime = {};
 	this->currentTimeWhenTimerStopped = {};
@@ -1943,6 +1948,7 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	// (created → force), то есть все классы уходят заново по свежим префам.
 	if (cfg->IsHudEditorOpen())
 	{
+		cfg->DestroyAllParticles();
 		cfg->DestroyOwnedLayout();
 		cfg->ClearBottomPanel();
 		cfg->TickHudEditor();
@@ -1952,12 +1958,38 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	// (z-index между сущностями не действует), поэтому на время окна он снесён, как у редактора.
 	if (KZ::gsmenu::HidesHud(target))
 	{
+		cfg->DestroyAllParticles();
 		cfg->DestroyOwnedLayout();
 		cfg->ClearBottomPanel();
 		return;
 	}
 
 	bool available = KZHUDService::IsMHUDAvailable();
+
+	// Particle-MHUD (hud/particles/particles.cpp): у игрока cl_draw_only_deathnotices 1 — клиент
+	// прячет весь худ игры вместе с panorama-сущностью и HTML-центром, рисовать ему можно только
+	// частицами. Только живому владельцу: спектатор остаётся на panorama/HTML ниже (оверлей по
+	// взгляду владельца у спектатора уезжает за экран). Тип Off — выбор «без худа», его не
+	// перебиваем. Cvar опрашиваем, только пока ответ может что-то поменять.
+	bool particleCandidate = available && player == target && target->IsAlive() && cfg->GetHudType() != HUD_TYPE_OFF;
+	if (particleCandidate)
+	{
+		cfg->PollDeathnoticesCvar();
+	}
+	if (particleCandidate && cfg->WantsParticleMHUD())
+	{
+		cfg->DestroyOwnedLayout();
+		cfg->ClearBottomPanel();
+		if (target->leadService)
+		{
+			// Дельта к PB/WR есть только в panorama-таймере — путь сравнения отпускаем.
+			target->leadService->SetCompareWanted(false, CybReplayDownload::Kind::PB);
+		}
+		cfg->UpdateParticles();
+		return;
+	}
+	cfg->DestroyAllParticles();
+
 	// hudType: 0 = Standard (HTML-панель), 2 = Off (ничего), 3 = Panorama (custom_hud_layout
 	// сущность). 1 (particle-оверлей апстрима) удалён в задаче 12 — апстрим вычистил
 	// particles/* из воркшоп-аддона, путь больше не работал; GetHudType() мигрирует

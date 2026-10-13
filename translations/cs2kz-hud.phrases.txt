@@ -685,6 +685,20 @@
 		"chi"		"仅标准 HUD：两行代替完整面板"
 		"ua"		"Лише для стандартного худу: два рядки замість повної панелі"
 	}
+	"HUD - Menu Label MhudOnHiddenHud"
+	{
+		"en"		"Show MHUD when HUD is hidden"
+		"ru"		"Показывать MHUD при скрытии худа"
+		"chi"		"隐藏 HUD 时显示 MHUD"
+		"ua"		"Показувати MHUD при прихованому худі"
+	}
+	"HUD - Menu Label MhudOnHiddenHud Sub"
+	{
+		"en"		"With cl_draw_only_deathnotices 1: speed, timer and keys drawn with particles"
+		"ru"		"При cl_draw_only_deathnotices 1: скорость, таймер и клавиши частицами"
+		"chi"		"cl_draw_only_deathnotices 1 时：用粒子显示速度、计时器和按键"
+		"ua"		"При cl_draw_only_deathnotices 1: швидкість, таймер і клавіші частинками"
+	}
 	"HUD - Menu Label ResetAll"
 	{
 		"en"		"Reset all HUD settings"

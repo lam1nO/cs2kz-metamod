@@ -343,6 +343,10 @@ void KZHUDService::InitMenuPrefs()
 	// Дефолт false = дефолт GetPreferenceBool("compactPanel") без второго аргумента.
 	KZ::menu::AddToggle(general, "HUD - Menu Label CompactPanel", "compactPanel", false);
 	KZ::menu::SetItemSubtext(general, "HUD - Menu Label CompactPanel Sub");
+	// Particle-MHUD при cl_draw_only_deathnotices 1 (hud/particles/particles.cpp): клиентский cvar
+	// прячет весь худ игры, частицы мира остаются. Дефолт true = MHUD_ON_HIDDEN_HUD_DEFAULT там же.
+	KZ::menu::AddToggle(general, "HUD - Menu Label MhudOnHiddenHud", "mhudOnHiddenHud", true);
+	KZ::menu::SetItemSubtext(general, "HUD - Menu Label MhudOnHiddenHud Sub");
 	// Сброс всех страниц худа разом — единственный пункт General со своим действием, поэтому
 	// стоит последним (см. ResetAllOnActivate выше).
 	KZ::menu::AddButton(general, "HUD - Menu Label ResetAll", &ResetAllOnActivate);
