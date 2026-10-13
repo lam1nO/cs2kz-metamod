@@ -191,7 +191,10 @@ namespace
 			return;
 		}
 		w.vars[key] = value;
-		if (!layout->SetDialogVariableString(panel, var, value.c_str()))
+		// Panorama переводит текст, совпавший с ключом локализации целиком («Main» → «Главный проход»),
+		// хвостовой NBSP делает текст не-ключом и на экране не виден.
+		const std::string shown = value.empty() ? value : value + "\xC2\xA0";
+		if (!layout->SetDialogVariableString(panel, var, shown.c_str()))
 		{
 			KZ_LOG_WARN(LogChannel::General, "[cyb] gsmenu_var_dropped reason=intern_limit panel=%s var=%s slot=%i\n", panel, var,
 						player->GetPlayerSlot().Get());
