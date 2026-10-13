@@ -272,29 +272,20 @@ void utils::PlaySoundToClient(CPlayerSlot player, const char *sound, f32 volume)
 	CSingleRecipientFilter filter(player.Get());
 	EmitSound_t soundParams;
 	soundParams.m_pSoundName = sound;
-	soundParams.m_flVolume = volume;
+	// m_flVolume НЕ трогаем (VOL_NORM): движок превращает отличное от 1.0 значение в параметр
+	// `public.volume_atten` (дизассемблер libserver, функция под сигнатурой EmitSound), и вместе с
+	// нашим `public.volume` громкость применялась бы дважды и нелинейно — это и было «громкость
+	// не настраивается точно» (жалоба 13.10.2026).
 
-	// Источник — ТЕКУЩАЯ пешка слушателя (живая или обсервер), а не контроллер `slot + 1`. У звуков
-	// аддона (kz.*, база kz.amb.base, csgo_mega) громкость гаснет с расстоянием до источника: 1.0 на
-	// нуле, 0 на 2048 юнитах. Контроллер положения в мире не имеет, и звук прыжка/рекорда звучал
-	// тем тише, чем дальше игрок от начала координат карты, — настройка громкости на это не влияла
-	// (жалоба 13.10.2026). Своя пешка не глушится !hide (ShouldHideIndex не прячет себя).
-	CEntityIndex source = player.Get() + 1;
-	Player *listener = g_pPlayerManager ? g_pPlayerManager->ToPlayer(player) : nullptr;
-	CBasePlayerPawn *pawn = listener ? listener->GetCurrentPawn() : nullptr;
-	if (pawn)
-	{
-		source = pawn->entindex();
-	}
-
-	// Громкость — явным параметром саунд-ивента `public.volume` (множитель к его собственной
-	// громкости): EmitSound_t::m_flVolume в CS2 до клиента не доезжает. Основной путь — параметр
-	// дописывает в САМО стартовое сообщение перехват PostEvent (utils::OnSosStartSoundEvent, флаг
-	// s_pendingSoundVolume ниже): отдельное сообщение могло бы обогнать старт и потеряться на клиенте.
-	// Запасной — GE_SosSetSoundEventParams по guid, если старт мимо перехвата не прошёл.
+	// Громкость — параметр саунд-ивента `public.volume` (множитель к его собственной громкости,
+	// у kz.* база 0.5 — 200 % дают 1.0). Основной путь — перехват PostEvent дописывает его в САМО
+	// стартовое сообщение и там же ставит источник -1 (utils::OnSosStartSoundEvent): «звук у
+	// слушателя», без позиции и затухания. У звуков kz.* громкость гаснет с расстоянием до источника
+	// (1.0 на нуле → 0 на 2048 юнитах), а источником был контроллер slot+1 — громкость зависела
+	// от того, где игрок/камера наблюдателя. Запасной путь — GE_SosSetSoundEventParams по guid.
 	s_pendingSoundVolume = volume;
 	s_pendingSoundVolumeApplied = false;
-	const SndOpEventGuid_t guid = g_pKZUtils->EmitSound(filter, source, soundParams);
+	const SndOpEventGuid_t guid = g_pKZUtils->EmitSound(filter, player.Get() + 1, soundParams);
 	s_pendingSoundVolume = -1.0f;
 	if (s_pendingSoundVolumeApplied || guid.m_nGuid == 0 || volume == 1.0f)
 	{
@@ -317,12 +308,23 @@ void utils::PlaySoundToClient(CPlayerSlot player, const char *sound, f32 volume)
 
 void utils::OnSosStartSoundEvent(CMsgSosStartSoundEvent *msg)
 {
-	if (s_pendingSoundVolume < 0.0f || s_pendingSoundVolume == 1.0f || !msg)
+	if (s_pendingSoundVolume < 0.0f || !msg)
 	{
 		return;
 	}
-	AppendSoundVolumeParam(*msg->mutable_packed_params(), s_pendingSoundVolume);
+	msg->set_source_entity_index(-1);
+	if (s_pendingSoundVolume != 1.0f)
+	{
+		AppendSoundVolumeParam(*msg->mutable_packed_params(), s_pendingSoundVolume);
+	}
 	s_pendingSoundVolumeApplied = true;
+	// Разовая сверка, что старт идёт синхронно внутри EmitSound (иначе работает только запасной путь).
+	static bool logged = false;
+	if (!logged)
+	{
+		logged = true;
+		KZ_LOG_INFO(LogChannel::General, "[cyb] sound_param_inject path=start volume=%.2f\n", s_pendingSoundVolume);
+	}
 }
 
 f32 utils::NormalizeDeg(f32 a)

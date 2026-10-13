@@ -338,8 +338,10 @@ void KZ::quiet::OnPostEvent(INetworkMessageInternal *pEvent, const CNetMessage *
 		case GE_SosStartSoundEvent:
 		{
 			auto msg = const_cast<CNetMessage *>(pData)->ToPB<CMsgSosStartSoundEvent>();
-			utils::OnSosStartSoundEvent(msg);
 			emitterEntIndex = msg->source_entity_index();
+			// После чтения источника: наши звуки перехват переводит на источник -1 («у слушателя»),
+			// а их эмиттер — контроллер, который quiet-фильтр и так не трогает.
+			utils::OnSosStartSoundEvent(msg);
 			break;
 		}
 		// Used by kz_misc to block valve's player say messages.

@@ -168,8 +168,9 @@ void KZPaintService::LogPaintTrace(const trace_t &tr, bool hit, const char *how)
 	this->pendingPaintDiag = hit;
 	const char *cls = (hit && tr.m_pEnt) ? tr.m_pEnt->GetClassname() : "-";
 	KZ_LOG_INFO(LogChannel::General,
-				"[cyb] paint_trace steam_id=%llu how=%s hit=%d frac=%.4f start_solid=%d ent=%s contents=0x%llx pos=%.1f/%.1f/%.1f normal=%.2f/%.2f/%.2f\n",
-				this->player->GetSteamId64(), how, hit ? 1 : 0, tr.m_flFraction, tr.m_bStartInSolid ? 1 : 0, cls ? cls : "?",
+				"[cyb] paint_trace steam_id=%llu how=%s first=0x%llx retraced=%d hit=%d frac=%.4f start_solid=%d ent=%s contents=0x%llx "
+				"pos=%.1f/%.1f/%.1f normal=%.2f/%.2f/%.2f\n",
+				this->player->GetSteamId64(), how, (unsigned long long)this->lastFirstContents, this->lastRetraced ? 1 : 0, hit ? 1 : 0, tr.m_flFraction, tr.m_bStartInSolid ? 1 : 0, cls ? cls : "?",
 				(unsigned long long)tr.m_nContents, tr.m_vEndPos.x, tr.m_vEndPos.y, tr.m_vEndPos.z, tr.m_vHitNormal.x, tr.m_vHitNormal.y,
 				tr.m_vHitNormal.z);
 }
@@ -193,12 +194,23 @@ bool KZPaintService::TracePaint(trace_t &tr) const
 	CTraceFilterPlayerMovementCS filter(pawn);
 	filter.EnableInteractsExcludeLayer(LAYER_INDEX_CONTENTS_PLAYER_CLIP);
 	filter.EnableInteractsExcludeLayer(LAYER_INDEX_CONTENTS_PLAYER);
-	// Невидимое луч метки пробивает: декаль на nodraw-поверхности (невидимые стены и блоки KZ-карт —
-	// tools/toolsinvisible и т.п.) или на небе ложится, но не рисуется, и игрок видит «paint не
-	// работает» (жалоба 13.10.2026). Метка должна лечь на видимую поверхность за ними.
-	filter.EnableInteractsExcludeLayer(LAYER_INDEX_CONTENTS_NODRAW);
-	filter.EnableInteractsExcludeLayer(LAYER_INDEX_CONTENTS_SKY);
 	INavPhysicsInterface::TraceLine(origin, endPos, &filter, &tr);
+	this->lastFirstContents = tr.DidHit() ? tr.m_nContents : 0;
+	this->lastRetraced = false;
+
+	// Луч упёрся в невидимое (nodraw — невидимые стены и блоки KZ-карт) или в небо: декаль там
+	// ложится, но не рисуется, и игрок видит «paint не работает» (жалоба 13.10.2026). Только в этом
+	// случае — второй луч сквозь такие слои, чтобы метка легла на видимую поверхность за ними.
+	// Первый проход обычный: если у видимой геометрии в физике окажется слой NODRAW, безусловное
+	// исключение пропускало бы луч сквозь пол. Что задел первый проход — в paint_trace (first=).
+	if (tr.DidHit() && (tr.m_nContents & (CONTENTS_NODRAW | CONTENTS_SKY)))
+	{
+		filter.EnableInteractsExcludeLayer(LAYER_INDEX_CONTENTS_NODRAW);
+		filter.EnableInteractsExcludeLayer(LAYER_INDEX_CONTENTS_SKY);
+		tr.Init();
+		INavPhysicsInterface::TraceLine(origin, endPos, &filter, &tr);
+		this->lastRetraced = true;
+	}
 
 	return tr.DidHit();
 }

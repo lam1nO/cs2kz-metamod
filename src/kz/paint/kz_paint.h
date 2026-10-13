@@ -53,6 +53,9 @@ public:
 	// PostEvent (kz_quiet), только для той метки, о трассе которой строка уже ушла.
 	f64 nextPaintDiagTime = 0.0;
 	bool pendingPaintDiag = false;
+	// Что задел ПЕРВЫЙ проход луча и был ли второй (сквозь nodraw/небо) — для paint_trace.
+	mutable u64 lastFirstContents = 0;
+	mutable bool lastRetraced = false;
 	void LogPaintTrace(const trace_t &tr, bool hit, const char *how);
 	bool autoPaintEnabled = false;
 	bool hasLastAutoPaintPosition = false;
