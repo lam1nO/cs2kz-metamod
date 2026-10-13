@@ -217,37 +217,9 @@ namespace
 	}
 } // namespace
 
-static CConVar<CUtlString> kz_gsmenu_testers("kz_gsmenu_testers", FCVAR_NONE,
-												"SteamID64 через запятую, кому включены новые panorama-меню; * — всем, пусто — никому", "");
-
-bool KZ::gsmenu::EnabledFor(KZPlayer *player)
+bool KZ::gsmenu::Available(KZPlayer *player)
 {
-	if (!player || !KZHUDService::IsMHUDAvailable())
-	{
-		return false;
-	}
-	const char *list = kz_gsmenu_testers.Get().Get();
-	if (!list || !list[0])
-	{
-		return false;
-	}
-	if (list[0] == '*')
-	{
-		return true;
-	}
-	char id[24];
-	V_snprintf(id, sizeof(id), "%llu", player->GetSteamId64());
-	const size_t len = strlen(id);
-	for (const char *p = strstr(list, id); p; p = strstr(p + 1, id))
-	{
-		const bool startOk = p == list || p[-1] == ',' || p[-1] == ' ';
-		const bool endOk = p[len] == '\0' || p[len] == ',' || p[len] == ' ';
-		if (startOk && endOk)
-		{
-			return true;
-		}
-	}
-	return false;
+	return player && KZHUDService::IsMHUDAvailable();
 }
 
 std::string KZ::gsmenu::Initial(const char *name)

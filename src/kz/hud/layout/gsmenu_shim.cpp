@@ -3,8 +3,8 @@
 // Все меню форка ходят через g_pMenus. Прослойка встаёт на его место: КАЖДЫЙ вызов построения
 // уходит в настоящий cs2menus (у него своя копия меню и свой хэндл), а параллельно копия меню
 // живёт здесь, в модели прослойки. Решение «кто показывает» принимается в DisplayMenu по игроку:
-// тестеру (KZ::gsmenu::EnabledFor) меню ведёт прослойка — ввод с пешки (W/S/E/A/D/R/F, у
-// спектатора выход — Shift) и боковой список gs panorama-окна; остальным — настоящий cs2menus,
+// когда панорама доступна (KZ::gsmenu::Available), меню ведёт прослойка — ввод с пешки (W/S/E/A/D/R/F, у
+// спектатора выход — Shift) и боковой список gs panorama-окна; иначе — настоящий cs2menus,
 // как раньше. Наружу видны только хэндлы прослойки: колбэки cs2menus переводятся обратно.
 //
 // Семантика повторяет cs2menus (ics2menus.h): disabled-пункты пропускаются курсором; E на
@@ -504,7 +504,7 @@ public:
 			return false;
 		}
 		KZPlayer *player = (slot >= 0 && slot < MAXPLAYERS) ? g_pKZPlayerManager->ToPlayer(CPlayerSlot(slot)) : nullptr;
-		if (!player || !KZ::gsmenu::EnabledFor(player))
+		if (!player || !KZ::gsmenu::Available(player))
 		{
 			if (SessionOf(slot))
 			{
@@ -512,7 +512,7 @@ public:
 			}
 			return real->DisplayMenu(m->real, slot, duration);
 		}
-		// Тестер: настоящее меню на слоте (если было) закрываем — показывает прослойка.
+		// Панорама: настоящее меню на слоте (если было) закрываем — показывает прослойка.
 		if (real->GetActiveMenu(slot) != kInvalidMenuHandle)
 		{
 			real->CancelMenu(slot);

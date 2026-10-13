@@ -593,8 +593,8 @@ bool KZHUDService::OpenReplayMenu()
 	KZ_LOG_INFO(LogChannel::General, "[cyb] replay_menu_open slot=%i page=%s fill=%i\n", this->player->GetPlayerSlot().Get(),
 				cyb_rpmenu_page.Get().Get() && cyb_rpmenu_page.Get().Get()[0] ? cyb_rpmenu_page.Get().Get() : KZ_RPMENU_LAYOUT, cyb_rpmenu_fill.Get());
 	this->RenderReplayMenu(layout, true);
-	// Подсказка «R — мышь» — только тем, кому включено новое меню (kz_gsmenu_testers).
-	if (KZ::gsmenu::EnabledFor(this->player))
+	// Подсказка «R — мышь» — когда панорама-меню доступны (старый плагин класс не ставит).
+	if (KZ::gsmenu::Available(this->player))
 	{
 		ApplyClass(this->player, layout, "replay_card", "canmouse", true);
 		layout->GetGlobalLayoutState()->MarkFullChanged();
@@ -685,8 +685,8 @@ void KZHUDService::ReadReplayMenuInput()
 	const u64 pressed = held & ~this->replayMenuHeld;
 	this->replayMenuHeld = held;
 
-	// R — режим мыши (только тестерам нового меню: без опубликованной разметки шкала не кликабельна).
-	if ((pressed & IN_RELOAD) && KZ::gsmenu::EnabledFor(this->player))
+	// R — режим мыши.
+	if ((pressed & IN_RELOAD) && KZ::gsmenu::Available(this->player))
 	{
 		this->SetReplayMouse(true);
 		return;
@@ -1032,7 +1032,7 @@ void KZHUDService::RenderReplayMenu(CCSCustomHudLayout *layout, bool force)
 	}
 }
 
-// === Режим мыши (тестеры gsmenu) =============================================================
+// === Режим мыши  =============================================================
 
 void KZHUDService::SetReplayMouse(bool on)
 {

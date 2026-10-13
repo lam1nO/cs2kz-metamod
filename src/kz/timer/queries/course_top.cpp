@@ -590,7 +590,7 @@ bool CourseTopRequest::ShowWindow()
 {
 	CourseTopRequest *req = this;
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(req->userID);
-	if (!player || !KZ::gsmenu::EnabledFor(player))
+	if (!player || !KZ::gsmenu::Available(player))
 	{
 		return false;
 	}

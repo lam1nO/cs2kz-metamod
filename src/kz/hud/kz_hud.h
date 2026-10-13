@@ -704,7 +704,7 @@ public:
 	// DestroyOwnedLayout: кэш живёт только вместе с сущностью). Зовётся из Reset(),
 	// LayoutCleanup() и CloseReplayMenu().
 	void DestroyOwnedReplayLayout();
-	// Клик по карточке реплея в режиме мыши (тестеры gsmenu): шкала sk0..sk100, строки row_*,
+	// Клик по карточке реплея в режиме мыши : шкала sk0..sk100, строки row_*,
 	// стрелки btn_*, rp_kbd — назад к клавишам. true — клик этой карточки.
 	bool HandleReplayClick(uint32 packedHandle, const char *panelId);
 
@@ -977,7 +977,7 @@ private:
 	bool replayMenuOpen {};
 	// Спрятано игроком через !rpmenu (см. ToggleReplayMenuHidden).
 	bool replayMenuHidden {};
-	bool replayMouse {};          // включён захват курсора на карточке (R у тестеров gsmenu)
+	bool replayMouse {};          // включён захват курсора на карточке (R)
 	std::string replayTipsUuid {}; // запись, для которой выставлены подсказки времени sk*
 	bool replayMenuFailLogged {}; // серия отказов создания сущности уже залогирована (см. rpmenu.cpp)
 	i32 replayMenuRetryTick {};   // тик последнего отказа — повтор создания с бэкоффом

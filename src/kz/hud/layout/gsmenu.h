@@ -62,7 +62,7 @@ namespace KZ::gsmenu
 		bool prev = false, next = false;
 	};
 
-	// Боковой список gs (без захвата курсора) — меню cs2menus у тестеров (gsmenu_shim.cpp).
+	// Боковой список gs (без захвата курсора) — меню cs2menus (gsmenu_shim.cpp).
 	struct ListRow
 	{
 		std::string label, value;
@@ -95,16 +95,14 @@ namespace KZ::gsmenu
 	void OnRoundStart(KZPlayer *player);                                 // смена карты снесла сущность
 	void Cleanup();                                                      // выгрузка плагина
 
-	// Прослойка над cs2menus (gsmenu_shim.cpp): меню форка у тестеров ведёт сама и рисует боковым
-	// списком, остальным всё уходит в cs2menus как раньше.
+	// Прослойка над cs2menus (gsmenu_shim.cpp): меню форка ведёт сама и рисует боковым списком;
+	// без панорамы всё уходит в cs2menus как раньше.
 	ICS2Menus *WrapMenus(ICS2Menus *real);
 	void ShimTick(KZPlayer *player);         // ввод и перерисовка, каждый такт (DrawPanels)
 	void ShimDisconnect(KZPlayer *player);
 
-	// Новые меню включены этому игроку: cvar kz_gsmenu_testers — SteamID64 через запятую, «*» —
-	// всем, пусто — никому. Пока аддон с разметкой не опубликован, у остальных клиентов её нет:
-	// окно не нарисуется, а захват курсора запер бы игрока.
-	bool EnabledFor(KZPlayer *player);
+	// Панорама-меню доступны (аддон с разметкой подключён, сущность создаётся).
+	bool Available(KZPlayer *player);
 
 	// Буква для квадрата: первый символ UTF-8, латиница — заглавная.
 	std::string Initial(const char *name);

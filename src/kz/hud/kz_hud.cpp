@@ -1582,7 +1582,7 @@ void KZHUDService::ComputeBottomState(KZPlayer *player, KZPlayer *target, Bottom
 	out = BottomPanelState {};
 	KZHUDService *cfg = target->hudService;
 
-	// Меню cs2menus у тестеров ведёт прослойка (layout/gsmenu_shim.cpp): ввод и перерисовка — каждый такт.
+	// Меню cs2menus ведёт прослойка (layout/gsmenu_shim.cpp): ввод и перерисовка — каждый такт.
 	KZ::gsmenu::ShimTick(target);
 	const bool isReplay = KZ::replaysystem::IsReplayBot(player);
 	// Язык получателя — часть слепка (kz_language меняет его на месте, без реконнекта).

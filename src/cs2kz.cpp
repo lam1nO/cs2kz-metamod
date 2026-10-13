@@ -80,8 +80,8 @@ static void AcquireMenusInterface()
 	{
 		g_pMenus = (ICS2Menus *)g_SMAPI->MetaFactory(CS2MENUS_INTERFACE_004, nullptr, nullptr);
 	}
-	// Прослойка panorama-меню (hud/layout/gsmenu_shim.cpp): тестерам меню форка ведёт сама,
-	// остальным пропускает всё в cs2menus. Флаги версий выше считаются по НАСТОЯЩЕМУ интерфейсу.
+	// Прослойка panorama-меню (hud/layout/gsmenu_shim.cpp): меню форка ведёт сама,
+	// без панорамы пропускает всё в cs2menus. Флаги версий выше считаются по НАСТОЯЩЕМУ интерфейсу.
 	g_pMenus = KZ::gsmenu::WrapMenus(g_pMenus);
 }
 
