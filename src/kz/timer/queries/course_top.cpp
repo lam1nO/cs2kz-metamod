@@ -640,8 +640,8 @@ bool CourseTopRequest::ShowWindow()
 		v.pendingUid = 0; // окно открыто командой — ответы прежних перезапросов из окна уже чужие
 		v.qLocal = req->localStatus != ResponseStatus::DISABLED;
 		v.qGlobal = req->globalStatus != ResponseStatus::DISABLED;
-		v.baseOffset = req->offset;
 	}
+	v.baseOffset = req->offset; // перезапрос из окна идёт с нуля — места тоже с нуля
 	RenderMaptop(player);
 	// Команда отдала первую страницу — дозапрашиваем полный топ для листания (тихо, без консоли).
 	const bool full = req->limit >= kMaptopLimit;
