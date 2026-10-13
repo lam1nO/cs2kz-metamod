@@ -44,6 +44,7 @@ namespace KZ::gsmenu
 		u32 colour = 0;      // класс avc0..avc7
 		bool wr = false;     // золото
 		bool me = false;     // своя строка — акцент
+		bool noGo = false;   // без кнопки ▶ (нет реплея)
 		std::string actions[KZ_GSMENU_ROW_ACTIONS]; // пустая — кнопки нет
 		std::string note;
 	};
@@ -58,6 +59,8 @@ namespace KZ::gsmenu
 		std::vector<Chip> filters[KZ_GSMENU_FILTER_GROUPS];
 		std::string headers[KZ_GSMENU_TABLE_COLS];
 		std::vector<Row> rows;
+		bool hasMe = false; // своя строка под чертой (ваш рекорд вне страницы)
+		Row me;
 		std::string page, hint;
 		bool prev = false, next = false;
 	};
@@ -83,11 +86,15 @@ namespace KZ::gsmenu
 	using ClickFn = std::function<void(KZPlayer *player, const char *id)>;
 
 	// Открыть или перерисовать окно-таблицу. Захват курсора включается.
-	bool ShowTable(KZPlayer *player, const Table &table, ClickFn onClick);
+	// owner — кто открыл окно (maptop/jumptop): ответ одного не должен перерисовать окно другого.
+	bool ShowTable(KZPlayer *player, const Table &table, ClickFn onClick, const char *owner);
 	void Close(KZPlayer *player, const char *reason);
 	bool ShowList(KZPlayer *player, const List &list);
 	void HideList(KZPlayer *player);
 	bool IsOpen(KZPlayer *player);
+	bool IsOpenBy(KZPlayer *player, const char *owner);
+	// Окно с захватом курсора (своё gw или внешнее — сетка GG1) — худ на это время снят.
+	bool HidesHud(KZPlayer *player);
 
 	// Проводка из KZHUDService.
 	bool Owns(KZPlayer *player, CEntityHandle handle);

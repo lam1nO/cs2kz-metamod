@@ -36,6 +36,7 @@ namespace
 		std::unordered_map<std::string, std::string> vars;
 		std::unordered_map<std::string, std::string> swaps; // панель -> текущий класс из набора (mc-*, t1..t7, avc*)
 		bool classDirty = false;
+		std::string owner; // кто открыл окно gw (maptop/jumptop)
 	};
 
 	WindowState g_windows[MAXPLAYERS + 1];
@@ -244,7 +245,7 @@ std::string KZ::gsmenu::Initial(const char *name)
 	return out;
 }
 
-bool KZ::gsmenu::ShowTable(KZPlayer *player, const Table &t, ClickFn onClick)
+bool KZ::gsmenu::ShowTable(KZPlayer *player, const Table &t, ClickFn onClick, const char *owner)
 {
 	WindowState *w = StateOf(player);
 	if (!w)
@@ -257,6 +258,7 @@ bool KZ::gsmenu::ShowTable(KZPlayer *player, const Table &t, ClickFn onClick)
 		return false;
 	}
 	w->onClick = std::move(onClick);
+	w->owner = owner ? owner : "";
 	// Боковой список (меню cs2menus) живёт рядом и не трогается: это другой корень разметки.
 	Class(player, *w, layout, "gg", "shown", false);
 	Class(player, *w, layout, "gw", "shown", true);
@@ -310,9 +312,6 @@ bool KZ::gsmenu::ShowTable(KZPlayer *player, const Table &t, ClickFn onClick)
 		const Row &r = t.rows[i];
 		Class(player, *w, layout, id, "wr", r.wr);
 		Class(player, *w, layout, id, "me", r.me);
-		V_snprintf(id, sizeof(id), "gr%i_av", i);
-		Var(player, *w, layout, id, "a", r.initial);
-		Swap(player, *w, layout, id, "avc" + std::to_string(r.colour % 8));
 		for (i32 j = 0; j < KZ_GSMENU_TABLE_COLS; j++)
 		{
 			V_snprintf(sub, sizeof(sub), "gr%i_c%i", i, j);
@@ -329,10 +328,21 @@ bool KZ::gsmenu::ShowTable(KZPlayer *player, const Table &t, ClickFn onClick)
 		}
 		V_snprintf(sub, sizeof(sub), "gr%i_note", i);
 		Var(player, *w, layout, sub, "v", r.note);
+		V_snprintf(sub, sizeof(sub), "gr%i_go", i);
+		Class(player, *w, layout, sub, "hidden", r.noGo);
 	}
-	// Своя строка под чертой — следующая итерация (нужен отдельный запрос PB игрока).
-	Class(player, *w, layout, "gm_sep", "hidden", true);
-	Class(player, *w, layout, "gm_line", "hidden", true);
+	// Своя строка под чертой — ваш рекорд, когда его нет на текущей странице.
+	Class(player, *w, layout, "gm_sep", "hidden", !t.hasMe);
+	Class(player, *w, layout, "gm_line", "hidden", !t.hasMe);
+	if (t.hasMe)
+	{
+		for (i32 j = 0; j < KZ_GSMENU_TABLE_COLS; j++)
+		{
+			V_snprintf(sub, sizeof(sub), "gm_c%i", j);
+			Var(player, *w, layout, sub, "v", t.me.cells[j]);
+		}
+		Class(player, *w, layout, "gm_go", "hidden", t.me.actions[0].empty());
+	}
 
 	Class(player, *w, layout, "gw_prev", "hidden", !t.prev);
 	Class(player, *w, layout, "gw_next", "hidden", !t.next);
@@ -429,6 +439,22 @@ bool KZ::gsmenu::IsOpen(KZPlayer *player)
 {
 	WindowState *w = StateOf(player);
 	return w && w->open;
+}
+
+bool KZ::gsmenu::IsOpenBy(KZPlayer *player, const char *owner)
+{
+	WindowState *w = StateOf(player);
+	return w && w->open && owner && w->owner == owner;
+}
+
+bool KZ::gsmenu::HidesHud(KZPlayer *player)
+{
+	WindowState *w = StateOf(player);
+	if (!w)
+	{
+		return false;
+	}
+	return w->open || (g_ext[player->GetPlayerSlot().Get()].capture && g_ext[player->GetPlayerSlot().Get()].entity.IsValid());
 }
 
 bool KZ::gsmenu::Owns(KZPlayer *player, CEntityHandle handle)

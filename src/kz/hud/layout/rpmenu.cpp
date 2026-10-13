@@ -1085,7 +1085,7 @@ void KZHUDService::RefreshReplayTips()
 	for (i32 i = 0; i <= 100; i++)
 	{
 		V_snprintf(id, sizeof(id), "sk%i", i);
-		utils::FormatTime(status.total * i / 100.0, tip, sizeof(tip));
+		utils::FormatTime(status.total * (i + 0.5) / 101.0, tip, sizeof(tip));
 		layout->SetDialogVariableString(id, "tt", tip);
 	}
 	this->replayTipsUuid = uuid;
@@ -1114,8 +1114,10 @@ bool KZHUDService::HandleReplayClick(uint32 packedHandle, const char *panelId)
 		KZ::replaysystem::menu::GetReplayMenuStatus(status);
 		if (status.total > 0.0)
 		{
+			// Кнопка sk{i} занимает 1/101 шкалы — время берём в её середине, иначе к правому краю
+			// клик уезжал на полкнопки от курсора.
 			char when[32];
-			utils::FormatTime(status.total * pct / 100.0, when, sizeof(when));
+			utils::FormatTime(status.total * (pct + 0.5) / 101.0, when, sizeof(when));
 			KZ::replaysystem::commands::JumpToReplayTime(this->player, when);
 		}
 	}
