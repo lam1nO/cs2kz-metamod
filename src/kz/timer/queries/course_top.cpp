@@ -4,6 +4,10 @@
 #include "kz/global/kz_global.h"
 
 #include "utils/simplecmds.h"
+#include "kz/hud/layout/gsmenu.h"
+#include "kz/mode/kz_mode.h"
+#include "kz/hud/kz_hud.h"
+#include "utils/interfaces.h"
 
 #include "vendor/sql_mm/src/public/sql_mm.h"
 // clang-format off
@@ -240,6 +244,9 @@ struct CourseTopRequest : public BaseRequest
 		}
 	}
 
+	// Окно !maptop (layout/gsmenu.cpp) — false, если панорама недоступна: тогда остаётся консоль.
+	bool ShowWindow();
+
 	virtual void Reply()
 	{
 		KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
@@ -254,7 +261,11 @@ struct CourseTopRequest : public BaseRequest
 			return;
 		}
 
-		player->languageService->PrintChat(true, false, "Course Top - Check Console");
+		// Окно перед лицом; консольная таблица остаётся как была (её читают скриптами и копируют).
+		if (!this->ShowWindow())
+		{
+			player->languageService->PrintChat(true, false, "Course Top - Check Console");
+		}
 		if (this->localStatus == ResponseStatus::RECEIVED)
 		{
 			this->ReplyLocal();
@@ -405,3 +416,197 @@ SCMD(kz_sctop, SCFL_TIMER)
 
 SCMD_LINK(kz_scoursetop, kz_sctop);
 SCMD_LINK(kz_smaptop, kz_sctop);
+
+// === Окно !maptop (общее panorama-окно, layout/gsmenu.cpp) ====================================
+//
+// Показывает то же, что консольная таблица: локальный топ сервера (если его нет — глобальный),
+// PRO или общий. PRO/NUB переключаются без запроса (оба списка уже пришли), режим и страница —
+// повтором запроса с теми же картой и курсом. Даты рана локальный запрос не отдаёт — колонки нет.
+
+namespace
+{
+	struct MaptopView
+	{
+		CUtlString map, course, mode;
+		u64 offset = 0;
+		bool pro = true;
+		bool hasNext = false;
+		std::vector<std::string> runIds; // строка -> id рана (реплей)
+		std::vector<u64> steamIds;
+		CourseTopRequest::CourseTopData data;
+		bool global = false;
+	};
+
+	MaptopView g_maptop[MAXPLAYERS + 1];
+
+	constexpr const char *kMaptopModes[] = {"KZT", "CKZ", "VNL", "SKZ"};
+
+	void RenderMaptop(KZPlayer *player);
+
+	void RequeryMaptop(KZPlayer *player, const char *mode, u64 offset)
+	{
+		MaptopView &v = g_maptop[player->GetPlayerSlot().Get()];
+		CCommand args;
+		char line[256];
+		V_snprintf(line, sizeof(line), "kz_maptop map=%s course=%s mode=%s o=%llu", v.map.Get(), v.course.Get(), mode, offset);
+		args.Tokenize(line);
+		CourseTopRequest::Create<CourseTopRequest>(player, CourseTopRequest::ctopFeatures, true, true, &args);
+	}
+
+	void OnMaptopClick(KZPlayer *player, const char *id)
+	{
+		MaptopView &v = g_maptop[player->GetPlayerSlot().Get()];
+		i32 row = -1, k = -1;
+		if (KZ_STREQ(id, "gf1_0") || KZ_STREQ(id, "gf1_1"))
+		{
+			v.pro = KZ_STREQ(id, "gf1_0");
+			RenderMaptop(player);
+			return;
+		}
+		if (sscanf(id, "gf2_%d", &k) == 1 && k >= 0)
+		{
+			i32 shown = 0;
+			for (const char *mode : kMaptopModes)
+			{
+				if (KZ::mode::GetModeInfo(CUtlString(mode)).id < 0)
+				{
+					continue;
+				}
+				if (shown++ == k)
+				{
+					RequeryMaptop(player, mode, 0);
+					return;
+				}
+			}
+			return;
+		}
+		if (KZ_STREQ(id, "gw_prev") || KZ_STREQ(id, "gw_next"))
+		{
+			const u64 step = 10;
+			const u64 offset = KZ_STREQ(id, "gw_next") ? v.offset + step : (v.offset >= step ? v.offset - step : 0);
+			RequeryMaptop(player, v.mode.Get(), offset);
+			return;
+		}
+		char action[8] {};
+		if (sscanf(id, "gr%d_%7s", &row, action) != 2 || row < 0 || row >= (i32)v.runIds.size())
+		{
+			return;
+		}
+		if (KZ_STREQ(action, "go") || KZ_STREQ(action, "a0"))
+		{
+			// Реплей грузит команда !replay — с её проверками, ожиданием загрузки и сообщениями.
+			KZ::gsmenu::Close(player, "watch_replay");
+			char cmd[96];
+			V_snprintf(cmd, sizeof(cmd), "kz_replay %s", v.runIds[row].c_str());
+			interfaces::pEngine->ClientCommand(player->GetPlayerSlot(), cmd);
+		}
+		else if (KZ_STREQ(action, "a1"))
+		{
+			player->PrintChat(true, false, "{grey}Профиль: {default}https://gymstrike.net/players/%llu", v.steamIds[row]);
+		}
+		else if (KZ_STREQ(action, "a2"))
+		{
+			KZ::gsmenu::Close(player, "lead_wr");
+			interfaces::pEngine->ClientCommand(player->GetPlayerSlot(), "kz_lead wr");
+		}
+	}
+
+	void RenderMaptop(KZPlayer *player)
+	{
+		MaptopView &v = g_maptop[player->GetPlayerSlot().Get()];
+		CUtlVector<CourseTopRequest::RunStats> &list = v.pro ? v.data.proData : v.data.overallData;
+
+		KZ::gsmenu::Table t;
+		t.title = v.map.Get();
+		t.sub = std::string(v.course.Get()) + " · " + (v.global ? "мировой топ" : "топ сервера");
+		t.cover = v.map.Get();
+		t.noTp = v.pro;
+		t.filters[1] = {{"PRO", v.pro}, {"NUB", !v.pro}};
+		const CUtlString curShort = KZ::mode::GetModeInfo(v.mode).shortModeName;
+		for (const char *mode : kMaptopModes)
+		{
+			if (KZ::mode::GetModeInfo(CUtlString(mode)).id >= 0)
+			{
+				t.filters[2].push_back({mode, !V_stricmp(curShort.Get(), mode)});
+			}
+		}
+		t.headers[0] = "№";
+		t.headers[1] = "Игрок";
+		t.headers[2] = "Время";
+		t.headers[3] = "TP";
+
+		v.runIds.clear();
+		v.steamIds.clear();
+		const u64 me = player->GetSteamId64();
+		const f64 best = list.Count() > 0 ? list[0].time : 0.0;
+		FOR_EACH_VEC(list, i)
+		{
+			if (i >= KZ_GSMENU_TABLE_ROWS)
+			{
+				break;
+			}
+			CourseTopRequest::RunStats &r = list[i];
+			KZ::gsmenu::Row row;
+			const u64 rank = v.offset + i + 1;
+			row.cells[0] = std::to_string(rank);
+			row.cells[1] = r.name.Get();
+			row.cells[2] = r.GetTime().Get();
+			row.cells[3] = v.pro ? "" : std::to_string(r.teleportsUsed);
+			row.initial = KZ::gsmenu::Initial(r.name.Get());
+			row.colour = (u32)(r.steamid64 % 8);
+			row.wr = rank == 1;
+			row.me = r.steamid64 == me;
+			row.actions[0] = "▶  Смотреть реплей";
+			row.actions[1] = "Ссылка на профиль";
+			if (rank == 1)
+			{
+				row.actions[2] = "Бежать с призраком";
+				row.note = "Рекорд сервера";
+			}
+			else if (v.offset == 0 && best > 0.0)
+			{
+				row.note = std::string("+") + utils::FormatTime(r.time - best).Get() + " до WR";
+			}
+			t.rows.push_back(row);
+			v.runIds.push_back(r.runID.Get());
+			v.steamIds.push_back(r.steamid64);
+		}
+		if (t.rows.empty())
+		{
+			t.hint = v.pro ? "PRO-рекордов на этом курсе пока нет" : "Рекордов на этом курсе пока нет";
+		}
+		else
+		{
+			t.hint = "Клик по строке — реплей, профиль";
+		}
+		char page[32];
+		V_snprintf(page, sizeof(page), "%llu–%llu", v.offset + 1, v.offset + (u64)t.rows.size());
+		t.page = t.rows.empty() ? "" : page;
+		t.prev = v.offset > 0;
+		t.next = list.Count() >= (i32)KZ_GSMENU_TABLE_ROWS;
+		KZ::gsmenu::ShowTable(player, t, OnMaptopClick);
+	}
+} // namespace
+
+bool CourseTopRequest::ShowWindow()
+{
+	CourseTopRequest *req = this;
+	KZPlayer *player = g_pKZPlayerManager->ToPlayer(req->userID);
+	if (!player || !KZ::gsmenu::EnabledFor(player))
+	{
+		return false;
+	}
+	MaptopView &v = g_maptop[player->GetPlayerSlot().Get()];
+	const bool local = req->localStatus == ResponseStatus::RECEIVED;
+	v.map = req->mapName;
+	v.course = req->courseName;
+	v.mode = req->modeName;
+	v.offset = req->offset;
+	v.global = !local;
+	v.data = CourseTopRequest::CourseTopData();
+	const CourseTopRequest::CourseTopData &src = local ? req->srData : req->wrData;
+	v.data.overallData = src.overallData;
+	v.data.proData = src.proData;
+	RenderMaptop(player);
+	return KZ::gsmenu::IsOpen(player);
+}

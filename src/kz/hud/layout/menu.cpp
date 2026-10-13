@@ -43,6 +43,7 @@
 // пересоздаётся на следующем открытии (RecycleMenuLayoutIfFull).
 #include "kz/hud/layout/layout.h"
 #include "kz/hud/layout/menu.h"
+#include "kz/hud/layout/gsmenu.h"
 #include "kz/hud/layout/panorama_tables.h"
 #include "kz/option/kz_option.h"
 #include "kz/option/menu/model.h"
@@ -1429,6 +1430,11 @@ bool KZHUDService::HandleMenuWindowClick(const char *id)
 
 void KZHUDService::OnLayoutMenuClick(uint32 packedHandle, const char *panelId)
 {
+	// Общее окно (layout/gsmenu.cpp) — своя сущность; сверка хэндла внутри.
+	if (KZ::gsmenu::OnClick(this->player, packedHandle, panelId))
+	{
+		return;
+	}
 	if (!this->menuOpen && !this->editorOpen)
 	{
 		return;

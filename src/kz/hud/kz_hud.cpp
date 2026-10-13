@@ -1,3 +1,4 @@
+#include "kz/hud/layout/gsmenu.h"
 #include "kz/kz.h"
 #include "cs2kz.h"
 #include "kz_hud.h"
@@ -446,6 +447,10 @@ void KZHUDService::Reset()
 	KZ::hudshare::ClearSlotState(this->player->GetPlayerSlot());
 	// Меню реплея (layout/rpmenu.cpp) — своя сущность, та же причина.
 	this->CloseReplayMenu("disconnect");
+	// Общее окно (layout/gsmenu.cpp) — своя сущность с захватом, та же причина. Меню прослойки
+	// закрываем первым: его onEnd(Disconnect) ещё рисует в это окно.
+	KZ::gsmenu::ShimDisconnect(this->player);
+	KZ::gsmenu::OnSlotReset(this->player);
 }
 
 // Сброс кэша отправки нижней панели БЕЗ *Active-флага: раунд-старт (OnRoundStart, в т.ч.
@@ -488,6 +493,7 @@ void KZHUDService::OnRoundStart()
 		// ниже (hooks.cpp) — флаг сбрасываем здесь безусловно, иначе следующий !rpmenu
 		// «закроет» несуществующее меню.
 		player->hudService->CloseReplayMenu("round_start");
+		KZ::gsmenu::OnRoundStart(player);
 	}
 }
 
@@ -1575,6 +1581,9 @@ void KZHUDService::ComputeBottomState(KZPlayer *player, KZPlayer *target, Bottom
 {
 	out = BottomPanelState {};
 	KZHUDService *cfg = target->hudService;
+
+	// Меню cs2menus у тестеров ведёт прослойка (layout/gsmenu_shim.cpp): ввод и перерисовка — каждый такт.
+	KZ::gsmenu::ShimTick(target);
 	const bool isReplay = KZ::replaysystem::IsReplayBot(player);
 	// Язык получателя — часть слепка (kz_language меняет его на месте, без реконнекта).
 	V_strncpy(out.lang, target->languageService->GetLanguage(), sizeof(out.lang));

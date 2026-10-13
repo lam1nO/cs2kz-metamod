@@ -47,6 +47,7 @@
 #include <vendor/ClientCvarValue/public/iclientcvarvalue.h>
 #include <vendor/ixwebsocket/ixwebsocket/IXNetSystem.h>
 #include <vendor/mm-cs2menus/src/public/ics2menus.h>
+#include "kz/hud/layout/gsmenu.h"
 
 #include "tier0/memdbgon.h"
 KZPlugin g_KZPlugin;
@@ -79,6 +80,9 @@ static void AcquireMenusInterface()
 	{
 		g_pMenus = (ICS2Menus *)g_SMAPI->MetaFactory(CS2MENUS_INTERFACE_004, nullptr, nullptr);
 	}
+	// Прослойка panorama-меню (hud/layout/gsmenu_shim.cpp): тестерам меню форка ведёт сама,
+	// остальным пропускает всё в cs2menus. Флаги версий выше считаются по НАСТОЯЩЕМУ интерфейсу.
+	g_pMenus = KZ::gsmenu::WrapMenus(g_pMenus);
 }
 
 PLUGIN_EXPOSE(KZPlugin, g_KZPlugin);

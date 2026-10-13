@@ -2,6 +2,7 @@
 // панелей и dialog-переменных. Перенесено с апстрима (src/kz/hud/layout/entity.cpp),
 // расхождения с ним — см. журнал решений задачи (планинг-доки этой ветки, разделы R1/R4).
 #include "kz/hud/layout/layout.h"
+#include "kz/hud/layout/gsmenu.h"
 #include "kz/hud/layout/panorama_tables.h"
 #include "kz/spec/kz_spec.h" // GetSpectatedPlayer — источник mhudMimicSpec (см. EnsureOwnedLayout)
 #include "sdk/entity/ccscustomhudlayout.h"
@@ -433,6 +434,8 @@ void KZHUDService::LayoutCleanup()
 			player->hudService->DestroyOwnedReplayLayout();
 		}
 	}
+	// Общее окно (layout/gsmenu.cpp) — четвёртая персональная сущность, со своим захватом.
+	KZ::gsmenu::Cleanup();
 }
 
 bool KZHUDService::OwnsLayoutEntity(CEntityHandle handle)
@@ -444,5 +447,6 @@ bool KZHUDService::OwnsLayoutEntity(CEntityHandle handle)
 	// (пустые/невалидные хэндлы по-прежнему false).
 	return (this->ownedLayout.IsValid() && this->ownedLayout.ToInt() == handle.ToInt())
 		   || (this->ownedMenuLayout.IsValid() && this->ownedMenuLayout.ToInt() == handle.ToInt())
-		   || (this->ownedReplayLayout.IsValid() && this->ownedReplayLayout.ToInt() == handle.ToInt());
+		   || (this->ownedReplayLayout.IsValid() && this->ownedReplayLayout.ToInt() == handle.ToInt())
+		   || KZ::gsmenu::Owns(this->player, handle);
 }
