@@ -1,3 +1,4 @@
+#include "kz/hud/layout/gsmenu.h"
 #include "kz_jumpstats.h"
 #include "kz/option/kz_option.h"
 #include "kz/language/kz_language.h"
@@ -408,20 +409,21 @@ struct JSMenuItem
 	JSMenuItemKind kind;
 	i64 defaultInt;   // default for Toggle (0/1) and TierCycle
 	f32 defaultFloat; // default for Volume
+	const char *group; // заголовок группы перед пунктом в panorama-списке (NULL — продолжение группы)
 };
 
 // kz_js menu items, in display order.
 static const JSMenuItem s_jsMenuItems[] = {
-	{"Jumpstats - Menu Label Reporting",         "jsReporting",             JSMenuItemKind::Toggle,    1,                       0.0f },
-	{"Jumpstats - Menu Label Always",            "jsAlways",                JSMenuItemKind::Toggle,    0,                       0.0f },
-	{"Jumpstats - Menu Label MinTier",           "jsMinTier",               JSMenuItemKind::TierCycle, DistanceTier_Impressive, 0.0f },
-	{"Jumpstats - Menu Label SoundMinTier",      "jsSoundMinTier",          JSMenuItemKind::TierCycle, DistanceTier_Impressive, 0.0f },
-	{"Jumpstats - Menu Label Volume",            "jsVolume",                JSMenuItemKind::Volume,    0,                       0.75f},
-	{"Jumpstats - Menu Label BroadcastMinTier",  "jsBroadcastMinTier",      JSMenuItemKind::TierCycle, DistanceTier_Godlike,    0.0f },
-	{"Jumpstats - Menu Label BroadcastSoundTier","jsBroadcastSoundMinTier", JSMenuItemKind::TierCycle, DistanceTier_Godlike,    0.0f },
-	{"Jumpstats - Menu Label Failstats",         "jsFailstats",             JSMenuItemKind::Toggle,    1,                       0.0f },
-	{"Jumpstats - Menu Label ExtendedChatStats", "jsExtendedChatStats",     JSMenuItemKind::Toggle,    0,                       0.0f },
-	{"Jumpstats - Menu Label MinTierConsole",    "jsMinTierConsole",        JSMenuItemKind::TierCycle, DistanceTier_Impressive, 0.0f },
+	{"Jumpstats - Menu Label Reporting",         "jsReporting",             JSMenuItemKind::Toggle,    1,                       0.0f,  "Чат"       },
+	{"Jumpstats - Menu Label Always",            "jsAlways",                JSMenuItemKind::Toggle,    0,                       0.0f,  NULL        },
+	{"Jumpstats - Menu Label MinTier",           "jsMinTier",               JSMenuItemKind::TierCycle, DistanceTier_Impressive, 0.0f,  NULL        },
+	{"Jumpstats - Menu Label Failstats",         "jsFailstats",             JSMenuItemKind::Toggle,    1,                       0.0f,  NULL        },
+	{"Jumpstats - Menu Label ExtendedChatStats", "jsExtendedChatStats",     JSMenuItemKind::Toggle,    0,                       0.0f,  NULL        },
+	{"Jumpstats - Menu Label SoundMinTier",      "jsSoundMinTier",          JSMenuItemKind::TierCycle, DistanceTier_Impressive, 0.0f,  "Звук"      },
+	{"Jumpstats - Menu Label Volume",            "jsVolume",                JSMenuItemKind::Volume,    0,                       0.75f, NULL        },
+	{"Jumpstats - Menu Label BroadcastMinTier",  "jsBroadcastMinTier",      JSMenuItemKind::TierCycle, DistanceTier_Godlike,    0.0f,  "Трансляция"},
+	{"Jumpstats - Menu Label BroadcastSoundTier","jsBroadcastSoundMinTier", JSMenuItemKind::TierCycle, DistanceTier_Godlike,    0.0f,  NULL        },
+	{"Jumpstats - Menu Label MinTierConsole",    "jsMinTierConsole",        JSMenuItemKind::TierCycle, DistanceTier_Impressive, 0.0f,  "Консоль"   },
 };
 
 // "<label>: <value>" text for one menu item, from the current preference.
@@ -522,6 +524,52 @@ static_function void OnJSMenuSelect(MenuHandle menu, int slot, int item)
 	}
 }
 
+// A/D на пороге или громкости: шаг назад/вперёд по тому же кругу, что E (E — только вперёд).
+static_function void OnJSMenuAdjust(MenuHandle menu, int slot, int item, float delta, float, float)
+{
+	KZPlayer *p = g_pKZPlayerManager->ToPlayer(CPlayerSlot(slot));
+	const char *key = p ? g_pMenus->GetItemInfo(menu, item) : nullptr;
+	if (!key || !key[0])
+	{
+		return;
+	}
+	for (const auto &it : s_jsMenuItems)
+	{
+		if (!KZ_STREQ(key, it.prefKey))
+		{
+			continue;
+		}
+		const bool up = delta > 0;
+		if (it.kind == JSMenuItemKind::TierCycle)
+		{
+			const i64 cur = p->optionService->GetPreferenceInt(it.prefKey, it.defaultInt);
+			p->optionService->SetPreferenceInt(it.prefKey, (cur + (up ? 1 : DISTANCETIER_COUNT - 1)) % DISTANCETIER_COUNT);
+		}
+		else if (it.kind == JSMenuItemKind::Volume)
+		{
+			const f32 cur = static_cast<f32>(p->optionService->GetPreferenceFloat(it.prefKey, it.defaultFloat));
+			const i32 n = (i32)KZ_ARRAYSIZE(s_volumePresets);
+			i32 idx = 0;
+			for (i32 i = 0; i < n; i++)
+			{
+				if (s_volumePresets[i] <= cur + 0.001f)
+				{
+					idx = i;
+				}
+			}
+			idx = up ? (idx + 1) % n : (idx + n - 1) % n;
+			p->optionService->SetPreferenceFloat(it.prefKey, s_volumePresets[idx]);
+		}
+		else
+		{
+			return;
+		}
+		std::string text = JSMenuItemText(p, it, p->languageService->GetLanguage());
+		g_pMenus->SetItemText(menu, item, text.c_str());
+		return;
+	}
+}
+
 // Один хэндл JS-меню на слот — пересоздаётся при каждом построении. Вход теперь один (!js):
 // подменю старого cs2menus-меню !options убрано вместе с ним, настройки джампстатов живут в
 // panorama-реестре.
@@ -552,8 +600,15 @@ u32 KZJumpstatsService::CreateJumpstatsMenu()
 	for (const auto &it : s_jsMenuItems)
 	{
 		std::string text = JSMenuItemText(this->player, it, lang);
-		g_pMenus->AddItem(m, text.c_str(), it.prefKey, false);
+		// Пороги и громкость — A/D-строки (назад/вперёд), E по-прежнему крутит вперёд.
+		const int idx = it.kind == JSMenuItemKind::Toggle ? g_pMenus->AddItem(m, text.c_str(), it.prefKey, false)
+														  : g_pMenus->AddAdjustableItem(m, text.c_str(), it.prefKey, 1.0f, 0.0f, 0.0f);
+		if (it.group && idx >= 0)
+		{
+			KZ::gsmenu::SetItemGroup(m, idx, it.group);
+		}
 	}
+	g_pMenus->SetAdjustCallback(m, &OnJSMenuAdjust);
 	g_pMenus->SetCloseOnSelect(m, false); // item text updates live
 	s_jsMenu[slot] = m;
 	return m;

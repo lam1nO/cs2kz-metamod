@@ -51,6 +51,10 @@ namespace
 		bool capture = false;
 		i32 startItem = 0;
 		std::vector<Item> items;
+		// Родитель подменю — как childDef->parent в cs2menus: R ведёт к нему, даже когда подменю
+		// показано напрямую DisplayMenu (jumptop LinkParent, zones), а не входом из родителя.
+		MenuHandle parent = kInvalidMenuHandle;
+		std::unordered_map<i32, std::string> groups; // заголовок группы перед пунктом (SetItemGroup)
 	};
 
 	struct Session
@@ -88,9 +92,11 @@ namespace
 	{
 		std::string out;
 		bool tag = false;
-		for (unsigned char c : s)
+		for (size_t i = 0; i < s.size(); i++)
 		{
-			if (c == '<')
+			const unsigned char c = (unsigned char)s[i];
+			// Тег — только если дальше есть «>»: в нике «a<3» это просто символ.
+			if (c == '<' && !tag && s.find('>', i) != std::string::npos)
 			{
 				tag = true;
 				continue;
@@ -100,7 +106,7 @@ namespace
 				tag = c != '>';
 				continue;
 			}
-			if (c >= 0x20 || c >= 0x80)
+			if (c >= 0x20)
 			{
 				out += (char)c;
 			}
@@ -195,19 +201,70 @@ public:
 		}
 	}
 
-	void Render(KZPlayer *player, Session &s)
+	// «Подпись: значение» пункта cs2menus → подпись слева, значение справа; вкл/выкл — переключатель.
+	static void SplitItem(const std::string &text, KZ::gsmenu::ListRow &row)
+	{
+		const size_t colon = text.rfind(": ");
+		if (colon == std::string::npos || colon == 0)
+		{
+			row.label = text;
+			return;
+		}
+		row.label = text.substr(0, colon);
+		row.value = text.substr(colon + 2);
+		static const char *kOn[] = {"вкл", "Вкл", "ВКЛ", "on", "On", "ON"};
+		static const char *kOff[] = {"выкл", "Выкл", "ВЫКЛ", "off", "Off", "OFF"};
+		for (const char *w : kOn)
+		{
+			if (row.value == w)
+			{
+				row.tog = row.on = true;
+			}
+		}
+		for (const char *w : kOff)
+		{
+			if (row.value == w)
+			{
+				row.tog = true;
+			}
+		}
+	}
+
+	// false — панель не создалась (сущность/аддон): вызывающий откатывается на cs2menus.
+	bool Render(KZPlayer *player, Session &s)
 	{
 		Menu *m = Find(s.Current());
 		if (!m)
 		{
-			return;
+			return false;
 		}
 		KZ::gsmenu::List list;
 		list.title = Plain(m->title);
 		const i32 count = (i32)m->items.size();
-		// Окно из 10 строк вокруг курсора: курсор держится на 4-й строке, пока есть куда листать.
-		const i32 first = (std::max)(0, (std::min)(s.cursor - 4, count - KZ_GSMENU_LIST_ROWS));
-		const i32 last = (std::min)(count, first + KZ_GSMENU_LIST_ROWS);
+		// Строки списка: заголовки групп + пункты; окно из 10 строк вокруг курсора (курсор — на 4-й).
+		struct Line
+		{
+			i32 item; // -1 — заголовок группы
+			std::string group;
+		};
+		std::vector<Line> lines;
+		i32 cursorLine = 0;
+		for (i32 i = 0; i < count; i++)
+		{
+			auto g = m->groups.find(i);
+			if (g != m->groups.end())
+			{
+				lines.push_back({-1, g->second});
+			}
+			if (i == s.cursor)
+			{
+				cursorLine = (i32)lines.size();
+			}
+			lines.push_back({i, {}});
+		}
+		const i32 total = (i32)lines.size();
+		const i32 first = (std::max)(0, (std::min)(cursorLine - 4, total - KZ_GSMENU_LIST_ROWS));
+		const i32 last = (std::min)(total, first + KZ_GSMENU_LIST_ROWS);
 		std::string sub;
 		if (count > KZ_GSMENU_LIST_ROWS)
 		{
@@ -218,11 +275,19 @@ public:
 			sub = sub.empty() ? Plain(s.status) : Plain(s.status) + " · " + sub;
 		}
 		list.sub = sub;
-		for (i32 i = first; i < last; i++)
+		for (i32 li = first; li < last; li++)
 		{
-			const Item &it = m->items[i];
 			KZ::gsmenu::ListRow row;
-			row.label = Plain(it.text);
+			if (lines[li].item < 0)
+			{
+				row.label = lines[li].group;
+				row.grp = true;
+				list.rows.push_back(row);
+				continue;
+			}
+			const i32 i = lines[li].item;
+			const Item &it = m->items[i];
+			SplitItem(Plain(it.text), row);
 			row.sel = i == s.cursor;
 			row.dim = it.disabled;
 			row.adj = it.adjustable && (!m->capture || (row.sel && s.captured));
@@ -236,7 +301,8 @@ public:
 		const Item *cur = (s.cursor >= 0 && s.cursor < count) ? &m->items[s.cursor] : nullptr;
 		list.adjHint = cur && cur->adjustable && (!m->capture || s.captured);
 		list.selectHint = (cur && cur->adjustable && m->capture) ? (s.captured ? "отпустить" : "настроить") : "выбрать";
-		KZ::gsmenu::ShowList(player, list);
+		list.exitHint = player->IsAlive() ? "F" : "Shift";
+		return KZ::gsmenu::ShowList(player, list);
 	}
 
 	void Tick(KZPlayer *player)
@@ -250,6 +316,12 @@ public:
 		if (s->endTime > 0 && g_pKZUtils->GetServerGlobals()->curtime >= s->endTime)
 		{
 			EndSession(slot, MenuEndReason::Timeout);
+			return;
+		}
+		// Слот отдан внешней системе меню или настоящий cs2menus показал своё — уступаем.
+		if (real->GetExternalBusy(slot) || real->GetActiveMenu(slot) != kInvalidMenuHandle)
+		{
+			EndSession(slot, MenuEndReason::Cancelled);
 			return;
 		}
 		const u64 held = HeldButtons(player);
@@ -270,12 +342,19 @@ public:
 			EndSession(slot, MenuEndReason::Exit);
 			return;
 		}
-		if ((pressed & IN_RELOAD) && s->stack.size() > 1)
+		if ((pressed & IN_RELOAD) && (s->stack.size() > 1 || Find(m->parent)))
 		{
 			const MenuHandle child = s->stack.back();
-			s->stack.pop_back();
+			if (s->stack.size() > 1)
+			{
+				s->stack.pop_back();
+			}
+			else
+			{
+				s->stack = {m->parent};
+			}
 			Menu *parent = Find(s->Current());
-			s->cursor = 0;
+			s->cursor = parent ? FirstSelectable(*parent, parent->startItem) : 0;
 			if (parent)
 			{
 				for (i32 i = 0; i < (i32)parent->items.size(); i++)
@@ -287,7 +366,9 @@ public:
 				}
 			}
 			s->captured = false;
-			s->dirty = true;
+			// Остальные нажатия этого такта относились к прежнему меню — не применяем их к новому.
+			this->Render(player, *s);
+			return;
 		}
 		if (!s->captured && (pressed & (IN_FORWARD | IN_BACK)) && count > 0)
 		{
@@ -312,7 +393,8 @@ public:
 				Menu *child = Find(it.child);
 				s->cursor = FirstSelectable(*child, child->startItem);
 				s->captured = false;
-				s->dirty = true;
+				this->Render(player, *s);
+				return;
 			}
 			else if (it.adjustable && m->capture)
 			{
@@ -325,26 +407,37 @@ public:
 				const i32 item = s->cursor;
 				const bool close = m->closeOnSelect;
 				MenuItemSelectFn fn = m->onSelect;
+				if (close)
+				{
+					// Как в cs2menus (menu_manager.cpp NavSelect): показ закрывается ДО onSelect,
+					// onEnd(Selected) — после него и только если меню ещё живо.
+					sessions[slot] = Session();
+					if (fn)
+					{
+						fn(h, slot, item);
+					}
+					if (!SessionOf(slot))
+					{
+						KZ::gsmenu::HideList(player);
+					}
+					if (Menu *mm = Find(h); mm && mm->onEnd)
+					{
+						MenuEndFn end = mm->onEnd;
+						end(h, slot, MenuEndReason::Selected);
+					}
+					return;
+				}
 				if (fn)
 				{
 					fn(h, slot, item); // может переоткрыть/закрыть меню — дальше перечитываем сессию
 				}
-				Session *after = SessionOf(slot);
-				if (close && after && after->Current() == h)
-				{
-					EndSession(slot, MenuEndReason::Selected);
-					return;
-				}
-				if (after)
-				{
-					after->dirty = true;
-				}
-				s = after;
+				s = SessionOf(slot);
 				m = s ? Find(s->Current()) : nullptr;
 				if (!s || !m)
 				{
 					return;
 				}
+				s->dirty = true;
 			}
 		}
 		// A/D: фронт — сразу, удержание — автоповтор после паузы (как у cs2menus и карточки реплея).
@@ -504,7 +597,7 @@ public:
 			return false;
 		}
 		KZPlayer *player = (slot >= 0 && slot < MAXPLAYERS) ? g_pKZPlayerManager->ToPlayer(CPlayerSlot(slot)) : nullptr;
-		if (!player || !KZ::gsmenu::Available(player))
+		if (!player || !KZ::gsmenu::Available(player) || real->GetExternalBusy(slot))
 		{
 			if (SessionOf(slot))
 			{
@@ -534,7 +627,12 @@ public:
 		s.held = HeldButtons(player); // клавиша, открывшая меню, не должна сразу сработать в нём
 		s.endTime = duration > 0 ? g_pKZUtils->GetServerGlobals()->curtime + duration : 0;
 		s.dirty = false;
-		this->Render(player, s);
+		if (!this->Render(player, s))
+		{
+			// Панель не создалась — показывает настоящий cs2menus (меню у игрока не пропадает).
+			s = Session();
+			return real->DisplayMenu(m->real, slot, duration);
+		}
 		return true;
 	}
 
@@ -707,7 +805,8 @@ public:
 	{
 		if (Session *s = SessionOf(slot))
 		{
-			return s->cursor;
+			Menu *m = Find(s->Current());
+			return (m && Selectable(*m, s->cursor)) ? s->cursor : -1;
 		}
 		return real->GetSelectedItem(slot);
 	}
@@ -754,6 +853,7 @@ public:
 			it.info = info ? info : "";
 			it.child = child;
 			p->items.insert(p->items.begin() + (std::min)((size_t)idx, p->items.size()), it);
+			c->parent = parent;
 			MarkDirty(parent);
 		}
 		return idx;
@@ -865,16 +965,54 @@ public:
 
 static GsMenus *g_shim = nullptr;
 
+void KZ::gsmenu::SetItemGroup(MenuHandle menu, int item, const char *title)
+{
+	if (!g_shim)
+	{
+		return;
+	}
+	if (auto it = g_shim->menus.find(menu); it != g_shim->menus.end())
+	{
+		it->second.groups[item] = title ? title : "";
+	}
+}
+
+void KZ::gsmenu::ShimRedrawAll()
+{
+	if (!g_shim)
+	{
+		return;
+	}
+	for (Session &s : g_shim->sessions)
+	{
+		if (s.active)
+		{
+			s.dirty = true;
+		}
+	}
+}
+
 ICS2Menus *KZ::gsmenu::WrapMenus(ICS2Menus *realMenus)
 {
 	if (!realMenus)
 	{
 		return nullptr;
 	}
-	if (!g_shim || g_shim->real != realMenus)
+	if (!g_shim)
 	{
-		delete g_shim;
 		g_shim = new GsMenus(realMenus);
+	}
+	else if (g_shim->real != realMenus)
+	{
+		// cs2menus перезагружен: его хэндлы и колбэки умерли вместе с ним — модель с нуля, но
+		// нумерацию хэндлов прослойки продолжаем (в статиках потребителей лежат старые номера).
+		for (Session &s : g_shim->sessions)
+		{
+			s = Session();
+		}
+		g_shim->menus.clear();
+		g_shim->fromReal.clear();
+		g_shim->real = realMenus;
 	}
 	return g_shim;
 }

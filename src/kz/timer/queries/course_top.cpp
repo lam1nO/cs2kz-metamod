@@ -246,6 +246,7 @@ struct CourseTopRequest : public BaseRequest
 
 	// Окно !maptop (layout/gsmenu.cpp) — false, если панорама недоступна: тогда остаётся консоль.
 	bool ShowWindow();
+	bool fromWindow = false; // перезапрос из окна (фильтр/листание), а не команда игрока
 
 	virtual void Reply()
 	{
@@ -261,6 +262,12 @@ struct CourseTopRequest : public BaseRequest
 			return;
 		}
 
+		// Перезапрос из окна (фильтр/листание) — только окно, без консольной таблицы на каждый клик.
+		if (this->fromWindow)
+		{
+			this->ShowWindow();
+			return;
+		}
 		// Окно перед лицом; консольная таблица остаётся как была (её читают скриптами и копируют).
 		if (!this->ShowWindow())
 		{
@@ -430,6 +437,8 @@ namespace
 		CUtlString map, course, mode;
 		u64 offset = 0;
 		bool pro = true;
+		u64 pendingUid = 0;     // последний перезапрос из окна — показываем только его ответ
+		f64 lastRequery = -1.0; // клики по фильтрам/листанию не чаще 2 в секунду
 		bool hasNext = false;
 		std::vector<std::string> runIds; // строка -> id рана (реплей)
 		std::vector<u64> steamIds;
@@ -446,11 +455,21 @@ namespace
 	void RequeryMaptop(KZPlayer *player, const char *mode, u64 offset)
 	{
 		MaptopView &v = g_maptop[player->GetPlayerSlot().Get()];
+		const f64 now = g_pKZUtils->GetServerGlobals()->curtime;
+		if (v.lastRequery >= 0.0 && now - v.lastRequery < 0.5)
+		{
+			return;
+		}
+		v.lastRequery = now;
+		// Значения — в кавычках: имя курса бывает с пробелами. Парсер (ParseArgsToKV3) берёт значение
+		// до следующего «ключ=», кавычки снимает токенайзер.
 		CCommand args;
 		char line[256];
-		V_snprintf(line, sizeof(line), "kz_maptop map=%s course=%s mode=%s o=%llu", v.map.Get(), v.course.Get(), mode, offset);
+		V_snprintf(line, sizeof(line), "kz_maptop map=%s course=\"%s\" mode=%s o=%llu", v.map.Get(), v.course.Get(), mode, offset);
 		args.Tokenize(line);
-		CourseTopRequest::Create<CourseTopRequest>(player, CourseTopRequest::ctopFeatures, true, true, &args);
+		CourseTopRequest *req = CourseTopRequest::Create<CourseTopRequest>(player, CourseTopRequest::ctopFeatures, true, true, &args);
+		req->fromWindow = true;
+		v.pendingUid = req->uid;
 	}
 
 	void OnMaptopClick(KZPlayer *player, const char *id)
@@ -487,26 +506,19 @@ namespace
 			RequeryMaptop(player, v.mode.Get(), offset);
 			return;
 		}
-		char action[8] {};
-		if (sscanf(id, "gr%d_%7s", &row, action) != 2 || row < 0 || row >= (i32)v.runIds.size())
+		if (sscanf(id, "gr%d_go", &row) != 1 || row < 0 || row >= (i32)v.runIds.size())
 		{
 			return;
 		}
-		if (KZ_STREQ(action, "go") || KZ_STREQ(action, "a0"))
-		{
-			// Реплей грузит команда !replay — с её проверками, ожиданием загрузки и сообщениями.
-			KZ::gsmenu::Close(player, "watch_replay");
-			interfaces::pEngine->ClientCommand(player->GetPlayerSlot(), "kz_replay %s", v.runIds[row].c_str());
-		}
-		else if (KZ_STREQ(action, "a1"))
-		{
-			player->PrintChat(true, false, "{grey}Профиль: {default}https://gymstrike.net/players/%llu", v.steamIds[row]);
-		}
-		else if (KZ_STREQ(action, "a2"))
-		{
-			KZ::gsmenu::Close(player, "lead_wr");
-			interfaces::pEngine->ClientCommand(player->GetPlayerSlot(), "kz_lead wr");
-		}
+		// Реплей грузит команда !replay — с её проверками, ожиданием загрузки и сообщениями; зовём её
+		// обработчик на сервере (как если бы игрок набрал её сам), без круга через клиента.
+		KZ::gsmenu::Close(player, "watch_replay");
+		CCommand args;
+		char line[96];
+		V_snprintf(line, sizeof(line), "kz_replay %s", v.runIds[row].c_str());
+		args.Tokenize(line);
+		CPlayerSlot slot = player->GetPlayerSlot();
+		scmd::OnClientCommand(slot, args);
 	}
 
 	void RenderMaptop(KZPlayer *player)
@@ -532,6 +544,7 @@ namespace
 		t.headers[1] = "Игрок";
 		t.headers[2] = "Время";
 		t.headers[3] = "TP";
+		t.headers[4] = "До WR";
 
 		v.runIds.clear();
 		v.steamIds.clear();
@@ -554,16 +567,10 @@ namespace
 			row.colour = (u32)(r.steamid64 % 8);
 			row.wr = rank == 1;
 			row.me = r.steamid64 == me;
-			row.actions[0] = "▶  Смотреть реплей";
-			row.actions[1] = "Ссылка на профиль";
-			if (rank == 1)
+			// Отставание от первого места — в пустой колонке c4 (ширина под дату в раскладке maptop).
+			if (rank > 1 && v.offset == 0 && best > 0.0)
 			{
-				row.actions[2] = "Бежать с призраком";
-				row.note = "Рекорд сервера";
-			}
-			else if (v.offset == 0 && best > 0.0)
-			{
-				row.note = std::string("+") + utils::FormatTime(r.time - best).Get() + " до WR";
+				row.cells[4] = std::string("+") + utils::FormatTime(r.time - best).Get();
 			}
 			t.rows.push_back(row);
 			v.runIds.push_back(r.runID.Get());
@@ -572,10 +579,6 @@ namespace
 		if (t.rows.empty())
 		{
 			t.hint = v.pro ? "PRO-рекордов на этом курсе пока нет" : "Рекордов на этом курсе пока нет";
-		}
-		else
-		{
-			t.hint = "Клик по строке — реплей, профиль";
 		}
 		char page[32];
 		V_snprintf(page, sizeof(page), "%llu–%llu", v.offset + 1, v.offset + (u64)t.rows.size());
@@ -595,6 +598,12 @@ bool CourseTopRequest::ShowWindow()
 		return false;
 	}
 	MaptopView &v = g_maptop[player->GetPlayerSlot().Get()];
+	// Ответ на перезапрос из окна — только последний и только пока окно открыто (игрок мог его
+	// закрыть или нащёлкать новые фильтры, пока шёл запрос). true — ответ «обработан», в чат не пишем.
+	if (req->fromWindow && (req->uid != v.pendingUid || !KZ::gsmenu::IsOpen(player)))
+	{
+		return true;
+	}
 	const bool local = req->localStatus == ResponseStatus::RECEIVED;
 	v.map = req->mapName;
 	v.course = req->courseName;

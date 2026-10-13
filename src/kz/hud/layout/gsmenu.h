@@ -66,7 +66,7 @@ namespace KZ::gsmenu
 	struct ListRow
 	{
 		std::string label, value;
-		bool sel = false, dim = false, adj = false, cap = false, tog = false, on = false;
+		bool sel = false, dim = false, adj = false, cap = false, tog = false, on = false, grp = false;
 	};
 
 	struct List
@@ -75,6 +75,7 @@ namespace KZ::gsmenu
 		std::vector<ListRow> rows; // не больше KZ_GSMENU_LIST_ROWS
 		bool adjHint = false;      // подсказка A/D в подвале
 		std::string selectHint = "выбрать";
+		std::string exitHint = "F"; // у спектатора выход — Shift
 	};
 
 	// Клик по кнопке окна: id как в разметке (gw_close, gf1_0, gr3, gr3_go, gr3_a0, gw_next…).
@@ -100,6 +101,9 @@ namespace KZ::gsmenu
 	ICS2Menus *WrapMenus(ICS2Menus *real);
 	void ShimTick(KZPlayer *player);         // ввод и перерисовка, каждый такт (DrawPanels)
 	void ShimDisconnect(KZPlayer *player);
+	void ShimRedrawAll(); // сущность пересоздана/снесена — перерисовать открытые списки
+	// Заголовок группы перед пунктом item меню (только панорама; cs2menus его не видит).
+	void SetItemGroup(uint32_t menu, int item, const char *title);
 
 	// Панорама-меню доступны (аддон с разметкой подключён, сущность создаётся).
 	bool Available(KZPlayer *player);

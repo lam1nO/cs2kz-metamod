@@ -1,3 +1,4 @@
+#include "kz/hud/layout/gsmenu.h"
 #include "kz.h"
 #include "utils/utils.h"
 #include "utils/ctimer.h"
@@ -265,6 +266,9 @@ void KZPlayer::OnPhysicsSimulatePost()
 	// к DrawPanels ниже (иначе худ показывал бы время на тик позади).
 	this->pracService->OnPhysicsSimulatePost();
 	KZ::replaysystem::OnPhysicsSimulatePost(this);
+	// Меню cs2menus ведёт прослойка (hud/layout/gsmenu_shim.cpp): ввод и перерисовка каждый такт,
+	// в любом состоянии игрока (в т.ч. мёртвом без цели наблюдения, где худ не рисуется).
+	KZ::gsmenu::ShimTick(this);
 	if (this->specService->GetSpectatedPlayer())
 	{
 		KZHUDService::DrawPanels(this->specService->GetSpectatedPlayer(), this);

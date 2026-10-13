@@ -1932,8 +1932,6 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 {
 	KZHUDService *cfg = target->hudService;
 
-	// Меню cs2menus ведёт прослойка (layout/gsmenu_shim.cpp): ввод и перерисовка — каждый такт.
-	KZ::gsmenu::ShimTick(target);
 
 	// Меню реплея спектатора (layout/rpmenu.cpp) — до всех ветвлений по типу худа: у него
 	// своя сущность, оно не зависит от hudType получателя и обязано тикать (ввод + рендер),

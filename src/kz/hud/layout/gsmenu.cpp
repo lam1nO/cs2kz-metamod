@@ -139,6 +139,7 @@ namespace
 		layout->DispatchSpawn(kv);
 		w.entity = layout;
 		ResetCaches(w);
+		KZ::gsmenu::ShimRedrawAll(); // открытые списки прослойки рисовались в прежнюю сущность
 		return layout;
 	}
 
@@ -365,6 +366,7 @@ bool KZ::gsmenu::ShowList(KZPlayer *player, const List &l)
 	Var(player, *w, layout, "gs", "t", l.title);
 	Var(player, *w, layout, "gs", "s", l.sub);
 	Var(player, *w, layout, "gs", "ke", l.selectHint);
+	Var(player, *w, layout, "gs", "kx", l.exitHint);
 	char id[24];
 	for (i32 i = 0; i < KZ_GSMENU_LIST_ROWS; i++)
 	{
@@ -382,6 +384,7 @@ bool KZ::gsmenu::ShowList(KZPlayer *player, const List &l)
 		Class(player, *w, layout, id, "cap", r.cap);
 		Class(player, *w, layout, id, "k-tog", r.tog);
 		Class(player, *w, layout, id, "on", r.on);
+		Class(player, *w, layout, id, "grp", r.grp);
 		char sub[24];
 		V_snprintf(sub, sizeof(sub), "gs%i_l", i);
 		Var(player, *w, layout, sub, "l", r.label);
@@ -463,7 +466,7 @@ bool KZ::gsmenu::OnClick(KZPlayer *player, uint32 packedHandle, const char *id)
 			e.clickWindowStart = now;
 			e.clicksInWindow = 0;
 		}
-		if (++e.clicksInWindow <= 16 && strspn(id, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") == strlen(id))
+		if (++e.clicksInWindow <= 16 && strlen(id) <= 48 && strspn(id, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") == strlen(id))
 		{
 			char cmd[96];
 			V_snprintf(cmd, sizeof(cmd), "css_ui_click %i %s\n", slot, id);
@@ -484,14 +487,12 @@ bool KZ::gsmenu::OnClick(KZPlayer *player, uint32 packedHandle, const char *id)
 		Close(player, "close_button");
 		return true;
 	}
-	// gr{i} — раскрыть/свернуть действия строки; остальные (gr{i}_go, gr{i}_a{k}, фильтры,
-	// листание) — колбэку владельца окна.
+	// Клик по самой строке gr{i} ничего не делает (действие — кнопка ▶ gr{i}_go); остальное —
+	// колбэку владельца окна.
 	i32 row = -1;
 	char tail = 0;
-	if (sscanf(id, "gr%d%c", &row, &tail) == 1 && row >= 0 && row < KZ_GSMENU_TABLE_ROWS)
+	if (sscanf(id, "gr%d%c", &row, &tail) == 1)
 	{
-		SetOpenRow(player, *w, layout, w->openRow == row ? -1 : row);
-		Flush(*w, layout);
 		return true;
 	}
 	if (w->onClick)
@@ -526,19 +527,14 @@ void KZ::gsmenu::OnSlotReset(KZPlayer *player)
 
 void KZ::gsmenu::OnRoundStart(KZPlayer *player)
 {
-	// Смена карты сносит сущность движком — сбрасываем флаги и кэш, захват ушёл вместе с ней.
+	// Раунд-старт бывает и посреди карты (сущность тогда жива) — сносим явно, со снятием захвата;
+	// на смене карты сущность уже снесена движком, Destroy безопасен и без неё.
 	if (WindowState *w = StateOf(player))
 	{
-		w->entity = nullptr;
-		w->open = false;
-		w->capture = false;
-		w->onClick = nullptr;
-		ResetCaches(*w);
-		ExtState &e = g_ext[player->GetPlayerSlot().Get()];
-		e.entity = nullptr;
-		e.capture = false;
-		e.layout.clear();
+		Destroy(player, *w);
+		DestroyExt(player, g_ext[player->GetPlayerSlot().Get()]);
 	}
+	ShimRedrawAll();
 }
 
 void KZ::gsmenu::Cleanup()
