@@ -438,16 +438,19 @@ SCMD_LINK(kz_smaptop, kz_sctop);
 
 namespace
 {
+	// Окно грузит до 100 записей одним запросом и листает по 10 у себя: команда !maptop отдаёт 10
+	// (консольная таблица), сразу за ней окно тихо дозапрашивает 100 — листание без запросов.
+	constexpr u64 kMaptopLimit = 100;
+	constexpr i32 kMaptopPage = KZ_GSMENU_TABLE_ROWS;
+
 	struct MaptopView
 	{
 		CUtlString map, course, mode;
-		u64 offset = 0;
+		i32 page = 0;
 		bool pro = true;
 		u64 pendingUid = 0;     // последний перезапрос из окна — показываем только его ответ
-		f64 lastRequery = -1.0; // клики по фильтрам/листанию не чаще 2 в секунду
-		bool hasNext = false;
-		std::vector<std::string> runIds; // строка -> id рана (реплей)
-		std::vector<u64> steamIds;
+		f64 lastRequery = -1.0; // клики по режимам не чаще 2 в секунду
+		std::vector<std::string> runIds; // строка на экране -> id рана (реплей)
 		CourseTopRequest::CourseTopData data;
 		bool global = false;
 	};
@@ -458,24 +461,29 @@ namespace
 
 	void RenderMaptop(KZPlayer *player);
 
-	void RequeryMaptop(KZPlayer *player, const char *mode, u64 offset)
+	void RequeryMaptop(KZPlayer *player, const char *mode, bool throttle)
 	{
 		MaptopView &v = g_maptop[player->GetPlayerSlot().Get()];
 		const f64 now = g_pKZUtils->GetServerGlobals()->curtime;
-		if (v.lastRequery >= 0.0 && now - v.lastRequery < 0.5)
+		if (throttle && v.lastRequery >= 0.0 && now - v.lastRequery < 0.5)
 		{
 			return;
 		}
 		v.lastRequery = now;
-		// Значения — в кавычках: имя курса бывает с пробелами. Парсер (ParseArgsToKV3) берёт значение
-		// до следующего «ключ=», кавычки снимает токенайзер.
+		// Без кавычек: ParseArgsToKV3 берёт значение до следующего «ключ=» (пробелы в имени курса не
+		// мешают), а кавычки он НЕ снимает — с ними курс искался как "Main" и таблица была пустой.
 		CCommand args;
 		char line[256];
-		V_snprintf(line, sizeof(line), "kz_maptop map=%s course=\"%s\" mode=%s o=%llu", v.map.Get(), v.course.Get(), mode, offset);
+		V_snprintf(line, sizeof(line), "kz_maptop map=%s course=%s mode=%s l=%llu", v.map.Get(), v.course.Get(), mode, kMaptopLimit);
 		args.Tokenize(line);
 		CourseTopRequest *req = CourseTopRequest::Create<CourseTopRequest>(player, CourseTopRequest::ctopFeatures, true, true, &args);
 		req->fromWindow = true;
 		v.pendingUid = req->uid;
+	}
+
+	CUtlVector<CourseTopRequest::RunStats> &MaptopList(MaptopView &v)
+	{
+		return v.pro ? v.data.proData : v.data.overallData;
 	}
 
 	void OnMaptopClick(KZPlayer *player, const char *id)
@@ -485,6 +493,7 @@ namespace
 		if (KZ_STREQ(id, "gf1_0") || KZ_STREQ(id, "gf1_1"))
 		{
 			v.pro = KZ_STREQ(id, "gf1_0");
+			v.page = 0;
 			RenderMaptop(player);
 			return;
 		}
@@ -499,7 +508,7 @@ namespace
 				}
 				if (shown++ == k)
 				{
-					RequeryMaptop(player, mode, 0);
+					RequeryMaptop(player, mode, true);
 					return;
 				}
 			}
@@ -507,9 +516,9 @@ namespace
 		}
 		if (KZ_STREQ(id, "gw_prev") || KZ_STREQ(id, "gw_next"))
 		{
-			const u64 step = 10;
-			const u64 offset = KZ_STREQ(id, "gw_next") ? v.offset + step : (v.offset >= step ? v.offset - step : 0);
-			RequeryMaptop(player, v.mode.Get(), offset);
+			const i32 pages = (MaptopList(v).Count() + kMaptopPage - 1) / kMaptopPage;
+			v.page = KZ_STREQ(id, "gw_next") ? (std::min)(v.page + 1, (std::max)(pages - 1, 0)) : (std::max)(v.page - 1, 0);
+			RenderMaptop(player);
 			return;
 		}
 		if (sscanf(id, "gr%d_go", &row) != 1 || row < 0 || row >= (i32)v.runIds.size())
@@ -530,7 +539,9 @@ namespace
 	void RenderMaptop(KZPlayer *player)
 	{
 		MaptopView &v = g_maptop[player->GetPlayerSlot().Get()];
-		CUtlVector<CourseTopRequest::RunStats> &list = v.pro ? v.data.proData : v.data.overallData;
+		CUtlVector<CourseTopRequest::RunStats> &list = MaptopList(v);
+		const i32 pages = (list.Count() + kMaptopPage - 1) / kMaptopPage;
+		v.page = (std::max)(0, (std::min)(v.page, pages - 1));
 
 		KZ::gsmenu::Table t;
 		t.title = v.map.Get();
@@ -553,18 +564,14 @@ namespace
 		t.headers[4] = "До WR";
 
 		v.runIds.clear();
-		v.steamIds.clear();
 		const u64 me = player->GetSteamId64();
 		const f64 best = list.Count() > 0 ? list[0].time : 0.0;
-		FOR_EACH_VEC(list, i)
+		const i32 first = v.page * kMaptopPage;
+		for (i32 i = first; i < list.Count() && i < first + kMaptopPage; i++)
 		{
-			if (i >= KZ_GSMENU_TABLE_ROWS)
-			{
-				break;
-			}
 			CourseTopRequest::RunStats &r = list[i];
 			KZ::gsmenu::Row row;
-			const u64 rank = v.offset + i + 1;
+			const i32 rank = i + 1;
 			row.cells[0] = std::to_string(rank);
 			row.cells[1] = r.name.Get();
 			row.cells[2] = r.GetTime().Get();
@@ -573,24 +580,26 @@ namespace
 			row.colour = (u32)(r.steamid64 % 8);
 			row.wr = rank == 1;
 			row.me = r.steamid64 == me;
-			// Отставание от первого места — в пустой колонке c4 (ширина под дату в раскладке maptop).
-			if (rank > 1 && v.offset == 0 && best > 0.0)
+			if (rank > 1 && best > 0.0)
 			{
 				row.cells[4] = std::string("+") + utils::FormatTime(r.time - best).Get();
 			}
 			t.rows.push_back(row);
 			v.runIds.push_back(r.runID.Get());
-			v.steamIds.push_back(r.steamid64);
 		}
 		if (t.rows.empty())
 		{
 			t.hint = v.pro ? "PRO-рекордов на этом курсе пока нет" : "Рекордов на этом курсе пока нет";
 		}
-		char page[32];
-		V_snprintf(page, sizeof(page), "%llu–%llu", v.offset + 1, v.offset + (u64)t.rows.size());
-		t.page = t.rows.empty() ? "" : page;
-		t.prev = v.offset > 0;
-		t.next = list.Count() >= (i32)KZ_GSMENU_TABLE_ROWS;
+		// Листание — только когда записей больше одной страницы.
+		if (pages > 1)
+		{
+			char page[32];
+			V_snprintf(page, sizeof(page), "%i / %i", v.page + 1, pages);
+			t.page = page;
+			t.prev = v.page > 0;
+			t.next = v.page < pages - 1;
+		}
 		KZ::gsmenu::ShowTable(player, t, OnMaptopClick);
 	}
 } // namespace
@@ -610,20 +619,105 @@ bool CourseTopRequest::ShowWindow()
 	{
 		return true;
 	}
-	if (!req->fromWindow)
-	{
-		v.pendingUid = 0; // окно открыто командой — ответы прежних перезапросов из окна уже чужие
-	}
 	const bool local = req->localStatus == ResponseStatus::RECEIVED;
 	v.map = req->mapName;
 	v.course = req->courseName;
 	v.mode = req->modeName;
-	v.offset = req->offset;
 	v.global = !local;
 	v.data = CourseTopRequest::CourseTopData();
 	const CourseTopRequest::CourseTopData &src = local ? req->srData : req->wrData;
 	v.data.overallData = src.overallData;
 	v.data.proData = src.proData;
+	if (!req->fromWindow)
+	{
+		v.page = 0;
+		v.pendingUid = 0; // окно открыто командой — ответы прежних перезапросов из окна уже чужие
+	}
 	RenderMaptop(player);
+	// Команда отдала первую страницу — дозапрашиваем полный топ для листания (тихо, без консоли).
+	const bool full = req->limit >= kMaptopLimit;
+	if (!req->fromWindow && !full && KZ::gsmenu::IsOpen(player)
+		&& (src.overallData.Count() >= kMaptopPage || src.proData.Count() >= kMaptopPage))
+	{
+		RequeryMaptop(player, v.mode.Get(), false);
+	}
 	return KZ::gsmenu::IsOpen(player);
+}
+
+// === Пройденные карты игрока для фильтра «Не пройденные» GG1 (сетки !nominate/!maps) ============
+//
+// GG1 (CSSharp) спрашивает `kz_gsm_done <slot>` с консоли сервера; ответ — серия серверных команд
+// `css_gg1_done <slot> <карта,карта,...>` (пачками, чтобы не упереться в длину команды) и в конце
+// `css_gg1_done_end <slot>`. Карты — с любым временем в текущем режиме игрока (любой курс, любой стиль).
+CON_COMMAND_F(kz_gsm_done, "kz_gsm_done <slot> — пройденные игроком карты в его режиме (для фильтра GG1)", FCVAR_NONE)
+{
+	if (utils::GetController(context.GetPlayerSlot()) || args.ArgC() < 2)
+	{
+		return;
+	}
+	const i32 slot = V_StringToInt32(args.Arg(1), -1);
+	KZPlayer *player = (slot >= 0 && slot < MAXPLAYERS) ? g_pKZPlayerManager->ToPlayer(CPlayerSlot(slot)) : nullptr;
+	auto sendEnd = [slot]()
+	{
+		char end[48];
+		V_snprintf(end, sizeof(end), "css_gg1_done_end %i\n", slot);
+		interfaces::pEngine->ServerCommand(end);
+	};
+	if (!player || !player->IsInGame() || !player->GetClient() || !KZDatabaseService::IsReady() || !player->modeService)
+	{
+		sendEnd();
+		return;
+	}
+	const i32 modeID = KZ::mode::GetModeInfo(player->modeService).databaseID;
+	char query[512];
+	V_snprintf(query, sizeof(query),
+			   "SELECT DISTINCT m.Name FROM Times t INNER JOIN MapCourses mc ON mc.ID = t.MapCourseID "
+			   "INNER JOIN Maps m ON m.ID = mc.MapID WHERE t.SteamID64 = %llu AND t.ModeID = %d",
+			   player->GetSteamId64(), modeID);
+	Transaction txn;
+	txn.queries.push_back(query);
+	const CPlayerUserId uid = player->GetClient()->GetUserID();
+	auto onSuccess = [slot, uid, sendEnd](std::vector<ISQLQuery *> queries)
+	{
+		KZPlayer *p = g_pKZPlayerManager->ToPlayer(uid);
+		if (!p || p->GetPlayerSlot().Get() != slot)
+		{
+			return; // игрок ушёл — слот чужой, ответ некому
+		}
+		std::string chunk;
+		auto flush = [&]()
+		{
+			if (chunk.empty())
+			{
+				return;
+			}
+			char cmd[512];
+			V_snprintf(cmd, sizeof(cmd), "css_gg1_done %i %s\n", slot, chunk.c_str());
+			interfaces::pEngine->ServerCommand(cmd);
+			chunk.clear();
+		};
+		ISQLResult *result = queries.empty() ? nullptr : queries[0]->GetResultSet();
+		while (result && result->FetchRow())
+		{
+			const char *name = result->GetString(0);
+			// В команду — только безопасные имена карт (буквы, цифры, _ - .), без разделителей консоли.
+			if (!name || !name[0] || strspn(name, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.") != strlen(name))
+			{
+				continue;
+			}
+			if (chunk.size() + strlen(name) + 1 > 380)
+			{
+				flush();
+			}
+			if (!chunk.empty())
+			{
+				chunk += ',';
+			}
+			chunk += name;
+		}
+		flush();
+		sendEnd();
+	};
+	auto onFailure = [sendEnd](std::string, int) { sendEnd(); };
+	KZDatabaseService::GetDatabaseConnection()->ExecuteTransaction(txn, onSuccess, onFailure);
 }

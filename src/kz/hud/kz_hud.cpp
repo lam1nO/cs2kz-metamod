@@ -1950,7 +1950,7 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	}
 	// Окно перед лицом (layout/gsmenu.cpp, !maptop): худ — другая сущность и рисуется ПОВЕРХ окна
 	// (z-index между сущностями не действует), поэтому на время окна он снесён, как у редактора.
-	if (KZ::gsmenu::IsOpen(target))
+	if (KZ::gsmenu::HidesHud(target))
 	{
 		cfg->DestroyOwnedLayout();
 		cfg->ClearBottomPanel();

@@ -88,6 +88,8 @@ namespace KZ::gsmenu
 	bool ShowList(KZPlayer *player, const List &list);
 	void HideList(KZPlayer *player);
 	bool IsOpen(KZPlayer *player);
+	// Окно с захватом курсора (своё gw или внешнее — сетка GG1) — худ на это время снят.
+	bool HidesHud(KZPlayer *player);
 
 	// Проводка из KZHUDService.
 	bool Owns(KZPlayer *player, CEntityHandle handle);

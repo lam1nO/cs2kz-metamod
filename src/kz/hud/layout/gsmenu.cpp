@@ -431,6 +431,16 @@ bool KZ::gsmenu::IsOpen(KZPlayer *player)
 	return w && w->open;
 }
 
+bool KZ::gsmenu::HidesHud(KZPlayer *player)
+{
+	WindowState *w = StateOf(player);
+	if (!w)
+	{
+		return false;
+	}
+	return w->open || (g_ext[player->GetPlayerSlot().Get()].capture && g_ext[player->GetPlayerSlot().Get()].entity.IsValid());
+}
+
 bool KZ::gsmenu::Owns(KZPlayer *player, CEntityHandle handle)
 {
 	WindowState *w = StateOf(player);
