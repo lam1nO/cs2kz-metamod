@@ -391,6 +391,7 @@ private:
 	// Сколько опросов подряд ушло без ответа: после первого молчания переспрашиваем реже, иначе
 	// у клиента, который не отвечает вовсе, копились бы ожидающие колбэки cvarquery.
 	i32 deathnoticesQueryTimeouts {};
+	bool deathnoticesAnswered {};
 
 	void UpdateMHUDSpeedParticles();
 	void UpdateMHUDTimerParticles();

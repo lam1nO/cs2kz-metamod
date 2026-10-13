@@ -413,6 +413,7 @@ void KZHUDService::Reset()
 	this->deathnoticesQueryPending = false;
 	this->deathnoticesQueryTime = 0.0;
 	this->deathnoticesQueryTimeouts = 0;
+	this->deathnoticesAnswered = false;
 	this->showPanel = this->player->optionService->GetPreferenceBool("showPanel", true);
 	this->timerStoppedTime = {};
 	this->currentTimeWhenTimerStopped = {};
