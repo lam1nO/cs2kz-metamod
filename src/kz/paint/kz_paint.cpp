@@ -8,6 +8,7 @@
 #include "sdk/cglobalsymbol.h"
 #include "sdk/recipientfilters.h"
 #include "utils/logging.h"
+#include "bspflags.h"
 
 void KZPaintService::Reset()
 {
