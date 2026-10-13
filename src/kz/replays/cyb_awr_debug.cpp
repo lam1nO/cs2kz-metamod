@@ -280,8 +280,9 @@ CON_COMMAND_F(kz_awr_debug, "Explain the AWR cut of one replay file. Usage: kz_a
 			}
 		}
 		KZ_LOG_INFO(LogChannel::Replays,
-					"[cyb_awr] debug uuid=%s splice frame=%zu tick=%u tp_raw=%d->%d arrival=%d D=%lld via=%c dead=%u..%u\n", uuid.c_str(), f,
-					src.ticks[f].serverTick, src.ticks[f - 1].checkpoint.teleportCount, src.ticks[f].checkpoint.teleportCount, hit ? 1 : 0,
+					"[cyb_awr] debug uuid=%s splice frame=%zu tick=%u in_window=%d traced=%d tp_raw=%d->%d arrival=%d D=%lld via=%c dead=%u..%u\n",
+					uuid.c_str(), f, src.ticks[f].serverTick, (hasWindow && f > runStart && f <= runEnd) ? 1 : 0, trace.empty() ? 0 : 1,
+					src.ticks[f - 1].checkpoint.teleportCount, src.ticks[f].checkpoint.teleportCount, hit ? 1 : 0,
 					hit ? (long long)hit->dest : -1LL, hit ? hit->method : '-', hit ? hit->deadFrom : 0u, hit ? hit->deadTo : 0u);
 	}
 
