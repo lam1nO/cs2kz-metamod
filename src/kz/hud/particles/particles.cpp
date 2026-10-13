@@ -12,9 +12,13 @@
 // Particle-MHUD — фолбэк к panorama-худу для игроков с cl_draw_only_deathnotices 1: этот cvar
 // прячет весь худ игры вместе с custom_hud_layout, а частицы рисует мир, их он не трогает.
 // Логика рисования — из удалённого 08.09 particle-пути (fba3b47a^:src/kz/hud/particles/
-// particles.cpp) без меню и команд: позиции и масштаб пока фиксированные (старые дефолты),
-// шрифт verdana без обводки. Ассеты — 15 скомпилированных .vpcf_c и атласы из бэкапа айтема
+// particles.cpp) без меню и команд. Ассеты — 15 скомпилированных .vpcf_c и атласы из бэкапа айтема
 // cs2kz 3469155349 от 11.06, лежат в нашем аддоне GYMSTRIKE-KZ теми же путями.
+//
+// Настройки — те же, что у panorama-худа (GetLayoutPrefs: позиция, кегль, цвета, обводка, вкл/выкл
+// элемента), своих у частиц нет: игрок двигает худ в редакторе !hud, и частицы едут туда же.
+// Шрифт — только verdana (решение владельца 13.10), обводка — поэлементная, как в панораме.
+// Прозрачность элемента частицы не умеют (альфа зашита литералом в .vpcf) — игнорируется.
 
 // Два аргумента: font (lato/verdana) × outline (outline/no_outline).
 #define MHUD_PARTICLE_NUMBERS_PATTERN     "particles/velo/velo_overlay_large_%s_%s.vpcf"
@@ -22,26 +26,28 @@
 #define MHUD_PARTICLE_INPUTS_PATTERN      "particles/inputs/inputs_%s_%s.vpcf"
 
 static_global constexpr const char *MHUD_PARTICLE_FONTS[] = {"lato", "verdana"};
-// Решение владельца 13.10: verdana без обводки. Настройка шрифта/обводки — отдельной задачей.
-#define MHUD_PARTICLE_FONT    "verdana"
-#define MHUD_PARTICLE_OUTLINE false
+#define MHUD_PARTICLE_FONT "verdana"
 
 #define MHUD_TIMER_DIGIT_STEP 1.6f
 #define MHUD_TIMER_DELIM_COLON 0 // sequence двоеточия в timer_delimiter
 #define MHUD_TIMER_DELIM_DOT   1 // sequence точки
 
-#define MHUD_DEF_SPEED_OFFSET_X    0.0f
-#define MHUD_DEF_SPEED_OFFSET_Y    -4.5f
-#define MHUD_DEF_SPEED_SCALE       0.04f
-#define MHUD_DEF_PRESPEED_OFFSET_X 0.0f
-#define MHUD_DEF_PRESPEED_OFFSET_Y -7.2f
-#define MHUD_DEF_PRESPEED_SCALE    0.03f
-#define MHUD_DEF_TIMER_OFFSET_X    0.0f
-#define MHUD_DEF_TIMER_OFFSET_Y    -20.0f
-#define MHUD_DEF_TIMER_SCALE       0.03f
-#define MHUD_DEF_KEYS_OFFSET_X     0.0f
-#define MHUD_DEF_KEYS_OFFSET_Y     -6.0f
-#define MHUD_DEF_KEYS_SCALE        0.075f
+// Перевод геометрии panorama в параметры частицы. Частица висит перед глазами (SetControlPointToPlayer +
+// PositionLock), рендерится спрайтом экранного размера CP17.y (m_flMinSize), а CP18 (x, y) сдвигает её
+// центр в единицах этого размера (m_flCenterXOffset/YOffset) — поэтому смещение делится на размер.
+// Панорама ставит центр элемента в (50 + x)% ширины и (50 + y)% высоты, кегль — в px.
+// Коэффициенты подобраны по скриншотам (16:9); cvar'ы — для подстройки без пересборки.
+// Отладка калибровки: частицы рисуются ПОВЕРХ panorama (без cl_draw_only_deathnotices) — видно расхождение.
+CConVar<bool> kz_mhud_particle_overlay("kz_mhud_particle_overlay", FCVAR_NONE,
+									   "Particle-MHUD: рисовать частицы вместе с panorama всем живым (отладка калибровки)", false);
+static CConVar<f32> kz_mhud_particle_digit_size("kz_mhud_particle_digit_size", FCVAR_NONE,
+												 "Particle-MHUD: размер частицы-цифр (CP17.y) на 1 px кегля panorama", 0.00123f);
+static CConVar<f32> kz_mhud_particle_keys_size("kz_mhud_particle_keys_size", FCVAR_NONE,
+												"Particle-MHUD: размер частицы клавиш (CP17.y) на 1 ед. размера клавиш panorama", 0.0025f);
+static CConVar<f32> kz_mhud_particle_pos_x("kz_mhud_particle_pos_x", FCVAR_NONE,
+										   "Particle-MHUD: смещение CP18.x × размер на 1% ширины экрана", 0.02966f);
+static CConVar<f32> kz_mhud_particle_pos_y("kz_mhud_particle_pos_y", FCVAR_NONE,
+										   "Particle-MHUD: смещение CP18.y × размер на 1% высоты экрана (вниз)", 0.01668f);
 
 // Опрос cvar: раз в 0.1 с (решение владельца 13.10 — переключение без заметной задержки); новый
 // запрос не уходит, пока не пришёл ответ на прежний, то есть фактически не чаще раза за пинг.
@@ -189,6 +195,48 @@ static_function void EnsureParticle(CHandle<CParticleSystem> &handle, const char
 	}
 }
 
+// Эффект частицы задаётся только при спавне: смена обводки элемента — пересоздать всю группу.
+// variant: -1 — группа ещё не создавалась, иначе последнее значение outline.
+static_function void EnsureGroup(CHandle<CParticleSystem> *handles, i32 count, i32 &variant, bool outline, const char *path, const Color &color,
+								 f32 scale, f32 x, f32 y)
+{
+	if (variant != -1 && variant != (i32)outline)
+	{
+		for (i32 i = 0; i < count; i++)
+		{
+			DestroyHandle(handles[i]);
+		}
+	}
+	variant = (i32)outline;
+	for (i32 i = 0; i < count; i++)
+	{
+		EnsureParticle(handles[i], path, color, scale, x, y);
+	}
+}
+
+// Геометрия элемента panorama → размер и смещение частицы (см. kz_mhud_particle_*).
+struct MHUDParticleGeom
+{
+	f32 size;
+	f32 x;
+	f32 y;
+};
+
+static_function MHUDParticleGeom ParticleGeom(const MHUDLayoutPrefs::Element &e, f32 sizePerUnit)
+{
+	MHUDParticleGeom g;
+	g.size = Max((f32)e.size * sizePerUnit, 0.001f);
+	g.x = (f32)e.x * kz_mhud_particle_pos_x.Get() / g.size;
+	g.y = -(f32)e.y * kz_mhud_particle_pos_y.Get() / g.size;
+	return g;
+}
+
+// Цвет элемента: градиент (маркер a == 1, см. panorama_tables) частица нарисовать не может — берём дефолт.
+static_function Color ParticleColor(const Color &c, const Color &fallback)
+{
+	return c.a() == 1 ? fallback : c;
+}
+
 bool KZHUDService::OwnsParticle(const CEntityHandle &handle) const
 {
 	for (const auto &h : this->mhudSpeedParticles)
@@ -245,6 +293,10 @@ void KZHUDService::DestroyAllParticles()
 		DestroyHandle(h);
 	}
 	DestroyHandle(this->mhudKeysParticle);
+	for (i32 &v : this->mhudParticleVariant)
+	{
+		v = -1;
+	}
 	this->particlesActive = false;
 }
 
@@ -298,76 +350,76 @@ static_function void LayoutDigitPair(i32 value, f32 size, f32 baseX, f32 baseY, 
 	}
 }
 
+static_function void DestroyGroup(CHandle<CParticleSystem> *handles, i32 count, i32 &variant)
+{
+	for (i32 i = 0; i < count; i++)
+	{
+		DestroyHandle(handles[i]);
+	}
+	variant = -1;
+}
+
 void KZHUDService::UpdateMHUDSpeedParticles()
 {
-	KZOptionService *opts = this->MHUDSettingsSource()->optionService;
-	bool speedEnabled = this->IsMHUDSpeedEnabled();
-	bool prespeedEnabled = opts->GetPreferenceBool("hudPrespeed", true);
-
-	char numbersPath[256];
-	BuildParticlePath(numbersPath, sizeof(numbersPath), MHUD_PARTICLE_NUMBERS_PATTERN, MHUD_PARTICLE_FONT, MHUD_PARTICLE_OUTLINE);
-
+	const MHUDLayoutPrefs &prefs = this->GetLayoutPrefs();
+	const MHUDLayoutPrefs::Element &speedEl = prefs.elements[(i32)LayoutElement::Speed];
+	const MHUDLayoutPrefs::Element &preEl = prefs.elements[(i32)LayoutElement::Prespeed];
 	const SpeedInfo info = this->GetSpeedInfo();
-	const Color baseColor = this->GetMHUDColorPref("mhudSpeedColor", MHUD_DEF_BASE_COLOR);
-	const Color prespeedBaseColor = this->GetMHUDColorPref("mhudPrespeedColor", MHUD_DEF_BASE_COLOR);
-	const Color perfColor = this->GetMHUDColorPref("mhudPrespeedPerfColor", MHUD_DEF_PERF_COLOR);
-	const Color jumpbugColor = this->GetMHUDColorPref("mhudPrespeedJumpbugColor", MHUD_DEF_JUMPBUG_COLOR);
-	const Color cjColor = this->GetMHUDColorPref("mhudSpeedCjColor", MHUD_DEF_CJ_COLOR);
+	char path[256];
 
-	if (speedEnabled)
+	if (speedEl.enabled)
 	{
-		for (auto &h : this->mhudSpeedParticles)
-		{
-			EnsureParticle(h, numbersPath, baseColor, MHUD_DEF_SPEED_SCALE, MHUD_DEF_SPEED_OFFSET_X, MHUD_DEF_SPEED_OFFSET_Y);
-		}
-		if (this->mhudSpeedParticles[0].Get() && this->mhudSpeedParticles[1].Get())
-		{
-			LayoutDigitPair(RoundFloatToInt(info.velocity.Length2D()), MHUD_DEF_SPEED_SCALE, MHUD_DEF_SPEED_OFFSET_X, MHUD_DEF_SPEED_OFFSET_Y,
-							this->mhudSpeedParticles[0].Get(), this->mhudSpeedParticles[1].Get());
-			const Color color = info.crouchJump ? cjColor : baseColor;
-			SetParticleTint(this->mhudSpeedParticles[0].Get(), color);
-			SetParticleTint(this->mhudSpeedParticles[1].Get(), color);
-		}
-	}
-	else
-	{
-		for (auto &h : this->mhudSpeedParticles)
-		{
-			DestroyHandle(h);
-		}
-	}
-
-	if (prespeedEnabled)
-	{
-		for (auto &h : this->mhudPrespeedParticles)
-		{
-			EnsureParticle(h, numbersPath, prespeedBaseColor, MHUD_DEF_PRESPEED_SCALE, MHUD_DEF_PRESPEED_OFFSET_X, MHUD_DEF_PRESPEED_OFFSET_Y);
-		}
-		CParticleSystem *p0 = this->mhudPrespeedParticles[0].Get();
-		CParticleSystem *p1 = this->mhudPrespeedParticles[1].Get();
+		const MHUDParticleGeom g = ParticleGeom(speedEl, kz_mhud_particle_digit_size.Get());
+		const Color base = ParticleColor(prefs.speed, MHUD_DEF_BASE_COLOR);
+		BuildParticlePath(path, sizeof(path), MHUD_PARTICLE_NUMBERS_PATTERN, MHUD_PARTICLE_FONT, speedEl.outline);
+		EnsureGroup(this->mhudSpeedParticles, 2, this->mhudParticleVariant[0], speedEl.outline, path, base, g.size, g.x, g.y);
+		CParticleSystem *p0 = this->mhudSpeedParticles[0].Get();
+		CParticleSystem *p1 = this->mhudSpeedParticles[1].Get();
 		if (p0 && p1)
 		{
-			if (info.hasPrespeed)
-			{
-				LayoutDigitPair(RoundFloatToInt(info.prespeed.Length2D()), MHUD_DEF_PRESPEED_SCALE, MHUD_DEF_PRESPEED_OFFSET_X,
-								MHUD_DEF_PRESPEED_OFFSET_Y, p0, p1);
-			}
-			else
-			{
-				p0->Destroy();
-				p1->Destroy();
-			}
-			const Color color = info.perfing ? (info.jumpbug ? jumpbugColor : perfColor) : prespeedBaseColor;
+			LayoutDigitPair(RoundFloatToInt(info.velocity.Length2D()), g.size, g.x, g.y, p0, p1);
+			const Color color = info.crouchJump ? ParticleColor(prefs.speedCj, MHUD_DEF_CJ_COLOR) : base;
 			SetParticleTint(p0, color);
 			SetParticleTint(p1, color);
 		}
 	}
 	else
 	{
-		for (auto &h : this->mhudPrespeedParticles)
+		DestroyGroup(this->mhudSpeedParticles, 2, this->mhudParticleVariant[0]);
+	}
+
+	if (preEl.enabled)
+	{
+		const MHUDParticleGeom g = ParticleGeom(preEl, kz_mhud_particle_digit_size.Get());
+		const Color base = ParticleColor(prefs.prespeed, MHUD_DEF_BASE_COLOR);
+		BuildParticlePath(path, sizeof(path), MHUD_PARTICLE_NUMBERS_PATTERN, MHUD_PARTICLE_FONT, preEl.outline);
+		EnsureGroup(this->mhudPrespeedParticles, 2, this->mhudParticleVariant[1], preEl.outline, path, base, g.size, g.x, g.y);
+		CParticleSystem *p0 = this->mhudPrespeedParticles[0].Get();
+		CParticleSystem *p1 = this->mhudPrespeedParticles[1].Get();
+		if (p0 && p1)
 		{
-			DestroyHandle(h);
+			if (info.hasPrespeed)
+			{
+				LayoutDigitPair(RoundFloatToInt(info.prespeed.Length2D()), g.size, g.x, g.y, p0, p1);
+			}
+			else
+			{
+				p0->Destroy();
+				p1->Destroy();
+			}
+			Color color = base;
+			if (info.perfing)
+			{
+				color = info.jumpbug ? ParticleColor(prefs.prespeedJumpbug, MHUD_DEF_JUMPBUG_COLOR)
+									 : ParticleColor(prefs.prespeedPerf, MHUD_DEF_PERF_COLOR);
+			}
+			SetParticleTint(p0, color);
+			SetParticleTint(p1, color);
 		}
+	}
+	else
+	{
+		DestroyGroup(this->mhudPrespeedParticles, 2, this->mhudParticleVariant[1]);
 	}
 }
 
@@ -375,32 +427,25 @@ void KZHUDService::UpdateMHUDSpeedParticles()
 
 void KZHUDService::UpdateMHUDTimerParticles()
 {
-	if (!this->IsMHUDTimerEnabled())
+	const MHUDLayoutPrefs &prefs = this->GetLayoutPrefs();
+	const MHUDLayoutPrefs::Element &el = prefs.elements[(i32)LayoutElement::Timer];
+	if (!el.enabled)
 	{
-		for (auto &h : this->mhudTimerDigitParticles)
-		{
-			DestroyHandle(h);
-		}
-		for (auto &h : this->mhudTimerDelimParticles)
-		{
-			DestroyHandle(h);
-		}
+		DestroyGroup(this->mhudTimerDigitParticles, KZ_ARRAYSIZE(this->mhudTimerDigitParticles), this->mhudParticleVariant[2]);
+		DestroyGroup(this->mhudTimerDelimParticles, KZ_ARRAYSIZE(this->mhudTimerDelimParticles), this->mhudParticleVariant[3]);
 		return;
 	}
 
 	KZPlayer *src = this->MHUDDataSource();
-	const Color tpColor = this->GetMHUDColorPref("mhudTimerTpColor", MHUD_DEF_TIMER_TP_COLOR);
+	const MHUDParticleGeom g = ParticleGeom(el, kz_mhud_particle_digit_size.Get());
+	const Color tpColor = ParticleColor(prefs.timerTp, MHUD_DEF_TIMER_TP_COLOR);
 	char numbersPath[256], delimPath[256];
-	BuildParticlePath(numbersPath, sizeof(numbersPath), MHUD_PARTICLE_NUMBERS_PATTERN, MHUD_PARTICLE_FONT, MHUD_PARTICLE_OUTLINE);
-	BuildParticlePath(delimPath, sizeof(delimPath), MHUD_PARTICLE_TIMER_DELIM_PATTERN, MHUD_PARTICLE_FONT, MHUD_PARTICLE_OUTLINE);
-	for (auto &h : this->mhudTimerDigitParticles)
-	{
-		EnsureParticle(h, numbersPath, tpColor, MHUD_DEF_TIMER_SCALE, 0.0f, MHUD_DEF_TIMER_OFFSET_Y);
-	}
-	for (auto &h : this->mhudTimerDelimParticles)
-	{
-		EnsureParticle(h, delimPath, tpColor, MHUD_DEF_TIMER_SCALE, 0.0f, MHUD_DEF_TIMER_OFFSET_Y);
-	}
+	BuildParticlePath(numbersPath, sizeof(numbersPath), MHUD_PARTICLE_NUMBERS_PATTERN, MHUD_PARTICLE_FONT, el.outline);
+	BuildParticlePath(delimPath, sizeof(delimPath), MHUD_PARTICLE_TIMER_DELIM_PATTERN, MHUD_PARTICLE_FONT, el.outline);
+	EnsureGroup(this->mhudTimerDigitParticles, KZ_ARRAYSIZE(this->mhudTimerDigitParticles), this->mhudParticleVariant[2], el.outline, numbersPath,
+				tpColor, g.size, g.x, g.y);
+	EnsureGroup(this->mhudTimerDelimParticles, KZ_ARRAYSIZE(this->mhudTimerDelimParticles), this->mhudParticleVariant[3], el.outline, delimPath,
+				tpColor, g.size, g.x, g.y);
 
 	bool timerRunning = src->timerService->GetTimerRunning();
 	if (!timerRunning && !src->hudService->ShouldShowTimerAfterStop())
@@ -427,7 +472,7 @@ void KZHUDService::UpdateMHUDTimerParticles()
 	{
 		time = 0.0;
 	}
-	bool detailed = this->MHUDSettingsSource()->optionService->GetPreferenceBool("hudTimerDetail", true);
+	bool detailed = prefs.timerDetailed;
 
 	i32 totalSeconds = (i32)time;
 	i32 hours = totalSeconds / 3600;
@@ -456,20 +501,21 @@ void KZHUDService::UpdateMHUDTimerParticles()
 		delimTypes[d] = (detailed && d == numDelims - 1) ? MHUD_TIMER_DELIM_DOT : MHUD_TIMER_DELIM_COLON;
 	}
 
+	// Шаг разрядов — в единицах размера частицы, как и смещение: строка масштабируется вместе с кеглем.
 	f32 layoutX[4] {};
 	for (i32 i = 0; i < numDigits; i++)
 	{
-		layoutX[i] = MHUD_DEF_TIMER_OFFSET_X + ((f32)i - (numDigits - 1) * 0.5f) * MHUD_TIMER_DIGIT_STEP;
+		layoutX[i] = g.x + ((f32)i - (numDigits - 1) * 0.5f) * MHUD_TIMER_DIGIT_STEP;
 	}
 
 	Color color;
-	if (!timerRunning)
+	if (src->timerService->GetPaused())
 	{
-		color = this->GetMHUDColorPref("mhudTimerStoppedColor", MHUD_DEF_TIMER_STOPPED_COLOR);
+		color = ParticleColor(prefs.timerPaused, MHUD_DEF_TIMER_PAUSED_COLOR);
 	}
-	else if (src->timerService->GetPaused())
+	else if (!timerRunning)
 	{
-		color = this->GetMHUDColorPref("mhudTimerPausedColor", MHUD_DEF_TIMER_PAUSED_COLOR);
+		color = ParticleColor(prefs.timerStopped, MHUD_DEF_TIMER_STOPPED_COLOR);
 	}
 	else if (src->checkpointService->GetTeleportCount() > 0)
 	{
@@ -477,7 +523,7 @@ void KZHUDService::UpdateMHUDTimerParticles()
 	}
 	else
 	{
-		color = this->GetMHUDColorPref("mhudTimerProColor", MHUD_DEF_TIMER_PRO_COLOR);
+		color = ParticleColor(prefs.timerPro, MHUD_DEF_TIMER_PRO_COLOR);
 	}
 
 	for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(this->mhudTimerDigitParticles); i++)
@@ -489,7 +535,7 @@ void KZHUDService::UpdateMHUDTimerParticles()
 		}
 		if (i < numDigits)
 		{
-			SetParticleLayout(p, (f32)digit[i], MHUD_DEF_TIMER_SCALE, layoutX[i], MHUD_DEF_TIMER_OFFSET_Y);
+			SetParticleLayout(p, (f32)digit[i], g.size, layoutX[i], g.y);
 			SetParticleTint(p, color);
 			p->Start();
 		}
@@ -507,7 +553,7 @@ void KZHUDService::UpdateMHUDTimerParticles()
 		}
 		if (d < numDelims)
 		{
-			SetParticleLayout(p, (f32)delimTypes[d], MHUD_DEF_TIMER_SCALE, layoutX[d] + MHUD_TIMER_DIGIT_STEP * 0.5f, MHUD_DEF_TIMER_OFFSET_Y);
+			SetParticleLayout(p, (f32)delimTypes[d], g.size, layoutX[d] + MHUD_TIMER_DIGIT_STEP * 0.5f, g.y);
 			SetParticleTint(p, color);
 			p->Start();
 		}
@@ -522,15 +568,18 @@ void KZHUDService::UpdateMHUDTimerParticles()
 
 void KZHUDService::UpdateMHUDKeysParticle()
 {
-	if (!this->IsMHUDKeysEnabled())
+	const MHUDLayoutPrefs &prefs = this->GetLayoutPrefs();
+	const MHUDLayoutPrefs::Element &el = prefs.elements[(i32)LayoutElement::Keys];
+	if (!el.enabled)
 	{
-		DestroyHandle(this->mhudKeysParticle);
+		DestroyGroup(&this->mhudKeysParticle, 1, this->mhudParticleVariant[4]);
 		return;
 	}
-	const Color baseColor = this->GetMHUDColorPref("mhudKeysColor", MHUD_DEF_BASE_COLOR);
+	const MHUDParticleGeom g = ParticleGeom(el, kz_mhud_particle_keys_size.Get());
+	const Color baseColor = ParticleColor(prefs.keys, MHUD_DEF_BASE_COLOR);
 	char inputsPath[256];
-	BuildParticlePath(inputsPath, sizeof(inputsPath), MHUD_PARTICLE_INPUTS_PATTERN, MHUD_PARTICLE_FONT, MHUD_PARTICLE_OUTLINE);
-	EnsureParticle(this->mhudKeysParticle, inputsPath, baseColor, MHUD_DEF_KEYS_SCALE, MHUD_DEF_KEYS_OFFSET_X, MHUD_DEF_KEYS_OFFSET_Y);
+	BuildParticlePath(inputsPath, sizeof(inputsPath), MHUD_PARTICLE_INPUTS_PATTERN, MHUD_PARTICLE_FONT, el.outline);
+	EnsureGroup(&this->mhudKeysParticle, 1, this->mhudParticleVariant[4], el.outline, inputsPath, baseColor, g.size, g.x, g.y);
 	CParticleSystem *p = this->mhudKeysParticle.Get();
 	if (!p)
 	{
@@ -550,19 +599,18 @@ void KZHUDService::UpdateMHUDKeysParticle()
 	mask |= (src->hudService->jumpedThisTick || src->IsButtonPressed(IN_JUMP)) ? KPF_Jump : 0;
 	mask |= src->IsButtonPressed(IN_DUCK) ? KPF_Duck : 0;
 
-	p->SetControlPointValue(17, Vector((f32)mask, MHUD_DEF_KEYS_SCALE, 0.0f));
-	p->SetControlPointValue(18, Vector(MHUD_DEF_KEYS_OFFSET_X, MHUD_DEF_KEYS_OFFSET_Y, 1.0f));
+	p->SetControlPointValue(17, Vector((f32)mask, g.size, 0.0f));
+	p->SetControlPointValue(18, Vector(g.x, g.y, 1.0f));
 	p->Start();
 
 	bool overlap = (forward && back) || (left && right);
-	SetParticleTint(p, overlap && this->IsMHUDKeysOverlapEnabled() ? this->GetMHUDColorPref("mhudKeysOverlapColor", MHUD_DEF_KEYS_OVERLAP_COLOR)
-																   : baseColor);
+	SetParticleTint(p, overlap && prefs.keysOverlapEnabled ? ParticleColor(prefs.keysOverlap, MHUD_DEF_KEYS_OVERLAP_COLOR) : baseColor);
 }
 
 void KZHUDService::UpdateParticles()
 {
 	// Только живому владельцу (DrawPanels гейтит player == target), mhudSource не задаём:
-	// данные и настройки — this->player.
+	// данные — this->player, настройки — GetLayoutPrefs() (с мимикрией, как у panorama).
 	this->particlesActive = true;
 	this->UpdateMHUDSpeedParticles();
 	this->UpdateMHUDTimerParticles();

@@ -379,6 +379,9 @@ private:
 	CHandle<CParticleSystem> mhudTimerDigitParticles[4] {};
 	CHandle<CParticleSystem> mhudTimerDelimParticles[3] {};
 	CHandle<CParticleSystem> mhudKeysParticle {};
+	// Обводка, с которой создана группа (скорость, престрейф, цифры таймера, разделители, клавиши);
+	// -1 — группы нет. Эффект частицы задаётся только при спавне, смена обводки — пересоздание.
+	i32 mhudParticleVariant[5] {-1, -1, -1, -1, -1};
 	// Хоть одна частица создана — дешёвый гейт для CheckTransmit и DestroyAllParticles.
 	bool particlesActive {};
 

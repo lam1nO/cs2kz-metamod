@@ -102,6 +102,7 @@ void FormatTimeHud(f64 time, char *output, u32 length)
 // (HtmlStatusInterval, деф. 0 = на каждой смене).
 #define KZ_HUD_BOTTOM_MENU_HEARTBEAT 0.1f
 
+extern CConVar<bool> kz_mhud_particle_overlay;
 static CConVar<bool> kz_force_mhud("kz_force_mhud", FCVAR_NONE, "Force the panorama HUD even when MultiAddonManager is not available.", false);
 
 // Аварийный рычаг-диагностика (дефект «дёргается камера в ноуклипе сквозь стены», окно
@@ -1977,7 +1978,11 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	{
 		cfg->PollDeathnoticesCvar();
 	}
-	if (particleCandidate && cfg->WantsParticleMHUD())
+	if (particleCandidate && kz_mhud_particle_overlay.Get())
+	{
+		cfg->UpdateParticles();
+	}
+	else if (particleCandidate && cfg->WantsParticleMHUD())
 	{
 		cfg->DestroyOwnedLayout();
 		cfg->ClearBottomPanel();
@@ -1989,7 +1994,10 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 		cfg->UpdateParticles();
 		return;
 	}
-	cfg->DestroyAllParticles();
+	else
+	{
+		cfg->DestroyAllParticles();
+	}
 
 	// hudType: 0 = Standard (HTML-панель), 2 = Off (ничего), 3 = Panorama (custom_hud_layout
 	// сущность). 1 (particle-оверлей апстрима) удалён в задаче 12 — апстрим вычистил
