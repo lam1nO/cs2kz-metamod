@@ -312,9 +312,6 @@ bool KZ::gsmenu::ShowTable(KZPlayer *player, const Table &t, ClickFn onClick, co
 		const Row &r = t.rows[i];
 		Class(player, *w, layout, id, "wr", r.wr);
 		Class(player, *w, layout, id, "me", r.me);
-		V_snprintf(id, sizeof(id), "gr%i_av", i);
-		Var(player, *w, layout, id, "a", r.initial);
-		Swap(player, *w, layout, id, "avc" + std::to_string(r.colour % 8));
 		for (i32 j = 0; j < KZ_GSMENU_TABLE_COLS; j++)
 		{
 			V_snprintf(sub, sizeof(sub), "gr%i_c%i", i, j);
@@ -339,8 +336,6 @@ bool KZ::gsmenu::ShowTable(KZPlayer *player, const Table &t, ClickFn onClick, co
 	Class(player, *w, layout, "gm_line", "hidden", !t.hasMe);
 	if (t.hasMe)
 	{
-		Var(player, *w, layout, "gm_av", "a", t.me.initial);
-		Swap(player, *w, layout, "gm_av", "avc" + std::to_string(t.me.colour % 8));
 		for (i32 j = 0; j < KZ_GSMENU_TABLE_COLS; j++)
 		{
 			V_snprintf(sub, sizeof(sub), "gm_c%i", j);

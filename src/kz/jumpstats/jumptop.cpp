@@ -1755,8 +1755,7 @@ namespace
 			V_snprintf(pre, sizeof(pre), "%.1f", r.pre);
 			row.cells[4] = sync;
 			row.cells[5] = pre;
-			// Префикс kz_ в узкой колонке только съедает место.
-			row.cells[6] = r.map.rfind("kz_", 0) == 0 ? r.map.substr(3) : r.map;
+			row.cells[6] = r.map;
 			row.initial = KZ::gsmenu::Initial(r.alias.c_str());
 			row.colour = (u32)(r.steamID64 % 8);
 			row.wr = i == 0;

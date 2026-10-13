@@ -4,6 +4,7 @@
 #include "kz/global/kz_global.h"
 
 #include "utils/simplecmds.h"
+#include "utils/ctimer.h"
 #include "kz/hud/layout/gsmenu.h"
 #include "kz/mode/kz_mode.h"
 #include "kz/hud/kz_hud.h"
@@ -463,6 +464,30 @@ namespace
 
 	void RenderMaptop(KZPlayer *player);
 
+	// Создание запроса — ТОЛЬКО отложенно, таймером на следующий тик. Ответ окна (ShowWindow) приходит
+	// из BaseRequest::CheckRequests, который обходит BaseRequest::instances через remove_if: новый запрос,
+	// созданный прямо там, делал push_back в тот же вектор посреди обхода — переаллокация, обход по
+	// освобождённой памяти, segv (канарейка 13.10, 0.305.0, кадр CheckRequests::$_2).
+	f64 DoRequeryMaptop(CPlayerUserId userID, CUtlString mode)
+	{
+		KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
+		if (!player)
+		{
+			return 0.0;
+		}
+		MaptopView &v = g_maptop[player->GetPlayerSlot().Get()];
+		// Без кавычек: ParseArgsToKV3 берёт значение до следующего «ключ=» (пробелы в имени курса не
+		// мешают), а кавычки он НЕ снимает — с ними курс искался как "Main" и таблица была пустой.
+		CCommand args;
+		char line[256];
+		V_snprintf(line, sizeof(line), "kz_maptop map=%s course=%s mode=%s l=%llu", v.map.Get(), v.course.Get(), mode.Get(), kMaptopLimit);
+		args.Tokenize(line);
+		CourseTopRequest *req = CourseTopRequest::Create<CourseTopRequest>(player, CourseTopRequest::ctopFeatures, v.qLocal, v.qGlobal, &args);
+		req->fromWindow = true;
+		v.pendingUid = req->uid;
+		return 0.0;
+	}
+
 	void RequeryMaptop(KZPlayer *player, const char *mode, bool throttle)
 	{
 		MaptopView &v = g_maptop[player->GetPlayerSlot().Get()];
@@ -475,15 +500,13 @@ namespace
 		{
 			v.lastRequery = now;
 		}
-		// Без кавычек: ParseArgsToKV3 берёт значение до следующего «ключ=» (пробелы в имени курса не
-		// мешают), а кавычки он НЕ снимает — с ними курс искался как "Main" и таблица была пустой.
-		CCommand args;
-		char line[256];
-		V_snprintf(line, sizeof(line), "kz_maptop map=%s course=%s mode=%s l=%llu", v.map.Get(), v.course.Get(), mode, kMaptopLimit);
-		args.Tokenize(line);
-		CourseTopRequest *req = CourseTopRequest::Create<CourseTopRequest>(player, CourseTopRequest::ctopFeatures, v.qLocal, v.qGlobal, &args);
-		req->fromWindow = true;
-		v.pendingUid = req->uid;
+		if (!player->GetClient())
+		{
+			return;
+		}
+		// Ответы, пришедшие до отложенного создания, уже чужие.
+		v.pendingUid = UINT64_MAX;
+		StartTimer<CPlayerUserId, CUtlString>(DoRequeryMaptop, player->GetClient()->GetUserID(), CUtlString(mode), 0.0, false);
 	}
 
 	CUtlVector<CourseTopRequest::RunStats> &MaptopList(MaptopView &v)
