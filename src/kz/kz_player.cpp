@@ -296,6 +296,7 @@ void KZPlayer::OnPhysicsSimulatePost()
 		// Layout-худ по той же причине: DrawPanels сюда не доходит, замороженная сущность
 		// висела бы до следующего вызова.
 		this->hudService->DestroyOwnedLayout();
+		this->hudService->DestroyAllParticles();
 		// Меню реплея: DrawPanels сюда не доходит, а именно этим кадром обычно кончается
 		// просмотр бота (кик бота → цели нет) — закрываем явно, чтобы сущность и флаг не
 		// висели до следующего спектейта.

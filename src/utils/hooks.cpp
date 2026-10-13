@@ -782,9 +782,9 @@ static KHook::Return<void> BuildGameSessionManifestPost(IGameSystem *pThis, cons
 	{
 		Warning("[CS2KZ] Precache kz soundevents \n");
 		pResourceManifest->AddResource(KZ_WORKSHOP_ADDON_SNDEVENT_FILE);
-		// KZHUDService::PrecacheParticles(pResourceManifest) удалён вместе с particle-MHUD
-		// (задача 12): апстрим вычистил particles/* из воркшоп-аддона, прекешировать больше нечего.
 	}
+	// Particle-MHUD: ассеты в нашем аддоне GYMSTRIKE-KZ (не в айтеме cs2kz) — безусловно, как луч.
+	KZHUDService::PrecacheParticles(pResourceManifest);
 	pResourceManifest->AddResource("particles/ui/hud/ui_map_def_utility_trail.vpcf");
 	// Наша частица луча !lead из аддона GYMSTRIKE-KZ и стоковая рядом: cyb_lead_particle
 	// переключает их живьём, а незарегистрированный в манифесте ассет у клиента не
