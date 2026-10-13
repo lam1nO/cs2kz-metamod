@@ -684,6 +684,11 @@ void KZHUDService::ReadReplayMenuInput()
 	const u64 held = HeldButtons(this->player);
 	const u64 pressed = held & ~this->replayMenuHeld;
 	this->replayMenuHeld = held;
+	// Клавиша, только что закрывшая меню прослойки (E на пункте), — не действие карточки.
+	if (KZ::gsmenu::ShimClosedRecently(this->player))
+	{
+		return;
+	}
 
 	// R — режим мыши.
 	if ((pressed & IN_RELOAD) && KZ::gsmenu::Available(this->player))

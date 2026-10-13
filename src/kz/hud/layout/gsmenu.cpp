@@ -532,7 +532,17 @@ void KZ::gsmenu::OnRoundStart(KZPlayer *player)
 	if (WindowState *w = StateOf(player))
 	{
 		Destroy(player, *w);
-		DestroyExt(player, g_ext[player->GetPlayerSlot().Get()]);
+		ExtState &e = g_ext[player->GetPlayerSlot().Get()];
+		const bool hadExt = e.entity.IsValid();
+		DestroyExt(player, e);
+		// Внешний владелец (GG1) не знает, что сущности больше нет, — без сброса его голосование и
+		// сетка молча перестали бы рисоваться до конца карты. css_ui_reset → он откроет разметку заново.
+		if (hadExt)
+		{
+			char cmd[48];
+			V_snprintf(cmd, sizeof(cmd), "css_ui_reset %i\n", player->GetPlayerSlot().Get());
+			interfaces::pEngine->ServerCommand(cmd);
+		}
 	}
 	ShimRedrawAll();
 }

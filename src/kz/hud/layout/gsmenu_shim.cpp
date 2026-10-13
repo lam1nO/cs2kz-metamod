@@ -66,6 +66,7 @@ namespace
 		std::string status;
 		u64 held = 0;
 		i32 holdTicks = 0;
+		i32 closedTick = -1000; // такт закрытия — карточка реплея не должна съесть ту же E
 		f64 endTime = 0; // 0 — без таймаута
 		bool dirty = true;
 
@@ -189,6 +190,7 @@ public:
 		}
 		const MenuHandle h = s.Current();
 		s = Session();
+		s.closedTick = g_pKZUtils->GetServerGlobals()->tickcount;
 		if (KZPlayer *player = g_pKZPlayerManager->ToPlayer(CPlayerSlot(slot)))
 		{
 			KZ::gsmenu::HideList(player);
@@ -412,6 +414,7 @@ public:
 					// Как в cs2menus (menu_manager.cpp NavSelect): показ закрывается ДО onSelect,
 					// onEnd(Selected) — после него и только если меню ещё живо.
 					sessions[slot] = Session();
+					sessions[slot].closedTick = g_pKZUtils->GetServerGlobals()->tickcount;
 					if (fn)
 					{
 						fn(h, slot, item);
@@ -755,6 +758,15 @@ public:
 		if (item >= 0 && item < (int)m->items.size())
 		{
 			m->items.erase(m->items.begin() + item);
+			std::unordered_map<i32, std::string> shifted;
+			for (auto &[i, title] : m->groups)
+			{
+				if (i != item)
+				{
+					shifted[i > item ? i - 1 : i] = title;
+				}
+			}
+			m->groups.swap(shifted);
 			for (Session &s : sessions)
 			{
 				if (s.active && s.Current() == menu)
@@ -776,6 +788,7 @@ public:
 		}
 		real->RemoveAllItems(m->real);
 		m->items.clear();
+		m->groups.clear();
 		for (Session &s : sessions)
 		{
 			if (s.active && s.Current() == menu)
@@ -1023,6 +1036,20 @@ void KZ::gsmenu::ShimTick(KZPlayer *player)
 	{
 		g_shim->Tick(player);
 	}
+}
+
+bool KZ::gsmenu::ShimClosedRecently(KZPlayer *player)
+{
+	if (!g_shim || !player)
+	{
+		return false;
+	}
+	const int slot = player->GetPlayerSlot().Get();
+	if (slot < 0 || slot > MAXPLAYERS)
+	{
+		return false;
+	}
+	return g_pKZUtils->GetServerGlobals()->tickcount - g_shim->sessions[slot].closedTick <= 1;
 }
 
 void KZ::gsmenu::ShimDisconnect(KZPlayer *player)

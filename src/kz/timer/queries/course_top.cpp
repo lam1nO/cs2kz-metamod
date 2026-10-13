@@ -394,6 +394,12 @@ struct CourseTopRequest : public BaseRequest
 SCMD(kz_ctop, SCFL_RECORD | SCFL_GLOBAL)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
+	// Повторный !maptop закрывает окно: под захватом курсора это выход без клика по ✕.
+	if (player && KZ::gsmenu::IsOpen(player))
+	{
+		KZ::gsmenu::Close(player, "command_toggle");
+		return true;
+	}
 	CourseTopRequest::Create<CourseTopRequest>(player, CourseTopRequest::ctopFeatures, true, true, args);
 	return true;
 }
@@ -603,6 +609,10 @@ bool CourseTopRequest::ShowWindow()
 	if (req->fromWindow && (req->uid != v.pendingUid || !KZ::gsmenu::IsOpen(player)))
 	{
 		return true;
+	}
+	if (!req->fromWindow)
+	{
+		v.pendingUid = 0; // окно открыто командой — ответы прежних перезапросов из окна уже чужие
 	}
 	const bool local = req->localStatus == ResponseStatus::RECEIVED;
 	v.map = req->mapName;

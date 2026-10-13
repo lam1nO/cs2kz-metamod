@@ -102,6 +102,7 @@ namespace KZ::gsmenu
 	void ShimTick(KZPlayer *player);         // ввод и перерисовка, каждый такт (DrawPanels)
 	void ShimDisconnect(KZPlayer *player);
 	void ShimRedrawAll(); // сущность пересоздана/снесена — перерисовать открытые списки
+	bool ShimClosedRecently(KZPlayer *player); // меню прослойки закрылось в этом/прошлом такте
 	// Заголовок группы перед пунктом item меню (только панорама; cs2menus его не видит).
 	void SetItemGroup(uint32_t menu, int item, const char *title);
 
