@@ -25,6 +25,32 @@
 
 namespace
 {
+	// Подпись полосы бренда: «KZ #5» из hostname «GYMSTRIKE.NET | KZ #5»; без «|» — пусто.
+	std::string ServerTag()
+	{
+		static CConVarRef<CUtlString> hostname("hostname");
+		if (!hostname.IsValidRef() || !hostname.IsConVarDataAvailable())
+		{
+			return {};
+		}
+		const char *bar = strrchr(hostname.Get().Get(), '|');
+		if (!bar)
+		{
+			return {};
+		}
+		bar++;
+		while (*bar == ' ')
+		{
+			bar++;
+		}
+		std::string tag = bar;
+		while (!tag.empty() && tag.back() == ' ')
+		{
+			tag.pop_back();
+		}
+		return tag;
+	}
+
 	struct WindowState
 	{
 		CHandle<CBaseEntity> entity {};
@@ -268,6 +294,7 @@ bool KZ::gsmenu::ShowTable(KZPlayer *player, const Table &t, ClickFn onClick, co
 
 	Var(player, *w, layout, "gw", "t", t.title);
 	Var(player, *w, layout, "gw", "s", t.sub);
+	Var(player, *w, layout, "gw", "srv", ServerTag());
 	Swap(player, *w, layout, "gw_cover", t.cover.empty() ? "mc-none" : "mc-" + t.cover);
 	Class(player, *w, layout, "gw_tier", "hidden", t.tier <= 0);
 	if (t.tier > 0)

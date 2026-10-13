@@ -958,10 +958,10 @@
 	}
 	"Options - Hint"
 	{
-		"en"		"Click a row to change it  ·  !options to close"
-		"ru"		"Клик по строке — изменить  ·  !options — закрыть"
-		"chi"		"Click a row to change it  ·  !options to close"
-		"ua"		"Клік по рядку — змінити  ·  !options — закрити"
+		"en"		"!options to close"
+		"ru"		"!options — закрыть"
+		"chi"		"!options to close"
+		"ua"		"!options — закрити"
 	}
 	"Options - Hero Title"
 	{
@@ -1056,10 +1056,10 @@
 	}
 	"HUD Editor - Hint"
 	{
-		"en"		"Click an element to select it  ·  click the grid to move it there  ·  !hud to close"
-		"ru"		"Клик по элементу — выбрать  ·  клик по сетке — перенести туда  ·  !hud — закрыть"
-		"chi"		"Click an element to select it  ·  click the grid to move it there  ·  !hud to close"
-		"ua"		"Клік по елементу — вибрати  ·  клік по сітці — перенести туди  ·  !hud — закрити"
+		"en"		"!hud to close"
+		"ru"		"!hud — закрыть"
+		"chi"		"!hud to close"
+		"ua"		"!hud — закрити"
 	}
 	"HUD Editor - Prop Position"
 	{
