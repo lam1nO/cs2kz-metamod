@@ -118,8 +118,9 @@ i32 SnapReplayMenuScale(i32 percent);
 // из того же аддона и должны видеть его неизменным. mhud.xml и общие css аддона только
 // дописываются; всё новое в mhud2.css под корневым классом .hud2.
 #define KZ_MHUD_LAYOUT "panorama/layout/custom_game/cs2kz/mhud2.vxml_c"
-// Шрифт новых элементов худа v2 (PB/WR, прогресс, курс, тип рана) — Noto Sans; вес задаёт mhud2.css.
-#define LAYOUT_V2_FONT "noto-sans"
+// Шрифт новых элементов худа v2 (PB/WR, прогресс, курс, тип рана) — Stratum2 Bold TF, как у
+// Кибершока и родного худа CS2: жирнее Noto и цифры одной ширины (решение владельца 14.10).
+#define LAYOUT_V2_FONT "stratum2-bold-tf"
 // Своя страница меню реплея спектатора (layout/rpmenu.cpp): карточка плеера целиком — шапка,
 // время, шкала перемотки с отметками, семь пунктов и подсказка. Живёт ТОЛЬКО в нашем аддоне
 // (custom_game/cyber/…), апстримного аналога у неё нет; исходники разметки — gymstrike-kz/content/panorama
