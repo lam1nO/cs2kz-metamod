@@ -517,21 +517,32 @@ bool KZ::gsmenu::OnClick(KZPlayer *player, uint32 packedHandle, const char *id)
 		// Не чаще 16 в секунду: CSSharp-обработчик перерисовывает окно на каждый клик.
 		ExtState &e = g_ext[slot];
 		const f64 now = g_pKZUtils->GetServerGlobals()->curtime;
-		if (now - e.clickWindowStart > 1.0)
+		// curtime с каждой карты начинается заново: окно с прошлой карты оказалось бы «в будущем»
+		// и никогда не сбросилось — все клики по сетке GG1 молча отбрасывались до реконнекта.
+		if (now - e.clickWindowStart > 1.0 || now < e.clickWindowStart)
 		{
 			e.clickWindowStart = now;
 			e.clicksInWindow = 0;
 		}
-		if (++e.clicksInWindow <= 16 && strlen(id) <= 48 && strspn(id, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") == strlen(id))
+		const bool badId = strlen(id) > 48 || strspn(id, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != strlen(id);
+		if (++e.clicksInWindow > 16 || badId)
 		{
-			char cmd[96];
-			V_snprintf(cmd, sizeof(cmd), "css_ui_click %i %s\n", slot, id);
-			interfaces::pEngine->ServerCommand(cmd);
+			KZ_LOG_WARN(LogChannel::General, "[cyb] gsmenu_ext_click_dropped reason=%s n=%i now=%.1f start=%.1f slot=%i\n",
+						badId ? "bad_id" : "rate", e.clicksInWindow, now, e.clickWindowStart, slot);
+			return true;
 		}
+		char cmd[96];
+		V_snprintf(cmd, sizeof(cmd), "css_ui_click %i %s\n", slot, id);
+		interfaces::pEngine->ServerCommand(cmd);
 		return true;
 	}
 	if ((CBaseEntity *)layout != w->entity.Get())
 	{
+		if (g_ext[slot].entity.IsValid())
+		{
+			// Клик по разметке, которой уже нет у владельца (пересоздана) — видно, если окно «не нажимается».
+			KZ_LOG_WARN(LogChannel::General, "[cyb] gsmenu_ext_click_dropped reason=stale_layout id=%s slot=%i\n", id, slot);
+		}
 		return false;
 	}
 	if (!w->open)
@@ -570,6 +581,8 @@ static void DestroyExt(KZPlayer *player, ExtState &e)
 	e.entity = nullptr;
 	e.capture = false;
 	e.layout.clear();
+	e.clickWindowStart = 0.0;
+	e.clicksInWindow = 0;
 }
 
 void KZ::gsmenu::OnSlotReset(KZPlayer *player)
