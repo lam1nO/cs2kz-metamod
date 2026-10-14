@@ -1,6 +1,8 @@
 #include "kz/hud/kz_hud.h"
 #include "kz/option/kz_option.h"
 #include "kz/checkpoint/kz_checkpoint.h"
+#include "kz/lead/kz_lead.h"
+#include "kz/prac/kz_prac.h"
 #include "sdk/entity/cparticlesystem.h"
 #include "entitykeyvalues.h"
 #include "utils/utils.h"
@@ -24,6 +26,9 @@
 #define MHUD_PARTICLE_NUMBERS_PATTERN     "particles/velo/velo_overlay_large_%s_%s.vpcf"
 #define MHUD_PARTICLE_TIMER_DELIM_PATTERN "particles/timer_delimiter/timer_delimiter_%s_%s.vpcf"
 #define MHUD_PARTICLE_INPUTS_PATTERN      "particles/inputs/inputs_%s_%s.vpcf"
+// Знак дельты (sequence 0 «+», 1 «−») — наш ассет в аддоне, только verdana: ячейка 121×57 и кегль
+// как у velo_overlay_large, поэтому геометрия та же, что у цифр.
+#define MHUD_PARTICLE_SIGN_PATTERN        "particles/gymstrike/mhud_sign_%s_%s.vpcf"
 
 static_global constexpr const char *MHUD_PARTICLE_FONTS[] = {"lato", "verdana"};
 #define MHUD_PARTICLE_FONT "verdana"
@@ -31,6 +36,17 @@ static_global constexpr const char *MHUD_PARTICLE_FONTS[] = {"lato", "verdana"};
 #define MHUD_TIMER_DIGIT_STEP 1.6f
 #define MHUD_TIMER_DELIM_COLON 0 // sequence двоеточия в timer_delimiter
 #define MHUD_TIMER_DELIM_DOT   1 // sequence точки
+
+// Дельта к PB/WR (как mhud_delta в panorama): справа от таймера, кегль 0.65 таймера, тот же центр по Y.
+// Ширины — в единицах размера частицы: разряд 0.625 (см. LayoutDigitPair), пара — 1.25,
+// разделитель с зазорами — 0.35 (шаг таймера 1.6 = пара + разделитель).
+#define MHUD_DELTA_SCALE        0.65f
+#define MHUD_DELTA_GAP          0.3f // зазор таймер → дельта, в единицах размера таймера
+#define MHUD_DIGIT_WIDTH        0.625f
+#define MHUD_DELIM_WIDTH        0.35f
+#define MHUD_SIGN_WIDTH         0.7f
+#define MHUD_SIGN_PLUS          0
+#define MHUD_SIGN_MINUS         1
 
 // Перевод геометрии panorama в параметры частицы. Частица висит перед глазами (SetControlPointToPlayer +
 // PositionLock), рендерится спрайтом экранного размера CP17.y (m_flMinSize), а CP18 (x, y) сдвигает её
@@ -81,6 +97,11 @@ void KZHUDService::PrecacheParticles(IEntityResourceManifest *pResourceManifest)
 			BuildParticlePath(path, sizeof(path), MHUD_PARTICLE_INPUTS_PATTERN, font, outline);
 			pResourceManifest->AddResource(path);
 		}
+	}
+	for (bool outline : {false, true})
+	{
+		BuildParticlePath(path, sizeof(path), MHUD_PARTICLE_SIGN_PATTERN, MHUD_PARTICLE_FONT, outline);
+		pResourceManifest->AddResource(path);
 	}
 }
 
@@ -267,6 +288,27 @@ bool KZHUDService::OwnsParticle(const CEntityHandle &handle) const
 			return true;
 		}
 	}
+	for (const auto &h : this->mhudDeltaSignParticles)
+	{
+		if (handle == h)
+		{
+			return true;
+		}
+	}
+	for (const auto &h : this->mhudDeltaDigitParticles)
+	{
+		if (handle == h)
+		{
+			return true;
+		}
+	}
+	for (const auto &h : this->mhudDeltaDelimParticles)
+	{
+		if (handle == h)
+		{
+			return true;
+		}
+	}
 	return handle == this->mhudKeysParticle;
 }
 
@@ -293,6 +335,18 @@ void KZHUDService::DestroyAllParticles()
 		DestroyHandle(h);
 	}
 	DestroyHandle(this->mhudKeysParticle);
+	for (auto &h : this->mhudDeltaSignParticles)
+	{
+		DestroyHandle(h);
+	}
+	for (auto &h : this->mhudDeltaDigitParticles)
+	{
+		DestroyHandle(h);
+	}
+	for (auto &h : this->mhudDeltaDelimParticles)
+	{
+		DestroyHandle(h);
+	}
 	for (i32 &v : this->mhudParticleVariant)
 	{
 		v = -1;
@@ -433,6 +487,7 @@ void KZHUDService::UpdateMHUDTimerParticles()
 	{
 		DestroyGroup(this->mhudTimerDigitParticles, KZ_ARRAYSIZE(this->mhudTimerDigitParticles), this->mhudParticleVariant[2]);
 		DestroyGroup(this->mhudTimerDelimParticles, KZ_ARRAYSIZE(this->mhudTimerDelimParticles), this->mhudParticleVariant[3]);
+		this->UpdateMHUDDeltaParticles(0.0f, 0.0f, 0.0f, false, false);
 		return;
 	}
 
@@ -464,6 +519,7 @@ void KZHUDService::UpdateMHUDTimerParticles()
 				h.Get()->Destroy();
 			}
 		}
+		this->UpdateMHUDDeltaParticles(0.0f, 0.0f, 0.0f, false, false);
 		return;
 	}
 
@@ -560,6 +616,127 @@ void KZHUDService::UpdateMHUDTimerParticles()
 		else
 		{
 			p->Destroy();
+		}
+	}
+
+	// Правый край строки таймера (последняя пара) — в экранных единицах (смещение × размер).
+	const f32 rightEdge = (layoutX[numDigits - 1] + MHUD_DIGIT_WIDTH) * g.size;
+	this->UpdateMHUDDeltaParticles(rightEdge, g.y * g.size, g.size, el.outline, timerRunning);
+}
+
+// === Дельта к PB/WR =================================================================
+
+// Тот же гейт и тот же источник, что у panorama (layout/mhud.cpp: UpdateTimerElement): путь
+// сравнения `!lead` своего игрока, вид записи — hudTimerCompare (1 PB, 2 WR). Путь заказывает
+// DrawPanels (SetCompareWanted), здесь только читаем. prac-часы к пути отношения не имеют.
+void KZHUDService::UpdateMHUDDeltaParticles(f32 timerRightEdge, f32 timerY, f32 timerSize, bool outline, bool show)
+{
+	const MHUDLayoutPrefs &prefs = this->GetLayoutPrefs();
+	KZPlayer *src = this->MHUDDataSource();
+	const bool inPrac = src->pracService && src->pracService->IsInPrac();
+	f64 delta = 0.0;
+	show = show && !inPrac && prefs.timerCompare != 0 && src->leadService && src->leadService->GetCompareDeltaSeconds(delta);
+	if (!show)
+	{
+		DestroyGroup(this->mhudDeltaSignParticles, KZ_ARRAYSIZE(this->mhudDeltaSignParticles), this->mhudParticleVariant[5]);
+		DestroyGroup(this->mhudDeltaDigitParticles, KZ_ARRAYSIZE(this->mhudDeltaDigitParticles), this->mhudParticleVariant[6]);
+		DestroyGroup(this->mhudDeltaDelimParticles, KZ_ARRAYSIZE(this->mhudDeltaDelimParticles), this->mhudParticleVariant[7]);
+		return;
+	}
+
+	// Округление до показываемой точности ДО разбиения на минуты (как hudfmt::FormatDelta).
+	const bool detailed = prefs.timerDetailed;
+	const i64 q = detailed ? 1000 : 100;
+	i64 units = (i64)(fabs(delta) * (f64)q + 0.5);
+	const i32 frac = (i32)(units % q);
+	i64 wholeSecs = units / q;
+	const i32 mins = (i32)Min(wholeSecs / 60, (i64)99);
+	const i32 secs = (i32)(wholeSecs % 60);
+
+	// Токены слева направо: знак, [минуты, «:»], секунды, «.», сотые, [тысячная].
+	// sequence разряда: 0..99 — число без ведущего нуля, 100..109 — «00».. «09».
+	struct Token
+	{
+		i32 kind; // 0 знак, 1 разряды, 2 разделитель
+		i32 seq;
+		f32 width;
+	};
+	Token tokens[8];
+	i32 n = 0;
+	tokens[n++] = {0, delta < 0.0 ? MHUD_SIGN_MINUS : MHUD_SIGN_PLUS, MHUD_SIGN_WIDTH};
+	if (mins > 0)
+	{
+		tokens[n++] = {1, mins, mins >= 10 ? MHUD_DIGIT_WIDTH * 2 : MHUD_DIGIT_WIDTH};
+		tokens[n++] = {2, MHUD_TIMER_DELIM_COLON, MHUD_DELIM_WIDTH};
+		tokens[n++] = {1, secs < 10 ? secs + 100 : secs, MHUD_DIGIT_WIDTH * 2};
+	}
+	else
+	{
+		tokens[n++] = {1, secs, secs >= 10 ? MHUD_DIGIT_WIDTH * 2 : MHUD_DIGIT_WIDTH};
+	}
+	tokens[n++] = {2, MHUD_TIMER_DELIM_DOT, MHUD_DELIM_WIDTH};
+	const i32 centis = detailed ? frac / 10 : frac;
+	tokens[n++] = {1, centis < 10 ? centis + 100 : centis, MHUD_DIGIT_WIDTH * 2};
+	if (detailed)
+	{
+		tokens[n++] = {1, frac % 10, MHUD_DIGIT_WIDTH};
+	}
+
+	const f32 size = Max(timerSize * MHUD_DELTA_SCALE, 0.001f);
+	const bool ahead = delta < 0.0;
+	const Color color = ahead ? ParticleColor(prefs.deltaAhead, MHUD_DEF_DELTA_AHEAD_COLOR) : ParticleColor(prefs.deltaBehind, MHUD_DEF_DELTA_BEHIND_COLOR);
+
+	char numbersPath[256], delimPath[256], signPath[256];
+	BuildParticlePath(numbersPath, sizeof(numbersPath), MHUD_PARTICLE_NUMBERS_PATTERN, MHUD_PARTICLE_FONT, outline);
+	BuildParticlePath(delimPath, sizeof(delimPath), MHUD_PARTICLE_TIMER_DELIM_PATTERN, MHUD_PARTICLE_FONT, outline);
+	BuildParticlePath(signPath, sizeof(signPath), MHUD_PARTICLE_SIGN_PATTERN, MHUD_PARTICLE_FONT, outline);
+	EnsureGroup(this->mhudDeltaSignParticles, KZ_ARRAYSIZE(this->mhudDeltaSignParticles), this->mhudParticleVariant[5], outline, signPath, color,
+				size, 0.0f, 0.0f);
+	EnsureGroup(this->mhudDeltaDigitParticles, KZ_ARRAYSIZE(this->mhudDeltaDigitParticles), this->mhudParticleVariant[6], outline, numbersPath,
+				color, size, 0.0f, 0.0f);
+	EnsureGroup(this->mhudDeltaDelimParticles, KZ_ARRAYSIZE(this->mhudDeltaDelimParticles), this->mhudParticleVariant[7], outline, delimPath,
+				color, size, 0.0f, 0.0f);
+
+	// Левый край дельты — правый край таймера + зазор; координаты частицы — в единицах её размера.
+	f32 cursor = (timerRightEdge + MHUD_DELTA_GAP * timerSize) / size;
+	const f32 y = timerY / size;
+	i32 usedDigits = 0, usedDelims = 0;
+	for (i32 i = 0; i < n; i++)
+	{
+		const Token &t = tokens[i];
+		CParticleSystem *p = NULL;
+		if (t.kind == 0)
+		{
+			p = this->mhudDeltaSignParticles[0].Get();
+		}
+		else if (t.kind == 1)
+		{
+			p = this->mhudDeltaDigitParticles[usedDigits++].Get();
+		}
+		else
+		{
+			p = this->mhudDeltaDelimParticles[usedDelims++].Get();
+		}
+		if (p)
+		{
+			SetParticleLayout(p, (f32)t.seq, size, cursor + t.width * 0.5f, y);
+			SetParticleTint(p, color);
+			p->Start();
+		}
+		cursor += t.width;
+	}
+	for (i32 i = usedDigits; i < (i32)KZ_ARRAYSIZE(this->mhudDeltaDigitParticles); i++)
+	{
+		if (this->mhudDeltaDigitParticles[i].Get())
+		{
+			this->mhudDeltaDigitParticles[i].Get()->Destroy();
+		}
+	}
+	for (i32 i = usedDelims; i < (i32)KZ_ARRAYSIZE(this->mhudDeltaDelimParticles); i++)
+	{
+		if (this->mhudDeltaDelimParticles[i].Get())
+		{
+			this->mhudDeltaDelimParticles[i].Get()->Destroy();
 		}
 	}
 }
