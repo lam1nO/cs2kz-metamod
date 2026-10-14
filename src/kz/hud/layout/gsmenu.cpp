@@ -275,6 +275,11 @@ std::string KZ::gsmenu::Initial(const char *name)
 	return out;
 }
 
+// Окна форка и сетка GG1 не живут вместе (рисуются друг поверх друга): открытие окна форка
+// просит GG1 закрыть захваченную сетку, захват сетки закрывает окна форка (cyb_ui_capture).
+static bool g_closingForExt[MAXPLAYERS + 1];
+static void YieldExtGrid(KZPlayer *player);
+
 bool KZ::gsmenu::ShowTable(KZPlayer *player, const Table &t, ClickFn onClick, const char *owner)
 {
 	WindowState *w = StateOf(player);
@@ -287,6 +292,7 @@ bool KZ::gsmenu::ShowTable(KZPlayer *player, const Table &t, ClickFn onClick, co
 	{
 		return false;
 	}
+	const bool wasOpen = w->open;
 	w->onClick = std::move(onClick);
 	w->owner = owner ? owner : "";
 	// Боковой список (меню cs2menus) живёт рядом и не трогается: это другой корень разметки.
@@ -393,6 +399,10 @@ bool KZ::gsmenu::ShowTable(KZPlayer *player, const Table &t, ClickFn onClick, co
 
 	w->open = true;
 	SetCapture(player, *w, true);
+	if (!wasOpen)
+	{
+		YieldExtGrid(player);
+	}
 	return true;
 }
 
@@ -408,6 +418,8 @@ bool KZ::gsmenu::ShowList(KZPlayer *player, const List &l)
 	{
 		return false;
 	}
+	auto shown = w->classes.find("gs|shown");
+	const bool wasShown = shown != w->classes.end() && shown->second;
 	Class(player, *w, layout, "gs", "shown", true);
 	Class(player, *w, layout, "gs", "nokey", true); // цифр-хоткеев у прослойки нет
 	Class(player, *w, layout, "gs", "k-adj", l.adjHint);
@@ -441,6 +453,10 @@ bool KZ::gsmenu::ShowList(KZPlayer *player, const List &l)
 		Var(player, *w, layout, sub, "v", r.value);
 	}
 	Flush(*w, layout);
+	if (!wasShown)
+	{
+		YieldExtGrid(player);
+	}
 	return true;
 }
 
@@ -593,6 +609,36 @@ static void DestroyExt(KZPlayer *player, ExtState &e)
 	e.layout.clear();
 	e.clickWindowStart = 0.0;
 	e.clicksInWindow = 0;
+}
+
+// Окно форка открылось — захваченную сетку GG1 закрыть тем же путём, что ✕ сетки (GG1: «close»).
+// Голосование GG1 (без захвата) живёт рядом с окнами форка — его не трогаем.
+static void YieldExtGrid(KZPlayer *player)
+{
+	const i32 slot = player->GetPlayerSlot().Get();
+	if (slot < 0 || slot >= MAXPLAYERS || g_closingForExt[slot])
+	{
+		return; // окно открыл колбэк закрытия ради сетки — сетку не трогаем, иначе пинг-понг
+	}
+	ExtState &e = g_ext[slot];
+	if (!e.capture || !e.entity.IsValid())
+	{
+		return;
+	}
+	char cmd[64];
+	V_snprintf(cmd, sizeof(cmd), "css_ui_click %i gg_close\n", slot);
+	interfaces::pEngine->ServerCommand(cmd);
+	KZ_LOG_INFO(LogChannel::General, "[cyb] gsmenu_ext_grid_closed reason=fork_window slot=%i\n", slot);
+}
+
+// Сетка GG1 взяла захват — окно gw и боковое меню форка закрыть, как по ✕.
+static void CloseForExt(KZPlayer *player)
+{
+	const i32 slot = player->GetPlayerSlot().Get();
+	g_closingForExt[slot] = true;
+	KZ::gsmenu::Close(player, "ext_grid");
+	KZ::gsmenu::ShimCancel(player);
+	g_closingForExt[slot] = false;
 }
 
 void KZ::gsmenu::OnSlotReset(KZPlayer *player)
@@ -760,6 +806,10 @@ CON_COMMAND_F(cyb_ui_capture, "cyb_ui_capture <slot> <0|1> — курсор и �
 	{
 		((CCSCustomHudLayout *)ent)->SetInputCaptureEnabled(player->GetPlayerSlot(), on);
 		e.capture = on;
+		if (on)
+		{
+			CloseForExt(player);
+		}
 	}
 }
 

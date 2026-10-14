@@ -1056,6 +1056,19 @@ bool KZ::gsmenu::ShimClosedRecently(KZPlayer *player)
 	return d >= 0 && d <= 1;
 }
 
+void KZ::gsmenu::ShimCancel(KZPlayer *player)
+{
+	if (!g_shim || !player)
+	{
+		return;
+	}
+	const int slot = player->GetPlayerSlot().Get();
+	if (g_shim->SessionOf(slot))
+	{
+		g_shim->EndSession(slot, MenuEndReason::Cancelled);
+	}
+}
+
 void KZ::gsmenu::ShimDisconnect(KZPlayer *player)
 {
 	if (!g_shim || !player)

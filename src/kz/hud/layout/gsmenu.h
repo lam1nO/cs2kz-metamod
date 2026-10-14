@@ -110,6 +110,7 @@ namespace KZ::gsmenu
 	ICS2Menus *WrapMenus(ICS2Menus *real);
 	void ShimTick(KZPlayer *player);         // ввод и перерисовка, каждый такт (DrawPanels)
 	void ShimDisconnect(KZPlayer *player);
+	void ShimCancel(KZPlayer *player); // закрыть боковое меню прослойки (onEnd с Cancelled)
 	void ShimRedrawAll(); // сущность пересоздана/снесена — перерисовать открытые списки
 	bool ShimClosedRecently(KZPlayer *player); // меню прослойки закрылось в этом/прошлом такте
 	// Заголовок группы перед пунктом item меню (только панорама; cs2menus его не видит).

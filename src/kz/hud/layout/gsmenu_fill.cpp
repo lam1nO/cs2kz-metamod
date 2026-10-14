@@ -31,24 +31,31 @@
 
 #include "tier0/memdbgon.h"
 
-// Главный курс карты в запросах: наименьший StageID её курсов.
-#define KZ_FILL_MAIN_COURSE(mc) "(SELECT MIN(mcm.StageID) FROM MapCourses mcm WHERE mcm.MapID = " mc ".MapID)"
+// Главные курсы (наименьший StageID карты; пара MapID+StageID уникальна — курс на карту один).
+// Подзапрос по StageID бежит только по MapCourses: Times сначала сворачиваются по курсу, и уже
+// результат джойнится к главным курсам. Коррелированный подзапрос в WHERE по Times шёл бы на каждую
+// строку времён (3 с на 200k в SQLite без индекса). Без WITH и оконных функций — MySQL 5.7 и SQLite.
+#define KZ_FILL_MAIN_COURSES                                                                                      \
+	"(SELECT mcx.ID AS CourseID, mcx.MapID FROM MapCourses mcx "                                                  \
+	"WHERE mcx.StageID = (SELECT MIN(mcm.StageID) FROM MapCourses mcm WHERE mcm.MapID = mcx.MapID))"
 
 // PB игрока по всем картам: [0] имя карты, [1] лучшее время любым стилем (done), [2] без стилей (pb).
-static constexpr char sql_fill_pb[] = "SELECT m.Name, MIN(t.RunTime), MIN(CASE WHEN t.StyleIDFlags = 0 THEN t.RunTime END) "
-									  "FROM Times t INNER JOIN MapCourses mc ON mc.ID = t.MapCourseID INNER JOIN Maps m ON m.ID = mc.MapID "
-									  "WHERE t.SteamID64 = %llu AND t.ModeID = %d AND mc.StageID = " KZ_FILL_MAIN_COURSE("mc") " GROUP BY m.Name";
+static constexpr char sql_fill_pb[] =
+	"SELECT m.Name, x.AnyTime, x.NoStyle FROM ("
+	"SELECT t.MapCourseID AS CourseID, MIN(t.RunTime) AS AnyTime, MIN(CASE WHEN t.StyleIDFlags = 0 THEN t.RunTime END) AS NoStyle "
+	"FROM Times t WHERE t.SteamID64 = %llu AND t.ModeID = %d GROUP BY t.MapCourseID) x "
+	"INNER JOIN " KZ_FILL_MAIN_COURSES " mm ON mm.CourseID = x.CourseID INNER JOIN Maps m ON m.ID = mm.MapID";
 
-// WR сервера по всем картам без оконных функций (MySQL и SQLite): минимум главного курса без стилей
-// и без забаненных (как !maptop), затем строки с этим временем — ник. Ничья — первая по t.ID.
+// WR сервера по всем картам: минимум главного курса без стилей и без забаненных (как !maptop),
+// затем строки с этим временем — ник. Ничья — первая по t2.ID.
 static constexpr char sql_fill_wr[] =
 	"SELECT m.Name, x.Best, p.Alias FROM ("
-	"SELECT mc.MapID, MIN(t.RunTime) AS Best FROM Times t INNER JOIN MapCourses mc ON mc.ID = t.MapCourseID "
+	"SELECT t.MapCourseID AS CourseID, MIN(t.RunTime) AS Best FROM Times t "
 	"LEFT JOIN Bans b ON b.SteamID64 = t.SteamID64 AND (b.ExpiresAt IS NULL OR b.ExpiresAt > CURRENT_TIMESTAMP) "
-	"WHERE b.ID IS NULL AND t.ModeID = %d AND t.StyleIDFlags = 0 AND mc.StageID = " KZ_FILL_MAIN_COURSE("mc") " GROUP BY mc.MapID) x "
-	"INNER JOIN Maps m ON m.ID = x.MapID "
-	"INNER JOIN MapCourses mc2 ON mc2.MapID = x.MapID AND mc2.StageID = " KZ_FILL_MAIN_COURSE("mc2") " "
-	"INNER JOIN Times t2 ON t2.MapCourseID = mc2.ID AND t2.ModeID = %d AND t2.StyleIDFlags = 0 AND t2.RunTime = x.Best "
+	"WHERE b.ID IS NULL AND t.ModeID = %d AND t.StyleIDFlags = 0 GROUP BY t.MapCourseID) x "
+	"INNER JOIN " KZ_FILL_MAIN_COURSES " mm ON mm.CourseID = x.CourseID "
+	"INNER JOIN Maps m ON m.ID = mm.MapID "
+	"INNER JOIN Times t2 ON t2.MapCourseID = x.CourseID AND t2.ModeID = %d AND t2.StyleIDFlags = 0 AND t2.RunTime = x.Best "
 	"INNER JOIN Players p ON p.SteamID64 = t2.SteamID64 "
 	"LEFT JOIN Bans b2 ON b2.SteamID64 = t2.SteamID64 AND (b2.ExpiresAt IS NULL OR b2.ExpiresAt > CURRENT_TIMESTAMP) "
 	"WHERE b2.ID IS NULL ORDER BY m.Name, t2.ID";
@@ -56,6 +63,7 @@ static constexpr char sql_fill_wr[] =
 #define KZ_FILL_WR_TTL   60.0 // с — перезапрос WR не чаще
 #define KZ_FILL_NAME_MAX 20   // символов ника на плитке
 #define KZ_FILL_TILES    400  // gt0..gt399 — ёмкость сетки разметки (GridView.MaxTiles GG1)
+#define KZ_FILL_RETRY    10.0 // с — повтор упавшего запроса не раньше
 
 namespace
 {
@@ -73,6 +81,7 @@ namespace
 		bool valid = false;
 		bool loading = false;
 		u32 gen = 0;
+		f64 retryAt = 0.0; // запрос упал — следующий не раньше
 	};
 
 	struct PbEntry
@@ -100,6 +109,7 @@ namespace
 		bool pbValid = false;
 		bool pbLoading = false;
 		u32 pbGen = 0;
+		f64 pbRetryAt = 0.0;
 		std::unordered_map<std::string, PbEntry> pb;
 	};
 
@@ -293,6 +303,7 @@ namespace
 			if (w.gen == gen)
 			{
 				w.loading = false;
+				w.retryAt = Now() + KZ_FILL_RETRY;
 			}
 			KZ_LOG_WARN(LogChannel::General, "[cyb] gsm_fill_wr_failed mode=%d err=%s\n", modeID, error.c_str());
 		};
@@ -346,6 +357,7 @@ namespace
 			if (f.pbGen == gen)
 			{
 				f.pbLoading = false;
+				f.pbRetryAt = Now() + KZ_FILL_RETRY;
 			}
 			KZ_LOG_WARN(LogChannel::General, "[cyb] gsm_fill_pb_failed slot=%i err=%s\n", slot, error.c_str());
 		};
@@ -372,14 +384,16 @@ namespace
 			if (hasWr)
 			{
 				// Своё время не лучше рекорда сервера (забаненный не входит в WR — тоже «WR»).
-				if (Ms(pb->second.pb) <= Ms(wr->second.time))
+				// Разница меньше сотой (на экране «+0.00») — тоже «WR».
+				const long long gap = Ms(pb->second.pb) / 10 - Ms(wr->second.time) / 10;
+				if (Ms(pb->second.pb) <= Ms(wr->second.time) || gap <= 0)
 				{
 					t.iswr = true;
 					t.gap = "WR";
 				}
 				else
 				{
-					t.gap = FormatGap(Ms(pb->second.pb) / 10 - Ms(wr->second.time) / 10);
+					t.gap = FormatGap(gap);
 				}
 			}
 		}
@@ -405,16 +419,20 @@ namespace
 		char panel[16];
 		for (size_t i = 0; i < f.tiles.size(); i++)
 		{
-			if (f.tiles[i].empty())
-			{
-				continue;
-			}
-			const TileOut want = Compute(f, w, f.tiles[i]);
 			TileOut &cur = f.applied[i];
+			// Пустой элемент (имя карты не прошло в консоль) — плитку очистить: в ней могла быть прежняя карта.
+			TileOut want;
+			want.set = true;
+			if (!f.tiles[i].empty())
+			{
+				want = Compute(f, w, f.tiles[i]);
+			}
 			V_snprintf(panel, sizeof(panel), "gt%i", (i32)i);
 			auto cls = [&](const char *name, bool on, bool was)
 			{
-				if (cur.set && on == was)
+				// Чистая плитка (впервые после создания сущности) — значений по умолчанию не пишем:
+				// каждая запись — линейный поиск по вектору сущности.
+				if (cur.set ? on == was : !on)
 				{
 					return;
 				}
@@ -423,7 +441,7 @@ namespace
 			};
 			auto var = [&](const char *name, const std::string &value, const std::string &was)
 			{
-				if (cur.set && value == was)
+				if (cur.set ? value == was : value.empty())
 				{
 					return;
 				}
@@ -462,7 +480,10 @@ namespace
 		SlotFill &f = g_fill[slot];
 		const i32 modeID = KZ::mode::GetModeInfo(player->modeService).databaseID;
 		const bool pbOk = f.pbValid && f.pbMode == modeID && f.pbSteam == player->GetSteamId64();
-		if (!pbOk)
+		const f64 now = Now();
+		// Упавший запрос — повтор не раньше KZ_FILL_RETRY (now < retryAt - RETRY — новый отсчёт realtime).
+		auto canRetry = [now](f64 at) { return now >= at || now < at - KZ_FILL_RETRY; };
+		if (!pbOk && canRetry(f.pbRetryAt))
 		{
 			RequestPb(player, slot, modeID);
 		}
@@ -472,8 +493,7 @@ namespace
 			w.valid = false; // карта сменилась
 			w.maps.clear();
 		}
-		const f64 now = Now();
-		if (!w.valid || now - w.fetchedAt >= KZ_FILL_WR_TTL || now < w.fetchedAt)
+		if ((!w.valid || now - w.fetchedAt >= KZ_FILL_WR_TTL || now < w.fetchedAt) && canRetry(w.retryAt))
 		{
 			RequestWr(modeID);
 		}
@@ -567,7 +587,11 @@ CON_COMMAND_F(kz_gsm_fill, "kz_gsm_fill <slot> <first> <карта,карта,..
 		f.pending.resize(count);
 		f.tiles.swap(f.pending);
 		f.pending.clear();
-		f.applied.resize(f.tiles.size());
+		// applied не укорачиваем: дальние плитки держат данные прошлой, более длинной сетки.
+		if (f.applied.size() < f.tiles.size())
+		{
+			f.applied.resize(f.tiles.size());
+		}
 		f.active = true;
 		Refresh(slot);
 		return;
