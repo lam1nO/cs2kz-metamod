@@ -120,6 +120,25 @@ namespace KZ::hudfmt
 		return pct < -50 ? -50 : (pct > 50 ? 50 : pct);
 	}
 
+	void FormatCourseStyles(const char *const *styles, int styleCount, char *out, size_t outLen)
+	{
+		if (!out || outLen == 0)
+		{
+			return;
+		}
+		out[0] = 0;
+		if (styleCount <= 0)
+		{
+			snprintf(out, outLen, "Normal");
+			return;
+		}
+		size_t n = 0;
+		for (int i = 0; i < styleCount && n + 1 < outLen; i++)
+		{
+			n = ClampWritten(n, snprintf(out + n, outLen - n, "%s%s", i ? " \xC2\xB7 " : "", styles[i] ? styles[i] : ""), outLen);
+		}
+	}
+
 	const char *NoTimePlaceholder(bool detailed)
 	{
 		return detailed ? "--:--.---" : "--:--.--";

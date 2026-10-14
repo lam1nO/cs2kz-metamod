@@ -54,8 +54,8 @@ static_function void GetKeysIdleChoices(KZPlayer *player, i64 tag, std::vector<K
 
 static_function i64 GetKeysIdleCurrent(KZPlayer *player, i64 tag)
 {
-	// Дефолт 2 (Underscore) синхронизирован с текущими настройками игрока (задача hud-defaults).
-	return player->optionService->GetPreferenceInt("mhudKeysIdle", 2);
+	// Дефолт — MHUD_DEF_KEYS_IDLE (худ v2: скрыты), тот же, что читает RefreshLayoutPrefs.
+	return player->optionService->GetPreferenceInt("mhudKeysIdle", MHUD_DEF_KEYS_IDLE);
 }
 
 static_function void OnKeysIdlePick(KZPlayer *player, i64 tag, i64 id)
@@ -174,9 +174,9 @@ static_function void AddHudElementItems(KZOptNode *node, LayoutElement e)
 	// пункт на всё меню: старый "Outline" в General убран, чтобы не осталось двух источников.
 	// Через колбэки — из-за миграции с hudOutline, см. OutlineGetCurrent выше.
 	KZ::menu::AddActionToggle(node, "HUD - Menu Label Outline", &OutlineGetCurrent, &OutlineOnActivate, (i64)e);
-	// Дефолт 0 (выкл) синхронизирован с текущими настройками игрока (задача hud-defaults) —
-	// тот же ответ отдаёт GetElementOutlinePref (layout/prefs.cpp) через fallback на hudOutline.
-	KZ::menu::SetItemPref(node, def.outlineKey, KZOptStorage::Bool, 0);
+	// Дефолт — LayoutOutlineDefault (худ v2: только у клавиш) — тот же ответ отдаёт
+	// GetElementOutlinePref (layout/prefs.cpp) через fallback на hudOutline.
+	KZ::menu::SetItemPref(node, def.outlineKey, KZOptStorage::Bool, LayoutOutlineDefault(e) ? 1 : 0);
 	// Прозрачность хранится Int (0-100), а не Float, как размер/позиция того же элемента —
 	// AddSize по умолчанию заводит Float (px-поле), поэтому storage переопределяем ЯВНО:
 	// реальный потребитель (layout/prefs.cpp:GetLayoutPrefs) читает opacityKey через
@@ -460,8 +460,8 @@ void KZHUDService::InitMenuPrefs()
 	KZ::menu::AddToggle(keysColors, "HUD - Menu Label Glow", "mhudKeysGlow", false);
 	KZ::menu::AddToggle(keysColors, "HUD - Menu Label Fill", "mhudKeysFill", false);
 	KZ::menu::AddChoice(keysColors, "HUD - Menu Label Idle", &GetKeysIdleChoices, &GetKeysIdleCurrent, &OnKeysIdlePick);
-	KZ::menu::SetItemPref(keysColors, "mhudKeysIdle", KZOptStorage::Int, 2);
-	KZ::menu::AddColor(keysColors, "HUD - Menu Label Color", "mhudKeysColor", MHUD_DEF_BASE_COLOR);
+	KZ::menu::SetItemPref(keysColors, "mhudKeysIdle", KZOptStorage::Int, MHUD_DEF_KEYS_IDLE);
+	KZ::menu::AddColor(keysColors, "HUD - Menu Label Color", "mhudKeysColor", MHUD_DEF_KEYS_COLOR);
 	KZ::menu::AddColor(keysColors, "HUD - Menu Label OverlapColor", "mhudKeysOverlapColor", MHUD_DEF_KEYS_OVERLAP_COLOR);
 	KZ::menu::SetItemEnabledBy(keysColors, "hudKeysOverlap");
 	KZ::menu::AddColor(keysColors, "HUD - Menu Label PressedColor", "mhudKeysPressedColor", MHUD_DEF_KEYS_PRESSED_COLOR);
@@ -473,8 +473,8 @@ void KZHUDService::InitMenuPrefs()
 	// элемента, обмена худом и белого списка. -1 «авто» входит в диапазон: это не «ноль», а
 	// отсутствие класса key-gap (layout/prefs.cpp). Size по умолчанию хранит Float — читатель
 	// берёт Int, поэтому хранение задано явно, как у прозрачности.
-	KZ::menu::AddSize(keysColors, "HUD Editor - Prop KeysGap", "mhudKeysGap", -1, -1, 24);
-	KZ::menu::SetItemPref(keysColors, "mhudKeysGap", KZOptStorage::Int, -1);
+	KZ::menu::AddSize(keysColors, "HUD Editor - Prop KeysGap", "mhudKeysGap", MHUD_DEF_KEYS_GAP, -1, 24);
+	KZ::menu::SetItemPref(keysColors, "mhudKeysGap", KZOptStorage::Int, MHUD_DEF_KEYS_GAP);
 
 	KZ::menu::AddColor(elementNodes[(i32)LayoutElement::Checkpoint], "HUD - Menu Label Color", "mhudCheckpointColor", MHUD_DEF_BASE_COLOR);
 	// Цвета полей редактора !hud и дельты таймера: пункты в скрытых узлах элементов — их правит

@@ -36,13 +36,13 @@ extern const LayoutElementDef LAYOUT_ELEMENTS[(i32)LayoutElement::Count] =
 	// разметке не было. varName "progress" — переменная процента (лейбл mhud_progress_pct внутри
 	// корня); подпись и ширину полосы пишет UpdateLeadProgressElement. Ключи префов прежние
 	// (mhudLeadProgress*). Дефолт тумблера false: элемент включают явно.
-	{"mhud_progress_pct", "mhud_progress", "progress",   "mhudLeadProgress", "mhudLeadProgressX", "mhudLeadProgressY", "mhudLeadProgressSize", "mhudLeadProgressFont", "mhudLeadProgressOutline", "mhudLeadProgressOpacity", LAYOUT_DEF_LEADPROGRESS_X, LAYOUT_DEF_LEADPROGRESS_Y, LAYOUT_DEF_LEADPROGRESS_SIZE, true, "stratum2-medium"},
+	{"mhud_progress_pct", "mhud_progress", "progress",   "mhudLeadProgress", "mhudLeadProgressX", "mhudLeadProgressY", "mhudLeadProgressSize", "mhudLeadProgressFont", "mhudLeadProgressOutline", "mhudLeadProgressOpacity", LAYOUT_DEF_LEADPROGRESS_X, LAYOUT_DEF_LEADPROGRESS_Y, LAYOUT_DEF_LEADPROGRESS_SIZE, true, LAYOUT_V2_FONT},
 	// Поля редактора `!hud` (§4.1 спеки). Корни — Panel (pbwr, showpos) или Label (course,
 	// runtype). У pbwr varName не пишется никогда: текст идёт в переменные ячеек (mhud.cpp).
-	{"mhud_pbwr",       "mhud_pbwr",       "pbwr",       "hudPbWr",       "mhudPbWrX",       "mhudPbWrY",       "mhudPbWrSize",       "mhudPbWrFont",       "mhudPbWrOutline",       "mhudPbWrOpacity",       LAYOUT_DEF_PBWR_X,       LAYOUT_DEF_PBWR_Y,       LAYOUT_DEF_PBWR_SIZE,       true, LAYOUT_DEFAULT_FONT},
+	{"mhud_pbwr",       "mhud_pbwr",       "pbwr",       "hudPbWr",       "mhudPbWrX",       "mhudPbWrY",       "mhudPbWrSize",       "mhudPbWrFont",       "mhudPbWrOutline",       "mhudPbWrOpacity",       LAYOUT_DEF_PBWR_X,       LAYOUT_DEF_PBWR_Y,       LAYOUT_DEF_PBWR_SIZE,       true, LAYOUT_V2_FONT},
 	{"mhud_showpos",    "mhud_showpos",    "pos",        "hudShowPos",    "mhudShowPosX",    "mhudShowPosY",    "mhudShowPosSize",    "mhudShowPosFont",    "mhudShowPosOutline",    "mhudShowPosOpacity",    LAYOUT_DEF_SHOWPOS_X,    LAYOUT_DEF_SHOWPOS_Y,    LAYOUT_DEF_SHOWPOS_SIZE,    true, "stratum2-mono"},
-	{"mhud_course",     "mhud_course",     "course",     "hudCourse",     "mhudCourseX",     "mhudCourseY",     "mhudCourseSize",     "mhudCourseFont",     "mhudCourseOutline",     "mhudCourseOpacity",     LAYOUT_DEF_COURSE_X,     LAYOUT_DEF_COURSE_Y,     LAYOUT_DEF_COURSE_SIZE,     true, "stratum2-bold"},
-	{"mhud_runtype",    "mhud_runtype",    "runtype",    "hudRunType",    "mhudRunTypeX",    "mhudRunTypeY",    "mhudRunTypeSize",    "mhudRunTypeFont",    "mhudRunTypeOutline",    "mhudRunTypeOpacity",    LAYOUT_DEF_RUNTYPE_X,    LAYOUT_DEF_RUNTYPE_Y,    LAYOUT_DEF_RUNTYPE_SIZE,    true, "stratum2-bold"},
+	{"mhud_course",     "mhud_course",     "course",     "hudCourse",     "mhudCourseX",     "mhudCourseY",     "mhudCourseSize",     "mhudCourseFont",     "mhudCourseOutline",     "mhudCourseOpacity",     LAYOUT_DEF_COURSE_X,     LAYOUT_DEF_COURSE_Y,     LAYOUT_DEF_COURSE_SIZE,     true, LAYOUT_V2_FONT},
+	{"mhud_runtype",    "mhud_runtype",    "runtype",    "hudRunType",    "mhudRunTypeX",    "mhudRunTypeY",    "mhudRunTypeSize",    "mhudRunTypeFont",    "mhudRunTypeOutline",    "mhudRunTypeOpacity",    LAYOUT_DEF_RUNTYPE_X,    LAYOUT_DEF_RUNTYPE_Y,    LAYOUT_DEF_RUNTYPE_SIZE,    true, LAYOUT_V2_FONT},
 };
 // clang-format on
 

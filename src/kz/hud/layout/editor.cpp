@@ -60,11 +60,11 @@ static_global const EditorReplicaDef EDITOR_REPLICA[(i32)LayoutElement::Count] =
 	{"e_prespeed",     "x_mhud_prespeed",     "prespeed",     "tag_prespeed",     "HUD Editor - Element Prespeed"},
 	{"e_keys",         "x_mhud_keys",         "keys",         "tag_keys",         "HUD Editor - Element Keys"},
 	{"e_checkpoint",   "x_mhud_checkpoint",   "checkpoint",   "tag_checkpoint",   "HUD Editor - Element Checkpoint"},
-	{"e_leadprogress", "x_mhud_progress_pct", "progress",     "tag_leadprogress", "HUD Editor - Element LeadProgress"},
-	{"e_pbwr",         "x_mhud_pbwr",         "pbwr",         "tag_pbwr",         "HUD Editor - Element PbWr"},
+	{"e_leadprogress", "x2_mhud_progress_pct", "progress",     "tag_leadprogress", "HUD Editor - Element LeadProgress"},
+	{"e_pbwr",         "x2_mhud_pbwr",        "pbwr",         "tag_pbwr",         "HUD Editor - Element PbWr"},
 	{"e_showpos",      "x_mhud_showpos",      "pos",          "tag_showpos",      "HUD Editor - Element ShowPos"},
-	{"e_course",       "x_mhud_course",       "course",       "tag_course",       "HUD Editor - Element Course"},
-	{"e_runtype",      "x_mhud_runtype",      "runtype",      "tag_runtype",      "HUD Editor - Element RunType"},
+	{"e_course",       "x2_mhud_course",      "course",       "tag_course",       "HUD Editor - Element Course"},
+	{"e_runtype",      "x2_mhud_runtype",     "runtype",      "tag_runtype",      "HUD Editor - Element RunType"},
 };
 // clang-format on
 
@@ -346,6 +346,9 @@ void KZHUDService::RenderEditor()
 	}
 	this->SetMenuBoolClass(layout, "opt_root", "hidden", this->menuApplied.optHidden, true);
 	this->SetMenuBoolClass(layout, "edit_root", "hidden", this->menuApplied.editHidden, false);
+	// Худ v2: реплика нового оформления (x2_*) включается классом корня редактора — старые версии
+	// KZ его не ставят и видят прежнюю реплику (x_*) из того же options.xml.
+	this->SetMenuBoolClass(layout, "edit_root", "hud2", this->menuApplied.editHud2, true);
 
 	const char *lang = this->player->languageService->GetLanguage();
 	auto phrase = [lang](const char *key) { return KZLanguageService::PrepareMessageWithLang(lang, key); };
@@ -571,7 +574,7 @@ void KZHUDService::RenderEditorReplica(CCSCustomHudLayout *layout, bool tickOnly
 	// «Прогресс»: 38% — плейсхолдер дизайна (подпись, процент и полоса та же запись, что у худа).
 	if (prefs.elements[(i32)LayoutElement::LeadProgress].enabled)
 	{
-		this->ApplyLeadProgressParts(layout, "x_", this->editorExtra, KZ_EDITOR_PROGRESS_PLACEHOLDER,
+		this->ApplyLeadProgressParts(layout, "x2_", this->editorExtra, KZ_EDITOR_PROGRESS_PLACEHOLDER,
 									 prefs.elements[(i32)LayoutElement::LeadProgress], prefs.leadProgressColor);
 	}
 	apply(LayoutElement::LeadProgress, true, KZ_EDITOR_PROGRESS_TEXT, prefs.leadProgressColor);
@@ -581,18 +584,17 @@ void KZHUDService::RenderEditorReplica(CCSCustomHudLayout *layout, bool tickOnly
 	const bool anyCell = cells[0] || cells[1] || cells[2] || cells[3];
 	if (anyCell && prefs.elements[(i32)LayoutElement::PbWr].enabled)
 	{
-		static const char *const detailedPh[4] = {"01:21.900", "01:08.102", "01:25.310", "01:12.744"};
-		static const char *const shortPh[4] = {"01:21.90", "01:08.10", "01:25.31", "01:12.74"};
+		static const char *const detailedPh[4] = {"1:21.900", "1:08.102", "1:25.310", "1:12.744"};
+		static const char *const shortPh[4] = {"1:21.90", "1:08.10", "1:25.31", "1:12.74"};
 		char buf[4][32];
 		const char *texts[4];
 		this->BuildPbWrTexts(this->player, GetHudDisplayCourse(this->player), prefs.timerDetailed, prefs.timerDetailed ? detailedPh : shortPh, buf,
 							 texts);
-		this->ApplyPbWrCells(layout, "x_", this->editorExtra, texts, cells, prefs.elements[(i32)LayoutElement::PbWr], prefs.pbwrColor);
+		this->ApplyPbWrCells(layout, "x2_", this->editorExtra, texts, cells, prefs.elements[(i32)LayoutElement::PbWr], prefs.pbwrColor);
 	}
 	apply(LayoutElement::PbWr, anyCell, NULL, prefs.pbwrColor);
 
 	// Курс — настоящий (курс · режим · стили игрока), до первого курса карты — плейсхолдер.
-	char line[128];
 	const KZCourseDescriptor *course = GetHudDisplayCourse(this->player);
 	const char *styles[8];
 	i32 styleCount = 0;
@@ -600,11 +602,15 @@ void KZHUDService::RenderEditorReplica(CCSCustomHudLayout *layout, bool tickOnly
 	{
 		styles[styleCount++] = this->player->styleServices[i]->GetStyleName();
 	}
-	KZ::hudfmt::FormatCourseLine(course ? course->name : "Main", this->player->modeService ? this->player->modeService->GetModeShortName() : "CKZ",
-								 styles, styleCount, line, sizeof(line));
-	apply(LayoutElement::Course, true, line, prefs.courseColor);
-	// Тип рана: бейдж PRO (класс rt-pro стоит в разметке реплики статически).
-	apply(LayoutElement::RunType, true, "PRO", MHUD_DEF_BASE_COLOR);
+	char style[96];
+	KZ::hudfmt::FormatCourseStyles(styles, styleCount, style, sizeof(style));
+	this->ApplyCourseParts(layout, "x2_", this->editorExtra, course ? course->name : "Main",
+						   this->player->modeService ? this->player->modeService->GetModeShortName() : "CKZ", style,
+						   prefs.elements[(i32)LayoutElement::Course], prefs.courseColor);
+	apply(LayoutElement::Course, true, NULL, prefs.courseColor);
+	// Тип рана: PRO (класс rt-pro стоит в разметке реплики статически).
+	this->ApplyRunTypeParts(layout, "x2_", this->editorExtra, "PRO", prefs.elements[(i32)LayoutElement::RunType]);
+	apply(LayoutElement::RunType, true, NULL, MHUD_DEF_BASE_COLOR);
 }
 
 void KZHUDService::TickHudEditor()

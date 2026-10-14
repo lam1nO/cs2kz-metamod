@@ -8,7 +8,9 @@
 #define LAYOUT_DEF_TIMER_SIZE 24
 
 #define LAYOUT_DEF_SPEED_X    0
-#define LAYOUT_DEF_SPEED_Y    8
+// Худ v2 (14.10): скорость и клавиши — по раскладке владельца. Прежние значения ревизии 1
+// живут в defaults.cpp (HUD_REV1_*): по ним ревизия 2 узнаёт, менял ли игрок элемент.
+#define LAYOUT_DEF_SPEED_Y    6
 #define LAYOUT_DEF_SPEED_SIZE 34
 
 #define LAYOUT_DEF_PRESPEED_X    0
@@ -16,9 +18,17 @@
 #define LAYOUT_DEF_PRESPEED_SIZE 22
 
 #define LAYOUT_DEF_KEYS_X    0
-#define LAYOUT_DEF_KEYS_Y    20
-// 30, а не 20 — дефолт синхронизирован с текущими настройками игрока (задача hud-defaults).
-#define LAYOUT_DEF_KEYS_SIZE 30
+#define LAYOUT_DEF_KEYS_Y    21
+#define LAYOUT_DEF_KEYS_SIZE 20
+// Остальное в клавишах владельца: ненажатые скрыты (mhudKeysIdle 1), вплотную (mhudKeysGap 0),
+// с обводкой, цвет MHUD_DEF_KEYS_COLOR (#40FF40).
+#define MHUD_DEF_KEYS_IDLE 1
+#define MHUD_DEF_KEYS_GAP  0
+// Дефолт обводки элемента: с худа v2 обводка по умолчанию только у клавиш (как у владельца).
+inline bool LayoutOutlineDefault(LayoutElement element)
+{
+	return element == LayoutElement::Keys;
+}
 
 #define LAYOUT_DEF_CHECKPOINT_X    0
 #define LAYOUT_DEF_CHECKPOINT_Y    30
@@ -29,7 +39,8 @@
 // остальных старых элементов дефолты не трогаем. Элемент по умолчанию включён.
 #define LAYOUT_DEF_LEADPROGRESS_X    (-42)
 #define LAYOUT_DEF_LEADPROGRESS_Y    (-5)
-#define LAYOUT_DEF_LEADPROGRESS_SIZE 18
+// Худ v2: кегль процента 15 (подпись — 0.8 от него, в mhud2.css).
+#define LAYOUT_DEF_LEADPROGRESS_SIZE 15
 
 // Поля редактора `!hud` (PB/WR, showpos, курс, тип рана) — дефолты владельца 28.09 (его
 // сохранённая раскладка; тип рана он не двигал). Все четыре по умолчанию включены.
@@ -39,7 +50,8 @@
 // наполовину за край экрана, поэтому они подтянуты внутрь примерно на полширины элемента.
 #define LAYOUT_DEF_PBWR_X    (-41)
 #define LAYOUT_DEF_PBWR_Y    (-44)
-#define LAYOUT_DEF_PBWR_SIZE 12
+// Худ v2: таблица WR/PB × NUB/PRO, кегль времени 15.
+#define LAYOUT_DEF_PBWR_SIZE 15
 
 #define LAYOUT_DEF_SHOWPOS_X    43
 #define LAYOUT_DEF_SHOWPOS_Y    (-40)
@@ -47,12 +59,12 @@
 
 #define LAYOUT_DEF_COURSE_X    0
 #define LAYOUT_DEF_COURSE_Y    (-39)
-#define LAYOUT_DEF_COURSE_SIZE 13
+#define LAYOUT_DEF_COURSE_SIZE 15
 
 // Тип рана — под таймером по центру (0/40): прежние -3/43 перекрывались с «Прогрессом».
 #define LAYOUT_DEF_RUNTYPE_X    0
 #define LAYOUT_DEF_RUNTYPE_Y    40
-#define LAYOUT_DEF_RUNTYPE_SIZE 15
+#define LAYOUT_DEF_RUNTYPE_SIZE 12
 
 #define LAYOUT_SIZE_MIN 8
 #define LAYOUT_SIZE_MAX 100
@@ -96,7 +108,12 @@ i32 SnapReplayMenuScale(i32 percent);
 // Разметка живёт в нашем аддоне GYMSTRIKE-KZ (см. KZ_WORKSHOP_ADDON_ID); путь намеренно
 // совпадает с апстримным — аддон собран из тех же исходников, и при откате на чужой
 // айтем код менять не придётся.
-#define KZ_MHUD_LAYOUT "panorama/layout/custom_game/cs2kz/mhud.vxml_c"
+// Худ v2 (спека h-spec-v2, 14.10) — ОТДЕЛЬНЫЙ файл: старые версии KZ на флоте грузят mhud.vxml_c
+// из того же аддона и должны видеть его неизменным. mhud.xml и общие css аддона только
+// дописываются; всё новое в mhud2.css под корневым классом .hud2.
+#define KZ_MHUD_LAYOUT "panorama/layout/custom_game/cs2kz/mhud2.vxml_c"
+// Шрифт новых элементов худа v2 (PB/WR, прогресс, курс, тип рана) — Noto Sans; вес задаёт mhud2.css.
+#define LAYOUT_V2_FONT "noto-sans"
 // Своя страница меню реплея спектатора (layout/rpmenu.cpp): карточка плеера целиком — шапка,
 // время, шкала перемотки с отметками, семь пунктов и подсказка. Живёт ТОЛЬКО в нашем аддоне
 // (custom_game/cyber/…), апстримного аналога у неё нет; исходники разметки — gymstrike-kz/content/panorama

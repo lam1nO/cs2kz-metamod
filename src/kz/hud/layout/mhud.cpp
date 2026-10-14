@@ -615,9 +615,9 @@ const KZCourseDescriptor *GetHudDisplayCourse(KZPlayer *source)
 	return course ? course : KZ::course::GetCourseByCyberNumber(0);
 }
 
-// Время ячейки PB/WR в точности таймера: с hudTimerDetail — тысячные (utils::FormatTime,
-// mm:ss.mmm), без — сотые (FormatTimeHud, mm:ss.cc). Ширина совпадает с плейсхолдером
-// KZ::hudfmt::NoTimePlaceholder, поэтому ячейки не прыгают, когда время появляется.
+// Время ячейки PB/WR в точности таймера: с hudTimerDetail — тысячные (utils::FormatTime), без —
+// сотые (FormatTimeHud). Худ v2: без ведущего нуля минут (3:02.641, а не 03:02.641); колонки
+// таблицы фиксированной ширины, поэтому прыгать нечему.
 static_function void FormatHudRecordTime(f64 time, bool detailed, char *out, u32 length)
 {
 	if (detailed)
@@ -628,7 +628,14 @@ static_function void FormatHudRecordTime(f64 time, bool detailed, char *out, u32
 	{
 		FormatTimeHud(time, out, length);
 	}
+	if (out[0] == '0' && out[1] >= '0' && out[1] <= '9')
+	{
+		memmove(out, out + 1, strlen(out));
+	}
 }
+
+// Нет времени в ячейке PB/WR (худ v2): тире, лейбл приглушён классом pw2-none.
+#define KZ_PBWR_NO_TIME "\xE2\x80\x94"
 
 // Стиль дочернего лейбла элемента (ячейки PB/WR, строки showpos): font-size/шрифт/цвет ставятся
 // на САМ лейбл — в panorama font-size через класс предка ребёнку не наследуется (как у клавиш), а
@@ -642,38 +649,46 @@ void KZHUDService::ApplyChildLabelStyle(CCSCustomHudLayout *layout, const char *
 }
 
 // Порядок ячеек: PB NUB, PB PRO, WR NUB, WR PRO — i < 2 это PB, нечётный индекс — PRO.
-static_global const char *const PBWR_CELL_IDS[4] = {"pw_pb_nub", "pw_pb_pro", "pw_wr_nub", "pw_wr_pro"};
-static_global const char *const PBWR_TIME_IDS[4] = {"pw_t_pb_nub", "pw_t_pb_pro", "pw_t_wr_nub", "pw_t_wr_pro"};
-static_global const char *const PBWR_CAP_IDS[4] = {"pw_c_pb_nub", "pw_c_pb_pro", "pw_c_wr_nub", "pw_c_wr_pro"};
+// Худ v2 (mhud2.xml): таблица — колонка подписей (WR, PB) и колонки NUB/PRO с шапкой.
+static_global const char *const PBWR_TIME_IDS[4] = {"pw2_t_pb_nub", "pw2_t_pb_pro", "pw2_t_wr_nub", "pw2_t_wr_pro"};
 static_global const char *const PBWR_VARS[4] = {"pb_nub", "pb_pro", "wr_nub", "wr_pro"};
+// Подписи строк: [0] — PB, [1] — WR (как строки i < 2 / i >= 2). Шапки колонок: [0] NUB, [1] PRO.
+static_global const char *const PBWR_ROWCAP_IDS[2] = {"pw2_c_pb", "pw2_c_wr"};
+static_global const char *const PBWR_HEAD_IDS[2] = {"pw2_h_nub", "pw2_h_pro"};
+static_global const char *const PBWR_COL_IDS[2] = {"pw2_nub", "pw2_pro"};
 
-// Ячейки PB/WR — общая запись для настоящего худа (prefix "") и реплики редактора (prefix "x_").
-// texts[i] — готовое время ячейки; cells[i] — включена ли ячейка.
+// Ячейки PB/WR — общая запись для настоящего худа (prefix "") и реплики редактора (prefix "x2_").
+// texts[i] — готовое время ячейки (или KZ_PBWR_NO_TIME); cells[i] — включена ли ячейка.
+// Кегль частей задаёт mhud2.css от font-size--N корня; здесь — шрифт, цвет и видимость.
 void KZHUDService::ApplyPbWrCells(CCSCustomHudLayout *layout, const char *prefix, LayoutExtraState &extra, const char *const (&texts)[4],
 								  const bool (&cells)[4], const MHUDLayoutPrefs::Element &style, const Color &color)
 {
 	char idBuf[64];
 	const char *colorClass = extra.pwColor.Get(color);
+	// Строка (PB/WR) видна, если в ней есть хоть одна ячейка; колонка (NUB/PRO) — так же.
+	const bool rowOn[2] = {cells[0] || cells[1], cells[2] || cells[3]};
+	const bool colOn[2] = {cells[0] || cells[2], cells[1] || cells[3]};
 	for (i32 i = 0; i < 4; i++)
 	{
-		// Переменная — на самом лейбле времени (у лейблов с 26.09 есть id pw_t_*), без расчёта на
-		// наследование переменных от предка.
 		const char *timeId = PrefixLayoutId(idBuf, sizeof(idBuf), prefix, PBWR_TIME_IDS[i]);
 		this->SetLayoutVar(layout, timeId, PBWR_VARS[i], extra.pbwrText[i], texts[i]);
 		this->ApplyChildLabelStyle(layout, timeId, extra.pwTime[i], style.size, style.fontClass, colorClass);
-		// Подпись PB/WR — тем же кеглем/шрифтом/цветом, что время: всё, что видно в элементе, должно
-		// настраиваться из редактора (требование владельца 27.09), статичный янтарный WR из css убран.
-		const char *capId = PrefixLayoutId(idBuf, sizeof(idBuf), prefix, PBWR_CAP_IDS[i]);
-		this->ApplyChildLabelStyle(layout, capId, extra.pwCap[i], style.size, style.fontClass, colorClass);
-		this->SetLayoutBoolClass(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, PBWR_CELL_IDS[i]), "hidden", extra.pbwrCellHidden[i], !cells[i]);
+		this->SetLayoutBoolClass(layout, timeId, "pw2-none", extra.pw2None[i], V_strcmp(texts[i], KZ_PBWR_NO_TIME) == 0);
+		// Строка выключена — ячейка схлопывается; выключена только ячейка — место держит
+		// (pw2-off = прозрачная), иначе соседняя строка съехала бы в чужую.
+		this->SetLayoutBoolClass(layout, timeId, "hidden", extra.pbwrCellHidden[i], !rowOn[i >> 1]);
+		this->SetLayoutBoolClass(layout, timeId, "pw2-off", extra.pw2Off[i], rowOn[i >> 1] && !cells[i]);
 	}
-	// Бейджи NUB/PRO — тот же кегль, что у времени: font-size ребёнку через класс корня не
-	// наследуется (см. ApplyChildLabelStyle), без класса бейдж не растёт вместе с элементом.
-	this->SetLayoutValueClass(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "pw_b_nub"), extra.pwBadgeSize[0], style.size, "font-size", false);
-	this->SetLayoutValueClass(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "pw_b_pro"), extra.pwBadgeSize[1], style.size, "font-size", false);
-	// Строка гаснет, когда обе её ячейки выключены: иначе от неё остался бы бейдж NUB/PRO.
-	this->SetLayoutBoolClass(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "pw_nub"), "hidden", extra.pbwrRowHidden[0], !(cells[0] || cells[2]));
-	this->SetLayoutBoolClass(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "pw_pro"), "hidden", extra.pbwrRowHidden[1], !(cells[1] || cells[3]));
+	for (i32 r = 0; r < 2; r++)
+	{
+		const char *capId = PrefixLayoutId(idBuf, sizeof(idBuf), prefix, PBWR_ROWCAP_IDS[r]);
+		this->ApplyChildLabelStyle(layout, capId, extra.pwCap[r], style.size, style.fontClass, colorClass);
+		this->SetLayoutBoolClass(layout, capId, "hidden", extra.pbwrRowHidden[r], !rowOn[r]);
+		// Шапки NUB/PRO — свой цвет из mhud2.css (не цвет элемента), только шрифт игрока.
+		const char *headId = PrefixLayoutId(idBuf, sizeof(idBuf), prefix, PBWR_HEAD_IDS[r]);
+		this->ApplyChildLabelStyle(layout, headId, extra.pwCap[2 + r], style.size, style.fontClass, NULL);
+		this->SetLayoutBoolClass(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, PBWR_COL_IDS[r]), "hidden", extra.pw2ColHidden[r], !colOn[r]);
+	}
 }
 
 void KZHUDService::UpdatePbWrElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force)
@@ -714,7 +729,7 @@ void KZHUDService::BuildPbWrTexts(KZPlayer *source, const KZCourseDescriptor *co
 		}
 		else
 		{
-			V_strncpy(buf[i], placeholders ? placeholders[i] : KZ::hudfmt::NoTimePlaceholder(detailed), sizeof(buf[i]));
+			V_strncpy(buf[i], placeholders ? placeholders[i] : KZ_PBWR_NO_TIME, sizeof(buf[i]));
 		}
 		texts[i] = buf[i];
 	}
@@ -756,24 +771,47 @@ void KZHUDService::UpdateShowPosElement(CCSCustomHudLayout *layout, KZPlayer *so
 	this->UpdateLayoutElement(layout, LayoutElement::ShowPos, show, NULL, prefs.showPosColor, force);
 }
 
+// Курс худа v2: три лейбла (имя Bold, режим и стиль приглушены в mhud2.css) и черта-панель цвета
+// элемента. Общая запись для худа (prefix "") и реплики редактора (prefix "x2_").
+void KZHUDService::ApplyCourseParts(CCSCustomHudLayout *layout, const char *prefix, LayoutExtraState &extra, const char *name, const char *mode,
+									const char *style, const MHUDLayoutPrefs::Element &el, const Color &color)
+{
+	char idBuf[64];
+	static const char *const ids[3] = {"cr2_name", "cr2_mode", "cr2_style"};
+	static const char *const vars[3] = {"course_name", "course_mode", "course_style"};
+	const char *texts[3] = {name, mode, style};
+	const char *colorClass = extra.courseColor.Get(color);
+	for (i32 i = 0; i < 3; i++)
+	{
+		const char *id = PrefixLayoutId(idBuf, sizeof(idBuf), prefix, ids[i]);
+		this->SetLayoutVar(layout, id, vars[i], extra.courseText[i], texts[i]);
+		this->ApplyChildLabelStyle(layout, id, extra.courseStyle[i], el.size, el.fontClass, colorClass);
+	}
+	this->ApplyChildLabelStyle(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "cr2_dot"), extra.courseStyle[3], el.size, el.fontClass, colorClass);
+	this->SetLayoutClass(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "cr2_sep"), extra.courseSepClass, extra.courseSepColor.Get(color));
+}
+
 void KZHUDService::UpdateCourseElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force)
 {
 	// Реплей-бот: курс и стили живого игрока к записи не относятся — строку не показываем.
 	const bool replay = KZ::replaysystem::IsReplayBot(source);
 	const KZCourseDescriptor *course = (!replay && this->IsLayoutElementEnabled(LayoutElement::Course)) ? GetHudDisplayCourse(source) : NULL;
-	char line[128] = "";
+	const MHUDLayoutPrefs &prefs = this->GetLayoutPrefs();
 	if (course)
 	{
-		// Полные имена стилей (AutoBhop, LegacyJump) — по дизайну; FormatCourseLine поднимает регистр.
 		const char *styles[8];
 		i32 styleCount = 0;
 		for (i32 i = 0; i < source->styleServices.Count() && styleCount < (i32)KZ_ARRAYSIZE(styles); i++)
 		{
 			styles[styleCount++] = source->styleServices[i]->GetStyleName();
 		}
-		KZ::hudfmt::FormatCourseLine(course->name, source->modeService->GetModeShortName(), styles, styleCount, line, sizeof(line));
+		char style[96];
+		KZ::hudfmt::FormatCourseStyles(styles, styleCount, style, sizeof(style));
+		this->ApplyCourseParts(layout, "", this->layoutExtra, course->name, source->modeService->GetModeShortName(), style,
+							   prefs.elements[(i32)LayoutElement::Course], prefs.courseColor);
 	}
-	this->UpdateLayoutElement(layout, LayoutElement::Course, course != NULL, course ? line : NULL, this->GetLayoutPrefs().courseColor, force);
+	// text = NULL: корень — Panel, текст в лейблах частей выше.
+	this->UpdateLayoutElement(layout, LayoutElement::Course, course != NULL, NULL, prefs.courseColor, force);
 }
 
 // PRAC / PRO / NUB — тот же критерий, что у метки слева от времени в HTML-худе (kz_hud.cpp):
@@ -813,8 +851,20 @@ void KZHUDService::UpdateRunTypeElement(CCSCustomHudLayout *layout, KZPlayer *so
 		// Скрытый элемент класс не трогает: прошлый rt-* под hidden никому не мешает, а снятие
 		// и возврат на каждом старте/стопе были бы лишними пересылками.
 		this->SetLayoutClass(layout, LAYOUT_ELEMENTS[(i32)LayoutElement::RunType].panelId, this->layoutExtra.runTypeClass, cls);
+		this->ApplyRunTypeParts(layout, "", this->layoutExtra, text, this->GetLayoutPrefs().elements[(i32)LayoutElement::RunType]);
 	}
-	this->UpdateLayoutElement(layout, LayoutElement::RunType, show, text, MHUD_DEF_BASE_COLOR, force);
+	// text = NULL: корень — Panel (точка + слово), слово пишет ApplyRunTypeParts.
+	this->UpdateLayoutElement(layout, LayoutElement::RunType, show, NULL, MHUD_DEF_BASE_COLOR, force);
+}
+
+// Тип рана худа v2: слово — на своём лейбле (цвет даёт класс rt-* корня в mhud2.css), шрифт игрока.
+void KZHUDService::ApplyRunTypeParts(CCSCustomHudLayout *layout, const char *prefix, LayoutExtraState &extra, const char *text,
+									 const MHUDLayoutPrefs::Element &el)
+{
+	char idBuf[64];
+	const char *id = PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "rt2_text");
+	this->SetLayoutVar(layout, id, "runtype", extra.runTypeText, text);
+	this->SetLayoutClass(layout, id, extra.runTypeFont, el.fontClass);
 }
 
 // === Элемент «Прогресс» по маршруту `!lead` (LayoutElement::LeadProgress) ==================
@@ -854,17 +904,15 @@ void KZHUDService::ApplyLeadProgressParts(CCSCustomHudLayout *layout, const char
 		}
 		extra.progressFill = fill;
 	}
-	// Цвет заливки — цвет элемента (фоном): полоса — видимая часть «Прогресса» и обязана
-	// настраиваться вместе с подписью и процентом; в .progress-fill (mhud.css) фона больше нет.
-	// Цвет по умолчанию (белый у элемента) — заливка остаётся синей из css (.progress-fill-default,
-	// как на дизайне); свой цвет игрока — палитрой фона. Тот же приём, что у дельты.
+	// Худ v2: заливка — всегда цветом элемента (фоном, pal-bg-N), дефолт белый; на финише (100%)
+	// зелёная через класс fin корня (mhud2.css перебивает палитру). Кегль корня — от него mhud2.css
+	// считает подпись и ширину трека (у корня-Panel своего font-size--N иначе нет).
 	{
-		// Белый — прежний дефолт элемента (у тех, кто его сохранил), #00AAFF — нынешний.
-		const auto same = [&](const Color &c) { return color.r() == c.r() && color.g() == c.g() && color.b() == c.b(); };
-		const bool fillDefault = same(MHUD_DEF_BASE_COLOR) || same(MHUD_DEF_LEADPROGRESS_COLOR);
-		const char *fillId2 = PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "mhud_progress_fill");
-		this->SetLayoutClass(layout, fillId2, extra.progressFillDefaultClass, fillDefault ? "progress-fill-default" : NULL);
-		this->SetLayoutClass(layout, fillId2, extra.progressFillClass, fillDefault ? NULL : extra.progressFillColor.Get(color));
+		const char *fillId = PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "mhud_progress_fill");
+		this->SetLayoutClass(layout, fillId, extra.progressFillClass, extra.progressFillColor.Get(color));
+		const char *rootId = PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "mhud_progress");
+		this->SetLayoutValueClass(layout, rootId, extra.progressRootSize, style.size, "font-size", false);
+		this->SetLayoutBoolClass(layout, rootId, "fin", extra.progressFin, percent >= 100);
 	}
 
 	// Кегль/шрифт/цвет — на самом лейбле процента: в panorama font-size через класс корня

@@ -81,7 +81,7 @@ bool KZHUDService::GetElementOutlinePref(LayoutElement element)
 	const bool withFalseDefault = opts->GetPreferenceBool(outlineKey, false);
 	// Дефолт false синхронизирован с текущими настройками игрока (задача hud-defaults) — тот
 	// же ответ обязан отдавать SetItemPref(..., outlineKey, ..., 0) в hud_prefs.cpp (кнопка Reset).
-	return (withTrueDefault == withFalseDefault) ? withTrueDefault : opts->GetPreferenceBool("hudOutline", false);
+	return (withTrueDefault == withFalseDefault) ? withTrueDefault : opts->GetPreferenceBool("hudOutline", LayoutOutlineDefault(element));
 }
 
 void KZHUDService::RefreshLayoutPrefs()
@@ -122,7 +122,7 @@ void KZHUDService::RefreshLayoutPrefs()
 	this->layoutPrefs.prespeed = this->GetMHUDColorPref("mhudPrespeedColor", MHUD_DEF_BASE_COLOR);
 	this->layoutPrefs.prespeedPerf = this->GetMHUDColorPref("mhudPrespeedPerfColor", MHUD_DEF_PERF_COLOR);
 	this->layoutPrefs.prespeedJumpbug = this->GetMHUDColorPref("mhudPrespeedJumpbugColor", MHUD_DEF_JUMPBUG_COLOR);
-	this->layoutPrefs.keys = this->GetMHUDColorPref("mhudKeysColor", MHUD_DEF_BASE_COLOR);
+	this->layoutPrefs.keys = this->GetMHUDColorPref("mhudKeysColor", MHUD_DEF_KEYS_COLOR);
 	this->layoutPrefs.keysOverlap = this->GetMHUDColorPref("mhudKeysOverlapColor", MHUD_DEF_KEYS_OVERLAP_COLOR);
 	this->layoutPrefs.keysPressed = this->GetMHUDColorPref("mhudKeysPressedColor", MHUD_DEF_KEYS_PRESSED_COLOR);
 	this->layoutPrefs.keysOverlapGlow = this->GetMHUDColorPref("mhudKeysOverlapGlowColor", MHUD_DEF_KEYS_OVERLAP_GLOW_COLOR);
@@ -155,13 +155,13 @@ void KZHUDService::RefreshLayoutPrefs()
 	this->layoutPrefs.keysBorder = opts->GetPreferenceBool("mhudKeysBorder", false);
 	this->layoutPrefs.keysGlow = opts->GetPreferenceBool("mhudKeysGlow", false);
 	this->layoutPrefs.keysFill = opts->GetPreferenceBool("mhudKeysFill", false);
-	this->layoutPrefs.keysIdle = Clamp((i32)opts->GetPreferenceInt("mhudKeysIdle", 2), 0, 2);
+	this->layoutPrefs.keysIdle = Clamp((i32)opts->GetPreferenceInt("mhudKeysIdle", MHUD_DEF_KEYS_IDLE), 0, 2);
 	// -1 «авто» — отдельное значение, а не 0: 0 это «вплотную», авто — пропорциональный отступ
 	// keys.css. Клэмп — преф мог прийти из БД/обмена мимо редактора, а класса key-gap--99 нет.
 	// Нечётное не округляем: классы есть на каждый пиксель 0..24, степпер редактора с нечётного
 	// просто шагает дальше по 2.
 	{
-		const i32 gap = (i32)opts->GetPreferenceInt("mhudKeysGap", -1);
+		const i32 gap = (i32)opts->GetPreferenceInt("mhudKeysGap", MHUD_DEF_KEYS_GAP);
 		this->layoutPrefs.keysGap = gap < 0 ? -1 : Clamp(gap, 0, 24);
 	}
 	this->layoutPrefs.speedPrecise = opts->GetPreferenceBool("mhudSpeedPrecise", false);
@@ -226,6 +226,7 @@ const char *GetElementColorKey(LayoutElement element, Color &def)
 		case LayoutElement::Prespeed:
 			return "mhudPrespeedColor";
 		case LayoutElement::Keys:
+			def = MHUD_DEF_KEYS_COLOR;
 			return "mhudKeysColor";
 		case LayoutElement::Checkpoint:
 			return "mhudCheckpointColor";

@@ -13,6 +13,7 @@
 // KZHUDService::HUD_DEFAULTS_REV на 1 (и только он).
 #include "kz/hud/layout/layout.h"
 #include "kz/option/kz_option.h"
+#include <cmath>
 #include "utils/logging.h"
 
 #include "tier0/memdbgon.h"
@@ -37,6 +38,14 @@ void KZHUDService::ApplyHudDefaults()
 	}
 
 	i32 written = 0;
+	// Ревизия 1 у игрока уже есть — ревизия 2 ВЫБОРОЧНАЯ (худ v2): трогает только то, что игрок
+	// не менял после первой перезаписи. Без ревизии вообще — полная перезапись ниже, уже новыми
+	// дефолтами, и сразу маркер 2.
+	if (storedRev == 1)
+	{
+		this->ApplyHudDefaultsRev2(written);
+		return;
+	}
 	{
 		// Одна запись в БД на всю миграцию: каждый SetPreference* флашит префы ЦЕЛИКОМ
 		// (SaveLocalPrefs внутри), без пакета 60+ ключей дали бы 60+ полных сериализаций и
@@ -76,7 +85,7 @@ void KZHUDService::ApplyHudDefaults()
 			opts->SetPreferenceFloat(def.yKey, (f64)def.yDefault);
 			opts->SetPreferenceFloat(def.sizeKey, (f64)def.sizeDefault);
 			opts->SetPreferenceStr(def.fontKey, def.fontDefault);
-			opts->SetPreferenceBool(def.outlineKey, false);
+			opts->SetPreferenceBool(def.outlineKey, LayoutOutlineDefault((LayoutElement)e));
 			opts->SetPreferenceInt(def.opacityKey, 100);
 			written += 7;
 		}
@@ -117,10 +126,11 @@ void KZHUDService::ApplyHudDefaults()
 
 		// Целочисленные ключи худа: чем показывать ненажатую клавишу (0/1/2) и режим дельты
 		// таймера.
-		opts->SetPreferenceInt("mhudKeysIdle", 2);
+		opts->SetPreferenceInt("mhudKeysIdle", MHUD_DEF_KEYS_IDLE);
+		opts->SetPreferenceInt("mhudKeysGap", MHUD_DEF_KEYS_GAP);
 		// Дельта таймера: 0 выкл / 1 к PB / 2 к WR (§4.1 спеки редактора).
 		opts->SetPreferenceInt("hudTimerCompare", 2);
-		written += 2;
+		written += 3;
 
 		// Цвета: тот же упакованный int, что читает GetMHUDColorPref, — пишем через
 		// SetMHUDColorPref, чтобы упаковка была ровно одна на оба направления.
@@ -138,7 +148,7 @@ void KZHUDService::ApplyHudDefaults()
 			{"mhudPrespeedColor", &MHUD_DEF_BASE_COLOR},
 			{"mhudPrespeedPerfColor", &MHUD_DEF_PERF_COLOR},
 			{"mhudPrespeedJumpbugColor", &MHUD_DEF_JUMPBUG_COLOR},
-			{"mhudKeysColor", &MHUD_DEF_BASE_COLOR},
+			{"mhudKeysColor", &MHUD_DEF_KEYS_COLOR},
 			{"mhudKeysOverlapColor", &MHUD_DEF_KEYS_OVERLAP_COLOR},
 			{"mhudKeysPressedColor", &MHUD_DEF_KEYS_PRESSED_COLOR},
 			{"mhudKeysOverlapGlowColor", &MHUD_DEF_KEYS_OVERLAP_GLOW_COLOR},
@@ -169,4 +179,155 @@ void KZHUDService::ApplyHudDefaults()
 	// путь проходится один раз за заход, и только когда маркер реально поднялся.
 	KZ_LOG_INFO(LogChannel::Option, "[cyb] hud_defaults_forced steam_id=%llu keys=%i rev_from=%lli rev_to=%i\n", this->player->GetSteamId64(false),
 				written, (i64)storedRev, (i32)HUD_DEFAULTS_REV);
+}
+
+// === Ревизия 2: худ v2 (спека h-spec-v2, 14.10) ===============================================
+// Ревизия 1 записала каждому игроку ВСЕ ключи худа явно, поэтому «не менял элемент» = все его
+// ключи до сих пор равны значениям ревизии 1 (таблица ниже — копия дефолтов на 28.09, НЕ
+// текущие LAYOUT_DEF_*). Ключа нет (элемент появился позже первой перезаписи этого игрока) —
+// чтение возвращает значение ревизии 1, то есть «не менял».
+//
+// Решения владельца 14.10: клавиши/скорость/престрейф — новые дефолты только у тех, кто их не
+// трогал; PB/WR, прогресс, курс, тип рана — новое оформление у всех (это разметка, не префы),
+// тумблер включается всем один раз, размер/позиция/шрифт/цвет остаются личными, если менялись.
+namespace
+{
+	struct Rev1Element
+	{
+		f64 x, y, size;
+		const char *font;
+	};
+
+	// Порядок — LayoutElement (Timer … RunType).
+	const Rev1Element HUD_REV1[(i32)LayoutElement::Count] = {
+		{0, 35, 24, "lato-bold"},          // Timer
+		{0, 8, 34, "lato-bold"},           // Speed
+		{0, 12, 22, "lato-bold"},          // Prespeed
+		{0, 20, 30, "lato-bold"},          // Keys
+		{0, 30, 20, "lato-bold"},          // Checkpoint
+		{-42, -5, 18, "stratum2-medium"},  // LeadProgress
+		{-41, -44, 12, "lato-bold"},       // PbWr
+		{43, -40, 13, "stratum2-mono"},    // ShowPos
+		{0, -39, 13, "stratum2-bold"},     // Course
+		{0, 40, 15, "stratum2-bold"},      // RunType
+	};
+	static_assert((i32)LayoutElement::Count == 10, "HUD_REV1: новый элемент — добавить его значения ревизии 1");
+
+	// До 28.09 «Прогресс» жил под таймером и выключенным — такие значения тоже «не менял».
+	constexpr f64 HUD_REV0_LEADPROGRESS_X = 0;
+	constexpr f64 HUD_REV0_LEADPROGRESS_Y = 41;
+	constexpr const char *HUD_REV0_LEADPROGRESS_FONT = "lato-bold";
+	const Color HUD_REV1_LEADPROGRESS_COLOR(0x00, 0xAA, 0xFF, 0xFF);
+} // namespace
+
+void KZHUDService::ApplyHudDefaultsRev2(i32 &written)
+{
+	KZOptionService *opts = this->player->optionService;
+	const auto feq = [&](const char *key, f64 v) { return fabs(opts->GetPreferenceFloat(key, v) - v) < 0.01; };
+	const auto ieq = [&](const char *key, i64 v) { return opts->GetPreferenceInt(key, v) == v; };
+	const auto beq = [&](const char *key, bool v) { return opts->GetPreferenceBool(key, v) == v; };
+	// Пустая строка шрифта (бывает после обмена худом) — это дефолт, а не личный выбор.
+	const auto seq = [&](const char *key, const char *v)
+	{
+		const char *cur = opts->GetPreferenceStr(key, v);
+		return !cur[0] || V_stricmp(cur, v) == 0;
+	};
+	const auto ceq = [&](const char *key, const Color &v)
+	{
+		const Color c = this->GetMHUDColorPref(key, v);
+		return c.r() == v.r() && c.g() == v.g() && c.b() == v.b();
+	};
+	// Общие 7 ключей элемента против ревизии 1 (тумблер, X/Y, размер, шрифт, обводка, прозрачность).
+	const auto untouched = [&](LayoutElement e)
+	{
+		const LayoutElementDef &def = LAYOUT_ELEMENTS[(i32)e];
+		const Rev1Element &r = HUD_REV1[(i32)e];
+		return beq(def.enabledKey, true) && feq(def.xKey, r.x) && feq(def.yKey, r.y) && feq(def.sizeKey, r.size) && seq(def.fontKey, r.font)
+			   && beq(def.outlineKey, false) && ieq(def.opacityKey, 100);
+	};
+	const auto writeElement = [&](LayoutElement e)
+	{
+		const LayoutElementDef &def = LAYOUT_ELEMENTS[(i32)e];
+		opts->SetPreferenceBool(def.enabledKey, def.enabledDefault);
+		opts->SetPreferenceFloat(def.xKey, (f64)def.xDefault);
+		opts->SetPreferenceFloat(def.yKey, (f64)def.yDefault);
+		opts->SetPreferenceFloat(def.sizeKey, (f64)def.sizeDefault);
+		opts->SetPreferenceStr(def.fontKey, def.fontDefault);
+		opts->SetPreferenceBool(def.outlineKey, LayoutOutlineDefault(e));
+		opts->SetPreferenceInt(def.opacityKey, 100);
+		written += 7;
+	};
+
+	char changed[160] = "";
+	const auto mark = [&](const char *name) { V_strncat(changed, changed[0] ? "," : "", sizeof(changed)); V_strncat(changed, name, sizeof(changed)); };
+
+	{
+		KZOptionService::BatchScope batch(opts);
+
+		// Клавиши: элемент + все свои настройки вида ревизии 1.
+		const bool keysUntouched = untouched(LayoutElement::Keys) && beq("hudKeysOverlap", true) && beq("mhudKeysOverlapAxis", false)
+								   && beq("mhudKeysLetters", true) && beq("mhudKeysSquare", true) && beq("mhudKeysBorder", false)
+								   && beq("mhudKeysGlow", false) && beq("mhudKeysFill", false) && ieq("mhudKeysIdle", 2) && ieq("mhudKeysGap", -1)
+								   && ceq("mhudKeysColor", MHUD_DEF_BASE_COLOR) && ceq("mhudKeysOverlapColor", MHUD_DEF_KEYS_OVERLAP_COLOR)
+								   && ceq("mhudKeysPressedColor", MHUD_DEF_KEYS_PRESSED_COLOR)
+								   && ceq("mhudKeysOverlapGlowColor", MHUD_DEF_KEYS_OVERLAP_GLOW_COLOR);
+		if (keysUntouched)
+		{
+			writeElement(LayoutElement::Keys);
+			opts->SetPreferenceInt("mhudKeysIdle", MHUD_DEF_KEYS_IDLE);
+			opts->SetPreferenceInt("mhudKeysGap", MHUD_DEF_KEYS_GAP);
+			this->SetMHUDColorPref("mhudKeysColor", MHUD_DEF_KEYS_COLOR);
+			written += 3;
+			mark("keys");
+		}
+		const bool speedUntouched = untouched(LayoutElement::Speed) && beq("mhudSpeedPrecise", false) && ceq("mhudSpeedColor", MHUD_DEF_BASE_COLOR)
+									&& ceq("mhudSpeedCjColor", MHUD_DEF_CJ_COLOR);
+		if (speedUntouched)
+		{
+			writeElement(LayoutElement::Speed);
+			mark("speed");
+		}
+		// Престрейф: дефолты v2 совпадают с ревизией 1 (у владельца отличается только слаг
+		// verdana-bold — тот же Arial Bold), писать нечего.
+
+		// Новое оформление: тумблер — всем; размер/позиция/шрифт/цвет — только нетронутые.
+		const LayoutElement redesigned[] = {LayoutElement::LeadProgress, LayoutElement::PbWr, LayoutElement::Course, LayoutElement::RunType};
+		for (LayoutElement e : redesigned)
+		{
+			const LayoutElementDef &def = LAYOUT_ELEMENTS[(i32)e];
+			const Rev1Element &r = HUD_REV1[(i32)e];
+			const bool progress = e == LayoutElement::LeadProgress;
+			opts->SetPreferenceBool(def.enabledKey, true);
+			written++;
+			const bool posDefault = (feq(def.xKey, r.x) && feq(def.yKey, r.y))
+									|| (progress && feq(def.xKey, HUD_REV0_LEADPROGRESS_X) && feq(def.yKey, HUD_REV0_LEADPROGRESS_Y));
+			if (posDefault)
+			{
+				opts->SetPreferenceFloat(def.xKey, (f64)def.xDefault);
+				opts->SetPreferenceFloat(def.yKey, (f64)def.yDefault);
+				written += 2;
+			}
+			if (feq(def.sizeKey, r.size))
+			{
+				opts->SetPreferenceFloat(def.sizeKey, (f64)def.sizeDefault);
+				written++;
+			}
+			if (seq(def.fontKey, r.font) || (progress && seq(def.fontKey, HUD_REV0_LEADPROGRESS_FONT)))
+			{
+				opts->SetPreferenceStr(def.fontKey, def.fontDefault);
+				written++;
+			}
+			if (progress && (ceq("mhudLeadProgressColor", HUD_REV1_LEADPROGRESS_COLOR) || ceq("mhudLeadProgressColor", MHUD_DEF_BASE_COLOR)))
+			{
+				this->SetMHUDColorPref("mhudLeadProgressColor", MHUD_DEF_LEADPROGRESS_COLOR);
+				written++;
+			}
+		}
+		mark("redesign");
+
+		// Литерал, а не HUD_DEFAULTS_REV: следующая ревизия пойдёт своим шагом после этой.
+		opts->SetPreferenceInt(HUD_DEFAULTS_REV_KEY, 2);
+	}
+
+	KZ_LOG_INFO(LogChannel::Option, "[cyb] hud_defaults_rev2 steam_id=%llu keys=%i changed=%s\n", this->player->GetSteamId64(false), written, changed);
 }

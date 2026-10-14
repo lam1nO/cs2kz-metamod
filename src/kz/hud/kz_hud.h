@@ -21,6 +21,7 @@ struct KZOptNode;
 // игроков поехали бы цвета худа).
 extern const Color MHUD_DEF_BASE_COLOR;
 extern const Color MHUD_DEF_LEADPROGRESS_COLOR;
+extern const Color MHUD_DEF_KEYS_COLOR;
 extern const Color MHUD_DEF_SHOWPOS_COLOR;
 extern const Color MHUD_DEF_PERF_COLOR;
 extern const Color MHUD_DEF_JUMPBUG_COLOR;
@@ -589,8 +590,11 @@ public:
 	// Ревизия набора дефолтов худа, применённая к префам игрока (преф HUD_DEFAULTS_REV_KEY).
 	// Поднимать ТОЛЬКО когда снова решено перезаписать оформление худа всему флоту: каждый
 	// подъём = один заход каждого игрока с потерей его персональных настроек худа.
-	static constexpr i32 HUD_DEFAULTS_REV = 1;
+	// Ревизия 2 (худ v2, 14.10) ВЫБОРОЧНАЯ: меняет только то, что игрок не трогал (см. defaults.cpp).
+	static constexpr i32 HUD_DEFAULTS_REV = 2;
 	static constexpr const char *HUD_DEFAULTS_REV_KEY = "hudDefaultsRev";
+	// Выборочная ревизия 2 (худ v2) для игроков с ревизией 1 — layout/defaults.cpp.
+	void ApplyHudDefaultsRev2(i32 &written);
 	// Перезаписывает ключи ВИДА худа новыми дефолтами, если применённая ревизия старше
 	// HUD_DEFAULTS_REV, и поднимает маркер (реализация и полный список ключей —
 	// hud/layout/defaults.cpp). В набор НЕ входят mhudMimicSpec (поведение спектейта),
@@ -940,6 +944,10 @@ private:
 		std::string pbwrText[4] {};
 		i32 pbwrCellHidden[4] {-1, -1, -1, -1};
 		i32 pbwrRowHidden[2] {-1, -1};
+		// Худ v2: тире вместо времени (pw2-none), выключенная ячейка (pw2-off), колонки NUB/PRO.
+		i32 pw2None[4] {-1, -1, -1, -1};
+		i32 pw2Off[4] {-1, -1, -1, -1};
+		i32 pw2ColHidden[2] {-1, -1};
 		std::string angText {};
 		const char *runTypeClass {};
 		std::string deltaText {};
@@ -980,6 +988,18 @@ private:
 		ColorClassCache progressFillColor {0u, false, NULL, true};
 		const char *progressFillClass {};
 		const char *progressFillDefaultClass {};
+		// Худ v2: кегль корня mhud_progress (от него mhud2.css считает подпись/трек) и финиш.
+		i32 progressRootSize {INT_MIN};
+		i32 progressFin {-1};
+		// Худ v2: курс — три лейбла (имя/режим/стиль) + точка, черта цветом элемента (фон).
+		std::string courseText[3] {};
+		LayoutChildStyleState courseStyle[4] {};
+		ColorClassCache courseColor {};
+		ColorClassCache courseSepColor {0u, false, NULL, true};
+		const char *courseSepClass {};
+		// Худ v2: слово типа рана на своём лейбле rt2_text.
+		std::string runTypeText {};
+		const char *runTypeFont {};
 		// Бейджи прыжка под престрейфом: полоса mhud_ind и ind_perf/ind_jb/ind_cj (hidden, кегль).
 		i32 indStripHidden {-1};
 		i32 indHidden[3] {-1, -1, -1};
@@ -998,6 +1018,10 @@ private:
 	// Кегль контейнера/кнопок и шрифт глифов блока клавиш — общий для худа и меню реплея
 	// (реализация в layout/mhud.cpp).
 	void ApplyKeysSizing(CCSCustomHudLayout *layout, LayoutKeysState &state, i32 size, const char *fontClass, const char *prefix = "");
+	// Худ v2: части курса и типа рана (худ и реплика редактора, layout/mhud.cpp).
+	void ApplyCourseParts(CCSCustomHudLayout *layout, const char *prefix, LayoutExtraState &extra, const char *name, const char *mode,
+						  const char *style, const MHUDLayoutPrefs::Element &el, const Color &color);
+	void ApplyRunTypeParts(CCSCustomHudLayout *layout, const char *prefix, LayoutExtraState &extra, const char *text, const MHUDLayoutPrefs::Element &el);
 	// Общие для настоящего худа (prefix "") и реплики редактора !hud (prefix "x_") записи дочерних
 	// панелей элементов (layout/mhud.cpp): один код классов на обе сущности, кэши — свои.
 	void ApplyKeysLook(CCSCustomHudLayout *layout, const char *prefix, LayoutKeysState &state, const MHUDLayoutPrefs &prefs,
@@ -1161,6 +1185,7 @@ private:
 	{
 		bool optHidden {true};
 		bool editHidden {true};
+		bool editHud2 {false};
 		bool colorPopupHidden {true};
 		bool listPopupHidden {true};
 		bool confirmPopupHidden {true};

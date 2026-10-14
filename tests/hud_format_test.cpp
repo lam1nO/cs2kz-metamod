@@ -47,6 +47,14 @@ int main()
 	assert(!GridCellToPercent("g1", 64, 36, x, y));
 	assert(ClampEditorPos(-51) == -50 && ClampEditorPos(-100) == -50 && ClampEditorPos(100) == 50);
 	assert(ClampEditorPos(0) == 0 && ClampEditorPos(-50) == -50 && ClampEditorPos(50) == 50 && ClampEditorPos(17) == 17);
+	{
+		char cs[64];
+		const char *st2[2] = {"AutoBhop", "LegacyJump"};
+		FormatCourseStyles(st2, 2, cs, sizeof(cs)); assert(!strcmp(cs, "AutoBhop \xC2\xB7 LegacyJump"));
+		FormatCourseStyles(nullptr, 0, cs, sizeof(cs)); assert(!strcmp(cs, "Normal"));
+		char tiny[6];
+		FormatCourseStyles(st2, 2, tiny, sizeof(tiny)); assert(strlen(tiny) < sizeof(tiny));
+	}
 	assert(!strcmp(NoTimePlaceholder(true), "--:--.---"));
 	assert(!strcmp(NoTimePlaceholder(false), "--:--.--"));
 	assert(!DeltaVisible(true, false, true, 1));
