@@ -784,7 +784,11 @@ void KZHUDService::ApplyCourseParts(CCSCustomHudLayout *layout, const char *pref
 	for (i32 i = 0; i < 3; i++)
 	{
 		const char *id = PrefixLayoutId(idBuf, sizeof(idBuf), prefix, ids[i]);
-		this->SetLayoutVar(layout, id, vars[i], extra.courseText[i], texts[i]);
+		// Panorama переводит текст, совпавший с ключом локализации целиком («Main» → «Главный проход»,
+		// «Normal» → «Обычный»): хвостовой NBSP делает его не-ключом и на экране не виден (как в gsmenu).
+		char shown[160];
+		V_snprintf(shown, sizeof(shown), "%s%s", texts[i], texts[i][0] ? "\xC2\xA0" : "");
+		this->SetLayoutVar(layout, id, vars[i], extra.courseText[i], shown);
 		this->ApplyChildLabelStyle(layout, id, extra.courseStyle[i], el.size, el.fontClass, colorClass);
 	}
 	this->ApplyChildLabelStyle(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "cr2_dot"), extra.courseStyle[3], el.size, el.fontClass, colorClass);
