@@ -527,8 +527,12 @@ bool KZ::gsmenu::OnClick(KZPlayer *player, uint32 packedHandle, const char *id)
 		const bool badId = strlen(id) > 48 || strspn(id, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != strlen(id);
 		if (++e.clicksInWindow > 16 || badId)
 		{
-			KZ_LOG_WARN(LogChannel::General, "[cyb] gsmenu_ext_click_dropped reason=%s n=%i now=%.1f start=%.1f slot=%i\n",
-						badId ? "bad_id" : "rate", e.clicksInWindow, now, e.clickWindowStart, slot);
+			// Один раз за окно: автокликер не должен забивать лог.
+			if (badId || e.clicksInWindow == 17)
+			{
+				KZ_LOG_WARN(LogChannel::General, "[cyb] gsmenu_ext_click_dropped reason=%s n=%i now=%.1f start=%.1f slot=%i\n",
+							badId ? "bad_id" : "rate", e.clicksInWindow, now, e.clickWindowStart, slot);
+			}
 			return true;
 		}
 		char cmd[96];
@@ -538,11 +542,6 @@ bool KZ::gsmenu::OnClick(KZPlayer *player, uint32 packedHandle, const char *id)
 	}
 	if ((CBaseEntity *)layout != w->entity.Get())
 	{
-		if (g_ext[slot].entity.IsValid())
-		{
-			// Клик по разметке, которой уже нет у владельца (пересоздана) — видно, если окно «не нажимается».
-			KZ_LOG_WARN(LogChannel::General, "[cyb] gsmenu_ext_click_dropped reason=stale_layout id=%s slot=%i\n", id, slot);
-		}
 		return false;
 	}
 	if (!w->open)
