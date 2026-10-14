@@ -1988,8 +1988,11 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 		cfg->ClearBottomPanel();
 		if (target->leadService)
 		{
-			// Дельта к PB/WR есть только в panorama-таймере — путь сравнения отпускаем.
-			target->leadService->SetCompareWanted(false, CybReplayDownload::Kind::PB);
+			// Дельта частицами (particles.cpp) — тот же путь сравнения, что у panorama-таймера
+			// (layout/mhud.cpp): держим только при включённом таймере и hudTimerCompare != 0.
+			const MHUDLayoutPrefs &own = cfg->GetOwnLayoutPrefs();
+			const i32 wantMode = own.elements[(i32)LayoutElement::Timer].enabled ? own.timerCompare : 0;
+			target->leadService->SetCompareWanted(wantMode != 0, wantMode == 2 ? CybReplayDownload::Kind::WR : CybReplayDownload::Kind::PB);
 		}
 		cfg->UpdateParticles();
 		return;

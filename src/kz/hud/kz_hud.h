@@ -379,9 +379,14 @@ private:
 	CHandle<CParticleSystem> mhudTimerDigitParticles[4] {};
 	CHandle<CParticleSystem> mhudTimerDelimParticles[3] {};
 	CHandle<CParticleSystem> mhudKeysParticle {};
-	// Обводка, с которой создана группа (скорость, престрейф, цифры таймера, разделители, клавиши);
-	// -1 — группы нет. Эффект частицы задаётся только при спавне, смена обводки — пересоздание.
-	i32 mhudParticleVariant[5] {-1, -1, -1, -1, -1};
+	// Дельта к PB/WR справа от таймера: знак, разряды (минуты, секунды, сотые, тысячная), разделители.
+	CHandle<CParticleSystem> mhudDeltaSignParticles[1] {};
+	CHandle<CParticleSystem> mhudDeltaDigitParticles[4] {};
+	CHandle<CParticleSystem> mhudDeltaDelimParticles[2] {};
+	// Обводка, с которой создана группа (скорость, престрейф, цифры таймера, разделители, клавиши,
+	// знак/цифры/разделители дельты); -1 — группы нет. Эффект частицы задаётся только при спавне,
+	// смена обводки — пересоздание.
+	i32 mhudParticleVariant[8] {-1, -1, -1, -1, -1, -1, -1, -1};
 	// Хоть одна частица создана — дешёвый гейт для CheckTransmit и DestroyAllParticles.
 	bool particlesActive {};
 
@@ -398,6 +403,7 @@ private:
 
 	void UpdateMHUDSpeedParticles();
 	void UpdateMHUDTimerParticles();
+	void UpdateMHUDDeltaParticles(f32 timerRightEdge, f32 timerY, f32 timerSize, bool outline, bool show);
 	void UpdateMHUDKeysParticle();
 
 public:
