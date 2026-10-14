@@ -1710,8 +1710,7 @@ namespace
 	void RenderJumptopWindow(KZPlayer *player)
 	{
 		JumptopView &v = g_jtView[player->GetPlayerSlot().Get()];
-		const i32 pages = ((i32)v.rows.size() + KZ_GSMENU_TABLE_ROWS - 1) / KZ_GSMENU_TABLE_ROWS;
-		v.page = (std::max)(0, (std::min)(v.page, pages - 1));
+		v.page = 0; // топ-20 без листания (решение владельца 14.10), свой рекорд — строкой снизу
 
 		KZ::gsmenu::Table t;
 		t.title = "Топ прыжков";
@@ -1719,7 +1718,7 @@ namespace
 		t.cols = "cols-jumptop";
 		for (i32 type = JumpType_LongJump; type <= JumpType_Jumpbug; type++)
 		{
-			t.filters[0].push_back({jumpTypeShortStr[type], type == v.jumpType});
+			t.filters[0].push_back({jumpTypeStr[type], type == v.jumpType});
 		}
 		t.filters[1] = {{"Дистанция", !v.isBlock}, {"Блоки", v.isBlock}};
 		for (const char *mode : jumptopModes)
@@ -1730,7 +1729,7 @@ namespace
 				t.filters[2].push_back({mode, dbID == v.modeID});
 			}
 		}
-		t.headers[0] = "№";
+		t.headers[0] = "Место";
 		t.headers[1] = "Игрок";
 		t.headers[2] = v.isBlock ? "Блок" : "Дистанция";
 		t.headers[3] = "Стрейфы";
@@ -1785,7 +1784,7 @@ namespace
 				mine.distance = it->second.distance;
 				t.hasMe = true;
 				t.me.cells[0] = place > 0 ? std::to_string(place) : "—";
-				t.me.cells[1] = "Ваш рекорд";
+				t.me.cells[1] = player->GetName();
 				t.me.cells[2] = JumpDistanceText(mine, v.isBlock);
 				t.me.initial = KZ::gsmenu::Initial(player->GetName());
 				t.me.colour = (u32)(me % 8);
@@ -1794,14 +1793,6 @@ namespace
 		if (v.rows.empty())
 		{
 			t.hint = "В этом топе пока пусто";
-		}
-		if (pages > 1)
-		{
-			char page[32];
-			V_snprintf(page, sizeof(page), "%i / %i", v.page + 1, pages);
-			t.page = page;
-			t.prev = v.page > 0;
-			t.next = v.page < pages - 1;
 		}
 		KZ::gsmenu::ShowTable(player, t, OnJumptopWindowClick, "jumptop");
 	}

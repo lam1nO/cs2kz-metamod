@@ -16,7 +16,7 @@
 #define KZ_GSMENU_LAYOUT "panorama/layout/custom_game/cyber/gsmenu.vxml_c"
 
 // Ёмкости разметки — контракт с tools/gen_gsmenu_xml.py аддона, менять только вместе.
-#define KZ_GSMENU_TABLE_ROWS    10
+#define KZ_GSMENU_TABLE_ROWS    20
 #define KZ_GSMENU_TABLE_COLS    8
 #define KZ_GSMENU_ROW_ACTIONS   3
 #define KZ_GSMENU_FILTER_GROUPS 3

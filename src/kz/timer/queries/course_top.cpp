@@ -69,6 +69,7 @@ struct CourseTopRequest : public BaseRequest
 		f64 time;
 		u64 steamid64;
 		u64 points {}; // 0 for local database
+		CUtlString created; // «YYYY-MM-DD HH:MM:SS» из Times.Created (локальная БД), пусто — нет данных
 
 		CUtlString GetName()
 		{
@@ -160,7 +161,7 @@ struct CourseTopRequest : public BaseRequest
 					while (result->FetchRow())
 					{
 						req->srData.overallData.AddToTail(
-							{result->GetString(0), result->GetString(2), (u64)result->GetInt64(4), result->GetFloat(3), (u64)result->GetInt64(1)});
+							{result->GetString(0), result->GetString(2), (u64)result->GetInt64(4), result->GetFloat(3), (u64)result->GetInt64(1), 0, result->GetString(5)});
 					}
 				}
 
@@ -168,7 +169,7 @@ struct CourseTopRequest : public BaseRequest
 				{
 					while (result->FetchRow())
 					{
-						req->srData.proData.AddToTail({result->GetString(0), result->GetString(2), 0, result->GetFloat(3), (u64)result->GetInt64(1)});
+						req->srData.proData.AddToTail({result->GetString(0), result->GetString(2), 0, result->GetFloat(3), (u64)result->GetInt64(1), 0, result->GetString(5)});
 					}
 				}
 			};
@@ -443,6 +444,7 @@ namespace
 	// (консольная таблица), сразу за ней окно тихо дозапрашивает 100 — листание без запросов.
 	constexpr u64 kMaptopLimit = 100;
 	constexpr i32 kMaptopPage = KZ_GSMENU_TABLE_ROWS;
+	constexpr i32 kMaptopShow = 10; // в окне — топ-10 и своя строка
 
 	struct MaptopView
 	{
@@ -454,6 +456,7 @@ namespace
 		u64 baseOffset = 0;                 // o= команды — места считаются от него
 		f64 lastRequery = -1.0; // клики по режимам не чаще 2 в секунду
 		std::vector<std::string> runIds; // строка на экране -> id рана (реплей)
+		std::string meRunId;             // своя строка под топом (ран ниже десятки)
 		CourseTopRequest::CourseTopData data;
 		bool global = false;
 	};
@@ -550,7 +553,17 @@ namespace
 			RenderMaptop(player);
 			return;
 		}
-		if (sscanf(id, "gr%d_go", &row) != 1 || row < 0 || row >= (i32)v.runIds.size())
+		// ▶ строки gr{i} или своей строки gm (ран ниже десятки).
+		std::string runId;
+		if (KZ_STREQ(id, "gm_go"))
+		{
+			runId = v.meRunId;
+		}
+		else if (sscanf(id, "gr%d_go", &row) == 1 && row >= 0 && row < (i32)v.runIds.size())
+		{
+			runId = v.runIds[row];
+		}
+		if (runId.empty())
 		{
 			return;
 		}
@@ -559,24 +572,85 @@ namespace
 		KZ::gsmenu::Close(player, "watch_replay");
 		CCommand args;
 		char line[96];
-		V_snprintf(line, sizeof(line), "kz_replay %s", v.runIds[row].c_str());
+		V_snprintf(line, sizeof(line), "kz_replay %s", runId.c_str());
 		args.Tokenize(line);
 		CPlayerSlot slot = player->GetPlayerSlot();
 		scmd::OnClientCommand(slot, args);
+	}
+
+	// «YYYY-MM-DD HH:MM:SS» (Times.Created) → «сегодня» / «вчера» / «5 дн назад» / «3 нед назад» / «2 мес назад» / «1 г назад».
+	std::string RelativeAgo(const char *ts)
+	{
+		int y = 0, mo = 0, d = 0, h = 0, mi = 0, sec = 0;
+		if (!ts || sscanf(ts, "%d-%d-%d %d:%d:%d", &y, &mo, &d, &h, &mi, &sec) < 3 || mo < 1 || mo > 12)
+		{
+			return "";
+		}
+		// Дни от 1970-01-01 (days_from_civil): без timegm/_mkgmtime, одинаково на всех платформах.
+		y -= mo <= 2;
+		const i64 era = (y >= 0 ? y : y - 399) / 400;
+		const i64 yoe = y - era * 400;
+		const i64 doy = (153 * (mo + (mo > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+		const i64 doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+		const i64 then = (era * 146097 + doe - 719468) * 86400 + h * 3600 + mi * 60 + sec;
+		const i64 days = ((i64)time(nullptr) - then) / 86400;
+		char buf[32];
+		if (days < 1)
+		{
+			return "сегодня";
+		}
+		if (days < 2)
+		{
+			return "вчера";
+		}
+		if (days < 7)
+		{
+			V_snprintf(buf, sizeof(buf), "%lld дн назад", (long long)days);
+		}
+		else if (days < 31)
+		{
+			V_snprintf(buf, sizeof(buf), "%lld нед назад", (long long)(days / 7));
+		}
+		else if (days < 365)
+		{
+			V_snprintf(buf, sizeof(buf), "%lld мес назад", (long long)(days / 30));
+		}
+		else
+		{
+			V_snprintf(buf, sizeof(buf), "%lld г назад", (long long)(days / 365));
+		}
+		return buf;
+	}
+
+	// Строка топа: место · ник · время · отставание от 1-го · когда.
+	KZ::gsmenu::Row MaptopRow(CourseTopRequest::RunStats &r, i32 rank, f64 best, u64 me)
+	{
+		KZ::gsmenu::Row row;
+		row.cells[0] = std::to_string(rank);
+		row.cells[1] = r.name.Get();
+		row.cells[2] = r.GetTime().Get();
+		if (rank > 1 && best > 0.0)
+		{
+			row.cells[3] = std::string("+") + utils::FormatTime(r.time - best).Get();
+		}
+		row.cells[4] = RelativeAgo(r.created.Get());
+		row.initial = KZ::gsmenu::Initial(r.name.Get());
+		row.colour = (u32)(r.steamid64 % 8);
+		row.wr = rank == 1;
+		row.me = r.steamid64 == me;
+		return row;
 	}
 
 	void RenderMaptop(KZPlayer *player)
 	{
 		MaptopView &v = g_maptop[player->GetPlayerSlot().Get()];
 		CUtlVector<CourseTopRequest::RunStats> &list = MaptopList(v);
-		const i32 pages = (list.Count() + kMaptopPage - 1) / kMaptopPage;
-		v.page = (std::max)(0, (std::min)(v.page, pages - 1));
+		v.page = 0; // топ-10 без листания (решение владельца 14.10), своя строка закреплена снизу
 
 		KZ::gsmenu::Table t;
 		t.title = v.map.Get();
 		t.sub = std::string(v.course.Get()) + " · " + (v.global ? "мировой топ" : "топ сервера");
 		t.cover = v.map.Get();
-		t.noTp = v.pro;
 		t.filters[1] = {{"PRO", v.pro}, {"NUB", !v.pro}};
 		const CUtlString curShort = KZ::mode::GetModeInfo(v.mode).shortModeName;
 		for (const char *mode : kMaptopModes)
@@ -586,48 +660,46 @@ namespace
 				t.filters[2].push_back({mode, !V_stricmp(curShort.Get(), mode)});
 			}
 		}
-		t.headers[0] = "№";
+		t.headers[0] = "Место";
 		t.headers[1] = "Игрок";
 		t.headers[2] = "Время";
-		t.headers[3] = "TP";
-		t.headers[4] = "До WR";
+		t.headers[3] = "Отставание";
+		t.headers[4] = "Когда";
 
 		v.runIds.clear();
+		v.meRunId.clear();
 		const u64 me = player->GetSteamId64();
 		const f64 best = list.Count() > 0 ? list[0].time : 0.0;
-		const i32 first = v.page * kMaptopPage;
-		for (i32 i = first; i < list.Count() && i < first + kMaptopPage; i++)
+		bool meShown = false;
+		for (i32 i = 0; i < list.Count() && i < kMaptopShow; i++)
 		{
-			CourseTopRequest::RunStats &r = list[i];
-			KZ::gsmenu::Row row;
-			const i32 rank = (i32)v.baseOffset + i + 1;
-			row.cells[0] = std::to_string(rank);
-			row.cells[1] = r.name.Get();
-			row.cells[2] = r.GetTime().Get();
-			row.cells[3] = v.pro ? "" : std::to_string(r.teleportsUsed);
-			row.initial = KZ::gsmenu::Initial(r.name.Get());
-			row.colour = (u32)(r.steamid64 % 8);
-			row.wr = rank == 1;
-			row.me = r.steamid64 == me;
-			if (rank > 1 && best > 0.0)
-			{
-				row.cells[4] = std::string("+") + utils::FormatTime(r.time - best).Get();
-			}
+			KZ::gsmenu::Row row = MaptopRow(list[i], (i32)v.baseOffset + i + 1, best, me);
+			meShown |= row.me;
 			t.rows.push_back(row);
-			v.runIds.push_back(r.runID.Get());
+			v.runIds.push_back(list[i].runID.Get());
+		}
+		// Своя строка — когда свой рекорд есть в загруженном топе, но ниже десятки.
+		for (i32 i = kMaptopShow; !meShown && i < list.Count(); i++)
+		{
+			if (list[i].steamid64 != me)
+			{
+				continue;
+			}
+			KZ::gsmenu::Row row = MaptopRow(list[i], (i32)v.baseOffset + i + 1, best, me);
+			t.hasMe = true;
+			for (i32 j = 0; j < KZ_GSMENU_TABLE_COLS; j++)
+			{
+				t.me.cells[j] = row.cells[j];
+			}
+			t.me.initial = row.initial;
+			t.me.colour = row.colour;
+			t.me.actions[0] = "▶"; // показать кнопку реплея своей строки (gm_go)
+			v.meRunId = list[i].runID.Get();
+			break;
 		}
 		if (t.rows.empty())
 		{
 			t.hint = v.pro ? "PRO-рекордов на этом курсе пока нет" : "Рекордов на этом курсе пока нет";
-		}
-		// Листание — только когда записей больше одной страницы.
-		if (pages > 1)
-		{
-			char page[32];
-			V_snprintf(page, sizeof(page), "%i / %i", v.page + 1, pages);
-			t.page = page;
-			t.prev = v.page > 0;
-			t.next = v.page < pages - 1;
 		}
 		KZ::gsmenu::ShowTable(player, t, OnMaptopClick, "maptop");
 	}
@@ -682,6 +754,8 @@ bool CourseTopRequest::ShowWindow()
 // GG1 (CSSharp) спрашивает `kz_gsm_done <slot>` с консоли сервера; ответ — серия серверных команд
 // `css_gg1_done <slot> <карта,карта,...>` (пачками, чтобы не упереться в длину команды) и в конце
 // `css_gg1_done_end <slot>`. Карты — с любым временем в текущем режиме игрока (любой курс, любой стиль).
+// Элемент — «карта=секунды»: лучшее время главного курса (наименьший StageID карты), для плитки
+// «✓ Пройдена 01:02.77»; без «=…» — пройден только бонус.
 CON_COMMAND_F(kz_gsm_done, "kz_gsm_done <slot> — пройденные игроком карты в его режиме (для фильтра GG1)", FCVAR_NONE)
 {
 	if (utils::GetController(context.GetPlayerSlot()) || args.ArgC() < 2)
@@ -704,10 +778,11 @@ CON_COMMAND_F(kz_gsm_done, "kz_gsm_done <slot> — пройденные игро
 		return;
 	}
 	const i32 modeID = KZ::mode::GetModeInfo(player->modeService).databaseID;
-	char query[512];
+	char query[768];
 	V_snprintf(query, sizeof(query),
-			   "SELECT DISTINCT m.Name FROM Times t INNER JOIN MapCourses mc ON mc.ID = t.MapCourseID "
-			   "INNER JOIN Maps m ON m.ID = mc.MapID WHERE t.SteamID64 = %llu AND t.ModeID = %d",
+			   "SELECT m.Name, MIN(CASE WHEN mc.StageID = (SELECT MIN(mc2.StageID) FROM MapCourses mc2 WHERE mc2.MapID = m.ID) "
+			   "THEN t.RunTime END) FROM Times t INNER JOIN MapCourses mc ON mc.ID = t.MapCourseID "
+			   "INNER JOIN Maps m ON m.ID = mc.MapID WHERE t.SteamID64 = %llu AND t.ModeID = %d GROUP BY m.Name",
 			   player->GetSteamId64(), modeID);
 	Transaction txn;
 	txn.queries.push_back(query);
@@ -740,7 +815,15 @@ CON_COMMAND_F(kz_gsm_done, "kz_gsm_done <slot> — пройденные игро
 			{
 				continue;
 			}
-			if (chunk.size() + strlen(name) + 1 > 380)
+			std::string item = name;
+			const f64 best = result->IsNull(1) ? 0.0 : result->GetFloat(1);
+			if (best > 0.0)
+			{
+				char t[32];
+				V_snprintf(t, sizeof(t), "=%.3f", best);
+				item += t;
+			}
+			if (chunk.size() + item.size() + 1 > 380)
 			{
 				flush();
 			}
@@ -748,7 +831,7 @@ CON_COMMAND_F(kz_gsm_done, "kz_gsm_done <slot> — пройденные игро
 			{
 				chunk += ',';
 			}
-			chunk += name;
+			chunk += item;
 		}
 		flush();
 		sendEnd();

@@ -296,11 +296,13 @@ bool KZ::gsmenu::ShowTable(KZPlayer *player, const Table &t, ClickFn onClick, co
 	Var(player, *w, layout, "gw", "s", t.sub);
 	Var(player, *w, layout, "gw", "srv", ServerTag());
 	Swap(player, *w, layout, "gw_cover", t.cover.empty() ? "mc-none" : "mc-" + t.cover);
+	// Подложка шапки (v3): та же обложка крупно и приглушённо за названием карты.
+	Swap(player, *w, layout, "gw_hero", t.cover.empty() ? "mc-none" : "mc-" + t.cover);
 	Class(player, *w, layout, "gw_tier", "hidden", t.tier <= 0);
 	if (t.tier > 0)
 	{
 		char tier[16];
-		V_snprintf(tier, sizeof(tier), "Тир %i", t.tier);
+		V_snprintf(tier, sizeof(tier), "T%i", t.tier);
 		Var(player, *w, layout, "gw_tier", "t", tier);
 		Swap(player, *w, layout, "gw_tier", "t" + std::to_string(t.tier));
 	}
@@ -308,6 +310,9 @@ bool KZ::gsmenu::ShowTable(KZPlayer *player, const Table &t, ClickFn onClick, co
 	char id[32];
 	for (i32 g = 0; g < KZ_GSMENU_FILTER_GROUPS; g++)
 	{
+		// Пустая группа не рисует пустую дорожку-пилюлю.
+		V_snprintf(id, sizeof(id), "gf%i", g);
+		Class(player, *w, layout, id, "hidden", t.filters[g].empty());
 		for (i32 k = 0; k < KZ_GSMENU_FILTER_CHIPS; k++)
 		{
 			V_snprintf(id, sizeof(id), "gf%i_%i", g, k);
