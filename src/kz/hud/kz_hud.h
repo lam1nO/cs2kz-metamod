@@ -1175,6 +1175,9 @@ private:
 	i32 editorSelected {-1}; // LayoutElement или -1 — ничего не выбрано
 	i32 editorStep {1};      // шаг стрелок позиции: 1 или 5 процентов
 	f64 editorOpenedAt {};   // curtime открытия — живой плейсхолдер таймера
+	// Док (список + свойства) и пристыкованные попапы слева: пересчёт при смене выбранного
+	// (правило в editor.cpp), ⇄ ed_side — ручная инверсия; при переносе не меняется.
+	bool editorDockLeft {false};
 	// Диф-кэш реплики худа на сущности меню (e_*/x_* панели) — свой, отдельный от кэша настоящего
 	// худа: это другая сущность. Живёт вместе с ownedMenuLayout (сброс в EnsureMenuLayout).
 	// Начальное hidden{true} совпадает с разметкой: кнопки e_* в options.xml заводятся с классом
@@ -1197,6 +1200,12 @@ private:
 		bool listPopupHidden {true};
 		bool confirmPopupHidden {true};
 		bool popDimHidden {true}; // pop_dim — затемнение под любым из трёх попапов
+		// Попапы цвета/шрифта в режиме редактора: ed — на месте панели свойств, dock-l — зеркально.
+		bool colorPopupEd {};
+		bool listPopupEd {};
+		bool popDimEd {};
+		bool colorPopupDockL {};
+		bool listPopupDockL {};
 		bool editOpenHidden {true};
 
 		bool tabHidden[KZ_MENU_TABS] {};
@@ -1241,7 +1250,18 @@ private:
 		bool eSel[KZ_EDITOR_ITEMS] {};
 		bool retiredRowHidden {};
 		bool propsHidden {true};
-		bool propsFlip {};
+		// Вариант B (контракт port2): has-sel/dock-l на edit_root, tag-dn на e_*, open на ep_font,
+		// hidden на заголовках пустых групп и строке цвета без основного цвета.
+		bool editHasSel {};
+		bool editDockL {};
+		bool eTagDn[KZ_EDITOR_ITEMS] {};
+		bool epFontOpen {};
+		bool epGtColHidden {};
+		bool epGtBehHidden {};
+		bool epProwColorHidden {};
+		// exy ставится на выбранную e_*; кэш menuVars ключуется именем — при смене выбранного
+		// значение надо переслать на новую панель, даже если координаты совпали.
+		i32 exySel {-1};
 		bool epOn {};
 		bool epStep1 {true};
 		bool epStep5 {};

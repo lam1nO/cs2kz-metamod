@@ -1139,6 +1139,17 @@ void KZHUDService::RenderMenuPopups(CCSCustomHudLayout *layout)
 	this->SetMenuBoolClass(layout, "confirm_popup", "hidden", this->menuApplied.confirmPopupHidden, this->menuPopup != MenuPopup::Confirm);
 	// Затемнение под попапом (спека gs2 §1.6): hittest, клик мимо попапа не уходит в окно.
 	this->SetMenuBoolClass(layout, "pop_dim", "hidden", this->menuApplied.popDimHidden, this->menuPopup == MenuPopup::None);
+	// Редактор (вариант B, контракт port2 §6): цвет/шрифт встают на место панели свойств, pop_dim
+	// прозрачный, но ловит клики; dock-l — зеркально, если док слева. confirm_popup — по центру, без ed.
+	const bool ed = this->editorOpen;
+	const bool dockL = ed && this->editorDockLeft;
+	this->SetMenuBoolClass(layout, "color_popup", "ed", this->menuApplied.colorPopupEd, ed);
+	this->SetMenuBoolClass(layout, "list_popup", "ed", this->menuApplied.listPopupEd, ed);
+	this->SetMenuBoolClass(layout, "pop_dim", "ed", this->menuApplied.popDimEd, ed);
+	this->SetMenuBoolClass(layout, "color_popup", "dock-l", this->menuApplied.colorPopupDockL, dockL);
+	this->SetMenuBoolClass(layout, "list_popup", "dock-l", this->menuApplied.listPopupDockL, dockL);
+	// Значение шрифта «раскрыто», пока его список открыт из редактора (в окне — open на row{i}).
+	this->SetMenuBoolClass(layout, "ep_font", "open", this->menuApplied.epFontOpen, ed && this->menuPopup == MenuPopup::List);
 	switch (this->menuPopup)
 	{
 		case MenuPopup::Color:
@@ -1165,6 +1176,8 @@ void KZHUDService::RenderMenuColorPopup(CCSCustomHudLayout *layout)
 	const char *lang = this->player->languageService->GetLanguage();
 	this->SetMenuVar(layout, "color_popup", "cp_title", KZLanguageService::PrepareMessageWithLang(lang, it->phraseKey).c_str());
 	this->SetMenuVar(layout, "color_popup", "cp_reset", KZLanguageService::PrepareMessageWithLang(lang, "Options - Color Reset").c_str());
+	// Кнопка color_ok общая для окна и редактора: без переменной она пустая.
+	this->SetMenuVar(layout, "color_popup", "cp_ok", KZLanguageService::PrepareMessageWithLang(lang, "HUD Editor - Apply").c_str());
 
 	const i32 pending = this->menuColorPending >= 0 ? this->menuColorPending : GetItemColorEntry(this->GetMHUDColorPref(it->prefKey, it->cdef), *it);
 	for (i32 i = 0; i < KZ_MENU_PRESETS; i++)
@@ -1571,7 +1584,9 @@ bool KZHUDService::HandleMenuPopupClick(const char *id)
 {
 	i32 a = -1;
 	i32 b = -1;
-	if (!V_strcmp(id, "color_close") || !V_strcmp(id, "list_close") || !V_strcmp(id, "confirm_no"))
+	// pop_dim — клик мимо попапа: закрыть без применения (у confirm — как «Отмена»), и в окне, и в
+	// редакторе (HandleEditorClick его не перехватывает).
+	if (!V_strcmp(id, "color_close") || !V_strcmp(id, "list_close") || !V_strcmp(id, "confirm_no") || !V_strcmp(id, "pop_dim"))
 	{
 		this->CloseMenuPopup();
 		return true;

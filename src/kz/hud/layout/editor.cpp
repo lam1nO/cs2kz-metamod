@@ -11,7 +11,8 @@
 //     PB/WR, showpos и курс — настоящие, если есть.
 //   - edit_grid — 64×36 кнопок g{c}_{r}: клик ставит ВЫБРАННЫЙ элемент центром в ячейку. Классов и
 //     переменных на ячейки сервер не ставит никогда (бюджет интернирования, menu.cpp).
-//   - edit_list — строки элементов el{i} (клик выбирает) с тумблерами et{i}, «Сбросить всё» (через confirm_popup), «Готово».
+//   - edit_list — строки элементов el{i} (клик выбирает) с тумблерами et{i}, «Сбросить всё» (через confirm_popup), «Готово»;
+//     в шапке ⇄ ed_side (док на другую сторону) и × ed_close.
 //   - edit_props — свойства выбранного: стрелки с шагом 1/5, кегль, шрифт (list_popup), цвет
 //     (color_popup), цвета дельты (только таймер), прозрачность, обводка, сброс элемента и общие
 //     строки поведения: тумблеры ep_trow*, степпер ep_srow, сегменты ep_grow (у кого что —
@@ -243,9 +244,12 @@ static_function bool HasEditorStepper(i32 sel)
 #define KZ_EDITOR_DELTA_PLACEHOLDER 0.312
 #define KZ_EDITOR_PROGRESS_PLACEHOLDER 38
 #define KZ_EDITOR_PROGRESS_TEXT "38%"
-// Панель свойств уезжает влево (flip), если выбранный элемент в правой нижней части экрана:
-// x > 60% и y > 60% от левого-верхнего угла = больше 10 от центра.
-#define KZ_EDITOR_FLIP_FROM 10
+// Док (список + свойства) уходит влево (dock-l), если выбранный элемент правее 15% от центра и
+// ниже верха дока: верх 96 px из 1080 = (96 - 540) / 10.8 ≈ -41 (контракт port2 §4).
+#define KZ_EDITOR_DOCK_LEFT_X 15
+#define KZ_EDITOR_DOCK_LEFT_Y (-41)
+// Ярлык элемента у верхней кромки экрана уходит под рамку (tag-dn).
+#define KZ_EDITOR_TAG_DOWN_Y (-44)
 
 #define SLOT_ID(fn, fmt) \
 	static_function const char *fn(i32 i) \
@@ -259,6 +263,18 @@ SLOT_ID(ElPanel, "el%i")
 SLOT_ID(EtPanel, "et%i")
 SLOT_ID(EnVar, "en%i")
 #undef SLOT_ID
+
+// Сторона дока для выбранного элемента — считается только при СМЕНЕ выбранного: перенос элемента
+// её не пересчитывает, иначе панели прыгали бы под мышью.
+static_function bool EditorDockLeftFor(const MHUDLayoutPrefs &prefs, i32 sel)
+{
+	if (!IsEditorElement(sel))
+	{
+		return false;
+	}
+	const MHUDLayoutPrefs::Element &el = prefs.elements[sel];
+	return KZ::hudfmt::ClampEditorPos(el.x) > KZ_EDITOR_DOCK_LEFT_X && KZ::hudfmt::ClampEditorPos(el.y) > KZ_EDITOR_DOCK_LEFT_Y;
+}
 
 // === Открытие / закрытие ======================================================================
 
@@ -291,6 +307,7 @@ void KZHUDService::OpenHudEditor()
 	}
 	this->editorOpen = true;
 	this->editorSelected = -1;
+	this->editorDockLeft = false;
 	this->editorStep = 1;
 	this->editorOpenedAt = g_pKZUtils->GetServerGlobals()->curtime;
 	this->menuPopup = MenuPopup::None;
@@ -328,6 +345,15 @@ void KZHUDService::CloseHudEditor()
 		this->SetMenuBoolClass(layout, "list_popup", "hidden", this->menuApplied.listPopupHidden, true);
 		this->SetMenuBoolClass(layout, "confirm_popup", "hidden", this->menuApplied.confirmPopupHidden, true);
 		this->SetMenuBoolClass(layout, "pop_dim", "hidden", this->menuApplied.popDimHidden, true);
+		// Классы режима редактора: окно !options на той же сущности их видеть не должно.
+		this->SetMenuBoolClass(layout, "edit_root", "has-sel", this->menuApplied.editHasSel, false);
+		this->SetMenuBoolClass(layout, "edit_root", "dock-l", this->menuApplied.editDockL, false);
+		this->SetMenuBoolClass(layout, "color_popup", "ed", this->menuApplied.colorPopupEd, false);
+		this->SetMenuBoolClass(layout, "list_popup", "ed", this->menuApplied.listPopupEd, false);
+		this->SetMenuBoolClass(layout, "pop_dim", "ed", this->menuApplied.popDimEd, false);
+		this->SetMenuBoolClass(layout, "color_popup", "dock-l", this->menuApplied.colorPopupDockL, false);
+		this->SetMenuBoolClass(layout, "list_popup", "dock-l", this->menuApplied.listPopupDockL, false);
+		this->SetMenuBoolClass(layout, "ep_font", "open", this->menuApplied.epFontOpen, false);
 		// Без этой строки игрок остаётся в курсоре навсегда (см. CloseLayoutMenu).
 		layout->SetInputCaptureEnabled(this->player->GetPlayerSlot(), false);
 	}
@@ -359,12 +385,15 @@ void KZHUDService::RenderEditor()
 	this->SetMenuVar(layout, "edit_list", "ed_title", phrase("HUD Editor - Title").c_str());
 	this->SetMenuVar(layout, "ed_reset_all", "ed_reset", phrase("HUD Editor - Reset").c_str());
 	this->SetMenuVar(layout, "ed_done", "ed_done", phrase("HUD Editor - Done").c_str());
-	this->SetMenuVar(layout, "edit_root", "ed_hint", phrase("HUD Editor - Hint").c_str());
 	static const char *const propLabels[][2] = {
 		{"p_pos", "HUD Editor - Prop Position"}, {"p_step", "HUD Editor - Prop Step"},       {"p_size", "HUD Editor - Prop Size"},
 		{"p_font", "HUD Editor - Prop Font"},    {"p_color", "HUD Editor - Prop Color"},     {"p_delta", "HUD Editor - Prop Delta"},
 		{"p_opacity", "HUD Editor - Prop Opacity"}, {"p_outline", "HUD Editor - Prop Outline"}, {"p_reset", "HUD Editor - Prop Reset"},
 		{"p_hint", "HUD Editor - Prop Hint"},
+		// Навбар футера свойств и заголовки групп (вариант B).
+		{"ed_key", "HUD Editor - Key"},          {"ed_move", "HUD Editor - Move"},
+		{"pg_pos", "HUD Editor - Group Position"}, {"pg_look", "HUD Editor - Group Look"},
+		{"pg_col", "HUD Editor - Group Color"},  {"pg_beh", "HUD Editor - Group Behavior"},
 	};
 	for (const auto &pl : propLabels)
 	{
@@ -372,6 +401,10 @@ void KZHUDService::RenderEditor()
 	}
 
 	this->RenderEditorReplica(layout, false);
+
+	// has-sel — клик по сетке что-то сделает (подсветка ячейки, линия, подпись); dock-l — сторона дока.
+	this->SetMenuBoolClass(layout, "edit_root", "has-sel", this->menuApplied.editHasSel, IsEditorElement(this->editorSelected));
+	this->SetMenuBoolClass(layout, "edit_root", "dock-l", this->menuApplied.editDockL, this->editorDockLeft);
 
 	// Список элементов: on = элемент включён (и у строки, и у её тумблера).
 	for (i32 i = 0; i < KZ_EDITOR_ITEMS; i++)
@@ -383,6 +416,8 @@ void KZHUDService::RenderEditor()
 		this->SetMenuBoolClass(layout, ElPanel(i), "on", this->menuApplied.elOn[i], enabled);
 		this->SetMenuBoolClass(layout, EtPanel(i), "on", this->menuApplied.etOn[i], enabled);
 		this->SetMenuBoolClass(layout, r.buttonId, "sel", this->menuApplied.eSel[i], i == this->editorSelected);
+		this->SetMenuBoolClass(layout, r.buttonId, "tag-dn", this->menuApplied.eTagDn[i],
+							   KZ::hudfmt::ClampEditorPos(prefs.elements[i].y) <= KZ_EDITOR_TAG_DOWN_Y);
 	}
 	// Реплики прицела больше нет (прицел родной, см. KZQuietService::UpdateWeaponCamera).
 	this->SetMenuBoolClass(layout, KZ_EDITOR_RETIRED_ROW, "hidden", this->menuApplied.retiredRowHidden, true);
@@ -401,7 +436,8 @@ void KZHUDService::RenderEditor()
 		char buf[48];
 		this->SetMenuVar(layout, "edit_props", "pn", phrase(EDITOR_REPLICA[sel].nameKey).c_str());
 		this->SetMenuBoolClass(layout, "ep_on", "on", this->menuApplied.epOn, prefs.elements[sel].enabled);
-		if (isElement)
+		Color colorDef;
+		const char *colorKey = GetElementColorKey((LayoutElement)sel, colorDef);
 		{
 			const LayoutElementDef &def = LAYOUT_ELEMENTS[sel];
 			const MHUDLayoutPrefs::Element &el = prefs.elements[sel];
@@ -409,17 +445,24 @@ void KZHUDService::RenderEditor()
 			// области: так же стоит и реплика (EditorClampStoredPos).
 			V_snprintf(buf, sizeof(buf), "%i \xC2\xB7 %i", KZ::hudfmt::ClampEditorPos(el.x), KZ::hudfmt::ClampEditorPos(el.y));
 			this->SetMenuVar(layout, "edit_props", "xy", buf);
+			// Тот же текст — в ярлык выбранной рамки. Кэш menuVars ключуется именем: при смене
+			// выбранного забываем прошлое значение, иначе новая панель его не получит.
+			if (this->menuApplied.exySel != sel)
+			{
+				this->menuVars.erase("exy");
+				this->menuApplied.exySel = sel;
+			}
+			this->SetMenuVar(layout, EDITOR_REPLICA[sel].buttonId, "exy", buf);
 			this->SetMenuBoolClass(layout, "ep_step1", "on", this->menuApplied.epStep1, this->editorStep == 1);
 			this->SetMenuBoolClass(layout, "ep_step5", "on", this->menuApplied.epStep5, this->editorStep == 5);
 			V_snprintf(buf, sizeof(buf), "%ipx", el.size);
 			this->SetMenuVar(layout, "edit_props", "sz", buf);
 			const char *slug = this->player->optionService->GetPreferenceStr(def.fontKey, def.fontDefault);
 			this->SetMenuVar(layout, "ep_font", "font", panorama::GetFontDisplayName(slug, def.fontDefault));
-			Color colorDef;
-			const char *colorKey = GetElementColorKey((LayoutElement)sel, colorDef);
 			const char *swatch = colorKey ? panorama::ResolveSwatchClass(this->GetMHUDColorPref(colorKey, colorDef)) : NULL;
 			this->SetMenuSwapClass(layout, "ep_color", this->menuApplied.epColor, swatch);
 			this->SetMenuBoolClass(layout, "ep_color", "hidden", this->menuApplied.epColorHidden, colorKey == NULL);
+			this->SetMenuBoolClass(layout, "ep_prow_color", "hidden", this->menuApplied.epProwColorHidden, colorKey == NULL);
 			if (sel == (i32)LayoutElement::Timer)
 			{
 				this->SetMenuSwapClass(layout, "ep_dcol_ahead", this->menuApplied.epDAhead, panorama::ResolveSwatchClass(prefs.deltaAhead));
@@ -476,9 +519,12 @@ void KZHUDService::RenderEditor()
 		}
 		this->SetMenuBoolClass(layout, "ep_srow", "hidden", this->menuApplied.epSrowHidden, !HasEditorStepper(sel));
 		this->SetMenuBoolClass(layout, "ep_grow", "hidden", this->menuApplied.epGrowHidden, seg == NULL);
-		const bool flip = isElement && KZ::hudfmt::ClampEditorPos(prefs.elements[sel].x) > KZ_EDITOR_FLIP_FROM
-						  && KZ::hudfmt::ClampEditorPos(prefs.elements[sel].y) > KZ_EDITOR_FLIP_FROM;
-		this->SetMenuBoolClass(layout, "edit_props", "flip", this->menuApplied.propsFlip, flip);
+		// Заголовки пустых групп: «Цвет» — ни основного, ни дельты, ни доп. цветов (Тип рана);
+		// «Поведение» — ни тумблеров, ни сегментов, ни степпера.
+		const bool noColors = colorKey == NULL && sel != (i32)LayoutElement::Timer && !EDITOR_EXTRA_COLORS[sel][0].prefKey;
+		this->SetMenuBoolClass(layout, "ep_gt_col", "hidden", this->menuApplied.epGtColHidden, noColors);
+		this->SetMenuBoolClass(layout, "ep_gt_beh", "hidden", this->menuApplied.epGtBehHidden,
+							   toggleCount == 0 && seg == NULL && !HasEditorStepper(sel));
 	}
 	this->SetMenuBoolClass(layout, "edit_props", "hidden", this->menuApplied.propsHidden, !isElement);
 
@@ -843,7 +889,11 @@ bool KZHUDService::HandleEditorClick(const char *id)
 	{
 		if (!V_strcmp(id, EDITOR_REPLICA[e].buttonId))
 		{
-			this->editorSelected = e;
+			if (this->editorSelected != e)
+			{
+				this->editorSelected = e;
+				this->editorDockLeft = EditorDockLeftFor(this->GetOwnLayoutPrefs(), e);
+			}
 			this->RenderEditor();
 			return true;
 		}
@@ -862,6 +912,7 @@ bool KZHUDService::HandleEditorClick(const char *id)
 				if (this->editorSelected != i)
 				{
 					this->editorSelected = i;
+					this->editorDockLeft = EditorDockLeftFor(this->GetOwnLayoutPrefs(), i);
 					this->RenderEditor();
 				}
 			}
@@ -967,7 +1018,19 @@ bool KZHUDService::HandleEditorClick(const char *id)
 	{
 		this->OpenMenuConfirm(KZMenuFindItemByPhrase(KZ_MENU_RESET_ALL_PHRASE));
 	}
-	else if (!V_strcmp(id, "ed_done") || !V_strcmp(id, "m_close"))
+	else if (!V_strcmp(id, "ed_side"))
+	{
+		// ⇄ — ручной перенос дока; держится до следующей смены выбранного.
+		this->editorDockLeft = !this->editorDockLeft;
+		this->RenderEditor();
+	}
+	else if (!V_strcmp(id, "ep_back"))
+	{
+		// ‹ шапки свойств (видна на 4:3, где док не вмещает и список, и свойства) — назад к списку.
+		this->editorSelected = -1;
+		this->RenderEditor();
+	}
+	else if (!V_strcmp(id, "ed_done") || !V_strcmp(id, "ed_close") || !V_strcmp(id, "m_close"))
 	{
 		this->CloseHudEditor();
 	}

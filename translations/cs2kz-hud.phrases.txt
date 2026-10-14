@@ -1056,10 +1056,10 @@
 	}
 	"HUD Editor - Title"
 	{
-		"en"		"HUD elements"
-		"ru"		"Элементы худа"
-		"chi"		"HUD elements"
-		"ua"		"Елементи худу"
+		"en"		"HUD editor"
+		"ru"		"Редактор худа"
+		"chi"		"HUD editor"
+		"ua"		"Редактор худу"
 	}
 	"HUD Editor - Reset"
 	{
@@ -1075,12 +1075,55 @@
 		"chi"		"Done"
 		"ua"		"Готово"
 	}
-	"HUD Editor - Hint"
+	// Вариант B: навбар футера свойств, заголовки групп, кнопка OK попапа цвета (cp_ok, общая с !options).
+	"HUD Editor - Key"
 	{
-		"en"		"!hud to close"
-		"ru"		"!hud — закрыть"
-		"chi"		"!hud to close"
-		"ua"		"!hud — закрити"
+		"en"		"LMB"
+		"ru"		"ЛКМ"
+		"chi"		"LMB"
+		"ua"		"ЛКМ"
+	}
+	"HUD Editor - Move"
+	{
+		"en"		"Move here"
+		"ru"		"Перенести сюда"
+		"chi"		"Move here"
+		"ua"		"Перенести сюди"
+	}
+	"HUD Editor - Group Position"
+	{
+		"en"		"Position"
+		"ru"		"Положение"
+		"chi"		"Position"
+		"ua"		"Положення"
+	}
+	"HUD Editor - Group Look"
+	{
+		"en"		"Look"
+		"ru"		"Вид"
+		"chi"		"Look"
+		"ua"		"Вигляд"
+	}
+	"HUD Editor - Group Color"
+	{
+		"en"		"Color"
+		"ru"		"Цвет"
+		"chi"		"Color"
+		"ua"		"Колір"
+	}
+	"HUD Editor - Group Behavior"
+	{
+		"en"		"Behavior"
+		"ru"		"Поведение"
+		"chi"		"Behavior"
+		"ua"		"Поведінка"
+	}
+	"HUD Editor - Apply"
+	{
+		"en"		"Apply"
+		"ru"		"Применить"
+		"chi"		"Apply"
+		"ua"		"Застосувати"
 	}
 	"HUD Editor - Prop Position"
 	{
@@ -1140,10 +1183,10 @@
 	}
 	"HUD Editor - Prop Reset"
 	{
-		"en"		"Reset element"
-		"ru"		"Сбросить элемент"
-		"chi"		"Reset element"
-		"ua"		"Скинути елемент"
+		"en"		"Reset"
+		"ru"		"Сбросить"
+		"chi"		"Reset"
+		"ua"		"Скинути"
 	}
 	"HUD Editor - Prop Hint"
 	{
@@ -1203,10 +1246,10 @@
 	}
 	"HUD Editor - Prop KeysIdleUnderscore"
 	{
-		"en"		"_"
-		"ru"		"_"
-		"chi"		"_"
-		"ua"		"_"
+		"en"		"Dash"
+		"ru"		"Черта"
+		"chi"		"Dash"
+		"ua"		"Риска"
 	}
 	// Поведение элементов в панели свойств редактора (ep_trow*/ep_grow): раньше — пункты !options.
 	"HUD Editor - Prop Decimals"
