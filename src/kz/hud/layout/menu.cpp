@@ -648,7 +648,7 @@ static_function i32 StepDelta(i32 current, i32 delta)
 	return delta;
 }
 
-// enabledBy: клики игнорируются, пока хотя бы один из гейт-префов выключен. Дефолт отсутствующего
+// enabledBy и isEnabled: клики игнорируются, пока хотя бы один из гейт-префов выключен. Дефолт отсутствующего
 // гейт-префа — true (гейтующие тумблеры заведены с дефолтом true).
 static_function bool IsMenuItemEnabled(KZPlayer *player, const KZOptItem &it)
 {
@@ -659,7 +659,7 @@ static_function bool IsMenuItemEnabled(KZPlayer *player, const KZOptItem &it)
 			return false;
 		}
 	}
-	return true;
+	return !it.isEnabled || it.isEnabled(player, it.tag);
 }
 
 static_function bool GetToggleValue(KZPlayer *player, const KZOptItem &it)
@@ -1316,7 +1316,7 @@ void KZHUDService::MenuRowAction(i32 rowIndex, i32 control, i32 arg)
 		return;
 	}
 	const KZOptItem &it = *row->item;
-	// enabledBy: клик мимо (клиент мог прислать клик по устаревшему кадру разметки).
+	// enabledBy/isEnabled: клик мимо (клиент мог прислать клик по устаревшему кадру разметки).
 	if (!IsMenuItemEnabled(this->player, it))
 	{
 		return;

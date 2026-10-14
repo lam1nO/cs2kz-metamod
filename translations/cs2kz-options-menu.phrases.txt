@@ -47,9 +47,9 @@
 	"Options - Menu Cat Paint"
 	{
 		"en"	"Paint"
-		"ru"	"Paint"
+		"ru"	"Краска"
 		"chi"	"涂鸦"
-		"ua"	"Paint"
+		"ua"	"Фарба"
 	}
 	"Options - Menu Label HidePlayers"
 	{

@@ -46,6 +46,9 @@ struct KZOptItem
 	// Greyed out and unclickable while any of these bool preferences is off. Two is enough for the
 	// HUD, where an element's own toggle gates the whole page and a row can gate itself on top.
 	const char *enabledBy[2] {};
+	// Same greying for a state that is not a bool preference (e.g. compactPanel only means something
+	// for the standard HUD type). NULL: no extra gate.
+	bool (*isEnabled)(KZPlayer *, i64 tag) {};
 	bool solidOnly {}; // Color: hide the gradients, for a consumer that cannot render one
 	KZOptItemType type {};
 	KZOptStorage storage {};         // how prefKey (and yKey) are stored; None: nothing to export
@@ -116,6 +119,8 @@ namespace KZ::menu
 	// Greys the item out and ignores clicks on it while the named bool preference is off. Call it
 	// twice to require both.
 	void SetItemEnabledBy(KZOptNode *node, const char *prefKey);
+	// Greys the item out while the callback returns false; checked on every redraw and click.
+	void SetItemEnabledIf(KZOptNode *node, bool (*isEnabled)(KZPlayer *, i64));
 	// The suffix a Size item shows after its value, "px" unless set.
 	void SetItemUnit(KZOptNode *node, const char *unit);
 	// Step a Size item in whole units while the preference keeps a fraction of them.

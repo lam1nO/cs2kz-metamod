@@ -33,6 +33,12 @@ static_function i64 GetHudTypeCurrent(KZPlayer *player, i64 tag)
 	return (i64)player->hudService->GetHudType();
 }
 
+// compactPanel — только про стандартный (HTML) худ: при MHUD/Off пункт серый (макет gs2_hud).
+static_function bool IsStandardHud(KZPlayer *player, i64 tag)
+{
+	return player->hudService->GetHudType() == KZHUDService::HUD_TYPE_STANDARD;
+}
+
 static_function void OnHudTypePick(KZPlayer *player, i64 tag, i64 id)
 {
 	player->hudService->SetHudType((i32)id);
@@ -198,9 +204,8 @@ static_function void ShareCodeOnActivate(KZPlayer *player, i64 tag)
 
 static_function void ShareTakeOnActivate(KZPlayer *player, i64 tag)
 {
-	// Динамического гейта у пунктов нет: enabledBy умеет только БУЛЕВ преф (IsMenuItemEnabled,
-	// layout/menu.cpp), а «наблюдаю ли я сейчас за кем-то» — состояние кадра, не настройка, и
-	// серым пункт стал бы только до следующей перерисовки меню. Поэтому пункт кликабелен всегда,
+	// Гейт SetItemEnabledIf тут не годится: «наблюдаю ли я сейчас за кем-то» — состояние кадра, не
+	// настройка, и серым пункт стал бы только до следующей перерисовки меню. Поэтому пункт кликабелен всегда,
 	// а отказ печатает TakeFromSpectated — с причиной, а не молчанием.
 	KZ::hudshare::TakeFromSpectated(player);
 }
@@ -343,6 +348,7 @@ void KZHUDService::InitMenuPrefs()
 	// Дефолт false = дефолт GetPreferenceBool("compactPanel") без второго аргумента.
 	KZ::menu::AddToggle(general, "HUD - Menu Label CompactPanel", "compactPanel", false);
 	KZ::menu::SetItemSubtext(general, "HUD - Menu Label CompactPanel Sub");
+	KZ::menu::SetItemEnabledIf(general, IsStandardHud);
 	// Particle-MHUD при cl_draw_only_deathnotices 1 (hud/particles/particles.cpp): клиентский cvar
 	// прячет весь худ игры, частицы мира остаются. Дефолт true = MHUD_ON_HIDDEN_HUD_DEFAULT там же.
 	KZ::menu::AddToggle(general, "HUD - Menu Label MhudOnHiddenHud", "mhudOnHiddenHud", true);

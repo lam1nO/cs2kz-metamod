@@ -1036,9 +1036,9 @@
 	"Confirm - ResetAll Body"
 	{
 		"en"		"Positions, sizes, fonts and colors of all elements return to defaults. You can undo it with !hudundo."
-		"ru"		"Позиции, размеры, шрифты и цвета всех элементов вернутся к стандартным. Откатить можно через !hudundo."
+		"ru"		"Позиции, размеры, шрифты и цвета всех элементов вернутся к стандартным. Отменить: !hudundo."
 		"chi"		"Positions, sizes, fonts and colors of all elements return to defaults. You can undo it with !hudundo."
-		"ua"		"Позиції, розміри, шрифти й кольори всіх елементів повернуться до стандартних. Відкотити можна через !hudundo."
+		"ua"		"Позиції, розміри, шрифти й кольори всіх елементів повернуться до стандартних. Скасувати: !hudundo."
 	}
 	"Confirm - ResetAll No"
 	{

@@ -526,7 +526,10 @@ void KZHUDService::RenderEditor()
 		this->SetMenuBoolClass(layout, "ep_gt_beh", "hidden", this->menuApplied.epGtBehHidden,
 							   toggleCount == 0 && seg == NULL && !HasEditorStepper(sel));
 	}
-	this->SetMenuBoolClass(layout, "edit_props", "hidden", this->menuApplied.propsHidden, !isElement);
+	// Цвет/шрифт встают на место панели свойств и короче её — без прятанья из-под попапа торчал бы
+	// хвост свойств (спека редактора §7: попап закрывает панель целиком).
+	const bool dockPopup = this->menuPopup == MenuPopup::Color || this->menuPopup == MenuPopup::List;
+	this->SetMenuBoolClass(layout, "edit_props", "hidden", this->menuApplied.propsHidden, !isElement || dockPopup);
 
 	this->RenderMenuPopups(layout);
 	// Смена класса панели не доезжает до стилей детей без полного пересчёта (см. RenderMenu).

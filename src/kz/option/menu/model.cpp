@@ -70,6 +70,14 @@ namespace KZ::menu
 		}
 	}
 
+	void SetItemEnabledIf(KZOptNode *node, bool (*isEnabled)(KZPlayer *, i64))
+	{
+		if (!node->items.empty())
+		{
+			node->items.back().isEnabled = isEnabled;
+		}
+	}
+
 	void SetItemScale(KZOptNode *node, i32 scale)
 	{
 		if (!node->items.empty())
