@@ -436,15 +436,14 @@ SCMD_LINK(kz_smaptop, kz_sctop);
 //
 // Показывает то же, что консольная таблица: локальный топ сервера (если его нет — глобальный),
 // PRO или общий. PRO/NUB переключаются без запроса (оба списка уже пришли), режим и страница —
-// повтором запроса с теми же картой и курсом. Даты рана локальный запрос не отдаёт — колонки нет.
+// повтором запроса с теми же картой и курсом. «Когда» — Times.Created локального топа (у глобального пусто).
 
 namespace
 {
-	// Окно грузит до 100 записей одним запросом и листает по 10 у себя: команда !maptop отдаёт 10
-	// (консольная таблица), сразу за ней окно тихо дозапрашивает 100 — листание без запросов.
+	// Окно показывает топ-10 и свою строку: команда !maptop отдаёт 10 (консольная таблица), сразу за ней
+	// окно тихо дозапрашивает 100 — чтобы найти свой рекорд ниже десятки.
 	constexpr u64 kMaptopLimit = 100;
-	constexpr i32 kMaptopPage = KZ_GSMENU_TABLE_ROWS;
-	constexpr i32 kMaptopShow = 10; // в окне — топ-10 и своя строка
+	constexpr i32 kMaptopShow = 10;
 
 	struct MaptopView
 	{
@@ -544,13 +543,6 @@ namespace
 					return;
 				}
 			}
-			return;
-		}
-		if (KZ_STREQ(id, "gw_prev") || KZ_STREQ(id, "gw_next"))
-		{
-			const i32 pages = (MaptopList(v).Count() + kMaptopPage - 1) / kMaptopPage;
-			v.page = KZ_STREQ(id, "gw_next") ? (std::min)(v.page + 1, (std::max)(pages - 1, 0)) : (std::max)(v.page - 1, 0);
-			RenderMaptop(player);
 			return;
 		}
 		// ▶ строки gr{i} или своей строки gm (ран ниже десятки).
@@ -742,7 +734,7 @@ bool CourseTopRequest::ShowWindow()
 	const bool full = req->limit >= kMaptopLimit;
 	// Дозапрос не трогает троттлинг кликов и не делается при o= (там листать от нуля незачем).
 	if (!req->fromWindow && !full && req->offset == 0 && KZ::gsmenu::IsOpenBy(player, "maptop")
-		&& (src.overallData.Count() >= kMaptopPage || src.proData.Count() >= kMaptopPage))
+		&& (src.overallData.Count() >= kMaptopShow || src.proData.Count() >= kMaptopShow))
 	{
 		RequeryMaptop(player, v.mode.Get(), false);
 	}

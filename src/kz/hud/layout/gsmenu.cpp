@@ -104,6 +104,7 @@ namespace
 		// Классы наборов, которые разметка ставит сама (gen_gsmenu_xml.py): без них Swap не снял бы
 		// стартовый класс, и cols-jumptop встал бы рядом с cols-maptop.
 		w.swaps["gw_cover"] = "mc-none";
+		w.swaps["gw_hero"] = "mc-none";
 		w.swaps["gw_table"] = "cols-maptop";
 		w.openRow = -1;
 		w.classDirty = false;
