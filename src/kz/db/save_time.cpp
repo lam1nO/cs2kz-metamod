@@ -2,6 +2,7 @@
 #include "kz/mode/kz_mode.h"
 #include "kz/style/kz_style.h"
 #include "kz/timer/kz_timer.h"
+#include "kz/hud/layout/gsmenu.h"
 #include "queries/save_time.h"
 #include "queries/times.h"
 #include "utils/uuid.h"
@@ -16,6 +17,17 @@ void KZDatabaseService::SaveTime(const char *runUUID, u64 steamID, u32 courseID,
 	{
 		return;
 	}
+
+	// Сетка карт GG1 (gsmenu_fill.cpp): новое время сбрасывает кэш PB игрока и, если это рекорд, WR режима.
+	TransactionSuccessCallbackFunc inner = onSuccess;
+	onSuccess = [inner, steamID, modeID, time](std::vector<ISQLQuery *> queries)
+	{
+		KZ::gsmenu::FillOnTimeSaved(steamID, modeID, time);
+		if (inner)
+		{
+			inner(queries);
+		}
+	};
 
 	char query[2048];
 	Transaction txn;

@@ -581,6 +581,8 @@ bool KZ::gsmenu::OnClick(KZPlayer *player, uint32 packedHandle, const char *id)
 
 static void DestroyExt(KZPlayer *player, ExtState &e)
 {
+	// Плитки сетки ушли вместе с сущностью — данные kz_gsm_fill GG1 пришлёт заново после открытия.
+	KZ::gsmenu::FillReset(player->GetPlayerSlot().Get(), false);
 	if (CBaseEntity *ent = e.entity.Get())
 	{
 		((CCSCustomHudLayout *)ent)->SetInputCaptureEnabled(player->GetPlayerSlot(), false);
@@ -595,6 +597,7 @@ static void DestroyExt(KZPlayer *player, ExtState &e)
 
 void KZ::gsmenu::OnSlotReset(KZPlayer *player)
 {
+	KZ::gsmenu::FillReset(player->GetPlayerSlot().Get(), true);
 	if (WindowState *w = StateOf(player))
 	{
 		Destroy(player, *w);
@@ -700,6 +703,12 @@ static CCSCustomHudLayout *ExtLayout(KZPlayer *player, i32 slot)
 	V_snprintf(cmd, sizeof(cmd), "css_ui_reset %i\n", slot);
 	interfaces::pEngine->ServerCommand(cmd);
 	return fresh;
+}
+
+CCSCustomHudLayout *KZ::gsmenu::ExtLayoutOf(KZPlayer *player)
+{
+	const i32 slot = player ? player->GetPlayerSlot().Get() : -1;
+	return (slot >= 0 && slot < MAXPLAYERS) ? ExtLayout(player, slot) : nullptr;
 }
 
 CON_COMMAND_F(cyb_ui_open, "cyb_ui_open <slot> <layout> — разметка внешнего владельца игроку (мост форка)", FCVAR_NONE)

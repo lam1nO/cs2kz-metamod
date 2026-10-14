@@ -28,6 +28,7 @@
 
 class KZPlayer;
 class ICS2Menus;
+class CCSCustomHudLayout;
 
 namespace KZ::gsmenu
 {
@@ -119,4 +120,13 @@ namespace KZ::gsmenu
 
 	// Буква для квадрата: первый символ UTF-8, латиница — заглавная.
 	std::string Initial(const char *name);
+
+	// Сущность внешнего владельца (GG1) игрока, если открыта: не создаётся; интерны на исходе —
+	// пересоздаётся с css_ui_reset, как в cyb_ui_batch.
+	CCSCustomHudLayout *ExtLayoutOf(KZPlayer *player);
+
+	// PB/WR в плитки сетки GG1 (kz_gsm_fill, gsmenu_fill.cpp).
+	void FillReset(i32 slot, bool leaving); // сущность снесена; leaving — игрок ушёл (забыть и PB)
+	void FillRefresh(KZPlayer *player);     // режим сменился — перечитать и переписать плитки
+	void FillOnTimeSaved(u64 steamID, i32 modeID, f64 time); // время записано в БД
 } // namespace KZ::gsmenu

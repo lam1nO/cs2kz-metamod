@@ -1,4 +1,5 @@
 #include "kz_mode.h"
+#include "kz/hud/layout/gsmenu.h"
 #include "kz_mode_vnl.h"
 
 #include "filesystem.h"
@@ -318,6 +319,8 @@ bool KZModeManager::SwitchToMode(KZPlayer *player, const char *modeName, bool si
 	{
 		player->profileService->RequestRating();
 		player->profileService->EmitGG1Bridge();
+		// Открытая сетка GG1 — PB/WR плиток в новом режиме (gsmenu_fill.cpp).
+		KZ::gsmenu::FillRefresh(player);
 	}
 	if (updatePreference)
 	{
