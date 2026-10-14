@@ -243,4 +243,103 @@
 		"chi"	"将分段和检查点时间打印到控制台，供直播叠加层使用"
 		"ua"	"Друкувати спліти та чекпоінти в консоль — для оверлеїв на стрімі"
 	}
+	// Навигация окна !options v4: заголовок, главные вкладки, подразделы и группы (layout/menu.cpp).
+	"Options - Title"
+	{
+		"en"	"Settings"
+		"ru"	"Настройки"
+		"chi"	"设置"
+		"ua"	"Налаштування"
+	}
+	"Options - Tab Gameplay"
+	{
+		"en"	"Gameplay"
+		"ru"	"Геймплей"
+		"chi"	"玩法"
+		"ua"	"Геймплей"
+	}
+	"Options - Tab SoundChat"
+	{
+		"en"	"Sound & chat"
+		"ru"	"Звук и чат"
+		"chi"	"声音和聊天"
+		"ua"	"Звук і чат"
+	}
+	"Options - Sub Mode"
+	{
+		"en"	"Mode"
+		"ru"	"Режим"
+		"chi"	"模式"
+		"ua"	"Режим"
+	}
+	"Options - Sub Start"
+	{
+		"en"	"Start & checkpoints"
+		"ru"	"Старт и чекпоинты"
+		"chi"	"起点和检查点"
+		"ua"	"Старт і чекпоінти"
+	}
+	"Options - Group StartPos"
+	{
+		"en"	"Start position"
+		"ru"	"Точка старта"
+		"chi"	"起点位置"
+		"ua"	"Точка старту"
+	}
+	"Options - Group Safeguard"
+	{
+		"en"	"Safeguard"
+		"ru"	"Сейфгард"
+		"chi"	"防护"
+		"ua"	"Сейфгард"
+	}
+	"Options - Sub HudGeneral"
+	{
+		"en"	"General"
+		"ru"	"Общее"
+		"chi"	"常规"
+		"ua"	"Загальне"
+	}
+	"Options - Sub Spectate"
+	{
+		"en"	"Spectating"
+		"ru"	"Наблюдение"
+		"chi"	"观战"
+		"ua"	"Спостереження"
+	}
+	"Options - Sub JsChat"
+	{
+		"en"	"Chat"
+		"ru"	"Чат"
+		"chi"	"聊天"
+		"ua"	"Чат"
+	}
+	"Options - Sub JsConsole"
+	{
+		"en"	"Console"
+		"ru"	"Консоль"
+		"chi"	"控制台"
+		"ua"	"Консоль"
+	}
+	"Options - Sub JsSound"
+	{
+		"en"	"Sound"
+		"ru"	"Звук"
+		"chi"	"声音"
+		"ua"	"Звук"
+	}
+	"Options - Sub JsOthers"
+	{
+		"en"	"Others' jumps"
+		"ru"	"Чужие прыжки"
+		"chi"	"他人跳跃"
+		"ua"	"Чужі стрибки"
+	}
+	"Options - Sub Other"
+	{
+		"en"	"Other"
+		"ru"	"Прочее"
+		"chi"	"其他"
+		"ua"	"Інше"
+	}
 }

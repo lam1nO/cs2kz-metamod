@@ -1,11 +1,10 @@
 // Окно настроек !options на своей разметке cyber/options.xml (спека 2026-09-26-hud-editor-options
-// §3.2/§4.4). Обход реестра (KZOptNode/KZOptItem, KZ::menu::Add*, kz/option/menu/model.h) — как
-// и раньше: состав меню регистрируют hud/prefs/hud_prefs.cpp и локальные ветки, этот файл только
-// обходит KZ::menu::GetTree() и рендерит. Отличия от прежнего рендера под cs2kz/menu.xml:
-//   - Категории верхнего уровня — вкладки tab0..tab5 (без hiddenFromMenu, не больше 6).
-//   - Подкатегории — не второй уровень, а заголовки секций sec{i} внутри вкладки: вкладка =
-//     плоский список «секция + пункты» целиком в слотах 0..KZ_MENU_ROWS-1, тело окна листается
-//     на клиенте (прокрутка панели), страниц у сервера нет (отзыв владельца 27.09).
+// §3.2/§4.4, навигация — контракт options v4). Реестр (KZOptNode/KZOptItem, KZ::menu::Add*,
+// kz/option/menu/model.h) регистрируют hud/prefs/hud_prefs.cpp и локальные ветки; на нём держатся
+// обмен худом, сброс и экспорт, этот файл его не меняет. Раскладка окна — своя таблица ниже:
+//   - Главные вкладки tab0..tab5 → подразделы stab0..stab5 → группы → пункты по phraseKey.
+//   - Строки текущего подраздела — слоты row{i} (sec{i} — заголовок группы над её первой строкой),
+//     классы gtop/gbot/dis/rst/nosub; тело листает клиент, страниц у сервера нет (отзыв 27.09).
 //   - Каждая строка row{i} — универсальная, вид контрола задаёт класс типа t-toggle|t-seg|t-step|
 //     t-btn|t-color|t-font (Choice с <= 4 вариантами — сегменты, длиннее — список-попап).
 //   - Position/Vector в окне больше не показываются: расположение элементов худа правит
@@ -73,6 +72,10 @@ KZHUDService::MenuAppliedState::MenuAppliedState()
 	for (i32 i = 0; i < KZ_MENU_TABS; i++)
 	{
 		tabHidden[i] = true;
+	}
+	for (i32 i = 0; i < KZ_MENU_SUBS; i++)
+	{
+		stabHidden[i] = true;
 	}
 	for (i32 i = 0; i < KZ_MENU_ROWS; i++)
 	{
@@ -156,37 +159,86 @@ const KZOptItem *KZMenuFindItemByPhrase(const char *phraseKey)
 	return found;
 }
 
-// === Вкладки и строки =========================================================================
+// === Раскладка окна: вкладки → подразделы → группы → пункты ===================================
+// Статическая таблица (контракт options v4): пункты ищутся в реестре по phraseKey, сам реестр
+// (обмен худом, сброс, экспорт) не меняется. Видимый пункт реестра вне таблицы уходит в «Прочее»
+// последней вкладки, пункт таблицы без реестра пропускается.
 
-// Вкладки — категории верхнего уровня без hiddenFromMenu, по порядку регистрации (cs2kz.cpp).
-static_function i32 BuildMenuTabs(const KZOptNode *(&tabs)[KZ_MENU_TABS])
+#define KZ_MENU_GROUP_ITEMS 6
+#define KZ_MENU_SUB_GROUPS  2
+
+#define KZ_MENU_HUD_GENERAL_SUB "Options - Sub HudGeneral"
+#define KZ_MENU_OTHER_SUB       "Options - Sub Other"
+
+struct MenuLayoutGroup
 {
-	i32 n = 0;
-	for (const KZOptNode *node : KZ::menu::GetTree())
-	{
-		if (node->hiddenFromMenu)
-		{
-			continue;
-		}
-		if (n == KZ_MENU_TABS)
-		{
-			// Вкладок в разметке шесть — седьмая категория просто не видна. Отказ обязан быть
-			// видимым (канон проекта); состав фиксируется на Load, спама не будет.
-			KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_menu_tabs_truncated reason=slot_limit category=%s limit=%i\n",
-						node->phraseKey ? node->phraseKey : "?", KZ_MENU_TABS);
-			break;
-		}
-		tabs[n++] = node;
-	}
-	return n;
-}
+	const char *titleKey; // NULL — группа без заголовка
+	const char *items[KZ_MENU_GROUP_ITEMS];
+};
 
-// Одна строка экрана: заголовок секции (подкатегория) или пункт.
+struct MenuLayoutSub
+{
+	const char *phraseKey;
+	MenuLayoutGroup groups[KZ_MENU_SUB_GROUPS];
+};
+
+struct MenuLayoutTab
+{
+	const char *phraseKey;
+	MenuLayoutSub subs[KZ_MENU_SUBS];
+};
+
+// clang-format off
+static const MenuLayoutTab s_menuLayout[] = {
+	{"Options - Tab Gameplay", {
+		{"Options - Sub Mode", {{NULL, {"Options - Menu Label Mode", "Options - Menu Label Styles", "Options - Menu Label Pistol", "Options - Menu Label FOV"}}}},
+		{"Options - Sub Start", {
+			{"Options - Group StartPos", {"Options - Menu Label SetStartPos", "Options - Menu Label ClearStartPos"}},
+			{"Options - Group Safeguard", {"Options - Menu Label SafeguardReset", "Options - Menu Label SafeguardTeleport"}}}},
+		{"Options - Menu Cat Visibility", {{NULL, {"Options - Menu Label HidePlayers", "Options - Menu Label HideWeapon", "Options - Menu Label HideLegs", "Options - Menu Label Beam"}}}},
+		{"Options - Menu Cat Paint", {{NULL, {"Options - Menu Label ShowAllPaint", "Options - Menu Label PaintColor", "Options - Menu Label PaintSize"}}}},
+	}},
+	{KZ_MENU_HUD_CATEGORY, {
+		{KZ_MENU_HUD_GENERAL_SUB, {
+			{NULL, {"HUD - Menu Label HudType", "HUD - Menu Label CompactPanel", "HUD - Menu Label MhudOnHiddenHud"}},
+			{NULL, {KZ_MENU_RESET_ALL_PHRASE}}}},
+		{"Options - Sub Spectate", {{NULL, {"HUD - Menu Label MimicSpec", "HUD Share - Menu Label Take"}}}},
+		{"HUD - Menu Cat ReplayMenu", {{NULL, {"HUD - Menu Label ReplayMenuScale"}}}},
+		{"HUD Share - Menu Cat Share", {{NULL, {"HUD Share - Menu Label ShareCode"}}}},
+	}},
+	{"Options - Tab SoundChat", {
+		{"Options - Menu Cat Sound", {{NULL, {"Options - Menu Label CheckpointSound", "Options - Menu Label TeleportSound", "Options - Menu Label TimerStopSound", "Options - Menu Label RecordVolume"}}}},
+		{"Options - Menu Cat Messages", {{NULL, {"Options - Menu Label CheckpointMessage", "Options - Menu Label MissedTime", "Options - Menu Label MapOverlay"}}}},
+	}},
+	{"Options - Menu Cat Jumpstats", {
+		{"Options - Sub JsChat", {{NULL, {"Jumpstats - Menu Label Reporting", "Jumpstats - Menu Label Always", "Jumpstats - Menu Label MinTier", "Jumpstats - Menu Label Failstats", "Jumpstats - Menu Label ExtendedChatStats"}}}},
+		{"Options - Sub JsConsole", {{NULL, {"Jumpstats - Menu Label MinTierConsole", "Jumpstats - Menu Label FailstatsConsole"}}}},
+		{"Options - Sub JsSound", {{NULL, {"Jumpstats - Menu Label SoundMinTier", "Jumpstats - Menu Label Volume"}}}},
+		{"Options - Sub JsOthers", {{NULL, {"Jumpstats - Menu Label BroadcastMinTier", "Jumpstats - Menu Label BroadcastMinTierConsole", "Jumpstats - Menu Label BroadcastSoundTier", "Jumpstats - Menu Label BroadcastPB"}}}},
+	}},
+};
+// clang-format on
+static_assert(sizeof(s_menuLayout) / sizeof(s_menuLayout[0]) <= KZ_MENU_TABS, "tab0..tab5");
+
+// Одна строка экрана — пункт; заголовок группы sec{i} стоит над первой строкой группы.
 struct MenuRowBinding
 {
 	const KZOptItem *item {};
-	const KZOptNode *node {};
-	bool isSection {};
+	const char *groupKey {}; // заголовок группы, NULL — без заголовка
+	bool groupTop {};
+	bool groupBottom {};
+};
+
+struct MenuSubRows
+{
+	const char *phraseKey {};
+	std::vector<MenuRowBinding> rows;
+};
+
+struct MenuTabRows
+{
+	const char *phraseKey {};
+	std::vector<MenuSubRows> subs;
 };
 
 // Пункт виден в окне, если его тип окно умеет рисовать: Position/Vector ушли в редактор (§3.2).
@@ -195,65 +247,202 @@ static_function bool IsMenuRowItem(const KZOptItem &it)
 	return it.type != KZOptItemType::Position && it.type != KZOptItemType::Vector;
 }
 
-static_function void BuildMenuRows(const KZOptNode *cat, std::vector<MenuRowBinding> &rows)
+// Обход видимой части реестра: узлы hiddenFromMenu пропускаются вместе с поддеревом.
+template<typename Fn>
+static_function void WalkVisibleMenuItems(const std::vector<KZOptNode *> &nodes, Fn &&fn)
 {
-	rows.clear();
-	if (!cat)
+	for (const KZOptNode *node : nodes)
 	{
-		return;
-	}
-	auto addItems = [&rows](const KZOptNode *node)
-	{
+		if (node->hiddenFromMenu)
+		{
+			continue;
+		}
 		for (const KZOptItem &it : node->items)
 		{
 			if (IsMenuRowItem(it))
 			{
-				rows.push_back({&it, node, false});
+				fn(node, it);
 			}
 		}
-	};
-	addItems(cat);
-	for (const KZOptNode *sub : cat->subs)
-	{
-		if (sub->hiddenFromMenu)
-		{
-			continue;
-		}
-		rows.push_back({NULL, sub, true});
-		addItems(sub);
+		WalkVisibleMenuItems(node->subs, fn);
 	}
 }
 
-static_function const KZOptNode *GetMenuTabNode(i32 tab)
+static_function const KZOptItem *FindVisibleMenuItem(const char *phraseKey)
 {
-	const KZOptNode *tabs[KZ_MENU_TABS] {};
-	const i32 count = BuildMenuTabs(tabs);
-	return (tab >= 0 && tab < count) ? tabs[tab] : NULL;
+	const KZOptItem *found = NULL;
+	WalkVisibleMenuItems(KZ::menu::GetTree(),
+						 [&](const KZOptNode *, const KZOptItem &it)
+						 {
+							 if (!found && it.phraseKey && V_strcmp(it.phraseKey, phraseKey) == 0)
+							 {
+								 found = &it;
+							 }
+						 });
+	return found;
 }
 
-static_function bool IsHudTab(const KZOptNode *tab)
+static_function bool IsPhraseInMenuLayout(const char *phraseKey)
 {
-	return tab && tab->phraseKey && V_strcmp(tab->phraseKey, KZ_MENU_HUD_CATEGORY) == 0;
-}
-
-// Строки вкладки — один расчёт для рендера и клика. Все строки вкладки идут в слоты row{i}/sec{i}
-// разом: страниц нет, тело окна листает клиент. Слотов в разметке KZ_MENU_ROWS — лишние строки
-// отрезаются с предупреждением в лог (состав реестра фиксируется на Load, поэтому раз на вкладку).
-static_function void BuildMenuTab(i32 tab, std::vector<MenuRowBinding> &rows)
-{
-	const KZOptNode *node = GetMenuTabNode(tab);
-	BuildMenuRows(node, rows);
-	if ((i32)rows.size() > KZ_MENU_ROWS)
+	for (const MenuLayoutTab &tab : s_menuLayout)
 	{
-		static_persist bool warned[KZ_MENU_TABS] {};
-		if (tab >= 0 && tab < KZ_MENU_TABS && !warned[tab])
+		for (const MenuLayoutSub &sub : tab.subs)
 		{
-			warned[tab] = true;
-			KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_menu_rows_truncated reason=slot_limit category=%s rows=%i limit=%i\n",
-						node && node->phraseKey ? node->phraseKey : "?", (i32)rows.size(), KZ_MENU_ROWS);
+			for (const MenuLayoutGroup &group : sub.groups)
+			{
+				for (const char *key : group.items)
+				{
+					if (key && V_strcmp(key, phraseKey) == 0)
+					{
+						return true;
+					}
+				}
+			}
 		}
-		rows.resize(KZ_MENU_ROWS);
 	}
+	return false;
+}
+
+static_function void PushMenuGroup(std::vector<MenuRowBinding> &rows, const char *titleKey, const std::vector<const KZOptItem *> &items)
+{
+	for (size_t k = 0; k < items.size(); k++)
+	{
+		rows.push_back({items[k], titleKey, k == 0, k + 1 == items.size()});
+	}
+}
+
+static_function void TruncateMenuSub(MenuSubRows &sub, const char *tabKey)
+{
+	if ((i32)sub.rows.size() <= KZ_MENU_ROWS)
+	{
+		return;
+	}
+	KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_menu_rows_truncated reason=slot_limit tab=%s sub=%s rows=%i limit=%i\n", tabKey, sub.phraseKey,
+				(i32)sub.rows.size(), KZ_MENU_ROWS);
+	sub.rows.resize(KZ_MENU_ROWS);
+	sub.rows.back().groupBottom = true;
+}
+
+// Раскладка собирается один раз на первом обращении: состав реестра фиксируется на Load, а
+// указатели на KZOptItem стабильны до выгрузки. Поэтому и предупреждения — по разу.
+static_function const std::vector<MenuTabRows> &GetMenuLayout()
+{
+	static_persist std::vector<MenuTabRows> tabs;
+	static_persist bool built = false;
+	if (built)
+	{
+		return tabs;
+	}
+	built = true;
+	for (const MenuLayoutTab &tabDef : s_menuLayout)
+	{
+		MenuTabRows tab;
+		tab.phraseKey = tabDef.phraseKey;
+		for (const MenuLayoutSub &subDef : tabDef.subs)
+		{
+			if (!subDef.phraseKey)
+			{
+				continue;
+			}
+			MenuSubRows sub;
+			sub.phraseKey = subDef.phraseKey;
+			for (const MenuLayoutGroup &groupDef : subDef.groups)
+			{
+				std::vector<const KZOptItem *> items;
+				for (const char *key : groupDef.items)
+				{
+					if (!key)
+					{
+						continue;
+					}
+					if (const KZOptItem *it = FindVisibleMenuItem(key))
+					{
+						items.push_back(it);
+					}
+					else
+					{
+						KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_menu_item_skipped reason=not_in_registry item=%s\n", key);
+					}
+				}
+				PushMenuGroup(sub.rows, groupDef.titleKey, items);
+			}
+			if (!sub.rows.empty())
+			{
+				TruncateMenuSub(sub, tab.phraseKey);
+				tab.subs.push_back(std::move(sub));
+			}
+		}
+		if (!tab.subs.empty())
+		{
+			tabs.push_back(std::move(tab));
+		}
+	}
+
+	// Видимые пункты реестра, которых нет в таблице (дубль phraseKey считается покрытым).
+	std::vector<const KZOptItem *> other;
+	WalkVisibleMenuItems(KZ::menu::GetTree(),
+						 [&](const KZOptNode *node, const KZOptItem &it)
+						 {
+							 if (it.phraseKey && IsPhraseInMenuLayout(it.phraseKey))
+							 {
+								 return;
+							 }
+							 KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_menu_item_unplaced reason=not_in_layout item=%s node=%s\n",
+										 it.phraseKey ? it.phraseKey : "?", node->phraseKey ? node->phraseKey : "?");
+							 other.push_back(&it);
+						 });
+	if (!other.empty() && !tabs.empty())
+	{
+		MenuTabRows &last = tabs.back();
+		if ((i32)last.subs.size() < KZ_MENU_SUBS)
+		{
+			MenuSubRows sub;
+			sub.phraseKey = KZ_MENU_OTHER_SUB;
+			PushMenuGroup(sub.rows, NULL, other);
+			TruncateMenuSub(sub, last.phraseKey);
+			last.subs.push_back(std::move(sub));
+		}
+		else
+		{
+			KZ_LOG_WARN(LogChannel::General, "[cyb] panorama_menu_other_dropped reason=slot_limit tab=%s items=%i limit=%i\n", last.phraseKey,
+						(i32)other.size(), KZ_MENU_SUBS);
+		}
+	}
+	return tabs;
+}
+
+static_function const MenuTabRows *GetMenuTab(i32 tab)
+{
+	const std::vector<MenuTabRows> &tabs = GetMenuLayout();
+	return (tab >= 0 && tab < (i32)tabs.size()) ? &tabs[tab] : NULL;
+}
+
+static_function const MenuSubRows *GetMenuSub(i32 tab, i32 sub)
+{
+	const MenuTabRows *t = GetMenuTab(tab);
+	return (t && sub >= 0 && sub < (i32)t->subs.size()) ? &t->subs[sub] : NULL;
+}
+
+// Строки (вкладка, подраздел) — один расчёт для рендера и клика: индекс row{i} = индекс здесь.
+static_function const std::vector<MenuRowBinding> &GetMenuSubRows(i32 tab, i32 sub)
+{
+	static_persist const std::vector<MenuRowBinding> empty;
+	const MenuSubRows *s = GetMenuSub(tab, sub);
+	return s ? s->rows : empty;
+}
+
+// Карточка редактора edit_open — только на «Худ» → «Общее».
+static_function bool IsHudGeneralSub(i32 tab, i32 sub)
+{
+	const MenuTabRows *t = GetMenuTab(tab);
+	const MenuSubRows *s = GetMenuSub(tab, sub);
+	return t && s && V_strcmp(t->phraseKey, KZ_MENU_HUD_CATEGORY) == 0 && V_strcmp(s->phraseKey, KZ_MENU_HUD_GENERAL_SUB) == 0;
+}
+
+// Кнопки-сбросы — аддон красит их классом rst.
+static_function bool IsResetMenuItem(const KZOptItem &it)
+{
+	return it.phraseKey && (V_strcmp(it.phraseKey, KZ_MENU_RESET_ALL_PHRASE) == 0 || V_strcmp(it.phraseKey, "Options - Menu Label ClearStartPos") == 0);
 }
 
 // Разбор id вида <prefix><a>[_<b>][suffix]: "tab3", "sg2_1", "st4_dec" (suffix "_dec"). Остаток
@@ -469,6 +658,8 @@ static_function i32 GetItemColorEntry(const Color &current, const KZOptItem &it)
 
 SLOT_ID(TabPanel, "tab%i")
 SLOT_ID(TabVar, "t%i")
+SLOT_ID(StabPanel, "stab%i")
+SLOT_ID(StabVar, "u%i")
 SLOT_ID(SecPanel, "sec%i")
 SLOT_ID(SecVar, "s%i")
 SLOT_ID(RowPanel, "row%i")
@@ -710,11 +901,9 @@ void KZHUDService::RenderMenu()
 	this->SetMenuBoolClass(layout, "edit_root", "hidden", this->menuApplied.editHidden, true);
 
 	const char *lang = this->player->languageService->GetLanguage();
-	const KZOptNode *tab = GetMenuTabNode(this->menuCategory);
-	// Шапка: имя вкладки и подзаголовок; мимикрия — хвостом подзаголовка (полное объяснение
+	// Шапка: заголовок окна и подзаголовок; мимикрия — хвостом подзаголовка (полное объяснение
 	// уходит в чат при открытии, OpenLayoutMenu).
-	const std::string title = KZLanguageService::PrepareMessageWithLang(lang, tab && tab->phraseKey ? tab->phraseKey : "HUD - Menu Title");
-	this->SetMenuVar(layout, "opt_root", "title", title.c_str());
+	this->SetMenuVar(layout, "opt_root", "title", KZLanguageService::PrepareMessageWithLang(lang, "Options - Title").c_str());
 	std::string sub = KZLanguageService::PrepareMessageWithLang(lang, "Options - Subtitle");
 	if (IsMenuMimicActive(this->player))
 	{
@@ -727,8 +916,8 @@ void KZHUDService::RenderMenu()
 	this->SetMenuVar(layout, "opt_root", "mode", this->player->modeService ? this->player->modeService->GetModeShortName() : "");
 	this->SetMenuVar(layout, "opt_root", "hint", KZLanguageService::PrepareMessageWithLang(lang, "Options - Hint").c_str());
 
-	// Карточка редактора — только на вкладке «Худ» (§3.2), над её строками.
-	const bool heroShown = IsHudTab(tab);
+	// Карточка редактора — только на «Худ» → «Общее», над строками подраздела.
+	const bool heroShown = IsHudGeneralSub(this->menuCategory, this->menuSub);
 	if (heroShown)
 	{
 		this->SetMenuVar(layout, "edit_open", "hero_t", KZLanguageService::PrepareMessageWithLang(lang, "Options - Hero Title").c_str());
@@ -749,19 +938,30 @@ void KZHUDService::RenderMenu()
 
 void KZHUDService::RenderMenuTabs(CCSCustomHudLayout *layout)
 {
-	const KZOptNode *tabs[KZ_MENU_TABS] {};
-	const i32 count = BuildMenuTabs(tabs);
+	const std::vector<MenuTabRows> &tabs = GetMenuLayout();
 	const char *lang = this->player->languageService->GetLanguage();
 	for (i32 i = 0; i < KZ_MENU_TABS; i++)
 	{
-		const bool used = i < count;
+		const bool used = i < (i32)tabs.size();
 		if (used)
 		{
-			const std::string label = KZLanguageService::PrepareMessageWithLang(lang, tabs[i]->phraseKey);
+			const std::string label = KZLanguageService::PrepareMessageWithLang(lang, tabs[i].phraseKey);
 			this->SetMenuVar(layout, TabPanel(i), TabVar(i), label.c_str());
 			this->SetMenuBoolClass(layout, TabPanel(i), "on", this->menuApplied.tabOn[i], i == this->menuCategory);
 		}
 		this->SetMenuBoolClass(layout, TabPanel(i), "hidden", this->menuApplied.tabHidden[i], !used);
+	}
+	const MenuTabRows *tab = GetMenuTab(this->menuCategory);
+	for (i32 i = 0; i < KZ_MENU_SUBS; i++)
+	{
+		const bool used = tab && i < (i32)tab->subs.size();
+		if (used)
+		{
+			const std::string label = KZLanguageService::PrepareMessageWithLang(lang, tab->subs[i].phraseKey);
+			this->SetMenuVar(layout, StabPanel(i), StabVar(i), label.c_str());
+			this->SetMenuBoolClass(layout, StabPanel(i), "on", this->menuApplied.stabOn[i], i == this->menuSub);
+		}
+		this->SetMenuBoolClass(layout, StabPanel(i), "hidden", this->menuApplied.stabHidden[i], !used);
 	}
 }
 
@@ -790,18 +990,18 @@ static_function const char *GetRowTypeClass(const KZOptItem &it, i32 choiceCount
 
 void KZHUDService::RenderMenuRows(CCSCustomHudLayout *layout)
 {
-	std::vector<MenuRowBinding> rows;
-	BuildMenuTab(this->menuCategory, rows);
+	const std::vector<MenuRowBinding> &rows = GetMenuSubRows(this->menuCategory, this->menuSub);
 	const char *lang = this->player->languageService->GetLanguage();
 
 	for (i32 i = 0; i < KZ_MENU_ROWS; i++)
 	{
 		const MenuRowBinding *row = i < (i32)rows.size() ? &rows[i] : NULL;
-		const bool isSection = row && row->isSection;
-		const bool isItem = row && !row->isSection;
+		const bool isItem = row != NULL;
+		// Заголовок группы — над её первой строкой.
+		const bool isSection = row && row->groupTop && row->groupKey;
 		if (isSection)
 		{
-			const std::string label = KZLanguageService::PrepareMessageWithLang(lang, row->node->phraseKey);
+			const std::string label = KZLanguageService::PrepareMessageWithLang(lang, row->groupKey);
 			this->SetMenuVar(layout, SecPanel(i), SecVar(i), label.c_str());
 		}
 		if (isItem)
@@ -876,6 +1076,12 @@ void KZHUDService::RenderMenuRows(CCSCustomHudLayout *layout)
 			this->SetMenuBoolClass(layout, TgPanel(i), "on", this->menuApplied.tgOn[i], on);
 			this->SetMenuSwapClass(layout, ClPanel(i), this->menuApplied.clBg[i], swatch);
 		}
+		this->SetMenuBoolClass(layout, RowPanel(i), "gtop", this->menuApplied.rowGtop[i], isItem && row->groupTop);
+		this->SetMenuBoolClass(layout, RowPanel(i), "gbot", this->menuApplied.rowGbot[i], isItem && row->groupBottom);
+		this->SetMenuBoolClass(layout, RowPanel(i), "dis", this->menuApplied.rowDis[i], isItem && !IsMenuItemEnabled(this->player, *row->item));
+		this->SetMenuBoolClass(layout, RowPanel(i), "rst", this->menuApplied.rowRst[i], isItem && IsResetMenuItem(*row->item));
+		// Без второй строки аддон прячет пустую подпись — иначе однострочный пункт съезжает вверх.
+		this->SetMenuBoolClass(layout, RowPanel(i), "nosub", this->menuApplied.rowNosub[i], isItem && !row->item->subKey);
 		this->SetMenuBoolClass(layout, SecPanel(i), "hidden", this->menuApplied.secHidden[i], !isSection);
 		this->SetMenuBoolClass(layout, RowPanel(i), "hidden", this->menuApplied.rowHidden[i], !isItem);
 	}
@@ -1009,7 +1215,7 @@ void KZHUDService::RenderMenuConfirmPopup(CCSCustomHudLayout *layout)
 
 void KZHUDService::SelectMenuTab(i32 tab)
 {
-	if (!GetMenuTabNode(tab))
+	if (!GetMenuTab(tab))
 	{
 		return;
 	}
@@ -1017,7 +1223,25 @@ void KZHUDService::SelectMenuTab(i32 tab)
 	{
 		this->CloseMenuPopup();
 	}
-	this->menuCategory = tab;
+	if (tab != this->menuCategory)
+	{
+		this->menuCategory = tab;
+		this->menuSub = 0;
+	}
+	this->RenderMenu();
+}
+
+void KZHUDService::SelectMenuSub(i32 sub)
+{
+	if (!GetMenuSub(this->menuCategory, sub))
+	{
+		return;
+	}
+	if (this->menuPopup != MenuPopup::None)
+	{
+		this->CloseMenuPopup();
+	}
+	this->menuSub = sub;
 	this->RenderMenu();
 }
 
@@ -1025,10 +1249,9 @@ void KZHUDService::SelectMenuTab(i32 tab)
 // 1 — сегмент arg, 2 — степпер на arg (±1).
 void KZHUDService::MenuRowAction(i32 rowIndex, i32 control, i32 arg)
 {
-	std::vector<MenuRowBinding> rows;
-	BuildMenuTab(this->menuCategory, rows);
+	const std::vector<MenuRowBinding> &rows = GetMenuSubRows(this->menuCategory, this->menuSub);
 	const MenuRowBinding *row = rowIndex >= 0 && rowIndex < (i32)rows.size() ? &rows[rowIndex] : NULL;
-	if (!row || row->isSection)
+	if (!row)
 	{
 		return;
 	}
@@ -1401,6 +1624,11 @@ bool KZHUDService::HandleMenuWindowClick(const char *id)
 		this->SelectMenuTab(a);
 		return true;
 	}
+	if (ParseIndexed(id, "stab", a, b) && b < 0)
+	{
+		this->SelectMenuSub(a);
+		return true;
+	}
 	if (ParseIndexed(id, "st", a, b, "_dec"))
 	{
 		this->MenuRowAction(a, 2, -1);
@@ -1466,32 +1694,52 @@ void KZHUDService::OnLayoutMenuClick(uint32 packedHandle, const char *panelId)
 	}
 }
 
-// Вкладка по ключу категории (или подкатегории — тогда вкладка, где стоит её секция; до секции
-// тело листает сам игрок). Ключ не найден/NULL — первая вкладка.
-static_function void FindMenuTab(const char *categoryKey, i32 &tab)
+// Вкладка и подраздел по ключу категории/подкатегории реестра: там, где лежит первый видимый
+// пункт этого узла. Ключ не найден/NULL — первая вкладка, первый подраздел.
+static_function void FindMenuTab(const char *categoryKey, i32 &tab, i32 &sub)
 {
 	tab = 0;
+	sub = 0;
 	if (!categoryKey)
 	{
 		return;
 	}
-	const KZOptNode *tabs[KZ_MENU_TABS] {};
-	const i32 count = BuildMenuTabs(tabs);
-	for (i32 i = 0; i < count; i++)
+	const KZOptItem *first = NULL;
+	WalkMenuNodes(KZ::menu::GetTree(),
+				  [&](KZOptNode *node)
+				  {
+					  if (node->hiddenFromMenu || !node->phraseKey || V_strcmp(node->phraseKey, categoryKey) != 0)
+					  {
+						  return false;
+					  }
+					  WalkVisibleMenuItems(std::vector<KZOptNode *> {node},
+										   [&](const KZOptNode *, const KZOptItem &it)
+										   {
+											   if (!first)
+											   {
+												   first = &it;
+											   }
+										   });
+					  return first != NULL;
+				  });
+	if (!first)
 	{
-		if (tabs[i]->phraseKey && V_strcmp(tabs[i]->phraseKey, categoryKey) == 0)
+		return;
+	}
+	const std::vector<MenuTabRows> &tabs = GetMenuLayout();
+	for (i32 t = 0; t < (i32)tabs.size(); t++)
+	{
+		for (i32 u = 0; u < (i32)tabs[t].subs.size(); u++)
 		{
-			tab = i;
-			return;
-		}
-		std::vector<MenuRowBinding> rows;
-		BuildMenuTab(i, rows);
-		for (const MenuRowBinding &row : rows)
-		{
-			if (row.isSection && row.node->phraseKey && V_strcmp(row.node->phraseKey, categoryKey) == 0)
+			for (const MenuRowBinding &row : tabs[t].subs[u].rows)
 			{
-				tab = i;
-				return;
+				// Сравнение по phraseKey: дубль пункта (один преф в двух узлах) лежит в таблице один раз.
+				if (row.item == first || (row.item->phraseKey && first->phraseKey && V_strcmp(row.item->phraseKey, first->phraseKey) == 0))
+				{
+					tab = t;
+					sub = u;
+					return;
+				}
 			}
 		}
 	}
@@ -1529,7 +1777,7 @@ void KZHUDService::OpenLayoutMenu(const char *categoryKey)
 		return;
 	}
 	this->menuOpen = true;
-	FindMenuTab(categoryKey, this->menuCategory);
+	FindMenuTab(categoryKey, this->menuCategory, this->menuSub);
 	this->menuPopup = MenuPopup::None;
 	this->menuPopupTarget = NULL;
 	this->menuConfirmTarget = NULL;

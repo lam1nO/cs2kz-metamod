@@ -1140,9 +1140,10 @@ private:
 	bool menuOpen {};
 	// Дедлайн следующей проверки инварианта захвата (curtime), см. CheckMenuCaptureInvariant.
 	f64 menuCaptureCheckTime {};
-	// Активная вкладка — индекс среди ВИДИМЫХ категорий верхнего уровня (BuildMenuTabs в
-	// layout/menu.cpp: KZ::menu::GetTree() без hiddenFromMenu, не больше KZ_MENU_TABS).
+	// Активная вкладка и её подраздел — индексы в таблице раскладки окна (GetMenuLayout в
+	// layout/menu.cpp, пустые вкладки/подразделы выброшены). Смена вкладки сбрасывает подраздел.
 	i32 menuCategory {};
+	i32 menuSub {};
 
 	enum class MenuPopup
 	{
@@ -1199,10 +1200,17 @@ private:
 
 		bool tabHidden[KZ_MENU_TABS] {};
 		bool tabOn[KZ_MENU_TABS] {};
+		bool stabHidden[KZ_MENU_SUBS] {};
+		bool stabOn[KZ_MENU_SUBS] {};
 
 		bool secHidden[KZ_MENU_ROWS] {};
 		bool rowHidden[KZ_MENU_ROWS] {};
 		const char *rowType[KZ_MENU_ROWS] {};
+		bool rowGtop[KZ_MENU_ROWS] {};
+		bool rowGbot[KZ_MENU_ROWS] {};
+		bool rowDis[KZ_MENU_ROWS] {};
+		bool rowRst[KZ_MENU_ROWS] {};
+		bool rowNosub[KZ_MENU_ROWS] {};
 		bool tgOn[KZ_MENU_ROWS] {};
 		bool segOn[KZ_MENU_ROWS][KZ_MENU_SEGS] {};
 		bool segHidden[KZ_MENU_ROWS][KZ_MENU_SEGS] {};
@@ -1275,6 +1283,7 @@ private:
 	void RenderMenuConfirmPopup(CCSCustomHudLayout *layout);
 
 	void SelectMenuTab(i32 tab);
+	void SelectMenuSub(i32 sub);
 	void MenuRowAction(i32 row, i32 control, i32 arg);
 	void OpenMenuPopup(MenuPopup kind, const KZOptItem *item);
 	void CloseMenuPopup();
