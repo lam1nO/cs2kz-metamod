@@ -228,6 +228,9 @@ public:
 		COMPARETYPE_COUNT
 	};
 
+	// Своё лучшее время курса в режиме (локальный PB, любые TP); 0 — нет рана или кэш не загружен.
+	f64 GetLocalPBTime(u32 modeID, u32 courseGuid);
+
 private:
 	// The maximum level that we should compare our current time with.
 	// For example, if the value is set to COMPARE_GPB, the player will not attempt to compare their splits with SR/WR,

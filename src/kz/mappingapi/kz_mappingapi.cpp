@@ -1886,8 +1886,12 @@ static_function void OpenCoursesMenu(KZPlayer *player)
 		{
 			V_snprintf(label, sizeof(label), "Bonus %d", i);
 		}
+		// «Main: 01:02.77» — своё время курса (v3: галочка и время справа), иначе «Main: Не пройден».
+		char item[96];
+		const f64 pb = player->timerService ? player->timerService->GetLocalPBTime(KZ::mode::GetModeInfo(player->modeService).id, ordered[i]->guid) : 0.0;
+		V_snprintf(item, sizeof(item), "%s: %s", label, pb > 0.0 ? utils::FormatTime(pb).Get() : "Не пройден");
 		// Курс без стартовой позиции — неактивный (серый) пункт.
-		g_pMenus->AddItem(m, label, info, !ordered[i]->hasStartPosition);
+		g_pMenus->AddItem(m, item, info, !ordered[i]->hasStartPosition);
 	}
 
 	// Одноразовый выбор — меню закрывается по клику (в отличие от !options).

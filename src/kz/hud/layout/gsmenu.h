@@ -70,6 +70,7 @@ namespace KZ::gsmenu
 	{
 		std::string label, value;
 		bool sel = false, dim = false, adj = false, cap = false, tog = false, on = false, grp = false;
+		bool done = false; // значение — своё время (галочка «пройден» перед ним, v3)
 	};
 
 	struct List

@@ -11,6 +11,10 @@
 #include "utils/interfaces.h"
 
 #include "vendor/sql_mm/src/public/sql_mm.h"
+#include "utils/json.h"
+
+#include <fstream>
+#include <sstream>
 // clang-format off
 #define COURSE_TOP_TABLE_KEY "Course Top - Table Name (Server Overall)"
 static_global const char *columnKeysLocal[] = {
@@ -570,48 +574,55 @@ namespace
 		scmd::OnClientCommand(slot, args);
 	}
 
-	// «YYYY-MM-DD HH:MM:SS» (Times.Created) → «сегодня» / «вчера» / «5 дн назад» / «3 нед назад» / «2 мес назад» / «1 г назад».
-	std::string RelativeAgo(const char *ts)
+	// «YYYY-MM-DD HH:MM:SS» (Times.Created) → «14.08.2026» — колонка «Дата» (решение владельца 14.10).
+	std::string RecordDate(const char *ts)
 	{
-		int y = 0, mo = 0, d = 0, h = 0, mi = 0, sec = 0;
-		if (!ts || sscanf(ts, "%d-%d-%d %d:%d:%d", &y, &mo, &d, &h, &mi, &sec) < 3 || mo < 1 || mo > 12)
+		int y = 0, mo = 0, d = 0;
+		if (!ts || sscanf(ts, "%d-%d-%d", &y, &mo, &d) != 3 || mo < 1 || mo > 12 || d < 1 || d > 31)
 		{
 			return "";
 		}
-		// Дни от 1970-01-01 (days_from_civil): без timegm/_mkgmtime, одинаково на всех платформах.
-		y -= mo <= 2;
-		const i64 era = (y >= 0 ? y : y - 399) / 400;
-		const i64 yoe = y - era * 400;
-		const i64 doy = (153 * (mo + (mo > 2 ? -3 : 9)) + 2) / 5 + d - 1;
-		const i64 doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-		const i64 then = (era * 146097 + doe - 719468) * 86400 + h * 3600 + mi * 60 + sec;
-		const i64 days = ((i64)time(nullptr) - then) / 86400;
-		char buf[32];
-		if (days < 1)
-		{
-			return "сегодня";
-		}
-		if (days < 2)
-		{
-			return "вчера";
-		}
-		if (days < 7)
-		{
-			V_snprintf(buf, sizeof(buf), "%lld дн назад", (long long)days);
-		}
-		else if (days < 31)
-		{
-			V_snprintf(buf, sizeof(buf), "%lld нед назад", (long long)(days / 7));
-		}
-		else if (days < 365)
-		{
-			V_snprintf(buf, sizeof(buf), "%lld мес назад", (long long)(days / 30));
-		}
-		else
-		{
-			V_snprintf(buf, sizeof(buf), "%lld г назад", (long long)(days / 365));
-		}
+		char buf[16];
+		V_snprintf(buf, sizeof(buf), "%02d.%02d.%04d", d, mo, y);
 		return buf;
+	}
+
+	// Тир карты для бейджа в шапке окна — из пула GG1 (cfg/GGMCmaps.json, рендерит оркестратор):
+	// {"<id>": {"display": "kz_x", "tier_kzt": 5, "tier_ckz": 4, "tier_vnl": null}}. 0 — тира нет.
+	i32 MapTier(const char *map, const char *modeShort)
+	{
+		char path[512];
+		g_SMAPI->PathFormat(path, sizeof(path), "%s/cfg/GGMCmaps.json", g_SMAPI->GetBaseDir());
+		std::ifstream f(path);
+		if (!f || !map || !modeShort)
+		{
+			return 0;
+		}
+		std::stringstream ss;
+		ss << f.rdbuf();
+		const nlohmann::json pool = nlohmann::json::parse(ss.str(), nullptr, false);
+		if (!pool.is_object())
+		{
+			return 0;
+		}
+		std::string key = std::string("tier_") + modeShort;
+		for (char &c : key)
+		{
+			c = (char)tolower((unsigned char)c);
+		}
+		for (const auto &[id, m] : pool.items())
+		{
+			if (!m.is_object() || !m.contains("display") || !m["display"].is_string() || V_stricmp(m["display"].get<std::string>().c_str(), map) != 0)
+			{
+				continue;
+			}
+			if (m.contains(key) && m[key].is_number_integer())
+			{
+				return m[key].get<i32>();
+			}
+			return 0;
+		}
+		return 0;
 	}
 
 	// Строка топа: место · ник · время · отставание от 1-го · когда.
@@ -625,7 +636,7 @@ namespace
 		{
 			row.cells[3] = std::string("+") + utils::FormatTime(r.time - best).Get();
 		}
-		row.cells[4] = RelativeAgo(r.created.Get());
+		row.cells[4] = RecordDate(r.created.Get());
 		row.initial = KZ::gsmenu::Initial(r.name.Get());
 		row.colour = (u32)(r.steamid64 % 8);
 		row.wr = rank == 1;
@@ -645,6 +656,7 @@ namespace
 		t.cover = v.map.Get();
 		t.filters[1] = {{"PRO", v.pro}, {"NUB", !v.pro}};
 		const CUtlString curShort = KZ::mode::GetModeInfo(v.mode).shortModeName;
+		t.tier = MapTier(v.map.Get(), curShort.Get());
 		for (const char *mode : kMaptopModes)
 		{
 			if (KZ::mode::GetModeInfo(CUtlString(mode)).id >= 0)
@@ -656,7 +668,7 @@ namespace
 		t.headers[1] = "Игрок";
 		t.headers[2] = "Время";
 		t.headers[3] = "Отставание";
-		t.headers[4] = "Когда";
+		t.headers[4] = "Дата";
 
 		v.runIds.clear();
 		v.meRunId.clear();

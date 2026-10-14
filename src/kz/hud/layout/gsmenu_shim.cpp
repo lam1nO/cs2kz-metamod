@@ -214,6 +214,8 @@ public:
 		}
 		row.label = text.substr(0, colon);
 		row.value = text.substr(colon + 2);
+		// «Main: 01:02.77» (меню !courses) — своё время: галочка «пройден» перед значением.
+		row.done = !row.value.empty() && isdigit((unsigned char)row.value[0]) && row.value.find(':') != std::string::npos;
 		static const char *kOn[] = {"вкл", "Вкл", "ВКЛ", "on", "On", "ON"};
 		static const char *kOff[] = {"выкл", "Выкл", "ВЫКЛ", "off", "Off", "OFF"};
 		for (const char *w : kOn)

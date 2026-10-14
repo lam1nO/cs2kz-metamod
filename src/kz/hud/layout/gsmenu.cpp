@@ -328,6 +328,8 @@ bool KZ::gsmenu::ShowTable(KZPlayer *player, const Table &t, ClickFn onClick, co
 	}
 
 	Swap(player, *w, layout, "gw_table", t.cols);
+	// Топ прыжков (v3): без шапки с обложкой, заголовок и режимы в одной строке.
+	Class(player, *w, layout, "gw", "js", t.cols == "cols-jumptop");
 	Class(player, *w, layout, "gw_table", "no-tp", t.noTp);
 	for (i32 j = 0; j < KZ_GSMENU_TABLE_COLS; j++)
 	{
@@ -431,6 +433,7 @@ bool KZ::gsmenu::ShowList(KZPlayer *player, const List &l)
 		Class(player, *w, layout, id, "k-tog", r.tog);
 		Class(player, *w, layout, id, "on", r.on);
 		Class(player, *w, layout, id, "grp", r.grp);
+		Class(player, *w, layout, id, "done", r.done);
 		char sub[24];
 		V_snprintf(sub, sizeof(sub), "gs%i_l", i);
 		Var(player, *w, layout, sub, "l", r.label);

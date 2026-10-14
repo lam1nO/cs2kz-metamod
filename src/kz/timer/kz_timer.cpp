@@ -1336,6 +1336,12 @@ void KZTimerService::UpdateCurrentCompareType(PBDataKey key)
 	this->currentCompareType = COMPARE_NONE;
 }
 
+f64 KZTimerService::GetLocalPBTime(u32 modeID, u32 courseGuid)
+{
+	auto it = this->localPBCache.find(ToPBDataKey(modeID, courseGuid));
+	return it == this->localPBCache.end() ? 0.0 : it->second.overall.pbTime;
+}
+
 const PBData *KZTimerService::GetCompareTargetForType(CompareType type, PBDataKey key)
 {
 	switch (type)
