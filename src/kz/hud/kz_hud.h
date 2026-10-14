@@ -1196,6 +1196,7 @@ private:
 		bool colorPopupHidden {true};
 		bool listPopupHidden {true};
 		bool confirmPopupHidden {true};
+		bool popDimHidden {true}; // pop_dim — затемнение под любым из трёх попапов
 		bool editOpenHidden {true};
 
 		bool tabHidden[KZ_MENU_TABS] {};
@@ -1211,6 +1212,9 @@ private:
 		bool rowDis[KZ_MENU_ROWS] {};
 		bool rowRst[KZ_MENU_ROWS] {};
 		bool rowNosub[KZ_MENU_ROWS] {};
+		bool rowMulti[KZ_MENU_ROWS] {}; // множественный выбор (Стили): on на каждом включённом sg
+		bool rowExt[KZ_MENU_ROWS] {};   // кнопка, отправляющая в чат (Поделиться худом)
+		bool rowOpen[KZ_MENU_ROWS] {};  // для строки открыт list_popup
 		bool tgOn[KZ_MENU_ROWS] {};
 		bool segOn[KZ_MENU_ROWS][KZ_MENU_SEGS] {};
 		bool segHidden[KZ_MENU_ROWS][KZ_MENU_SEGS] {};

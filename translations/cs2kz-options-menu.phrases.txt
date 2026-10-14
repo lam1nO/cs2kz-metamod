@@ -342,4 +342,40 @@
 		"chi"	"其他"
 		"ua"	"Інше"
 	}
+	// Окно !options, дизайн gs2: подпись к нику в шапке, подписи переключателя, футер.
+	"Options - Who Caption"
+	{
+		"en"	"Player"
+		"ru"	"Игрок"
+		"chi"	"玩家"
+		"ua"	"Гравець"
+	}
+	"Options - On"
+	{
+		"en"	"On"
+		"ru"	"Вкл"
+		"chi"	"开"
+		"ua"	"Увімк"
+	}
+	"Options - Off"
+	{
+		"en"	"Off"
+		"ru"	"Выкл"
+		"chi"	"关"
+		"ua"	"Вимк"
+	}
+	"Options - Footer Key"
+	{
+		"en"	"LMB"
+		"ru"	"ЛКМ"
+		"chi"	"左键"
+		"ua"	"ЛКМ"
+	}
+	"Options - Footer Select"
+	{
+		"en"	"Select"
+		"ru"	"Выбрать"
+		"chi"	"选择"
+		"ua"	"Вибрати"
+	}
 }

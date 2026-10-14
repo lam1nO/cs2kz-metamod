@@ -327,6 +327,7 @@ void KZHUDService::CloseHudEditor()
 		this->SetMenuBoolClass(layout, "color_popup", "hidden", this->menuApplied.colorPopupHidden, true);
 		this->SetMenuBoolClass(layout, "list_popup", "hidden", this->menuApplied.listPopupHidden, true);
 		this->SetMenuBoolClass(layout, "confirm_popup", "hidden", this->menuApplied.confirmPopupHidden, true);
+		this->SetMenuBoolClass(layout, "pop_dim", "hidden", this->menuApplied.popDimHidden, true);
 		// Без этой строки игрок остаётся в курсоре навсегда (см. CloseLayoutMenu).
 		layout->SetInputCaptureEnabled(this->player->GetPlayerSlot(), false);
 	}

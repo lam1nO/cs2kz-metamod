@@ -4,7 +4,7 @@
 // обмен худом, сброс и экспорт, этот файл его не меняет. Раскладка окна — своя таблица ниже:
 //   - Главные вкладки tab0..tab5 → подразделы stab0..stab5 → группы → пункты по phraseKey.
 //   - Строки текущего подраздела — слоты row{i} (sec{i} — заголовок группы над её первой строкой),
-//     классы gtop/gbot/dis/rst/nosub; тело листает клиент, страниц у сервера нет (отзыв 27.09).
+//     классы gtop/gbot/dis/rst/nosub/ext/multi/open; тело листает клиент, страниц у сервера нет (отзыв 27.09).
 //   - Каждая строка row{i} — универсальная, вид контрола задаёт класс типа t-toggle|t-seg|t-step|
 //     t-btn|t-color|t-font (Choice с <= 4 вариантами — сегменты, длиннее — список-попап).
 //   - Position/Vector в окне больше не показываются: расположение элементов худа правит
@@ -47,7 +47,7 @@
 #include "kz/option/kz_option.h"
 #include "kz/option/menu/model.h"
 #include "kz/language/kz_language.h"
-#include "kz/mode/kz_mode.h" // GetModeShortName — подпись режима в сайдбаре окна
+#include "kz/mode/kz_mode.h"
 #include "kz/spec/kz_spec.h" // GetSpectatedPlayer — цель мимикрии (подпись в окне) и reason инварианта
 #include "sdk/entity/ccscustomhudlayout.h"
 #include "entitykeyvalues.h"
@@ -439,10 +439,51 @@ static_function bool IsHudGeneralSub(i32 tab, i32 sub)
 	return t && s && V_strcmp(t->phraseKey, KZ_MENU_HUD_CATEGORY) == 0 && V_strcmp(s->phraseKey, KZ_MENU_HUD_GENERAL_SUB) == 0;
 }
 
+static_function bool IsMenuPhrase(const KZOptItem &it, const char *phraseKey)
+{
+	return it.phraseKey && V_strcmp(it.phraseKey, phraseKey) == 0;
+}
+
 // Кнопки-сбросы — аддон красит их классом rst.
 static_function bool IsResetMenuItem(const KZOptItem &it)
 {
-	return it.phraseKey && (V_strcmp(it.phraseKey, KZ_MENU_RESET_ALL_PHRASE) == 0 || V_strcmp(it.phraseKey, "Options - Menu Label ClearStartPos") == 0);
+	return IsMenuPhrase(it, KZ_MENU_RESET_ALL_PHRASE) || IsMenuPhrase(it, "Options - Menu Label ClearStartPos");
+}
+
+// Кнопка, которая отправляет что-то в чат, — класс ext (иконка «ссылка»).
+static_function bool IsExternalMenuItem(const KZOptItem &it)
+{
+	return IsMenuPhrase(it, "HUD Share - Menu Label ShareCode");
+}
+
+// Множественный выбор: getChoices метит selected у КАЖДОГО включённого варианта, клик по
+// сегменту переключает только его (StylesOnPick → ToggleStyle). Аддон рисует чипы (класс multi).
+static_function bool IsMultiChoiceMenuItem(const KZOptItem &it)
+{
+	return it.type == KZOptItemType::Choice && IsMenuPhrase(it, "Options - Menu Label Styles");
+}
+
+// Подпись кнопки t-btn — глаголом по пункту (спека gs2 §1.3: «Задать», «Сбросить», «Забрать»,
+// «Поделиться»); неизвестная кнопка — общее «Выполнить».
+static_function const char *GetMenuButtonPhrase(const KZOptItem &it)
+{
+	if (IsResetMenuItem(it))
+	{
+		return "Options - Button Reset";
+	}
+	if (IsMenuPhrase(it, "Options - Menu Label SetStartPos"))
+	{
+		return "Options - Button Set";
+	}
+	if (IsMenuPhrase(it, "HUD Share - Menu Label Take"))
+	{
+		return "Options - Button Take";
+	}
+	if (IsMenuPhrase(it, "HUD Share - Menu Label ShareCode"))
+	{
+		return "Options - Button Share";
+	}
+	return "Options - Button Go";
 }
 
 // Разбор id вида <prefix><a>[_<b>][suffix]: "tab3", "sg2_1", "st4_dec" (suffix "_dec"). Остаток
@@ -901,19 +942,18 @@ void KZHUDService::RenderMenu()
 	this->SetMenuBoolClass(layout, "edit_root", "hidden", this->menuApplied.editHidden, true);
 
 	const char *lang = this->player->languageService->GetLanguage();
-	// Шапка: заголовок окна и подзаголовок; мимикрия — хвостом подзаголовка (полное объяснение
-	// уходит в чат при открытии, OpenLayoutMenu).
+	// Шапка (спека gs2 §1.1): заголовок слева, «Игрок <ник>» справа. Подзаголовок, бренд и режим
+	// окно больше не рисует (sub/brand_sub/mode не ставим); про мимикрию игрок узнаёт из чата при
+	// открытии (OpenLayoutMenu).
 	this->SetMenuVar(layout, "opt_root", "title", KZLanguageService::PrepareMessageWithLang(lang, "Options - Title").c_str());
-	std::string sub = KZLanguageService::PrepareMessageWithLang(lang, "Options - Subtitle");
-	if (IsMenuMimicActive(this->player))
-	{
-		sub += " ";
-		sub += KZLanguageService::PrepareMessageWithLang(lang, "HUD - Menu Mimic Suffix");
-	}
-	this->SetMenuVar(layout, "opt_root", "sub", sub.c_str());
-	this->SetMenuVar(layout, "opt_root", "brand_sub", KZLanguageService::PrepareMessageWithLang(lang, "Options - Brand Sub").c_str());
+	this->SetMenuVar(layout, "opt_root", "who_cap", KZLanguageService::PrepareMessageWithLang(lang, "Options - Who Caption").c_str());
 	this->SetMenuVar(layout, "opt_root", "who", this->player->GetName());
-	this->SetMenuVar(layout, "opt_root", "mode", this->player->modeService ? this->player->modeService->GetModeShortName() : "");
+	// Подписи переключателя — одни на все строки tg{i} (показ — классом on).
+	this->SetMenuVar(layout, "opt_root", "on_t", KZLanguageService::PrepareMessageWithLang(lang, "Options - On").c_str());
+	this->SetMenuVar(layout, "opt_root", "off_t", KZLanguageService::PrepareMessageWithLang(lang, "Options - Off").c_str());
+	// Футер §1.5: действие мыши и инфо, без подсказки закрытия (есть крестик).
+	this->SetMenuVar(layout, "opt_root", "f_key", KZLanguageService::PrepareMessageWithLang(lang, "Options - Footer Key").c_str());
+	this->SetMenuVar(layout, "opt_root", "f_act", KZLanguageService::PrepareMessageWithLang(lang, "Options - Footer Select").c_str());
 	this->SetMenuVar(layout, "opt_root", "hint", KZLanguageService::PrepareMessageWithLang(lang, "Options - Hint").c_str());
 
 	// Карточка редактора — только на «Худ» → «Общее», над строками подраздела.
@@ -999,6 +1039,7 @@ void KZHUDService::RenderMenuRows(CCSCustomHudLayout *layout)
 		const bool isItem = row != NULL;
 		// Заголовок группы — над её первой строкой.
 		const bool isSection = row && row->groupTop && row->groupKey;
+		bool multi = false;
 		if (isSection)
 		{
 			const std::string label = KZLanguageService::PrepareMessageWithLang(lang, row->groupKey);
@@ -1060,18 +1101,17 @@ void KZHUDService::RenderMenuRows(CCSCustomHudLayout *layout)
 					break;
 				}
 				case KZOptItemType::Button:
-				{
-					const bool isResetAll = it.phraseKey && V_strcmp(it.phraseKey, KZ_MENU_RESET_ALL_PHRASE) == 0;
-					this->SetMenuVar(layout, BtPanel(i), BtVar(i),
-									 KZLanguageService::PrepareMessageWithLang(lang, isResetAll ? "Options - Button Reset" : "Options - Button Go").c_str());
+					this->SetMenuVar(layout, BtPanel(i), BtVar(i), KZLanguageService::PrepareMessageWithLang(lang, GetMenuButtonPhrase(it)).c_str());
 					break;
-				}
 				case KZOptItemType::Color:
 					swatch = panorama::GetColorEntryBgClass(GetItemColorEntry(this->GetMHUDColorPref(it.prefKey, it.cdef), it));
 					break;
 				default:
 					break;
 			}
+			// Чипы — только пока пункт рисуется сегментами: при > KZ_MENU_SEGS вариантах это строка-
+			// значение со списком-попапом, где отметки ставит сам список.
+			multi = IsMultiChoiceMenuItem(it) && (i32)choices.size() <= KZ_MENU_SEGS;
 			this->SetMenuSwapClass(layout, RowPanel(i), this->menuApplied.rowType[i], rowType);
 			this->SetMenuBoolClass(layout, TgPanel(i), "on", this->menuApplied.tgOn[i], on);
 			this->SetMenuSwapClass(layout, ClPanel(i), this->menuApplied.clBg[i], swatch);
@@ -1080,6 +1120,11 @@ void KZHUDService::RenderMenuRows(CCSCustomHudLayout *layout)
 		this->SetMenuBoolClass(layout, RowPanel(i), "gbot", this->menuApplied.rowGbot[i], isItem && row->groupBottom);
 		this->SetMenuBoolClass(layout, RowPanel(i), "dis", this->menuApplied.rowDis[i], isItem && !IsMenuItemEnabled(this->player, *row->item));
 		this->SetMenuBoolClass(layout, RowPanel(i), "rst", this->menuApplied.rowRst[i], isItem && IsResetMenuItem(*row->item));
+		this->SetMenuBoolClass(layout, RowPanel(i), "ext", this->menuApplied.rowExt[i], isItem && IsExternalMenuItem(*row->item));
+		this->SetMenuBoolClass(layout, RowPanel(i), "multi", this->menuApplied.rowMulti[i], multi);
+		// Значение «раскрыто», пока для этой строки открыт список.
+		this->SetMenuBoolClass(layout, RowPanel(i), "open", this->menuApplied.rowOpen[i],
+							   isItem && this->menuPopup == MenuPopup::List && this->menuPopupTarget == row->item);
 		// Без второй строки аддон прячет пустую подпись — иначе однострочный пункт съезжает вверх.
 		this->SetMenuBoolClass(layout, RowPanel(i), "nosub", this->menuApplied.rowNosub[i], isItem && !row->item->subKey);
 		this->SetMenuBoolClass(layout, SecPanel(i), "hidden", this->menuApplied.secHidden[i], !isSection);
@@ -1092,6 +1137,8 @@ void KZHUDService::RenderMenuPopups(CCSCustomHudLayout *layout)
 	this->SetMenuBoolClass(layout, "color_popup", "hidden", this->menuApplied.colorPopupHidden, this->menuPopup != MenuPopup::Color);
 	this->SetMenuBoolClass(layout, "list_popup", "hidden", this->menuApplied.listPopupHidden, this->menuPopup != MenuPopup::List);
 	this->SetMenuBoolClass(layout, "confirm_popup", "hidden", this->menuApplied.confirmPopupHidden, this->menuPopup != MenuPopup::Confirm);
+	// Затемнение под попапом (спека gs2 §1.6): hittest, клик мимо попапа не уходит в окно.
+	this->SetMenuBoolClass(layout, "pop_dim", "hidden", this->menuApplied.popDimHidden, this->menuPopup == MenuPopup::None);
 	switch (this->menuPopup)
 	{
 		case MenuPopup::Color:
@@ -1822,6 +1869,7 @@ void KZHUDService::CloseLayoutMenu()
 		this->SetMenuBoolClass(layout, "color_popup", "hidden", this->menuApplied.colorPopupHidden, true);
 		this->SetMenuBoolClass(layout, "list_popup", "hidden", this->menuApplied.listPopupHidden, true);
 		this->SetMenuBoolClass(layout, "confirm_popup", "hidden", this->menuApplied.confirmPopupHidden, true);
+		this->SetMenuBoolClass(layout, "pop_dim", "hidden", this->menuApplied.popDimHidden, true);
 		// Самая важная строка файла: без неё игрок остаётся в режиме курсора навсегда — движок
 		// возвращает управление только когда ВСЕ layout-сущности с capture его сняли.
 		layout->SetInputCaptureEnabled(this->player->GetPlayerSlot(), false);

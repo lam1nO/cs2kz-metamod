@@ -170,10 +170,10 @@
 	}
 	"HUD Share - Menu Label ShareCode Sub"
 	{
-		"en"		"Prints a code in chat: anyone typing !hudget <code> gets this HUD"
-		"ru"		"Напечатает в чат код: кто введёт !hudget <код> — получит этот худ"
-		"chi"		"在聊天中打印代码: 输入 !hudget <代码> 即可得到这个 HUD"
-		"ua"		"Надрукує в чат код: хто введе !hudget <код> — отримає цей худ"
+		"en"		"Your HUD code will be posted to chat"
+		"ru"		"Код вашего худа уйдёт в чат"
+		"chi"		"你的 HUD 代码将发送到聊天"
+		"ua"		"Код вашого худу піде в чат"
 	}
 	"HUD Share - Menu Label Take"
 	{
