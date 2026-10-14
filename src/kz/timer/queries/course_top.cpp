@@ -757,9 +757,9 @@ bool CourseTopRequest::ShowWindow()
 //
 // GG1 (CSSharp) спрашивает `kz_gsm_done <slot>` с консоли сервера; ответ — серия серверных команд
 // `css_gg1_done <slot> <карта,карта,...>` (пачками, чтобы не упереться в длину команды) и в конце
-// `css_gg1_done_end <slot>`. Карты — с любым временем в текущем режиме игрока (любой курс, любой стиль).
+// `css_gg1_done_end <slot>`. Карты с временем главного курса в текущем режиме игрока (любой стиль).
 // Элемент — «карта=секунды»: лучшее время главного курса (наименьший StageID карты), для плитки
-// «✓ Пройдена 01:02.77»; без «=…» — пройден только бонус.
+// «✓ Пройдена 01:02.77». Карты, где пройден только бонус, не отдаются.
 CON_COMMAND_F(kz_gsm_done, "kz_gsm_done <slot> — пройденные игроком карты в его режиме (для фильтра GG1)", FCVAR_NONE)
 {
 	if (utils::GetController(context.GetPlayerSlot()) || args.ArgC() < 2)
@@ -819,8 +819,13 @@ CON_COMMAND_F(kz_gsm_done, "kz_gsm_done <slot> — пройденные игро
 			{
 				continue;
 			}
+			// Пройдена = пройден главный курс; один бонус карту пройденной не делает.
+			if (result->IsNull(1))
+			{
+				continue;
+			}
 			std::string item = name;
-			const f64 best = result->IsNull(1) ? 0.0 : result->GetFloat(1);
+			const f64 best = result->GetFloat(1);
 			if (best > 0.0)
 			{
 				char t[32];
