@@ -128,6 +128,7 @@ void KZHUDService::ApplyHudDefaults()
 		// таймера.
 		opts->SetPreferenceInt("mhudKeysIdle", MHUD_DEF_KEYS_IDLE);
 		opts->SetPreferenceInt("mhudKeysGap", MHUD_DEF_KEYS_GAP);
+		opts->SetPreferenceInt(MHUD_KEYS_GAP_KEY, MHUD_DEF_KEYS_GAP);
 		// Дельта таймера: 0 выкл / 1 к PB / 2 к WR (§4.1 спеки редактора).
 		opts->SetPreferenceInt("hudTimerCompare", 2);
 		written += 3;
@@ -276,6 +277,7 @@ void KZHUDService::ApplyHudDefaultsRev2(i32 &written)
 			writeElement(LayoutElement::Keys);
 			opts->SetPreferenceInt("mhudKeysIdle", MHUD_DEF_KEYS_IDLE);
 			opts->SetPreferenceInt("mhudKeysGap", MHUD_DEF_KEYS_GAP);
+			opts->SetPreferenceInt(MHUD_KEYS_GAP_KEY, MHUD_DEF_KEYS_GAP);
 			this->SetMHUDColorPref("mhudKeysColor", MHUD_DEF_KEYS_COLOR);
 			written += 3;
 			mark("keys");

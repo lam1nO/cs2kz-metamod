@@ -161,8 +161,14 @@ void KZHUDService::RefreshLayoutPrefs()
 	// Нечётное не округляем: классы есть на каждый пиксель 0..24, степпер редактора с нечётного
 	// просто шагает дальше по 2.
 	{
-		const i32 gap = (i32)opts->GetPreferenceInt("mhudKeysGap", MHUD_DEF_KEYS_GAP);
-		this->layoutPrefs.keysGap = gap < 0 ? -1 : Clamp(gap, 0, 24);
+		constexpr i64 kUnset = -100000;
+		i64 gap = opts->GetPreferenceInt(MHUD_KEYS_GAP_KEY, kUnset);
+		if (gap == kUnset)
+		{
+			const i64 old = opts->GetPreferenceInt("mhudKeysGap", MHUD_DEF_KEYS_GAP);
+			gap = old < 0 ? (this->layoutPrefs.elements[(i32)LayoutElement::Keys].size + 1) / 2 : old;
+		}
+		this->layoutPrefs.keysGap = Clamp((i32)gap, MHUD_KEYS_GAP_MIN, MHUD_KEYS_GAP_MAX);
 	}
 	this->layoutPrefs.speedPrecise = opts->GetPreferenceBool("mhudSpeedPrecise", false);
 	// Престрейф — три префа апстрима, до этой задачи не читавшиеся вообще (дефолты его же,

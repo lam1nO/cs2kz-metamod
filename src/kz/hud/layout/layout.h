@@ -24,6 +24,12 @@
 // с обводкой, цвет MHUD_DEF_KEYS_COLOR (#40FF40).
 #define MHUD_DEF_KEYS_IDLE 1
 #define MHUD_DEF_KEYS_GAP  0
+// Отступ клавиш в px — с худа v2 без «авто» и с отрицательными значениями (плотнее, вплоть до
+// наложения ячеек, как у particle-MHUD). Свой ключ: старый mhudKeysGap (-1 = авто, 0..24) читают
+// старые версии KZ на флоте; новый при первом чтении выводится из него (авто → N/2, как keys-size.css).
+#define MHUD_KEYS_GAP_KEY "mhudKeysGapPx"
+#define MHUD_KEYS_GAP_MIN (-30)
+#define MHUD_KEYS_GAP_MAX 24
 // Дефолт обводки элемента: с худа v2 обводка по умолчанию только у клавиш (как у владельца).
 inline bool LayoutOutlineDefault(LayoutElement element)
 {

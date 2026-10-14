@@ -473,8 +473,8 @@ void KZHUDService::InitMenuPrefs()
 	// элемента, обмена худом и белого списка. -1 «авто» входит в диапазон: это не «ноль», а
 	// отсутствие класса key-gap (layout/prefs.cpp). Size по умолчанию хранит Float — читатель
 	// берёт Int, поэтому хранение задано явно, как у прозрачности.
-	KZ::menu::AddSize(keysColors, "HUD Editor - Prop KeysGap", "mhudKeysGap", MHUD_DEF_KEYS_GAP, -1, 24);
-	KZ::menu::SetItemPref(keysColors, "mhudKeysGap", KZOptStorage::Int, MHUD_DEF_KEYS_GAP);
+	KZ::menu::AddSize(keysColors, "HUD Editor - Prop KeysGap", MHUD_KEYS_GAP_KEY, MHUD_DEF_KEYS_GAP, MHUD_KEYS_GAP_MIN, MHUD_KEYS_GAP_MAX);
+	KZ::menu::SetItemPref(keysColors, MHUD_KEYS_GAP_KEY, KZOptStorage::Int, MHUD_DEF_KEYS_GAP);
 
 	KZ::menu::AddColor(elementNodes[(i32)LayoutElement::Checkpoint], "HUD - Menu Label Color", "mhudCheckpointColor", MHUD_DEF_BASE_COLOR);
 	// Цвета полей редактора !hud и дельты таймера: пункты в скрытых узлах элементов — их правит

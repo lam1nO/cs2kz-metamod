@@ -428,22 +428,19 @@ void KZHUDService::ApplyKeysLook(CCSCustomHudLayout *layout, const char *prefix,
 		SetKeysHasClass(layout, this->player, keysPanel, "keys-square", square != 0);
 		state.square = square;
 	}
-	// Интервал клавиш: один класс key-gap--G на корне (mhud.css), прошлый снимаем. -1 «авто» —
-	// без класса, остаётся пропорциональный отступ keys.css.
+	// Интервал клавиш: один класс на корне, прошлый снимаем. key-gap--G (0..24, mhud.css) или
+	// key-gap--negG (плотнее, mhud2-el.css под .hud2). «Авто» с худа v2 нет.
 	const i32 gap = prefs.keysGap;
 	if (state.gap != gap)
 	{
 		char gapClass[32];
-		if (state.gap >= 0)
+		if (state.gap != INT_MIN)
 		{
-			V_snprintf(gapClass, sizeof(gapClass), "key-gap--%i", state.gap);
+			V_snprintf(gapClass, sizeof(gapClass), state.gap < 0 ? "key-gap--neg%i" : "key-gap--%i", abs(state.gap));
 			layout->SetHasClass(keysPanel, gapClass, k_eHudPanelClassStatus_DoesNotHaveClass);
 		}
-		if (gap >= 0)
-		{
-			V_snprintf(gapClass, sizeof(gapClass), "key-gap--%i", gap);
-			SetKeysHasClass(layout, this->player, keysPanel, gapClass, true);
-		}
+		V_snprintf(gapClass, sizeof(gapClass), gap < 0 ? "key-gap--neg%i" : "key-gap--%i", abs(gap));
+		SetKeysHasClass(layout, this->player, keysPanel, gapClass, true);
 		state.gap = gap;
 	}
 

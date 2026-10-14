@@ -459,15 +459,8 @@ void KZHUDService::RenderEditor()
 		if (sel == (i32)LayoutElement::Keys)
 		{
 			this->SetMenuVar(layout, "edit_props", "psl", phrase("HUD Editor - Prop KeysGap").c_str());
-			if (prefs.keysGap < 0)
-			{
-				this->SetMenuVar(layout, "edit_props", "ps", phrase("HUD Editor - Prop KeysGapAuto").c_str());
-			}
-			else
-			{
-				V_snprintf(buf, sizeof(buf), "%i px", prefs.keysGap);
-				this->SetMenuVar(layout, "edit_props", "ps", buf);
-			}
+			V_snprintf(buf, sizeof(buf), "%i px", prefs.keysGap);
+			this->SetMenuVar(layout, "edit_props", "ps", buf);
 		}
 		const EditorSegDef *seg = GetEditorSegments(sel);
 		if (seg)
@@ -781,8 +774,8 @@ void KZHUDService::EditorTogglePref(i32 row)
 	this->RenderEditor();
 }
 
-// Степпер ep_srow. Клавиши — ступени интервала: авто (-1) → 0 → 2 → … → 24; с нечётного (из
-// обмена/БД) шаг вниз уходит на ближайшее чётное снизу, а не мимо нуля сразу в «авто».
+// Степпер ep_srow. Клавиши — интервал в px шагом 2, от MHUD_KEYS_GAP_MIN (плотнее, с наложением
+// ячеек) до MHUD_KEYS_GAP_MAX; с нечётного (выведенного из старого «авто») — на ближайшее чётное.
 void KZHUDService::EditorStepPref(i32 dir)
 {
 	const MHUDLayoutPrefs &prefs = this->GetOwnLayoutPrefs();
@@ -795,17 +788,17 @@ void KZHUDService::EditorStepPref(i32 dir)
 	i32 next = gap;
 	if (dir > 0)
 	{
-		next = gap < 0 ? 0 : MIN(gap + 2, 24);
+		next = MIN(gap + 2 - (gap & 1), MHUD_KEYS_GAP_MAX);
 	}
 	else
 	{
-		next = gap <= 0 ? -1 : MAX(gap - 2 + (gap & 1), 0);
+		next = MAX(gap - 2 + (gap & 1), MHUD_KEYS_GAP_MIN);
 	}
 	if (next == gap)
 	{
 		return;
 	}
-	this->player->optionService->SetPreferenceInt("mhudKeysGap", next);
+	this->player->optionService->SetPreferenceInt(MHUD_KEYS_GAP_KEY, next);
 	this->RefreshLayoutPrefs();
 	this->RenderEditor();
 }
