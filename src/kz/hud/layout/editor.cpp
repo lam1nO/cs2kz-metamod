@@ -443,7 +443,12 @@ void KZHUDService::RenderEditor()
 			const MHUDLayoutPrefs::Element &el = prefs.elements[sel];
 			// Позиция — проценты от центра, как её видят !hud share и БД, но прижатая к видимой
 			// области: так же стоит и реплика (EditorClampStoredPos).
-			V_snprintf(buf, sizeof(buf), "%i \xC2\xB7 %i", KZ::hudfmt::ClampEditorPos(el.x), KZ::hudfmt::ClampEditorPos(el.y));
+			// Минус типографский (U+2212), как в макете: дефис в «−42 · −5» читается как тире.
+			{
+				const i32 ex = KZ::hudfmt::ClampEditorPos(el.x), ey = KZ::hudfmt::ClampEditorPos(el.y);
+				V_snprintf(buf, sizeof(buf), "%s%i \xC2\xB7 %s%i", ex < 0 ? "\xE2\x88\x92" : "", ex < 0 ? -ex : ex, ey < 0 ? "\xE2\x88\x92" : "",
+						   ey < 0 ? -ey : ey);
+			}
 			this->SetMenuVar(layout, "edit_props", "xy", buf);
 			// Тот же текст — в ярлык выбранной рамки. Кэш menuVars ключуется именем: при смене
 			// выбранного забываем прошлое значение, иначе новая панель его не получит.
@@ -455,7 +460,7 @@ void KZHUDService::RenderEditor()
 			this->SetMenuVar(layout, EDITOR_REPLICA[sel].buttonId, "exy", buf);
 			this->SetMenuBoolClass(layout, "ep_step1", "on", this->menuApplied.epStep1, this->editorStep == 1);
 			this->SetMenuBoolClass(layout, "ep_step5", "on", this->menuApplied.epStep5, this->editorStep == 5);
-			V_snprintf(buf, sizeof(buf), "%ipx", el.size);
+			V_snprintf(buf, sizeof(buf), "%i px", el.size);
 			this->SetMenuVar(layout, "edit_props", "sz", buf);
 			const char *slug = this->player->optionService->GetPreferenceStr(def.fontKey, def.fontDefault);
 			this->SetMenuVar(layout, "ep_font", "font", panorama::GetFontDisplayName(slug, def.fontDefault));

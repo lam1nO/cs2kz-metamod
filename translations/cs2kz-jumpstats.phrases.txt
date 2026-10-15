@@ -1229,9 +1229,9 @@
 	"Jumpstats - Tier Name None"
 	{
 		"en"		"None"
-		"ru"		"None"
+		"ru"		"Нет"
 		"chi"		"None"
-		"ua"		"None"
+		"ua"		"Немає"
 	}
 	"Jumpstats - Tier Name Meh"
 	{

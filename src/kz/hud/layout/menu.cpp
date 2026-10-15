@@ -1145,7 +1145,8 @@ void KZHUDService::RenderMenuPopups(CCSCustomHudLayout *layout)
 	const bool dockL = ed && this->editorDockLeft;
 	this->SetMenuBoolClass(layout, "color_popup", "ed", this->menuApplied.colorPopupEd, ed);
 	this->SetMenuBoolClass(layout, "list_popup", "ed", this->menuApplied.listPopupEd, ed);
-	this->SetMenuBoolClass(layout, "pop_dim", "ed", this->menuApplied.popDimEd, ed);
+	// Подтверждение и в редакторе — по центру с обычным затемнением (спека редактора §7).
+	this->SetMenuBoolClass(layout, "pop_dim", "ed", this->menuApplied.popDimEd, ed && this->menuPopup != MenuPopup::Confirm);
 	this->SetMenuBoolClass(layout, "color_popup", "dock-l", this->menuApplied.colorPopupDockL, dockL);
 	this->SetMenuBoolClass(layout, "list_popup", "dock-l", this->menuApplied.listPopupDockL, dockL);
 	// Значение шрифта «раскрыто», пока его список открыт из редактора (в окне — open на row{i}).

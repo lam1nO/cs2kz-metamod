@@ -45,9 +45,20 @@ extern CUtlVector<KZModeManager::ModePluginInfo> modeInfos;
 namespace
 {
 	// ---------------------------------------------------------------- Mode (Choice) ----
+	// Текущий режим — тот, что реально включён (его же показывает худ), а не preferredMode: преф пишется
+	// именем, с которым режим включили, и после !ckz там «CKZ», а в списке — длинное «Classic».
 	const char *CurrentModeName(KZPlayer *player)
 	{
+		if (player->modeService)
+		{
+			return player->modeService->GetModeName();
+		}
 		return player->optionService->GetPreferenceStr("preferredMode", KZOptionService::GetOptionStr("defaultMode", KZ_DEFAULT_MODE));
+	}
+
+	bool IsModeInfo(const KZModeManager::ModePluginInfo &info, const char *name)
+	{
+		return !V_stricmp(info.longModeName, name) || !V_stricmp(info.shortModeName, name);
 	}
 
 	void ModeGetChoices(KZPlayer *player, i64 tag, std::vector<KZChoice> &out)
@@ -60,7 +71,7 @@ namespace
 			{
 				continue; // числится в БД, но плагин не загружен — выбрать нельзя
 			}
-			out.push_back({std::string(modeInfos[i].longModeName.Get()), id, nullptr, !V_stricmp(modeInfos[i].longModeName, current)});
+			out.push_back({std::string(modeInfos[i].longModeName.Get()), id, nullptr, IsModeInfo(modeInfos[i], current)});
 			id++;
 		}
 	}
@@ -75,7 +86,7 @@ namespace
 			{
 				continue;
 			}
-			if (!V_stricmp(modeInfos[i].longModeName, current))
+			if (IsModeInfo(modeInfos[i], current))
 			{
 				return id;
 			}
