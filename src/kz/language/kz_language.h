@@ -16,6 +16,11 @@ public:
 	static void LoadTranslations();
 	static void Cleanup();
 	static const char *GetBaseAddon();
+	// Язык игрока, если он не выбран явно: опция defaultLanguage, иначе KZ_DEFAULT_PLAYER_LANGUAGE.
+	static const char *GetDefaultLanguage();
+	// Привести ввод игрока/значение префа к коду перевода: "RU" -> "ru", "russian" -> "ru"
+	// (имена cl_language из translations/config.txt). false — код неизвестен (в т.ч. пустой).
+	static bool NormalizeLanguage(const char *input, char *out, size_t outSize);
 
 	struct LanguageInfo
 	{

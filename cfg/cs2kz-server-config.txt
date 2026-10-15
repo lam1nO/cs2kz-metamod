@@ -10,7 +10,11 @@
 	"defaultTimeLimit"					"60.0"
 
 	// Default language to be used if client does not set a language/language is not supported.
-	"defaultLanguage"					"en"
+	"defaultLanguage"					"ru"
+
+	// 1 = брать язык из cl_language клиента (нужен metamod-плагин ClientCvarValue), если игрок
+	// не выбрал язык через !language. 0 = всем серверный defaultLanguage.
+	"useClientLanguage"					"0"
 
 	// Interval between tips.
 	"tipInterval"						"75"

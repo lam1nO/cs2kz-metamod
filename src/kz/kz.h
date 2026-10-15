@@ -29,7 +29,12 @@ enum KzModeCvars : int; // defined in mode/kz_mode.h
 // фолбэк на случай потери конфига, и оно обязано совпадать с профилем.
 #define KZ_DEFAULT_CHAT_PREFIX  "{blue}GYMSTRIKE {grey}|{default}"
 #define KZ_DEFAULT_TIP_INTERVAL 75.0
+// KZ_DEFAULT_LANGUAGE — ЯЗЫК-ФОЛБЭК ФРАЗ (en есть у каждой фразы), а не язык игрока: им
+// подменяется перевод, которого нет в языке игрока. Язык игрока по умолчанию — опция
+// defaultLanguage из cs2kz-server-config.txt, а без неё KZ_DEFAULT_PLAYER_LANGUAGE (сервера
+// русскоязычные, решение владельца 15.10).
 #define KZ_DEFAULT_LANGUAGE     "en"
+#define KZ_DEFAULT_PLAYER_LANGUAGE "ru"
 #define KZ_DEFAULT_STYLE        "Normal"
 #define KZ_DEFAULT_MODE         "Classic"
 #define KZ_BASE_ADDON_KEY       "default"

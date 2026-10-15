@@ -161,6 +161,53 @@ const char *KZLanguageService::GetBaseAddon()
 	return addonsKV->GetString(KZ_BASE_ADDON_KEY, KZ_WORKSHOP_ADDON_ID);
 }
 
+const char *KZLanguageService::GetDefaultLanguage()
+{
+	const char *lang = KZOptionService::GetOptionStr("defaultLanguage", KZ_DEFAULT_PLAYER_LANGUAGE);
+	return (lang && lang[0]) ? lang : KZ_DEFAULT_PLAYER_LANGUAGE;
+}
+
+bool KZLanguageService::NormalizeLanguage(const char *input, char *out, size_t outSize)
+{
+	if (!out || outSize == 0)
+	{
+		return false;
+	}
+	out[0] = '\0';
+	if (!input || !input[0])
+	{
+		return false;
+	}
+	char lower[32] {};
+	V_strncpy(lower, input, sizeof(lower));
+	V_strlower(lower);
+	if (KZ_STREQ(lower, KZ_DEFAULT_LANGUAGE))
+	{
+		V_strncpy(out, lower, outSize);
+		return true;
+	}
+	if (!languagesKV)
+	{
+		return false;
+	}
+	// translations/config.txt: имя cl_language -> код перевода. Принимаем и имя ("russian"), и код ("ru").
+	for (KeyValues *kv = languagesKV->GetFirstSubKey(); kv; kv = kv->GetNextKey())
+	{
+		const char *code = kv->GetString();
+		if (!code || !code[0])
+		{
+			continue;
+		}
+		if (KZ_STREQI(kv->GetName(), lower) || KZ_STREQI(code, lower))
+		{
+			V_strncpy(out, code, outSize);
+			V_strlower(out);
+			return true;
+		}
+	}
+	return false;
+}
+
 void KZLanguageService::LoadLanguages()
 {
 	char fullPath[1024];
@@ -200,15 +247,22 @@ void KZLanguageService::LoadTranslations()
 
 void KZLanguageService::OnPlayerPreferencesLoaded()
 {
-	const char *language = this->player->optionService->GetPreferenceStr("preferredLanguage");
-	bool shouldReconnect = !(this->player->checkpointService->GetCheckpointCount() || this->player->timerService->GetTimerRunning());
-	if (language[0])
+	// Пустой/неизвестный преф = язык не выбран явно -> остаётся серверный дефолт. Пустая строка
+	// лежит в БД у тех, кто вводил !language без аргумента (до фикса это сохраняло "" и включало
+	// фолбэк-английский до рестарта сервера).
+	char language[16] {};
+	if (!KZLanguageService::NormalizeLanguage(this->player->optionService->GetPreferenceStr("preferredLanguage"), language, sizeof(language)))
 	{
-		KZLanguageService::UpdateLanguage(this->player->GetSteamId64(false), language, LanguageInfo::CacheLevel::CACHE_PREF, shouldReconnect);
-		if (!shouldReconnect)
-		{
-			this->player->languageService->PrintChat(false, false, "Language Change - Manual Menu Change Required");
-		}
+		return;
+	}
+	// Префы перечитываются на каждом OnPlayerActive (смена карты) — язык тот же, напоминание о
+	// переоткрытии меню печатать незачем.
+	bool changed = !KZ_STREQI(this->GetLanguage(), language);
+	bool shouldReconnect = !(this->player->checkpointService->GetCheckpointCount() || this->player->timerService->GetTimerRunning());
+	KZLanguageService::UpdateLanguage(this->player->GetSteamId64(false), language, LanguageInfo::CacheLevel::CACHE_PREF, shouldReconnect);
+	if (changed && !shouldReconnect)
+	{
+		this->player->languageService->PrintChat(false, false, "Language Change - Manual Menu Change Required");
 	}
 }
 
@@ -243,8 +297,12 @@ const char *KZLanguageService::GetTranslatedFormat(const char *language, const c
 void KZLanguageService::UpdateLanguage(u64 xuid, const char *langKey, LanguageInfo::CacheLevel cacheLevel, bool shouldReconnect)
 {
 	// Manual override > Loaded preference > Queried ConVar
+	if (!langKey || !langKey[0])
+	{
+		langKey = KZLanguageService::GetDefaultLanguage();
+	}
 	auto &langInfo = KZLanguageService::clientLanguageInfos[xuid];
-	const char *addon = addonsKV->GetString(langKey, addonsKV->GetString(KZOptionService::GetOptionStr("defaultLanguage", KZ_DEFAULT_LANGUAGE)));
+	const char *addon = addonsKV->GetString(langKey, addonsKV->GetString(KZLanguageService::GetDefaultLanguage()));
 	if (langInfo.cacheLevel > cacheLevel)
 	{
 		return;
@@ -276,9 +334,12 @@ void KZLanguageService::OnPlayerConnect(u64 steamID64)
 	{
 		return;
 	}
-	this->UpdateLanguage(steamID64, KZOptionService::GetOptionStr("defaultLanguage", KZ_DEFAULT_LANGUAGE), LanguageInfo::CacheLevel::CACHE_NONE,
+	this->UpdateLanguage(steamID64, KZLanguageService::GetDefaultLanguage(), LanguageInfo::CacheLevel::CACHE_NONE,
 						 false);
-	if (g_pClientCvarValue)
+	// cl_language клиента НЕ перебивает серверный дефолт, пока это не включено опцией
+	// useClientLanguage: сервера русскоязычные, а у большинства клиент на english (решение
+	// владельца 15.10 — «русский у всех по умолчанию»). Явный выбор — !language, он в префе.
+	if (g_pClientCvarValue && KZOptionService::GetOptionInt("useClientLanguage", 0))
 	{
 		// clang-format off
 		g_pClientCvarValue->QueryCvarValue(this->player->GetPlayerSlot(), "cl_language",
@@ -297,21 +358,39 @@ void KZLanguageService::OnPlayerConnect(u64 steamID64)
 
 KZLanguageService::LanguageInfo::LanguageInfo()
 {
-	V_strncpy(this->language, KZOptionService::GetOptionStr("defaultLanguage", KZ_DEFAULT_LANGUAGE), sizeof(this->language));
+	V_strncpy(this->language, KZLanguageService::GetDefaultLanguage(), sizeof(this->language));
 }
 
 SCMD(kz_language, SCFL_PREFERENCE | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
-	char language[32] {};
-	V_snprintf(language, sizeof(language), "%s", args->Arg(1));
-	V_strlower(language);
+	const char *arg = args->ArgC() >= 2 ? args->Arg(1) : "";
+	// Без аргумента — только показать текущий язык. Раньше пустой аргумент сохранялся в преф
+	// как "" с уровнем CACHE_OVERRIDE: фразы шли фолбэком на английском, и это держалось
+	// через реконнекты и смены карт до рестарта сервера (clientLanguageInfos — статическая).
+	if (!arg[0])
+	{
+		player->languageService->PrintChat(true, false, "Language - Current", player->languageService->GetLanguage());
+		return true;
+	}
+	char language[16] {};
+	bool reset = KZ_STREQI(arg, "default") || KZ_STREQI(arg, "reset");
+	if (reset)
+	{
+		V_strncpy(language, KZLanguageService::GetDefaultLanguage(), sizeof(language));
+	}
+	else if (!KZLanguageService::NormalizeLanguage(arg, language, sizeof(language)))
+	{
+		player->languageService->PrintChat(true, false, "Language - Unknown", arg);
+		return true;
+	}
 	bool shouldReconnect = !(player->checkpointService->GetCheckpointCount() || player->timerService->GetTimerRunning());
 	KZLanguageService::UpdateLanguage(player->GetSteamId64(false), language, KZLanguageService::LanguageInfo::CacheLevel::CACHE_OVERRIDE, true);
-	player->optionService->SetPreferenceStr("preferredLanguage", language);
+	// reset пишет "" — «не выбран явно»: при следующем заходе действует серверный дефолт.
+	player->optionService->SetPreferenceStr("preferredLanguage", reset ? "" : language);
+	player->languageService->PrintChat(true, false, "Switch Language", language);
 	if (!shouldReconnect)
 	{
-		player->languageService->PrintChat(true, false, "Switch Language", language);
 		player->languageService->PrintChat(false, false, "Language Change - Manual Menu Change Required");
 	}
 	return true;

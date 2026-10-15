@@ -47,4 +47,22 @@
 		"de"		"{yellow}Bitte verbinde dich erneut mit dem Server, um die Änderungen am Menü zu übernehmen."
 		"es"		"{yellow}Por favor, vuelva a conectarse al servidor para aplicar los cambios en el menú."
 	}
+
+	"Language - Current"
+	{
+		// Current language: ru. Change: !language <code> (en, ru, ...), !language default — server default.
+		"#format"	"language:s"
+		"en"		"{grey}Current language: {default}{language}{grey}. Change: {default}!language <code>{grey} (en, ru, ua, ...), {default}!language default{grey} — server default."
+		"ru"		"{grey}Текущий язык: {default}{language}{grey}. Сменить: {default}!language <код>{grey} (ru, en, ua, ...), {default}!language default{grey} — язык сервера."
+		"ua"		"{grey}Поточна мова: {default}{language}{grey}. Змінити: {default}!language <код>{grey} (ua, ru, en, ...), {default}!language default{grey} — мова сервера."
+	}
+
+	"Language - Unknown"
+	{
+		// Unknown language: xx. Available: en, ru, ...
+		"#format"	"language:s"
+		"en"		"{grey}Unknown language {default}{language}{grey}. Use a code like {default}en{grey}, {default}ru{grey}, {default}ua{grey}."
+		"ru"		"{grey}Неизвестный язык {default}{language}{grey}. Укажите код: {default}ru{grey}, {default}en{grey}, {default}ua{grey}."
+		"ua"		"{grey}Невідома мова {default}{language}{grey}. Вкажіть код: {default}ua{grey}, {default}en{grey}, {default}ru{grey}."
+	}
 }
