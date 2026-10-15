@@ -193,7 +193,7 @@ bool KZLanguageService::NormalizeLanguage(const char *input, char *out, size_t o
 	// translations/config.txt: имя cl_language -> код перевода. Принимаем и имя ("russian"), и код ("ru").
 	for (KeyValues *kv = languagesKV->GetFirstSubKey(); kv; kv = kv->GetNextKey())
 	{
-		const char *code = kv->GetString();
+		const char *code = languagesKV->GetString(kv->GetName(), ""); // значение подключа: у KV1 нет GetString() без имени
 		if (!code || !code[0])
 		{
 			continue;
