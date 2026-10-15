@@ -467,7 +467,7 @@ namespace
 
 	MaptopView g_maptop[MAXPLAYERS + 1];
 
-	constexpr const char *kMaptopModes[] = {"KZT", "CKZ", "VNL", "SKZ"};
+	constexpr const char *kMaptopModes[] = {"CKZ", "KZT", "VNL", "SKZ"}; // порядок как в !jstop
 
 	void RenderMaptop(KZPlayer *player);
 
