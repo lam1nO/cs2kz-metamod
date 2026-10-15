@@ -475,7 +475,7 @@ namespace
 	// из BaseRequest::CheckRequests, который обходит BaseRequest::instances через remove_if: новый запрос,
 	// созданный прямо там, делал push_back в тот же вектор посреди обхода — переаллокация, обход по
 	// освобождённой памяти, segv (канарейка 13.10, 0.305.0, кадр CheckRequests::$_2).
-	f64 DoRequeryMaptop(CPlayerUserId userID, CUtlString mode)
+	f64 DoRequeryMaptop(CPlayerUserId userID, CUtlString mode, CUtlString course)
 	{
 		KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
 		if (!player)
@@ -487,7 +487,7 @@ namespace
 		// мешают), а кавычки он НЕ снимает — с ними курс искался как "Main" и таблица была пустой.
 		CCommand args;
 		char line[256];
-		V_snprintf(line, sizeof(line), "kz_maptop map=%s course=%s mode=%s l=%llu", v.map.Get(), v.course.Get(), mode.Get(), kMaptopLimit);
+		V_snprintf(line, sizeof(line), "kz_maptop map=%s course=%s mode=%s l=%llu", v.map.Get(), course.Get(), mode.Get(), kMaptopLimit);
 		args.Tokenize(line);
 		CourseTopRequest *req = CourseTopRequest::Create<CourseTopRequest>(player, CourseTopRequest::ctopFeatures, v.qLocal, v.qGlobal, &args);
 		req->fromWindow = true;
@@ -495,7 +495,9 @@ namespace
 		return 0.0;
 	}
 
-	void RequeryMaptop(KZPlayer *player, const char *mode, bool throttle)
+	// course — курс перезапроса; v.course меняет только ответ (ShowWindow), иначе отброшенный троттлингом
+	// клик по вкладке курса оставил бы окно с вкладкой нового курса над таблицей старого.
+	void RequeryMaptop(KZPlayer *player, const char *mode, const char *course, bool throttle)
 	{
 		MaptopView &v = g_maptop[player->GetPlayerSlot().Get()];
 		const f64 now = g_pKZUtils->GetServerGlobals()->curtime;
@@ -513,7 +515,7 @@ namespace
 		}
 		// Ответы, пришедшие до отложенного создания, уже чужие.
 		v.pendingUid = UINT64_MAX;
-		StartTimer<CPlayerUserId, CUtlString>(DoRequeryMaptop, player->GetClient()->GetUserID(), CUtlString(mode), 0.0, false);
+		StartTimer<CPlayerUserId, CUtlString, CUtlString>(DoRequeryMaptop, player->GetClient()->GetUserID(), CUtlString(mode), CUtlString(course), 0.0, false);
 	}
 
 	CUtlVector<CourseTopRequest::RunStats> &MaptopList(MaptopView &v)
@@ -536,9 +538,7 @@ namespace
 		{
 			if (k < (i32)v.courseNames.size() && V_stricmp(v.courseNames[k].c_str(), v.course.Get()))
 			{
-				v.course = v.courseNames[k].c_str();
-				v.page = 0;
-				RequeryMaptop(player, v.mode.Get(), true);
+				RequeryMaptop(player, v.mode.Get(), v.courseNames[k].c_str(), true);
 			}
 			return;
 		}
@@ -554,7 +554,7 @@ namespace
 				if (shown++ == k)
 				{
 					v.page = 0;
-					RequeryMaptop(player, mode, true);
+					RequeryMaptop(player, mode, v.course.Get(), true);
 					return;
 				}
 			}
@@ -666,7 +666,7 @@ namespace
 		t.sub = std::string(v.course.Get()) + " · " + (v.global ? "мировой топ" : "топ сервера");
 		t.cover = v.map.Get();
 		t.filters[1] = {{"PRO", v.pro}, {"NUB", !v.pro}};
-		// Курсы (Main / Bonus N) — вкладками слева в полосе режимов; список курсов есть только у карты,
+		// Курсы (Main / Bonus N) — вкладками слева в полосе режимов (не больше 8 — ёмкость разметки); список курсов есть только у карты,
 		// что сейчас на сервере, у чужой карты (!maptop <карта>) полоса остаётся без них.
 		v.courseNames.clear();
 		if (!V_stricmp(v.map.Get(), g_pKZUtils->GetCurrentMapName().Get()))
@@ -773,7 +773,7 @@ bool CourseTopRequest::ShowWindow()
 	if (!req->fromWindow && !full && req->offset == 0 && KZ::gsmenu::IsOpenBy(player, "maptop")
 		&& (src.overallData.Count() >= kMaptopShow || src.proData.Count() >= kMaptopShow))
 	{
-		RequeryMaptop(player, v.mode.Get(), false);
+		RequeryMaptop(player, v.mode.Get(), v.course.Get(), false);
 	}
 	return KZ::gsmenu::IsOpen(player);
 }
