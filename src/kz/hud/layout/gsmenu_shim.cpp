@@ -22,6 +22,7 @@
 #include <vendor/mm-cs2menus/src/public/ics2menus.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <unordered_map>
 
 #include "tier0/memdbgon.h"
@@ -69,6 +70,10 @@ namespace
 		i32 closedTick = -1000; // такт закрытия — карточка реплея не должна съесть ту же E
 		f64 endTime = 0; // 0 — без таймаута
 		bool dirty = true;
+		// Окно строк списка с прошлой отрисовки: прокрутка идёт от него, а не от курсора заново.
+		MenuHandle winMenu = kInvalidMenuHandle;
+		i32 winFirst = 0;
+		i32 winCursorLine = 0;
 
 		MenuHandle Current() const
 		{
@@ -245,7 +250,7 @@ public:
 		KZ::gsmenu::List list;
 		list.title = Plain(m->title);
 		const i32 count = (i32)m->items.size();
-		// Строки списка: заголовки групп + пункты; окно из 10 строк вокруг курсора (курсор — на 4-й).
+		// Строки списка: заголовки групп + пункты; окно из 10 строк вокруг курсора.
 		struct Line
 		{
 			i32 item; // -1 — заголовок группы
@@ -267,22 +272,58 @@ public:
 			lines.push_back({i, {}});
 		}
 		const i32 total = (i32)lines.size();
-		i32 first = (std::max)(0, (std::min)(cursorLine - 4, total - KZ_GSMENU_LIST_ROWS));
-		i32 last = (std::min)(total, first + KZ_GSMENU_LIST_ROWS);
-		// Окно не кончается заголовком группы без её пунктов: сдвиг на строку вниз, а если курсор
-		// стоит первой строкой окна — окно короче на строку. За заголовком всегда идёт пункт, перед ним — пункт или начало.
-		if (last < total && last > first && lines[last - 1].item < 0)
+		const i32 rows = KZ_GSMENU_LIST_ROWS;
+		const i32 maxFirst = (std::max)(0, total - rows);
+		// Окно из 10 строк. Целевое — курсор 5-й строкой, но за шаг курсора окно сдвигается
+		// не больше чем на строку и только в сторону шага: переход через заголовок группы (+2 строки)
+		// не съедает сверху две. Без шага (перерисовка) окно стоит. Новое меню — сразу целевое.
+		const i32 desired = (std::max)(0, (std::min)(cursorLine - 4, maxFirst));
+		const bool same = s.winMenu == s.Current();
+		const i32 prev = same ? (std::min)(s.winFirst, maxFirst) : desired;
+		i32 target = desired;
+		if (same)
 		{
-			if (cursorLine > first)
+			if (cursorLine > s.winCursorLine)
 			{
-				first++;
-				last++;
+				target = (std::min)((std::max)(desired, prev), prev + 1);
+			}
+			else if (cursorLine < s.winCursorLine)
+			{
+				target = (std::max)((std::min)(desired, prev), prev - 1);
 			}
 			else
 			{
-				last--; // курсор на первой строке окна — 9 строк без висящего заголовка
+				target = prev;
 			}
 		}
+		// Обязательно: виден курсор и строка над ним (заголовок его группы). Желательно: окно не
+		// кончается заголовком без пунктов, видна строка под курсором. Из годных — ближайшее к
+		// целевому, при равенстве — к прошлому окну (меньше сдвиг).
+		i32 first = 0, bestKey = -1;
+		for (i32 f = 0; f <= maxFirst; f++)
+		{
+			if (cursorLine < f || cursorLine >= f + rows || (cursorLine > 0 && cursorLine - 1 < f))
+			{
+				continue;
+			}
+			const bool hang = f + rows < total && lines[f + rows - 1].item < 0;
+			const bool blind = cursorLine + 1 < total && cursorLine + 1 >= f + rows;
+			const i32 key = (hang ? 2000000 : 0) + (blind ? 1000000 : 0) + std::abs(f - target) * 1000 + std::abs(f - prev);
+			if (bestKey < 0 || key < bestKey)
+			{
+				first = f;
+				bestKey = key;
+			}
+		}
+		i32 last = (std::min)(total, first + rows);
+		// Висящего заголовка не избежать (у первого пункта, группы вплотную) — окно короче на строку.
+		if (last < total && last > cursorLine + 1 && lines[last - 1].item < 0)
+		{
+			last--;
+		}
+		s.winMenu = s.Current();
+		s.winFirst = first;
+		s.winCursorLine = cursorLine;
 		std::string sub;
 		if (count > KZ_GSMENU_LIST_ROWS)
 		{
@@ -319,7 +360,7 @@ public:
 			list.rows.push_back(row);
 		}
 		const Item *cur = (s.cursor >= 0 && s.cursor < count) ? &m->items[s.cursor] : nullptr;
-		list.adjHint = cur && cur->adjustable && (!m->capture || s.captured);
+		list.adjHint = true; // A/D в подвале всегда: иначе подвал меняет высоту при листании
 		list.selectHint = (cur && cur->adjustable && m->capture) ? (s.captured ? "отпустить" : "настроить") : "выбрать";
 		list.exitHint = player->IsAlive() ? "F" : "Shift";
 		return KZ::gsmenu::ShowList(player, list);
