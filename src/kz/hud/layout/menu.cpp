@@ -196,7 +196,7 @@ static const MenuLayoutTab s_menuLayout[] = {
 			{"Options - Group StartPos", {"Options - Menu Label SetStartPos", "Options - Menu Label ClearStartPos"}},
 			{"Options - Group Safeguard", {"Options - Menu Label SafeguardReset", "Options - Menu Label SafeguardTeleport"}}}},
 		{"Options - Menu Cat Visibility", {{NULL, {"Options - Menu Label HidePlayers", "Options - Menu Label HideWeapon", "Options - Menu Label HideLegs", "Options - Menu Label Beam"}}}},
-		{"Options - Menu Cat Paint", {{NULL, {"Options - Menu Label ShowAllPaint", "Options - Menu Label PaintColor", "Options - Menu Label PaintSize"}}}},
+		{"Options - Menu Cat Paint", {{NULL, {"Options - Menu Label ShowAllPaint", "Options - Menu Label PaintColor", "Options - Menu Label PaintSize", "Options - Menu Label ClearPaint"}}}},
 	}},
 	{KZ_MENU_HUD_CATEGORY, {
 		{KZ_MENU_HUD_GENERAL_SUB, {
@@ -482,6 +482,10 @@ static_function const char *GetMenuButtonPhrase(const KZOptItem &it)
 	if (IsMenuPhrase(it, "HUD Share - Menu Label ShareCode"))
 	{
 		return "Options - Button Share";
+	}
+	if (IsMenuPhrase(it, "Options - Menu Label ClearPaint"))
+	{
+		return "Options - Button Clear";
 	}
 	return "Options - Button Go";
 }

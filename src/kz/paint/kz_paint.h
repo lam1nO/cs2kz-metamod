@@ -46,6 +46,8 @@ public:
 	void PlacePaint();
 	void ToggleAutoPaint();
 	void ToggleShowAllPaint();
+	// Стереть следы краски только на экране этого игрока (round_start одному клиенту) — !cleardecals и пункт !options.
+	void ClearLocalDecals();
 
 	bool pendingPaint = false;
 	// Диагностика «paint не видно» (13.10.2026): строка лога о трассе и о доставке декаля, не чаще

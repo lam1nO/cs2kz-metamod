@@ -135,6 +135,20 @@
 		"chi"	"涂鸦颜色"
 		"ua"	"Колір фарби"
 	}
+	"Options - Menu Label ClearPaint"
+	{
+		"en"	"Clear paint on screen"
+		"ru"	"Очистить краску на экране"
+		"chi"	"清除屏幕上的涂鸦"
+		"ua"	"Очистити фарбу на екрані"
+	}
+	"Options - Menu Label ClearPaint Sub"
+	{
+		"en"	"Removes the marks only for you"
+		"ru"	"Стирает следы только у вас"
+		"chi"	"仅为你清除"
+		"ua"	"Стирає сліди лише у вас"
+	}
 	"Options - Menu Label PaintSize"
 	{
 		"en"	"Paint size"

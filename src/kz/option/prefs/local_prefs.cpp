@@ -42,6 +42,11 @@ namespace
 		player->checkpointService->ClearStartPosition();
 	}
 
+	void ClearPaintOnActivate(KZPlayer *player, i64 tag)
+	{
+		player->paintService->ClearLocalDecals();
+	}
+
 	// ------------------------------------------------------------------ Visibility ------
 	i64 HidePlayersGetCurrent(KZPlayer *player, i64 tag)
 	{
@@ -128,4 +133,7 @@ void KZLocalOptionsMenu_Register()
 	// KZPaintService::GetColor ("Default to red").
 	KZ::menu::AddColor(paint, "Options - Menu Label PaintColor", "paintColor", Color(255, 0, 0, 255));
 	KZ::menu::AddSize(paint, "Options - Menu Label PaintSize", "paintSize", (i32)KZPaintService::DEFAULT_PAINT_SIZE, 1, 50);
+	// Очистка — только у себя на экране (!cleardecals); название и подпись согласованы с владельцем 15.10.
+	KZ::menu::AddButton(paint, "Options - Menu Label ClearPaint", &ClearPaintOnActivate);
+	KZ::menu::SetItemSubtext(paint, "Options - Menu Label ClearPaint Sub");
 }

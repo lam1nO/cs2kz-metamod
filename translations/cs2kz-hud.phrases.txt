@@ -1026,6 +1026,13 @@
 		"chi"		"分享"
 		"ua"		"Поділитися"
 	}
+	"Options - Button Clear"
+	{
+		"en"		"Clear"
+		"ru"		"Очистить"
+		"chi"		"清除"
+		"ua"		"Очистити"
+	}
 	"Options - Button Reset"
 	{
 		"en"		"Reset"

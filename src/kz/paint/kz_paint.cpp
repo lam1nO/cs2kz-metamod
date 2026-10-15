@@ -360,20 +360,30 @@ SCMD(kz_showpaint, SCFL_MISC | SCFL_PREFERENCE)
 	return true;
 }
 
-SCMD(kz_cleardecals, SCFL_MISC)
+void KZPaintService::ClearLocalDecals()
 {
-	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
-	CSingleRecipientFilter filter(player->GetPlayerSlot());
 	IGameEvent *event = interfaces::pGameEventManager->CreateEvent("round_start");
 	if (!event)
 	{
-		return true;
+		return;
 	}
 	event->SetInt("timelimit", 0);
 	event->SetInt("fraglimit", 0);
 	event->SetString("objective", "");
-	IGameEventListener2 *listener = g_pKZUtils->GetLegacyGameEventListener(player->GetPlayerSlot());
-	listener->FireGameEvent(event);
+	IGameEventListener2 *listener = g_pKZUtils->GetLegacyGameEventListener(this->player->GetPlayerSlot());
+	if (listener)
+	{
+		listener->FireGameEvent(event);
+	}
 	interfaces::pGameEventManager->FreeEvent(event);
+}
+
+SCMD(kz_cleardecals, SCFL_MISC)
+{
+	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
+	if (player)
+	{
+		player->paintService->ClearLocalDecals();
+	}
 	return true;
 }
