@@ -208,7 +208,7 @@ static const MenuLayoutTab s_menuLayout[] = {
 	}},
 	{"Options - Tab SoundChat", {
 		{"Options - Menu Cat Sound", {{NULL, {"Options - Menu Label CheckpointSound", "Options - Menu Label TeleportSound", "Options - Menu Label TimerStopSound", "Options - Menu Label RecordVolume"}}}},
-		{"Options - Menu Cat Messages", {{NULL, {"Options - Menu Label CheckpointMessage", "Options - Menu Label MissedTime", "Options - Menu Label MapOverlay"}}}},
+		{"Options - Menu Cat Messages", {{NULL, {"Options - Menu Label CheckpointMessage", "Options - Menu Label MissedTime"}}}},
 	}},
 	{"Options - Menu Cat Jumpstats", {
 		{"Options - Sub JsChat", {{NULL, {"Jumpstats - Menu Label Reporting", "Jumpstats - Menu Label Always", "Jumpstats - Menu Label MinTier", "Jumpstats - Menu Label Failstats", "Jumpstats - Menu Label ExtendedChatStats"}}}},
@@ -1766,6 +1766,15 @@ static_function void FindMenuTab(const char *categoryKey, i32 &tab, i32 &sub)
 	if (!categoryKey)
 	{
 		return;
+	}
+	// Ключ главной вкладки (KZ_MENU_HUD_CATEGORY у !hud) — сразу её первый подраздел.
+	for (i32 t = 0; t < (i32)(sizeof(s_menuLayout) / sizeof(s_menuLayout[0])); t++)
+	{
+		if (s_menuLayout[t].phraseKey && V_strcmp(s_menuLayout[t].phraseKey, categoryKey) == 0)
+		{
+			tab = t;
+			return;
+		}
 	}
 	const KZOptItem *first = NULL;
 	WalkMenuNodes(KZ::menu::GetTree(),
