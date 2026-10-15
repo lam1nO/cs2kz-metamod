@@ -43,8 +43,8 @@ const Color MHUD_DEF_BASE_COLOR(255, 255, 255, 255);
 // Значения showpos по дизайну — #CFD8DE; подписи X/Y/Z красит CSS аддона.
 // Худ v2: заливка прогресса — цветом элемента, дефолт белый (был #00AAFF, см. HUD_REV1_LEADPROGRESS_COLOR).
 const Color MHUD_DEF_LEADPROGRESS_COLOR(0xFF, 0xFF, 0xFF, 0xFF);
-// Худ v2: клавиши по умолчанию зелёные, как у владельца.
-const Color MHUD_DEF_KEYS_COLOR(0x40, 0xFF, 0x40, 0xFF);
+// Ревизия 3 (15.10): клавиши по умолчанию белые (в худе v2 были #40FF40, см. defaults.cpp).
+const Color MHUD_DEF_KEYS_COLOR(0xFF, 0xFF, 0xFF, 0xFF);
 const Color MHUD_DEF_SHOWPOS_COLOR(0xFF, 0xFF, 0xFF, 0xFF); // белый: #CFD8DE через палитру серел (отзыв 27.09)
 const Color MHUD_DEF_PERF_COLOR(0x40, 0xFF, 0x40, 0xFF);
 const Color MHUD_DEF_JUMPBUG_COLOR(0xFF, 0xFF, 0x20, 0xFF);

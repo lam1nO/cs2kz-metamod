@@ -38,12 +38,17 @@ void KZHUDService::ApplyHudDefaults()
 	}
 
 	i32 written = 0;
-	// Ревизия 1 у игрока уже есть — ревизия 2 ВЫБОРОЧНАЯ (худ v2): трогает только то, что игрок
-	// не менял после первой перезаписи. Без ревизии вообще — полная перезапись ниже, уже новыми
-	// дефолтами, и сразу маркер 2.
-	if (storedRev == 1)
+	// Ревизия 1 у игрока уже есть — ревизии 2 и 3 ВЫБОРОЧНЫЕ: трогают только то, что игрок не
+	// менял. Цепочкой 1 → 2 → 3 (у каждой свой пакет и свой маркер). Без ревизии вообще — полная
+	// перезапись ниже, уже текущими дефолтами, и сразу маркер HUD_DEFAULTS_REV.
+	if (storedRev == 1 || storedRev == 2)
 	{
-		this->ApplyHudDefaultsRev2(written);
+		if (storedRev == 1)
+		{
+			this->ApplyHudDefaultsRev2(written);
+			written = 0;
+		}
+		this->ApplyHudDefaultsRev3(written);
 		return;
 	}
 	{
@@ -332,4 +337,84 @@ void KZHUDService::ApplyHudDefaultsRev2(i32 &written)
 	}
 
 	KZ_LOG_INFO(LogChannel::Option, "[cyb] hud_defaults_rev2 steam_id=%llu keys=%i changed=%s\n", this->player->GetSteamId64(false), written, changed);
+}
+
+// === Ревизия 3: дефолты по худу владельца (15.10) ============================================
+// «Для дефолта — прогресс и PB/WR как у меня, клавиши белыми, бейдж типа рана 16; и такие
+// настройки тем, кто их не менял». Шрифт, обводка, прозрачность, цвет прогресса и PB/WR у
+// владельца равны дефолтам ревизии 2 — писать нечего. Ключ за ключом: «не менял» = ключа нет
+// (чтение отдаёт старый дефолт) или он равен дефолту ревизии 2; позиция — парой X/Y, как в
+// ревизии 2 (это одна настройка). Игрок, прошедший ревизию 2 в этом же заходе, получил там уже
+// новые значения — здесь они не совпадут со старыми и останутся.
+namespace
+{
+	// Дефолты ревизии 2 (14.10), НЕ текущие LAYOUT_DEF_*.
+	constexpr f64 HUD_REV2_LEADPROGRESS_X = -42;
+	constexpr f64 HUD_REV2_LEADPROGRESS_Y = -5;
+	constexpr f64 HUD_REV2_LEADPROGRESS_SIZE = 15;
+	constexpr f64 HUD_REV2_PBWR_SIZE = 15;
+	constexpr f64 HUD_REV2_RUNTYPE_SIZE = 12;
+	const Color HUD_REV2_KEYS_COLOR(0x40, 0xFF, 0x40, 0xFF);
+} // namespace
+
+void KZHUDService::ApplyHudDefaultsRev3(i32 &written)
+{
+	KZOptionService *opts = this->player->optionService;
+	const auto feq = [&](const char *key, f64 v) { return fabs(opts->GetPreferenceFloat(key, v) - v) < 0.01; };
+	// Цвет читаем из СВОИХ префов (GetMHUDColorPref смотрит в источник настроек — при спектейте
+	// это чужой игрок); сравнение по RGB, как в ревизии 2.
+	const auto ceq = [&](const char *key, const Color &v)
+	{
+		const i64 packed = opts->GetPreferenceInt(key, ((i64)v.r() << 24) | ((i64)v.g() << 16) | ((i64)v.b() << 8) | (i64)v.a());
+		return ((packed >> 24) & 0xFF) == v.r() && ((packed >> 16) & 0xFF) == v.g() && ((packed >> 8) & 0xFF) == v.b();
+	};
+
+	char changed[96] = "";
+	const auto mark = [&](const char *name) { V_strncat(changed, changed[0] ? "," : "", sizeof(changed)); V_strncat(changed, name, sizeof(changed)); };
+
+	{
+		KZOptionService::BatchScope batch(opts);
+
+		const LayoutElementDef &progress = LAYOUT_ELEMENTS[(i32)LayoutElement::LeadProgress];
+		if (feq(progress.xKey, HUD_REV2_LEADPROGRESS_X) && feq(progress.yKey, HUD_REV2_LEADPROGRESS_Y))
+		{
+			opts->SetPreferenceFloat(progress.xKey, (f64)LAYOUT_DEF_LEADPROGRESS_X);
+			opts->SetPreferenceFloat(progress.yKey, (f64)LAYOUT_DEF_LEADPROGRESS_Y);
+			written += 2;
+			mark("progress_pos");
+		}
+		const struct
+		{
+			LayoutElement element;
+			f64 oldSize;
+			f64 newSize;
+			const char *name;
+		} kSizes[] = {
+			{LayoutElement::LeadProgress, HUD_REV2_LEADPROGRESS_SIZE, LAYOUT_DEF_LEADPROGRESS_SIZE, "progress_size"},
+			{LayoutElement::PbWr, HUD_REV2_PBWR_SIZE, LAYOUT_DEF_PBWR_SIZE, "pbwr_size"},
+			{LayoutElement::RunType, HUD_REV2_RUNTYPE_SIZE, LAYOUT_DEF_RUNTYPE_SIZE, "runtype_size"},
+		};
+		for (const auto &it : kSizes)
+		{
+			const char *key = LAYOUT_ELEMENTS[(i32)it.element].sizeKey;
+			if (feq(key, it.oldSize))
+			{
+				opts->SetPreferenceFloat(key, it.newSize);
+				written++;
+				mark(it.name);
+			}
+		}
+		if (ceq("mhudKeysColor", HUD_REV2_KEYS_COLOR))
+		{
+			this->SetMHUDColorPref("mhudKeysColor", MHUD_DEF_KEYS_COLOR);
+			written++;
+			mark("keys_color");
+		}
+
+		// Маркер — в том же пакете, что и ключи (см. полную перезапись выше).
+		opts->SetPreferenceInt(HUD_DEFAULTS_REV_KEY, 3);
+	}
+
+	KZ_LOG_INFO(LogChannel::Option, "[cyb] hud_defaults_rev3 steam_id=%llu keys=%i changed=%s\n", this->player->GetSteamId64(false), written,
+				changed[0] ? changed : "-");
 }

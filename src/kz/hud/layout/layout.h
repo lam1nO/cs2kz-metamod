@@ -21,7 +21,7 @@
 #define LAYOUT_DEF_KEYS_Y    21
 #define LAYOUT_DEF_KEYS_SIZE 20
 // Остальное в клавишах владельца: ненажатые скрыты (mhudKeysIdle 1), вплотную (mhudKeysGap 0),
-// с обводкой, цвет MHUD_DEF_KEYS_COLOR (#40FF40).
+// с обводкой, цвет MHUD_DEF_KEYS_COLOR (белый с ревизии 3, был #40FF40).
 #define MHUD_DEF_KEYS_IDLE 1
 #define MHUD_DEF_KEYS_GAP  0
 // Отступ клавиш в px — с худа v2 без «авто» и с отрицательными значениями (плотнее, вплоть до
@@ -43,10 +43,11 @@ inline bool LayoutOutlineDefault(LayoutElement element)
 // «Прогресс» по маршруту `!lead` — дефолты владельца 28.09 (его раскладка: слева по центру
 // высоты, Stratum2 Medium, #00AAFF). Для «Прогресса» смена дефолтов разрешена им явно — у
 // остальных старых элементов дефолты не трогаем. Элемент по умолчанию включён.
-#define LAYOUT_DEF_LEADPROGRESS_X    (-42)
-#define LAYOUT_DEF_LEADPROGRESS_Y    (-5)
-// Худ v2: кегль процента 15 (подпись — 0.8 от него, в mhud2.css).
-#define LAYOUT_DEF_LEADPROGRESS_SIZE 15
+// Ревизия 3 (15.10): позиция и кегль — как у владельца (было -42/-5, 15; см. defaults.cpp).
+#define LAYOUT_DEF_LEADPROGRESS_X    (-43)
+#define LAYOUT_DEF_LEADPROGRESS_Y    (-4)
+// Кегль процента (подпись — 0.8 от него, в mhud2.css).
+#define LAYOUT_DEF_LEADPROGRESS_SIZE 17
 
 // Поля редактора `!hud` (PB/WR, showpos, курс, тип рана) — дефолты владельца 28.09 (его
 // сохранённая раскладка; тип рана он не двигал). Все четыре по умолчанию включены.
@@ -56,8 +57,8 @@ inline bool LayoutOutlineDefault(LayoutElement element)
 // наполовину за край экрана, поэтому они подтянуты внутрь примерно на полширины элемента.
 #define LAYOUT_DEF_PBWR_X    (-41)
 #define LAYOUT_DEF_PBWR_Y    (-44)
-// Худ v2: таблица WR/PB × NUB/PRO, кегль времени 15.
-#define LAYOUT_DEF_PBWR_SIZE 15
+// Худ v2: таблица WR/PB × NUB/PRO; кегль времени 17 с ревизии 3 (был 15).
+#define LAYOUT_DEF_PBWR_SIZE 17
 
 #define LAYOUT_DEF_SHOWPOS_X    43
 #define LAYOUT_DEF_SHOWPOS_Y    (-40)
@@ -70,7 +71,8 @@ inline bool LayoutOutlineDefault(LayoutElement element)
 // Тип рана — под таймером по центру (0/40): прежние -3/43 перекрывались с «Прогрессом».
 #define LAYOUT_DEF_RUNTYPE_X    0
 #define LAYOUT_DEF_RUNTYPE_Y    40
-#define LAYOUT_DEF_RUNTYPE_SIZE 12
+// Ревизия 3: бейдж крупнее (был 12).
+#define LAYOUT_DEF_RUNTYPE_SIZE 16
 
 #define LAYOUT_SIZE_MIN 8
 #define LAYOUT_SIZE_MAX 100
