@@ -270,7 +270,7 @@ public:
 		i32 first = (std::max)(0, (std::min)(cursorLine - 4, total - KZ_GSMENU_LIST_ROWS));
 		i32 last = (std::min)(total, first + KZ_GSMENU_LIST_ROWS);
 		// Окно не кончается заголовком группы без её пунктов: сдвиг на строку вниз, а если курсор
-		// стоит первой строкой окна — вверх. За заголовком всегда идёт пункт, перед ним — пункт или начало.
+		// стоит первой строкой окна — окно короче на строку. За заголовком всегда идёт пункт, перед ним — пункт или начало.
 		if (last < total && last > first && lines[last - 1].item < 0)
 		{
 			if (cursorLine > first)
@@ -278,10 +278,9 @@ public:
 				first++;
 				last++;
 			}
-			else if (first > 0)
+			else
 			{
-				first--;
-				last--;
+				last--; // курсор на первой строке окна — 9 строк без висящего заголовка
 			}
 		}
 		std::string sub;
@@ -361,6 +360,13 @@ public:
 		if (pressed & exitKey)
 		{
 			EndSession(slot, MenuEndReason::Exit);
+			return;
+		}
+		// R при захваченном значении — сначала отпустить захват, меню не закрывать.
+		if ((pressed & IN_RELOAD) && s->captured)
+		{
+			s->captured = false;
+			s->dirty = true;
 			return;
 		}
 		// R на корневом меню (ни стека, ни родителя) — выход, как F/Shift; во вложенном — назад.

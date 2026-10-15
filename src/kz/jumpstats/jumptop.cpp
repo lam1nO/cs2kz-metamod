@@ -1807,6 +1807,8 @@ namespace
 				// Стрейфы, синк, pre, карта — из своей строки топа (если она в выборке), иначе из кэша PB.
 				if (place > 0)
 				{
+					// Вся строка — из одного прыжка: PB мог обновиться после запроса топа.
+					t.me.cells[2] = JumpDistanceText(v.rows[place - 1], v.isBlock);
 					t.me.cells[3] = std::to_string(v.rows[place - 1].strafes);
 					t.me.cells[4] = JumpSyncText(v.rows[place - 1].sync);
 					t.me.cells[5] = JumpPreText(v.rows[place - 1].pre);
