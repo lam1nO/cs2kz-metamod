@@ -1758,6 +1758,63 @@ const KZCourseDescriptor *KZ::course::GetCourseDescriptorByIndex(u32 index)
 	return &g_mappingApi.courseDescriptors[index];
 }
 
+// Порядок — сортировка вставками по cyber-номеру (0 = main, 1..99 = бонусы, 100+ = прочие);
+// дубликаты номеров сохраняют порядок g_sortedCourses. Опираться на него как на «исходный»
+// нельзя: ключ сортировки (id) не уникален — Mapi_CreateCourse дедуплицирует по hammerId и
+// targetname, но не по id, — а перестроение вектора после дропа курса валидацией не обязано
+// воспроизвести прежний относительный порядок равных ключей. Порядок детерминирован в
+// пределах одного состояния вектора, и только на это тут и рассчитываем.
+// Имя — каноническое (Main, Bonus N): названия из разметки бывают переведены («Главный проход»),
+// а игроки знают курсы по Main/Bonus (решение владельца 13.10). Main — курс с cyber-номером 0, а
+// если он отключён платформой (номер 0 у невидимого курса) — первый видимый; Bonus — по номеру из
+// имени, курсы без номера (100+) — по порядку в списке.
+i32 KZ::course::GetCourseTabs(CourseTab *out, i32 max)
+{
+	const KZCourseDescriptor *ordered[KZ_MAX_COURSE_COUNT];
+	i32 count = 0;
+	FOR_EACH_VEC(g_sortedCourses, i)
+	{
+		if (count >= KZ_MAX_COURSE_COUNT)
+		{
+			break;
+		}
+		const KZCourseDescriptor *course = g_sortedCourses[i];
+		i32 num = KZ::course::GetCyberCourseNumber(course);
+		i32 pos = count;
+		while (pos > 0 && KZ::course::GetCyberCourseNumber(ordered[pos - 1]) > num)
+		{
+			ordered[pos] = ordered[pos - 1];
+			pos--;
+		}
+		ordered[pos] = course;
+		count++;
+	}
+	bool hasMain = false;
+	for (i32 i = 0; i < count; i++)
+	{
+		hasMain |= KZ::course::GetCyberCourseNumber(ordered[i]) == 0;
+	}
+	i32 n = 0;
+	for (i32 i = 0; i < count && n < max; i++, n++)
+	{
+		out[n].course = ordered[i];
+		const i32 num = KZ::course::GetCyberCourseNumber(ordered[i]);
+		if (num == 0 || (i == 0 && !hasMain))
+		{
+			V_strncpy(out[n].label, "Main", sizeof(out[n].label));
+		}
+		else if (num > 0 && num < 100)
+		{
+			V_snprintf(out[n].label, sizeof(out[n].label), "Bonus %d", num);
+		}
+		else
+		{
+			V_snprintf(out[n].label, sizeof(out[n].label), "Bonus %d", i);
+		}
+	}
+	return n;
+}
+
 static void ListCourses(KZPlayer *player)
 {
 	if (player->timerService->GetCourse())
@@ -1837,58 +1894,17 @@ static_function void OpenCoursesMenu(KZPlayer *player)
 		return;
 	}
 
-	// Сортировка вставками по cyber-номеру (0 = main, 1..99 = бонусы, 100+ = прочие);
-	// дубликаты номеров сохраняют порядок g_sortedCourses. Опираться на него как на «исходный»
-	// нельзя: ключ сортировки (id) не уникален — Mapi_CreateCourse дедуплицирует по hammerId и
-	// targetname, но не по id, — а перестроение вектора после дропа курса валидацией не обязано
-	// воспроизвести прежний относительный порядок равных ключей. Порядок детерминирован в
-	// пределах одного состояния вектора, и только на это тут и рассчитываем.
-	const KZCourseDescriptor *ordered[KZ_MAX_COURSE_COUNT];
-	i32 count = 0;
-	FOR_EACH_VEC(g_sortedCourses, i)
-	{
-		const KZCourseDescriptor *course = g_sortedCourses[i];
-		i32 num = KZ::course::GetCyberCourseNumber(course);
-		i32 pos = count;
-		while (pos > 0 && KZ::course::GetCyberCourseNumber(ordered[pos - 1]) > num)
-		{
-			ordered[pos] = ordered[pos - 1];
-			pos--;
-		}
-		ordered[pos] = course;
-		count++;
-	}
-
-	bool hasMain = false;
+	KZ::course::CourseTab tabs[KZ_MAX_COURSE_COUNT];
+	const i32 count = KZ::course::GetCourseTabs(tabs, KZ_MAX_COURSE_COUNT);
 	for (i32 i = 0; i < count; i++)
 	{
-		hasMain |= KZ::course::GetCyberCourseNumber(ordered[i]) == 0;
-	}
-	for (i32 i = 0; i < count; i++)
-	{
+		const KZCourseDescriptor *course = tabs[i].course;
 		char info[16];
-		V_snprintf(info, sizeof(info), "%d", ordered[i]->id);
-		// Имя — каноническое (Main, Bonus N): названия из разметки бывают переведены («Главный проход»),
-		// а игроки знают курсы по Main/Bonus (решение владельца 13.10). Main — курс с cyber-номером 0, а
-		// если он отключён платформой (номер 0 у невидимого курса) — первый видимый; Bonus — по номеру из
-		// имени, курсы без номера (100+) — по порядку в списке.
-		const i32 num = KZ::course::GetCyberCourseNumber(ordered[i]);
-		char label[64];
-		if (num == 0 || (i == 0 && !hasMain))
-		{
-			V_strncpy(label, "Main", sizeof(label));
-		}
-		else if (num > 0 && num < 100)
-		{
-			V_snprintf(label, sizeof(label), "Bonus %d", num);
-		}
-		else
-		{
-			V_snprintf(label, sizeof(label), "Bonus %d", i);
-		}
+		V_snprintf(info, sizeof(info), "%d", course->id);
+		const char *label = tabs[i].label;
 		// «Main: 01:02.77» — своё время курса (v3: галочка и время справа), иначе «Main: Не пройден».
 		char item[96];
-		const f64 pb = player->timerService ? player->timerService->GetLocalPBTime(KZ::mode::GetModeInfo(player->modeService).id, ordered[i]->guid) : 0.0;
+		const f64 pb = player->timerService ? player->timerService->GetLocalPBTime(KZ::mode::GetModeInfo(player->modeService).id, course->guid) : 0.0;
 		char pbText[32] = "Не пройден";
 		if (pb > 0.0)
 		{
@@ -1902,7 +1918,7 @@ static_function void OpenCoursesMenu(KZPlayer *player)
 		}
 		V_snprintf(item, sizeof(item), "%s: %s", label, pbText);
 		// Курс без стартовой позиции — неактивный (серый) пункт.
-		g_pMenus->AddItem(m, item, info, !ordered[i]->hasStartPosition);
+		g_pMenus->AddItem(m, item, info, !course->hasStartPosition);
 	}
 
 	// Одноразовый выбор — меню закрывается по клику (в отличие от !options).

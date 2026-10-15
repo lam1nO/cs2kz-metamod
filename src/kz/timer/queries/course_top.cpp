@@ -460,6 +460,7 @@ namespace
 		f64 lastRequery = -1.0; // клики по режимам не чаще 2 в секунду
 		std::vector<std::string> runIds; // строка на экране -> id рана (реплей)
 		std::string meRunId;             // своя строка под топом (ран ниже десятки)
+		std::vector<std::string> courseNames; // вкладка gf0_k -> имя курса для перезапроса (только текущая карта)
 		CourseTopRequest::CourseTopData data;
 		bool global = false;
 	};
@@ -529,6 +530,16 @@ namespace
 			v.pro = KZ_STREQ(id, "gf1_0");
 			v.page = 0;
 			RenderMaptop(player);
+			return;
+		}
+		if (sscanf(id, "gf0_%d", &k) == 1 && k >= 0)
+		{
+			if (k < (i32)v.courseNames.size() && V_stricmp(v.courseNames[k].c_str(), v.course.Get()))
+			{
+				v.course = v.courseNames[k].c_str();
+				v.page = 0;
+				RequeryMaptop(player, v.mode.Get(), true);
+			}
 			return;
 		}
 		if (sscanf(id, "gf2_%d", &k) == 1 && k >= 0)
@@ -655,6 +666,19 @@ namespace
 		t.sub = std::string(v.course.Get()) + " · " + (v.global ? "мировой топ" : "топ сервера");
 		t.cover = v.map.Get();
 		t.filters[1] = {{"PRO", v.pro}, {"NUB", !v.pro}};
+		// Курсы (Main / Bonus N) — вкладками слева в полосе режимов; список курсов есть только у карты,
+		// что сейчас на сервере, у чужой карты (!maptop <карта>) полоса остаётся без них.
+		v.courseNames.clear();
+		if (!V_stricmp(v.map.Get(), g_pKZUtils->GetCurrentMapName().Get()))
+		{
+			KZ::course::CourseTab tabs[KZ_GSMENU_FILTER_CHIPS];
+			const i32 n = KZ::course::GetCourseTabs(tabs, KZ_GSMENU_FILTER_CHIPS);
+			for (i32 i = 0; i < n; i++)
+			{
+				t.filters[0].push_back({tabs[i].label, !V_stricmp(tabs[i].course->name, v.course.Get())});
+				v.courseNames.push_back(tabs[i].course->name);
+			}
+		}
 		const CUtlString curShort = KZ::mode::GetModeInfo(v.mode).shortModeName;
 		t.tier = MapTier(v.map.Get(), curShort.Get());
 		for (const char *mode : kMaptopModes)

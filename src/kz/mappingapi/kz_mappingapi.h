@@ -435,6 +435,15 @@ namespace KZ::course
 	u32 GetCourseDescriptorTotal();
 	const KZCourseDescriptor *GetCourseDescriptorByIndex(u32 index);
 
+	// Курсы карты в порядке !courses (по cyber-номеру) с каноническими подписями «Main» / «Bonus N» —
+	// общий источник для меню !courses и вкладок курсов окна !maptop. Возвращает число курсов (≤ max).
+	struct CourseTab
+	{
+		const KZCourseDescriptor *course;
+		char label[32];
+	};
+	i32 GetCourseTabs(CourseTab *out, i32 max);
+
 	// Отдать платформе список курсов этой карты: cyber-номер + имя курса + дескриптор +
 	// признак «отключён платформой». Платформе имена курсов взять больше негде, а без них она
 	// показывает бонус как «C2» вместо «B1»: cyber-номер бонуса, чьё имя не «bonusN», уходит в
