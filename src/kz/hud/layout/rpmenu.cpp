@@ -1197,10 +1197,9 @@ bool KZHUDService::HandleReplayClick(uint32 packedHandle, const char *panelId)
 		if (status.total > 0.0)
 		{
 			// Кнопка sk{i} занимает 1/101 шкалы — время берём в её середине, иначе к правому краю
-			// клик уезжал на полкнопки от курсора.
-			char when[32];
-			utils::FormatTime(status.total * (pct + 0.5) / 101.0, when, sizeof(when));
-			KZ::replaysystem::commands::JumpToReplayTime(this->player, when);
+			// клик уезжал на полкнопки от курсора. Время шкалы, как в бирке (RefreshReplayTips):
+			// у рана это таймер, а не позиция в записи — перевод в кадр делает SeekReplayMenuTo.
+			KZ::replaysystem::menu::SeekReplayMenuTo(this->player, status.total * (pct + 0.5) / 101.0);
 		}
 	}
 	else

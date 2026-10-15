@@ -84,6 +84,8 @@ namespace KZ::replaysystem::menu
 	};
 
 	void GetReplayMenuStatus(ReplayMenuStatus &out);
+	// Перемотка на время шкалы карточки (та же шкала, что ReplayMenuStatus::position/total).
+	void SeekReplayMenuTo(KZPlayer *player, f64 seconds);
 	// Идёт ли реплей в режиме AWR (телепорты вырезаны) — бейдж на карточке.
 	bool IsReplayMenuAwr();
 	// Реплей рана (есть заголовок run с временем) против записи без таймера (джамп/ручной):

@@ -16,6 +16,7 @@
 
 #include <vendor/mm-cs2menus/src/public/ics2menus.h>
 
+#include <algorithm>
 #include <cmath>
 
 #include "tier0/memdbgon.h"
@@ -265,6 +266,50 @@ void KZ::replaysystem::menu::GetReplayMenuStatus(ReplayMenuStatus &out)
 	// поле скорости и пилюля состояния переписываются на ходу, и плавающее число знаков
 	// дёргало бы соседние элементы строки. В чате формат прежний.
 	V_snprintf(out.speed, sizeof(out.speed), "%.2f", commands::GetReplaySpeed());
+}
+
+// У реплея рана шкала — таймер рана, а запись начинается раньше старта (RunRecorder берёт 5 с
+// до него): время шкалы переводим в эффективный кадр от кадра TIMER_START, иначе клик по шкале
+// приземлялся на 5 с раньше подсказки. У записи без таймера шкала и есть эффективное время.
+void KZ::replaysystem::menu::SeekReplayMenuTo(KZPlayer *player, f64 seconds)
+{
+	using namespace KZ::replaysystem;
+	if (!player || !data::IsReplayPlaying())
+	{
+		return;
+	}
+	const auto *replay = data::GetCurrentReplay();
+	const u32 effectiveCount = playback::EffectiveTickCount();
+	if (effectiveCount == 0)
+	{
+		return;
+	}
+	f64 offset = 0.0; // эффективное время кадра, где шкала = 0
+	u32 startIdx = 0, endIdx = 0;
+	i32 courseId = -1;
+	if (IsReplayMenuRunReplay()
+		&& playback::RunWindowFromEvents(replay->tickData, replay->tickCount, replay->events, replay->numEvents, startIdx, endIdx, courseId))
+	{
+		// Старт восстановленного рана несёт уже набежавшее время — шкала на этом кадре не 0.
+		f64 startTimer = 0.0;
+		for (u32 i = 0; i < replay->numEvents; i++)
+		{
+			const RpEvent &ev = replay->events[i];
+			if (ev.type == RPEVENT_TIMER_EVENT && ev.data.timer.type == RpEvent::RpEventData::TimerEvent::TIMER_START
+				&& playback::TickIndexForServerTick(replay->tickData, replay->tickCount, ev.serverTick) == startIdx)
+			{
+				startTimer = ev.data.timer.time;
+			}
+		}
+		offset = (f64)playback::RawTickToEffective(startIdx) * ENGINE_FIXED_TICK_INTERVAL - startTimer;
+	}
+	i64 target = (i64)std::floor((seconds + offset) / ENGINE_FIXED_TICK_INTERVAL + 0.5);
+	target = (std::max)((i64)0, (std::min)(target, (i64)effectiveCount - 1));
+	const u32 targetTick = playback::EffectiveTickToRaw((u32)target);
+	commands::NavigateReplay(player, targetTick);
+	char time[32];
+	utils::FormatTime(seconds, time, sizeof(time), false);
+	player->languageService->PrintChat(true, false, "Replay - Jumped To Tick", targetTick, time);
 }
 
 int KZ::replaysystem::menu::GetReplayMenuSeekStepSeconds(bool fast)
