@@ -368,9 +368,10 @@ std::string KZ::replaysystem::menu::GetReplayMenuSeekChipText(KZPlayer *player, 
 
 void KZ::replaysystem::menu::GetReplayMenuSpeedLimits(bool &atMin, bool &atMax)
 {
-	const int idx = NearestSpeedIndex(commands::GetReplaySpeed());
-	atMin = idx == 0;
-	atMax = idx == RPMENU_SPEEDS_COUNT - 1;
+	// Сравниваем саму скорость, а не ближайший пресет: при !rpspeed 0.15 «−» ещё уводит на 0.10x.
+	const float speed = commands::GetReplaySpeed();
+	atMin = speed <= RPMENU_SPEEDS[0] + 1e-3f;
+	atMax = speed >= RPMENU_SPEEDS[RPMENU_SPEEDS_COUNT - 1] - 1e-3f;
 }
 
 // Выбор реплея из списка совпавших по нику (паттерн kz_spec_menu.cpp).
