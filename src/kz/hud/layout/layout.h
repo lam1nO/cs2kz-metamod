@@ -44,7 +44,7 @@ inline bool LayoutOutlineDefault(LayoutElement element)
 // высоты, Stratum2 Medium, #00AAFF). Для «Прогресса» смена дефолтов разрешена им явно — у
 // остальных старых элементов дефолты не трогаем. Элемент по умолчанию включён.
 // Ревизия 3 (15.10): позиция и кегль — как у владельца (было -42/-5, 15; см. defaults.cpp).
-#define LAYOUT_DEF_LEADPROGRESS_X    (-43)
+#define LAYOUT_DEF_LEADPROGRESS_X    (-41)
 #define LAYOUT_DEF_LEADPROGRESS_Y    (-4)
 // Кегль процента (подпись — 0.8 от него, в mhud2.css).
 #define LAYOUT_DEF_LEADPROGRESS_SIZE 17
@@ -92,7 +92,7 @@ inline bool LayoutOutlineDefault(LayoutElement element)
 
 // Масштаб карточки: ступени процентов, класс .rp-scale--N на панели replay_card.
 // Наборы правил — rpmenu2-scale.css (генератор tools/build_rpmenu2_scale.py в аддоне).
-#define RPMENU_DEF_SCALE 100
+#define RPMENU_DEF_SCALE 75
 extern const i32 RPMENU_SCALE_STEPS[];
 extern const i32 RPMENU_SCALE_STEP_COUNT;
 i32 SnapReplayMenuScale(i32 percent);

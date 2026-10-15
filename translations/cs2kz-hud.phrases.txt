@@ -377,6 +377,20 @@
 		"chi"		"卡片大小"
 		"ua"		"Розмір картки"
 	}
+	"HUD - Menu Label ReplayMenuPosX"
+	{
+		"en"		"Horizontal offset"
+		"ru"		"Сдвиг по горизонтали"
+		"chi"		"水平偏移"
+		"ua"		"Зсув по горизонталі"
+	}
+	"HUD - Menu Label ReplayMenuPosY"
+	{
+		"en"		"Vertical offset"
+		"ru"		"Сдвиг по вертикали"
+		"chi"		"垂直偏移"
+		"ua"		"Зсув по вертикалі"
+	}
 	"HUD - Menu Cat Keys"
 	{
 		"en"		"Keys"

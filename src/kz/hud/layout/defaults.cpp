@@ -41,14 +41,19 @@ void KZHUDService::ApplyHudDefaults()
 	// Ревизия 1 у игрока уже есть — ревизии 2 и 3 ВЫБОРОЧНЫЕ: трогают только то, что игрок не
 	// менял. Цепочкой 1 → 2 → 3 (у каждой свой пакет и свой маркер). Без ревизии вообще — полная
 	// перезапись ниже, уже текущими дефолтами, и сразу маркер HUD_DEFAULTS_REV.
-	if (storedRev == 1 || storedRev == 2)
+	if (storedRev >= 1 && storedRev <= 3)
 	{
 		if (storedRev == 1)
 		{
 			this->ApplyHudDefaultsRev2(written);
 			written = 0;
 		}
-		this->ApplyHudDefaultsRev3(written);
+		if (storedRev <= 2)
+		{
+			this->ApplyHudDefaultsRev3(written);
+			written = 0;
+		}
+		this->ApplyHudDefaultsRev4(written);
 		return;
 	}
 	{
@@ -172,6 +177,10 @@ void KZHUDService::ApplyHudDefaults()
 			this->SetMHUDColorPref(kColors[i].key, *kColors[i].color);
 			written++;
 		}
+
+		// Меню реплея — 75 % всем (ревизия 4).
+		opts->SetPreferenceInt("rpmenuScale", RPMENU_DEF_SCALE);
+		written++;
 
 		// Маркер — последней записью внутри того же пакета: он уезжает в БД той же
 		// сериализацией, что и сами ключи. Отдельная запись после пакета могла бы сохранить
@@ -417,4 +426,27 @@ void KZHUDService::ApplyHudDefaultsRev3(i32 &written)
 
 	KZ_LOG_INFO(LogChannel::Option, "[cyb] hud_defaults_rev3 steam_id=%llu keys=%i changed=%s\n", this->player->GetSteamId64(false), written,
 				changed[0] ? changed : "-");
+}
+
+// === Ревизия 4: меню реплея 75 %, прогресс на одной линии с PB/WR (15.10) ===================
+// «Размер меню реплея сделать для всех 75 % — потом если что сами поменяют»: rpmenuScale пишется
+// ВСЕМ безусловно (на части разрешений карточка обрезалась слева). Прогресс: X ревизии 3 (−43)
+// на текущий дефолт (−41, как у PB/WR) — только тем, у кого позиция ревизии 3 (не двигали).
+void KZHUDService::ApplyHudDefaultsRev4(i32 &written)
+{
+	KZOptionService *opts = this->player->optionService;
+	const auto feq = [&](const char *key, f64 v) { return fabs(opts->GetPreferenceFloat(key, v) - v) < 0.01; };
+	{
+		KZOptionService::BatchScope batch(opts);
+		opts->SetPreferenceInt("rpmenuScale", RPMENU_DEF_SCALE);
+		written++;
+		const LayoutElementDef &progress = LAYOUT_ELEMENTS[(i32)LayoutElement::LeadProgress];
+		if (feq(progress.xKey, -43) && feq(progress.yKey, LAYOUT_DEF_LEADPROGRESS_Y))
+		{
+			opts->SetPreferenceFloat(progress.xKey, (f64)LAYOUT_DEF_LEADPROGRESS_X);
+			written++;
+		}
+		opts->SetPreferenceInt(HUD_DEFAULTS_REV_KEY, 4);
+	}
+	KZ_LOG_INFO(LogChannel::Option, "[cyb] hud_defaults_rev4 steam_id=%llu keys=%i\n", this->player->GetSteamId64(false), written);
 }

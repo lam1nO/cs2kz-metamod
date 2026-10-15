@@ -598,12 +598,14 @@ public:
 	// подъём = один заход каждого игрока с потерей его персональных настроек худа.
 	// Ревизии 2 (худ v2, 14.10) и 3 (дефолты владельца, 15.10) ВЫБОРОЧНЫЕ: меняют только то,
 	// что игрок не трогал (см. defaults.cpp).
-	static constexpr i32 HUD_DEFAULTS_REV = 3;
+	static constexpr i32 HUD_DEFAULTS_REV = 4;
 	static constexpr const char *HUD_DEFAULTS_REV_KEY = "hudDefaultsRev";
 	// Выборочная ревизия 2 (худ v2) для игроков с ревизией 1 — layout/defaults.cpp.
 	void ApplyHudDefaultsRev2(i32 &written);
 	// Выборочная ревизия 3 для игроков с ревизией 2 (и сразу после ревизии 2) — layout/defaults.cpp.
 	void ApplyHudDefaultsRev3(i32 &written);
+	// Ревизия 4 (15.10): меню реплея 75 % ВСЕМ, прогресс к PB/WR тем, кто его не двигал — layout/defaults.cpp.
+	void ApplyHudDefaultsRev4(i32 &written);
 	// Перезаписывает ключи ВИДА худа новыми дефолтами, если применённая ревизия старше
 	// HUD_DEFAULTS_REV, и поднимает маркер (реализация и полный список ключей —
 	// hud/layout/defaults.cpp). В набор НЕ входят mhudMimicSpec (поведение спектейта),

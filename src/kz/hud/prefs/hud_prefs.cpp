@@ -378,6 +378,13 @@ void KZHUDService::InitMenuPrefs()
 	s_resettableNodes[RPMENU_RESET_SLOT] = rpmenu;
 	KZ::menu::AddChoice(rpmenu, "HUD - Menu Label ReplayMenuScale", &RpMenuScaleGetChoices, &RpMenuScaleGetCurrent, &RpMenuScaleOnPick);
 	KZ::menu::SetItemPref(rpmenu, "rpmenuScale", KZOptStorage::Int, RPMENU_DEF_SCALE);
+	// Сдвиг карточки (15.10, владелец: на части разрешений карточка обрезалась слева, а двигать её
+	// было негде) — двумя степперами в процентах от центра, те же ключи rpmenuPosX/Y, что у скрытого
+	// пункта-позиции ниже (окно Position не рисует).
+	KZ::menu::AddSize(rpmenu, "HUD - Menu Label ReplayMenuPosX", "rpmenuPosX", RPMENU_DEF_POS_X, -100, 100);
+	KZ::menu::SetItemUnit(rpmenu, "%");
+	KZ::menu::AddSize(rpmenu, "HUD - Menu Label ReplayMenuPosY", "rpmenuPosY", RPMENU_DEF_POS_Y, -100, 100);
+	KZ::menu::SetItemUnit(rpmenu, "%");
 
 	// Обмен худом — СВОЯ подкатегория, а не пункты в General. Довод: в General лежит «сбросить
 	// все настройки худа», и действия обмена рядом с ней читались бы как часть сброса, а

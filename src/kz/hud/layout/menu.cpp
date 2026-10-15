@@ -203,7 +203,7 @@ static const MenuLayoutTab s_menuLayout[] = {
 			{NULL, {"HUD - Menu Label HudType", "HUD - Menu Label CompactPanel", "HUD - Menu Label MhudOnHiddenHud"}},
 			{NULL, {KZ_MENU_RESET_ALL_PHRASE}}}},
 		{"Options - Sub Spectate", {{NULL, {"HUD - Menu Label MimicSpec", "HUD Share - Menu Label Take"}}}},
-		{"HUD - Menu Cat ReplayMenu", {{NULL, {"HUD - Menu Label ReplayMenuScale"}}}},
+		{"HUD - Menu Cat ReplayMenu", {{NULL, {"HUD - Menu Label ReplayMenuScale", "HUD - Menu Label ReplayMenuPosX", "HUD - Menu Label ReplayMenuPosY"}}}},
 		{"HUD Share - Menu Cat Share", {{NULL, {"HUD Share - Menu Label ShareCode"}}}},
 	}},
 	{"Options - Tab SoundChat", {
