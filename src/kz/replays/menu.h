@@ -113,8 +113,18 @@ namespace KZ::replaysystem::menu
 	// Язык не нужен: PB/WR/AWR — одинаковые сокращения во всех локалях.
 	void GetReplayMenuBadge(ReplayMenuBadge &out);
 
-	// Контекстная подсказка биндов под списком — для ВЫБРАННОЙ строки.
+	// Контекстная подсказка под списком — для ВЫБРАННОЙ строки: действие БЕЗ клавиши (клавишу
+	// страница рисует отдельной панелью hint_key, в квадратных скобках, как навбар buy-меню CS2).
 	std::string GetReplayMenuHintText(KZPlayer *player, ReplayMenuLine line);
+	// Клавиша подсказки для строки: «E» у выбираемых, «A/D» у регулируемых.
+	const char *GetReplayMenuHintKey(ReplayMenuLine line);
+
+	// Подпись кнопки перемотки на карточке: «-3с» / «+15с» на языке игрока. dir — -1 или +1.
+	std::string GetReplayMenuSeekChipText(KZPlayer *player, bool fast, int dir);
+
+	// Стоит ли скорость на крайнем пресете (0.10x / 4.00x): кнопки −/+ на карточке гаснут
+	// (класс disabled), а клик по погашенной сервер игнорирует. Ближайший пресет — как у A/D.
+	void GetReplayMenuSpeedLimits(bool &atMin, bool &atMax);
 
 } // namespace KZ::replaysystem::menu
 

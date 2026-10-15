@@ -961,38 +961,63 @@
 		"en"		"PAUSED"
 		"ru"		"ПАУЗА"
 	}
-	// Контекстные подсказки — под выбранной строкой, по одной на пункт.
+	// Контекстные подсказки — под выбранной строкой, по одной на пункт. Клавишу («E», «A/D»)
+	// страница рисует отдельной панелью hint_key в скобках, поэтому в тексте её НЕТ. Регистр
+	// (капс) задаёт CSS.
 	"Replay Panel - Hint Pause"
 	{
-		"en"		"E pause / resume"
-		"ru"		"E пауза / продолжить"
+		"en"		"Pause / resume"
+		"ru"		"Пауза / продолжить"
 	}
 	"Replay Panel - Hint Step"
 	{
-		"en"		"A/D step by tick"
-		"ru"		"A/D шаг по тикам"
+		"en"		"Step by tick"
+		"ru"		"Шаг по тикам"
 	}
 	// Одна фраза на обе строки перемотки — шаг подставляется (точная / быстрая).
 	"Replay Panel - Hint Seek"
 	{
 		"#format"	"step:d"
-		"en"		"A/D -{step}s / +{step}s"
-		"ru"		"A/D -{step}с / +{step}с"
+		"en"		"-{step}s / +{step}s"
+		"ru"		"-{step}с / +{step}с"
 	}
 	"Replay Panel - Hint Restart"
 	{
-		"en"		"E restart from the beginning"
-		"ru"		"E начать с начала"
+		"en"		"Restart from the beginning"
+		"ru"		"Начать с начала"
 	}
 	"Replay Panel - Hint Speed"
 	{
-		"en"		"A/D change speed"
-		"ru"		"A/D изменить скорость"
+		"en"		"Change speed"
+		"ru"		"Изменить скорость"
 	}
 	"Replay Panel - Hint End"
 	{
-		"en"		"E stop the replay"
-		"ru"		"E завершить просмотр"
+		"en"		"Stop the replay"
+		"ru"		"Завершить просмотр"
+	}
+	// Подпись кнопки перемотки на карточке: step — число со знаком («-3», «+15»).
+	"Replay Panel - Seek Chip"
+	{
+		"#format"	"step:s"
+		"en"		"{step}s"
+		"ru"		"{step}с"
+	}
+	// Шапка карточки и правая часть подвала (режим мыши по R).
+	"Replay Panel - Title"
+	{
+		"en"		"Replay"
+		"ru"		"Реплей"
+	}
+	"Replay Panel - Mouse On"
+	{
+		"en"		"Mouse"
+		"ru"		"Мышь"
+	}
+	"Replay Panel - Mouse Off"
+	{
+		"en"		"Cursor off"
+		"ru"		"Курсор выкл"
 	}
 	"Replay Panel - Auto"
 	{

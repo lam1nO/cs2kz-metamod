@@ -352,6 +352,27 @@ std::string KZ::replaysystem::menu::GetReplayMenuHintText(KZPlayer *player, Repl
 	}
 }
 
+const char *KZ::replaysystem::menu::GetReplayMenuHintKey(ReplayMenuLine line)
+{
+	return IsReplayMenuLineAdjustable(line) ? "A/D" : "E";
+}
+
+std::string KZ::replaysystem::menu::GetReplayMenuSeekChipText(KZPlayer *player, bool fast, int dir)
+{
+	// Знак и число собираем здесь (%+d), а единицу («с»/«s») даёт перевод — фраза со строкой,
+	// не с числом: шаблон фраз умеет только «{step}», без флага знака.
+	char step[16];
+	V_snprintf(step, sizeof(step), "%+d", (dir < 0 ? -1 : 1) * GetReplayMenuSeekStepSeconds(fast));
+	return KZLanguageService::PrepareMessageWithLang(player->languageService->GetLanguage(), "Replay Panel - Seek Chip", step);
+}
+
+void KZ::replaysystem::menu::GetReplayMenuSpeedLimits(bool &atMin, bool &atMax)
+{
+	const int idx = NearestSpeedIndex(commands::GetReplaySpeed());
+	atMin = idx == 0;
+	atMax = idx == RPMENU_SPEEDS_COUNT - 1;
+}
+
 // Выбор реплея из списка совпавших по нику (паттерн kz_spec_menu.cpp).
 static_function void OnReplaySearchMenuSelect(MenuHandle menu, int slot, int item)
 {

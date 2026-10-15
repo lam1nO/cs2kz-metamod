@@ -21,9 +21,13 @@
 // ReplayMenuLine: W/S ходят по странице (RPMENU_ROWS), иначе выбор прыгал бы по карточке
 // вверх-вниз. Семантика каждой строки при этом прежняя — её задаёт поле line.
 //
-// Мышиный режим спеки (наведение, клики, перетаскивание шкалы) НЕ реализован: курсорного
-// захвата у меню нет, ввод читается с наблюдательской пешки. Классы .hovered/.grabbed/.active
-// и отметки чекпоинтов/телепортов/прыжков страница просто не получает и не показывает.
+// Режим мыши — по R (SetReplayMouse ниже): захват курсора на сущности карточки, клики по шкале
+// (sk0..sk100), кнопкам строк и крестику шапки (HandleReplayClick). Клавиши при этом НЕ
+// отключаются: ReadReplayMenuInput читает W/S/E/A/D/R каждый тик в обоих режимах (решение
+// владельца 14.10 — мышь и клавиатура работают вместе), R выключает мышь обратно. Дойдут ли
+// кнопки до сервера при захвате — решает клиент (см. SetReplayMouse); первый пришедший в
+// сеансе мыши аккорд пишется в лог (replay_menu_mouse_key), чтобы это было видно без отладчика.
+// Вид — gs2 (вариант B, rpmenu2.xml); старый rpmenu.xml грузят прежние версии сервера.
 //
 // Меню ВСЕГДА открыто, пока игрок наблюдает реплей-бота с идущим плейбеком: UpdateReplayMenu
 // (тик из DrawPanels) сам открывает и закрывает его; команды нет, cs2menus-меню удалено.
@@ -130,6 +134,10 @@ namespace
 		ChipSpeedVal,
 		ChipSpeedInc,
 		Hint,
+		HintKey,
+		Title,
+		MouseOn,
+		MouseOff,
 		Count
 	};
 
@@ -173,14 +181,19 @@ namespace
 		{"chip_speed_val",      "chip_speed_val"},
 		{"chip_speed_inc",      "chip_speed_inc"},
 		{"hint_text",           "hint"},
+		{"hint_key",            "hint_key"},
+		{"rp_title",            "title"},
+		{"hint_mouse_on",       "mouse_on"},
+		{"rp_kbd_label",        "mouse_off"},
 	};
 	// clang-format on
 	static_assert(KZ_ARRAYSIZE(RPMENU_VARS) == (size_t)RPVar::Count, "таблица слотов должна совпадать с RPVar");
 
 	// Строка карточки: панель (на неё вешается selected), слот текста, семантика пункта и пара
-	// чипов регулировки. chipDec/chipInc заданы РОВНО у регулируемых строк
+	// кнопок регулировки. chipDec/chipInc заданы РОВНО у регулируемых строк
 	// (IsReplayMenuLineAdjustable) — на выбранной такой строке они подсвечиваются классом
-	// focused: это и есть сигнал «сейчас работают A/D» (раньше его рисовали «< >» вокруг строки).
+	// focused: это и есть сигнал «сейчас работают A/D». В виде gs2 класс висит на самих кнопках
+	// btn_* (фон и иконка кнопки — потомковые правила .ib.focused), а не на подписи внутри.
 	struct RPMenuRowDef
 	{
 		const char *panelId;
@@ -194,10 +207,10 @@ namespace
 	constexpr RPMenuRowDef RPMENU_ROWS[] =
 	{
 		{"row_play",      RPVar::RowPlay,     ReplayMenuLine::Pause,    NULL,                  NULL},
-		{"row_frame",     RPVar::RowFrame,    ReplayMenuLine::Step,     "chip_frame_prev",     "chip_frame_next"},
-		{"row_seek",      RPVar::RowSeek,     ReplayMenuLine::Seek,     "chip_seek_back",      "chip_seek_fwd"},
-		{"row_seek_fast", RPVar::RowSeekFast, ReplayMenuLine::SeekFast, "chip_seek_fast_back", "chip_seek_fast_fwd"},
-		{"row_speed",     RPVar::RowSpeed,    ReplayMenuLine::Speed,    "chip_speed_dec",      "chip_speed_inc"},
+		{"row_frame",     RPVar::RowFrame,    ReplayMenuLine::Step,     "btn_frame_prev",     "btn_frame_next"},
+		{"row_seek",      RPVar::RowSeek,     ReplayMenuLine::Seek,     "btn_seek_back",      "btn_seek_fwd"},
+		{"row_seek_fast", RPVar::RowSeekFast, ReplayMenuLine::SeekFast, "btn_seek_fast_back", "btn_seek_fast_fwd"},
+		{"row_speed",     RPVar::RowSpeed,    ReplayMenuLine::Speed,    "btn_speed_dec",      "btn_speed_inc"},
 		{"row_restart",   RPVar::RowRestart,  ReplayMenuLine::Restart,  NULL,                  NULL},
 		{"row_exit",      RPVar::RowExit,     ReplayMenuLine::End,      NULL,                  NULL},
 	};
@@ -244,9 +257,10 @@ namespace
 	// не выйдет, шкала замрёт с двумя ширинами сразу.
 	constexpr i32 RPMENU_PROGRESS_STEPS = 100;
 	// Имена классов, которые ставит этот файл помимо шкалы: rp-live, hidden, paused, selected,
-	// focused, shown, cp, tp, pb, wr, other — одиннадцать, плюс по одному на ступень масштаба
-	// (RPMENU_SCALE_STEP_COUNT). При добавлении нового класса обновить число.
-	constexpr i32 RPMENU_STATIC_CLASSES = 11 + 5;
+	// focused, shown, cp, tp, pb, wr, other, canmouse, mouse, speed1, disabled — пятнадцать, плюс
+	// по одному на ступень масштаба (RPMENU_SCALE_STEP_COUNT). При добавлении нового класса
+	// обновить число.
+	constexpr i32 RPMENU_STATIC_CLASSES = 15 + 5;
 	// Классы позиции карточки — та же сетка, что у элементов худа: проценты от центра с шагом 1
 	// внутри ±100, то есть 201 имя на ось. Худший случай (игрок прогнал степпер от края до края
 	// по обеим осям за один просмотр) считаем честно, хотя вживую так не двигают: сущность меню
@@ -690,11 +704,32 @@ void KZHUDService::ReadReplayMenuInput()
 		return;
 	}
 
-	// R — режим мыши.
-	if ((pressed & IN_RELOAD) && KZ::gsmenu::Available(this->player))
+	// Диагностика захвата: дошла ли до сервера клавиша меню, пока включён курсор. Пишем ПЕРВЫЙ
+	// такой аккорд сеанса мыши (флаг сбрасывает SetReplayMouse) — одна строка на включение мыши,
+	// не на тик. Нет строки после нажатий W/S в режиме мыши — значит, клиент глушит кнопки при
+	// захвате (см. SetReplayMouse), и работает только мышь.
+	constexpr u64 RPMENU_KEYS = IN_FORWARD | IN_BACK | IN_USE | IN_MOVELEFT | IN_MOVERIGHT | IN_RELOAD;
+	if (this->replayMouse && !this->replayMouseKeysSeen && (pressed & RPMENU_KEYS))
 	{
-		this->SetReplayMouse(true);
-		return;
+		this->replayMouseKeysSeen = true;
+		KZ_LOG_INFO(LogChannel::General, "[cyb] replay_menu_mouse_key slot=%i buttons=0x%llx\n", this->player->GetPlayerSlot().Get(),
+					(unsigned long long)(pressed & RPMENU_KEYS));
+	}
+
+	// R — переключатель режима мыши: включает курсор и выключает его обратно (бинд [R] всегда в
+	// подвале карточки). Выключить можно и кликом по кнопке подвала rp_kbd.
+	if (pressed & IN_RELOAD)
+	{
+		if (this->replayMouse)
+		{
+			this->SetReplayMouse(false);
+			return;
+		}
+		if (KZ::gsmenu::Available(this->player))
+		{
+			this->SetReplayMouse(true);
+			return;
+		}
 	}
 
 	if (pressed & IN_FORWARD)
@@ -820,9 +855,8 @@ void KZHUDService::RenderReplayMenu(CCSCustomHudLayout *layout, bool force)
 	// может не удаться (интерн-таблица сущности переполнена), и разовая попытка оставила бы
 	// слот с плейсхолдером «{s:...}» навсегда — кэш же пишется только на успехе и заставит
 	// повторить на следующем кадре. Цена — десяток сравнений строк на тик, без сети.
-	// Чипы у нас индикаторы, а не кнопки (мыши нет): показывают клавишу, которой строка
-	// управляется. Знаки минуса/плюса — ASCII: типографские «−»/«±» из спеки в игровом
-	// шрифте не гарантированы.
+	// Клавиша-индикатор строки: страница оборачивает её в скобки сама («[E]», rpmenu2.xml).
+	// Знаки минуса/плюса — ASCII: в виде gs2 вместо них иконки, слоты остаются (панели скрыты).
 	this->SetReplayMenuVar(layout, (i32)RPVar::ChipKeyPlay, "E", force);
 	this->SetReplayMenuVar(layout, (i32)RPVar::ChipKeyRestart, "E", force);
 	this->SetReplayMenuVar(layout, (i32)RPVar::ChipKeyExit, "E", force);
@@ -831,23 +865,27 @@ void KZHUDService::RenderReplayMenu(CCSCustomHudLayout *layout, bool force)
 	const bool arrows = cyb_rpmenu_arrow_chips.Get();
 	this->SetReplayMenuVar(layout, (i32)RPVar::ChipFramePrev, arrows ? "\xE2\x97\x80" : "A", force);
 	this->SetReplayMenuVar(layout, (i32)RPVar::ChipFrameNext, arrows ? "\xE2\x96\xB6" : "D", force);
-	char seekBack[16], seekFwd[16];
-	V_snprintf(seekBack, sizeof(seekBack), "-%is", KZ::replaysystem::menu::GetReplayMenuSeekStepSeconds(false));
-	V_snprintf(seekFwd, sizeof(seekFwd), "+%is", KZ::replaysystem::menu::GetReplayMenuSeekStepSeconds(false));
-	this->SetReplayMenuVar(layout, (i32)RPVar::ChipSeekBack, seekBack, force);
-	this->SetReplayMenuVar(layout, (i32)RPVar::ChipSeekFwd, seekFwd, force);
-	V_snprintf(seekBack, sizeof(seekBack), "-%is", KZ::replaysystem::menu::GetReplayMenuSeekStepSeconds(true));
-	V_snprintf(seekFwd, sizeof(seekFwd), "+%is", KZ::replaysystem::menu::GetReplayMenuSeekStepSeconds(true));
-	this->SetReplayMenuVar(layout, (i32)RPVar::ChipSeekFastBack, seekBack, force);
-	this->SetReplayMenuVar(layout, (i32)RPVar::ChipSeekFastFwd, seekFwd, force);
+	// Подписи перемотки на языке игрока: «-3с» / «+15с» (en — «s»), шаг — из menu.cpp.
+	{
+		using KZ::replaysystem::menu::GetReplayMenuSeekChipText;
+		this->SetReplayMenuVar(layout, (i32)RPVar::ChipSeekBack, GetReplayMenuSeekChipText(this->player, false, -1).c_str(), force);
+		this->SetReplayMenuVar(layout, (i32)RPVar::ChipSeekFwd, GetReplayMenuSeekChipText(this->player, false, 1).c_str(), force);
+		this->SetReplayMenuVar(layout, (i32)RPVar::ChipSeekFastBack, GetReplayMenuSeekChipText(this->player, true, -1).c_str(), force);
+		this->SetReplayMenuVar(layout, (i32)RPVar::ChipSeekFastFwd, GetReplayMenuSeekChipText(this->player, true, 1).c_str(), force);
+	}
 	this->SetReplayMenuVar(layout, (i32)RPVar::ChipSpeedDec, "-", force);
 	this->SetReplayMenuVar(layout, (i32)RPVar::ChipSpeedInc, "+", force);
-	// Превью времени под курсором сервер не наполняет (мышиного режима нет), но переменная
+	// Превью времени под курсором сервер не наполняет (бирки мыши — переменные tt на skw*), но переменная
 	// обязана СУЩЕСТВОВАТЬ, иначе на странице останется её плейсхолдер «{s:...}». Именно здесь
 	// и нужен проброс force: на первом кадре кэш пуст, и без него пустой текст «совпал» бы с
 	// кэшем и не ушёл бы вовсе. Строки тиков под шкалой на странице больше нет (решение
 	// владельца 17.09: не нужна) — вместе с ней ушёл и слот.
 	this->SetReplayMenuVar(layout, (i32)RPVar::SeekPreview, "", force);
+	// Заголовок шапки и правая часть подвала («[R] Мышь» / кнопка «[R] Курсор выкл»): видимость
+	// задают классы canmouse/mouse на карточке, тексты — всегда (слот без текста висел бы «{s:…}»).
+	this->SetReplayMenuVar(layout, (i32)RPVar::Title, KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Title").c_str(), force);
+	this->SetReplayMenuVar(layout, (i32)RPVar::MouseOn, KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Mouse On").c_str(), force);
+	this->SetReplayMenuVar(layout, (i32)RPVar::MouseOff, KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - Mouse Off").c_str(), force);
 
 	// Шапка: ник автора записи, подстрочник «карта · курс · режим» и бейдж AWR — в старой
 	// карточке метка AWR стояла в начале строки состояния.
@@ -914,16 +952,40 @@ void KZHUDService::RenderReplayMenu(CCSCustomHudLayout *layout, bool force)
 	char speedText[24];
 	V_snprintf(speedText, sizeof(speedText), "%sx", status.speed);
 	this->SetReplayMenuVar(layout, (i32)RPVar::ChipSpeedVal, speedText, force);
-	// Пилюля состояния (спека §3.6): на ходу — скорость, на паузе — слово «ПАУЗА». Глиф —
-	// знак воспроизведения/паузы; цвет и пульсацию даёт класс paused.
+	// Пилюля состояния (спека gs2 §4–5): на паузе — слово «ПАУЗА» и золотой значок паузы, на ходу
+	// со скоростью ≠ 1.00x — скорость, на 1.00x — только значок ▶ (текст пустой + класс speed1:
+	// селектора :empty в Panorama нет). Значок — иконка state_icon по классу paused; глиф
+	// state_glyph шлётся по-старому, страница gs2 его не показывает.
+	const bool speed1 = !status.paused && KZ_STREQ(status.speed, "1.00");
 	const std::string pausedText =
 		status.paused ? KZLanguageService::PrepareMessageWithLang(lang, "Replay Panel - State Paused") : std::string();
-	this->SetReplayMenuVar(layout, (i32)RPVar::StateText, status.paused ? pausedText.c_str() : speedText, force);
+	this->SetReplayMenuVar(layout, (i32)RPVar::StateText, status.paused ? pausedText.c_str() : (speed1 ? "" : speedText), force);
 	this->SetReplayMenuVar(layout, (i32)RPVar::StateGlyph, status.paused ? "\xE2\x9D\x99\xE2\x9D\x99" : "\xE2\x96\xB6", force);
 	if (force || state.paused != (i32)status.paused)
 	{
 		state.paused = (i32)status.paused;
 		state.classDirty |= ApplyClass(this->player, layout, "state_pill", "paused", status.paused);
+		// На карточке — для иконки строки «Пауза/Продолжить» (.card.paused #row_play .ri).
+		state.classDirty |= ApplyClass(this->player, layout, "replay_card", "paused", status.paused);
+	}
+	if (force || state.speed1 != (i32)speed1)
+	{
+		state.speed1 = (i32)speed1;
+		state.classDirty |= ApplyClass(this->player, layout, "state_pill", "speed1", speed1);
+	}
+	// Кнопки −/+ скорости гаснут на крайних пресетах (0.10x / 4.00x); клик по погашенной
+	// HandleReplayClick игнорирует, A/D там и так упирается в край списка.
+	bool speedMin = false, speedMax = false;
+	KZ::replaysystem::menu::GetReplayMenuSpeedLimits(speedMin, speedMax);
+	if (force || state.speedMin != (i32)speedMin)
+	{
+		state.speedMin = (i32)speedMin;
+		state.classDirty |= ApplyClass(this->player, layout, "btn_speed_dec", "disabled", speedMin);
+	}
+	if (force || state.speedMax != (i32)speedMax)
+	{
+		state.speedMax = (i32)speedMax;
+		state.classDirty |= ApplyClass(this->player, layout, "btn_speed_inc", "disabled", speedMax);
 	}
 
 	// Шкала: заполнение и ручка одним шагом (0.25 %) — класс снимается у прошлого значения и
@@ -986,6 +1048,12 @@ void KZHUDService::RenderReplayMenu(CCSCustomHudLayout *layout, bool force)
 			state.markType[i] = newType;
 		}
 		state.markUuid = markUuid;
+		// Сменилась запись при включённой мыши — бирки времени шкалы пересчитать под новую
+		// длительность (RefreshReplayTips сам сверяет uuid и шлёт только при смене).
+		if (this->replayMouse)
+		{
+			this->RefreshReplayTips();
+		}
 	}
 
 	// Строки и подсказка.
@@ -1016,6 +1084,7 @@ void KZHUDService::RenderReplayMenu(CCSCustomHudLayout *layout, bool force)
 		}
 	}
 	const ReplayMenuLine selectedLine = RPMENU_ROWS[this->replayMenuRow].line;
+	this->SetReplayMenuVar(layout, (i32)RPVar::HintKey, KZ::replaysystem::menu::GetReplayMenuHintKey(selectedLine), force);
 	this->SetReplayMenuVar(layout, (i32)RPVar::Hint, KZ::replaysystem::menu::GetReplayMenuHintText(this->player, selectedLine).c_str(), force);
 
 	// Движковый баг (sdk/entity/ccscustomhudlayout.h:179-181): SetHasClass не доезжает до
@@ -1051,9 +1120,14 @@ void KZHUDService::SetReplayMouse(bool on)
 	this->replayMouse = on;
 	ApplyClass(this->player, layout, "replay_card", "mouse", on);
 	layout->GetGlobalLayoutState()->MarkFullChanged();
-	// Пока держим курсор, клавиши до сервера не доходят; маска «удержано» на выходе — текущая,
-	// чтобы R, отпущенная во время мыши, не сработала повторно.
+	// Клавиши в режиме мыши сервер НЕ выключает: ReadReplayMenuInput работает в обоих режимах.
+	// Доходят ли они при захвате — решение клиента (sdk: «players get movement control back once
+	// all layouts have disabled input capture»), проверяется логом replay_menu_mouse_key. Маска
+	// «удержано» — текущая в обе стороны, чтобы R, нажатая для переключения, не сработала
+	// повторно, а клавиша, отпущенная при захвате, — ложным фронтом.
 	this->replayMenuHeld = HeldButtons(this->player);
+	this->replayMenuHoldTicks = 0;
+	this->replayMouseKeysSeen = false;
 	if (on)
 	{
 		this->RefreshReplayTips();
@@ -1081,10 +1155,12 @@ void KZHUDService::RefreshReplayTips()
 		return;
 	}
 	CCSCustomHudLayout *layout = (CCSCustomHudLayout *)ent;
+	// Бирка — сосед кнопки sk{i} в обёртке skw{i} (кнопка режет детей по рамке, а бирка шире её
+	// в двадцать раз — см. tools/gen_rpmenu2_xml.py), поэтому переменная ставится на обёртку.
 	char id[8], tip[32];
 	for (i32 i = 0; i <= 100; i++)
 	{
-		V_snprintf(id, sizeof(id), "sk%i", i);
+		V_snprintf(id, sizeof(id), "skw%i", i);
 		utils::FormatTime(status.total * (i + 0.5) / 101.0, tip, sizeof(tip));
 		layout->SetDialogVariableString(id, "tt", tip);
 	}
@@ -1107,6 +1183,12 @@ bool KZHUDService::HandleReplayClick(uint32 packedHandle, const char *panelId)
 	if (KZ_STREQ(panelId, "rp_kbd"))
 	{
 		this->SetReplayMouse(false);
+	}
+	else if (KZ_STREQ(panelId, "rp_close"))
+	{
+		// Крестик шапки = «Завершить просмотр», как строка row_exit.
+		ApplyReplayMenuInput(this->player, ReplayMenuLine::End, ReplayMenuInput::Select);
+		this->CloseReplayMenu("end_clicked");
 	}
 	else if (sscanf(panelId, "sk%d", &pct) == 1 && pct >= 0 && pct <= 100)
 	{
@@ -1142,6 +1224,13 @@ bool KZHUDService::HandleReplayClick(uint32 packedHandle, const char *panelId)
 			{"btn_speed_dec", ReplayMenuLine::Speed, ReplayMenuInput::Dec},
 			{"btn_speed_inc", ReplayMenuLine::Speed, ReplayMenuInput::Inc},
 		};
+		// Погашенные −/+ скорости (класс disabled на крайнем пресете) клик не принимают.
+		bool speedMin = false, speedMax = false;
+		KZ::replaysystem::menu::GetReplayMenuSpeedLimits(speedMin, speedMax);
+		if ((speedMin && KZ_STREQ(panelId, "btn_speed_dec")) || (speedMax && KZ_STREQ(panelId, "btn_speed_inc")))
+		{
+			return true;
+		}
 		for (const Map &m : kMap)
 		{
 			if (KZ_STREQ(panelId, m.id))

@@ -1060,6 +1060,7 @@ private:
 	// Спрятано игроком через !rpmenu (см. ToggleReplayMenuHidden).
 	bool replayMenuHidden {};
 	bool replayMouse {};          // включён захват курсора на карточке (R)
+	bool replayMouseKeysSeen {};  // в этом сеансе мыши уже пришла клавиша меню (лог один раз, rpmenu.cpp)
 	std::string replayTipsUuid {}; // запись, для которой выставлены подсказки времени sk*
 	bool replayMenuFailLogged {}; // серия отказов создания сущности уже залогирована (см. rpmenu.cpp)
 	i32 replayMenuRetryTick {};   // тик последнего отказа — повтор создания с бэкоффом
@@ -1078,7 +1079,10 @@ private:
 		// кадра, первый проход шлёт ВСЁ (dialog-переменной на странице до этого нет вовсе).
 		std::vector<std::string> vars {};
 		i32 selectedRow {-1}; // строка с классом selected
-		i32 paused {-1};      // класс paused на state_pill (-1 — ещё не выставляли)
+		i32 paused {-1};      // класс paused на state_pill и replay_card (-1 — ещё не выставляли)
+		i32 speed1 {-1};      // класс speed1 на state_pill: ход на 1.00x, в пилюле только значок
+		i32 speedMin {-1};    // класс disabled на btn_speed_dec (скорость на нижнем пресете)
+		i32 speedMax {-1};    // класс disabled на btn_speed_inc (скорость на верхнем пресете)
 		i32 badgeShown {-1};  // показан ли бейдж типа записи (класс hidden снят)
 		i32 badgeClass {-1};   // индекс расцветки бейджа в RPMENU_BADGE_CLASSES
 		i32 scale {-1};        // ступень масштаба карточки (класс .rp-scale--N на replay_card)

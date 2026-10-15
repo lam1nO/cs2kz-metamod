@@ -89,7 +89,7 @@ inline bool LayoutOutlineDefault(LayoutElement element)
 // (отпечаток считается из реестра, см. hud/share/hud_share.cpp).
 
 // Масштаб карточки: ступени процентов, класс .rp-scale--N на панели replay_card.
-// Наборы правил — rpmenu-scale.css (генератор tools/build_rpmenu_scale.py в аддоне).
+// Наборы правил — rpmenu2-scale.css (генератор tools/build_rpmenu2_scale.py в аддоне).
 #define RPMENU_DEF_SCALE 100
 extern const i32 RPMENU_SCALE_STEPS[];
 extern const i32 RPMENU_SCALE_STEP_COUNT;
@@ -124,9 +124,11 @@ i32 SnapReplayMenuScale(i32 percent);
 // Своя страница меню реплея спектатора (layout/rpmenu.cpp): карточка плеера целиком — шапка,
 // время, шкала перемотки с отметками, семь пунктов и подсказка. Живёт ТОЛЬКО в нашем аддоне
 // (custom_game/cyber/…), апстримного аналога у неё нет; исходники разметки — gymstrike-kz/content/panorama
-// (rpmenu.xml + rpmenu.css + rpmenu-positions.css + rpmenu-scale.css), спека
-// 2026-09-11-replay-player-panorama.
-#define KZ_RPMENU_LAYOUT "panorama/layout/custom_game/cyber/rpmenu.vxml_c"
+// (rpmenu2.xml + rpmenu2.css + rpmenu2-seek.css + rpmenu2-scale.css + rpmenu-positions.css; xml и
+// seek — генератор tools/gen_rpmenu2_xml.py), спека SPEC-rpmenu-gs2.md (вид gs2, вариант B, 15.10).
+// Новый вид — ОТДЕЛЬНЫЙ файл, как mhud2: старые версии KZ на флоте грузят rpmenu.vxml_c из того же
+// аддона, и он остаётся неизменным.
+#define KZ_RPMENU_LAYOUT "panorama/layout/custom_game/cyber/rpmenu2.vxml_c"
 
 // Отказ SetHasClass/SetDialogVariableString по упору в HUD_LAYOUT_MAX_INTERNED_STRINGS —
 // общий лог для entity.cpp и rpmenu.cpp (реализация в entity.cpp).
