@@ -94,9 +94,10 @@ constexpr char sql_jumptop_insert[] = R"(
 )";
 
 // Личные рекорды игрока по всем режимам/типам — для кэша на заходе. Лучшая строка выбирается в
-// коде (истории PB у игрока немного), SQL общий для MySQL и SQLite.
+// коде (истории PB у игрока немного), SQL общий для MySQL и SQLite. Strafes/Sync/Pre/MapName —
+// для строки «Вы» окна !jstop.
 constexpr char sql_jumptop_getpbs[] = R"(
-    SELECT Mode, JumpType, IsBlockJump, Block, Distance
+    SELECT Mode, JumpType, IsBlockJump, Block, Distance, Strafes, Sync, Pre, MapName
         FROM Jumptop
         WHERE SteamID64 = %llu AND Removed = 0
 )";

@@ -47,6 +47,10 @@ namespace
 	{
 		i32 block;
 		f64 distance;
+		// Остальное — для строки «Вы» окна !jstop; strafes < 0 — неизвестно.
+		i32 strafes = -1;
+		f64 sync = 0.0, pre = 0.0;
+		std::string map;
 	};
 
 	struct PlayerCache
@@ -531,7 +535,8 @@ namespace
 					auto it = cache.bests.find(key);
 					if (it == cache.bests.end() || KZ::jumptop::IsBetter(isBlock, block, distance, it->second.block, it->second.distance))
 					{
-						cache.bests[key] = {block, distance};
+						const char *map = result->GetString(8);
+						cache.bests[key] = {block, distance, result->GetInt(5), ResultDouble(result, 6), ResultDouble(result, 7), map ? map : ""};
 					}
 				}
 				cache.steamID64 = steamID64;
@@ -621,7 +626,8 @@ void KZ::jumptop::OnJumpFinish(KZPlayer *player, Jump *jump)
 		if (it == cache->bests.end() || IsBetter(isBlock, rowBlock, distance, it->second.block, it->second.distance))
 		{
 			isPB[c] = true;
-			cache->bests[key] = {rowBlock, distance};
+			cache->bests[key] = {rowBlock, distance, jump->GetStrafeCount(), (f64)jump->GetSync(), (f64)jump->GetTakeoffSpeed(),
+								 g_pKZUtils->GetCurrentMapName().Get()};
 		}
 	}
 	if (!isPB[0] && !isPB[1])
@@ -1657,6 +1663,20 @@ namespace
 		return buf;
 	}
 
+	std::string JumpSyncText(f64 sync)
+	{
+		char buf[16];
+		V_snprintf(buf, sizeof(buf), "%.0f%%", sync * 100.0);
+		return buf;
+	}
+
+	std::string JumpPreText(f64 pre)
+	{
+		char buf[16];
+		V_snprintf(buf, sizeof(buf), "%.1f", pre);
+		return buf;
+	}
+
 	void RenderJumptopWindow(KZPlayer *player);
 
 	void OnJumptopWindowClick(KZPlayer *player, const char *id)
@@ -1733,8 +1753,8 @@ namespace
 		t.headers[1] = "Игрок";
 		t.headers[2] = v.isBlock ? "Блок" : "Дистанция";
 		t.headers[3] = "Стрейфы";
-		t.headers[4] = "Синк";
-		t.headers[5] = "Pre";
+		t.headers[4] = "Синхр.";
+		t.headers[5] = "Скорость";
 		t.headers[6] = "Карта";
 
 		v.shownIds.clear();
@@ -1749,11 +1769,8 @@ namespace
 			row.cells[1] = r.alias;
 			row.cells[2] = JumpDistanceText(r, v.isBlock);
 			row.cells[3] = std::to_string(r.strafes);
-			char sync[16], pre[16];
-			V_snprintf(sync, sizeof(sync), "%.0f%%", r.sync * 100.0);
-			V_snprintf(pre, sizeof(pre), "%.1f", r.pre);
-			row.cells[4] = sync;
-			row.cells[5] = pre;
+			row.cells[4] = JumpSyncText(r.sync);
+			row.cells[5] = JumpPreText(r.pre);
 			row.cells[6] = r.map;
 			row.initial = KZ::gsmenu::Initial(r.alias.c_str());
 			row.colour = (u32)(r.steamID64 % 8);
@@ -1779,13 +1796,36 @@ namespace
 						place = i + 1;
 					}
 				}
+				const Best &best = it->second;
 				JumptopRow mine {};
-				mine.block = it->second.block;
-				mine.distance = it->second.distance;
+				mine.block = best.block;
+				mine.distance = best.distance;
 				t.hasMe = true;
 				t.me.cells[0] = place > 0 ? std::to_string(place) : "—";
 				t.me.cells[1] = player->GetName();
 				t.me.cells[2] = JumpDistanceText(mine, v.isBlock);
+				// Стрейфы, синк, pre, карта — из своей строки топа (если она в выборке), иначе из кэша PB.
+				if (place > 0)
+				{
+					t.me.cells[3] = std::to_string(v.rows[place - 1].strafes);
+					t.me.cells[4] = JumpSyncText(v.rows[place - 1].sync);
+					t.me.cells[5] = JumpPreText(v.rows[place - 1].pre);
+					t.me.cells[6] = v.rows[place - 1].map;
+				}
+				else if (best.strafes >= 0)
+				{
+					t.me.cells[3] = std::to_string(best.strafes);
+					t.me.cells[4] = JumpSyncText(best.sync);
+					t.me.cells[5] = JumpPreText(best.pre);
+					t.me.cells[6] = best.map;
+				}
+				for (i32 j = 3; j <= 6; j++)
+				{
+					if (t.me.cells[j].empty())
+					{
+						t.me.cells[j] = "—";
+					}
+				}
 				t.me.initial = KZ::gsmenu::Initial(player->GetName());
 				t.me.colour = (u32)(me % 8);
 			}

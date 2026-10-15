@@ -701,6 +701,7 @@ namespace
 			v.meRunId = list[i].runID.Get();
 			break;
 		}
+		t.empty = t.rows.empty();
 		if (t.rows.empty())
 		{
 			t.hint = v.pro ? "PRO-рекордов на этом курсе пока нет" : "Рекордов на этом курсе пока нет";
