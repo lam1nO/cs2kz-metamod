@@ -2228,9 +2228,9 @@ SCMD(kz_panel, SCFL_HUD)
 	return true;
 }
 
-// !hud — без аргументов открывает/закрывает редактор худа (спека 2026-09-26-hud-editor-options
-// §4.5, layout/editor.cpp); `panel` — диагностика вместимости центральной HTML-панели. Открытое
-// окно !options редактор закрывает сам (одна сущность — один режим).
+// !hud — без аргументов открывает/закрывает !options сразу на вкладке «Худ» (решение владельца 15.10:
+// оттуда «Открыть редактор»; раньше !hud открывал редактор сразу); `panel` — диагностика вместимости
+// центральной HTML-панели. Открытый редактор !hud закрывает и окно не открывает.
 SCMD(kz_hud, SCFL_HUD | SCFL_PREFERENCE)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
@@ -2246,7 +2246,7 @@ SCMD(kz_hud, SCFL_HUD | SCFL_PREFERENCE)
 		}
 		else
 		{
-			player->hudService->OpenHudEditor();
+			player->hudService->OpenLayoutMenu("HUD - Menu Cat Hud"); // KZ_MENU_HUD_CATEGORY (layout/menu.cpp)
 		}
 		return true;
 	}
