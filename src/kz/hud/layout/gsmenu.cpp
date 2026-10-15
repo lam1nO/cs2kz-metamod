@@ -190,6 +190,17 @@ namespace
 		}
 	}
 
+	// Как Class, но «выключено» в ещё не тронутую пару не пишет: у свежей сущности класса нет и так,
+	// а каждая пара — запись в m_vecHasClasses сущности (для редких классов вроде nd/empty).
+	void ClassLazy(KZPlayer *player, WindowState &w, CCSCustomHudLayout *layout, const char *panel, const char *cls, bool on)
+	{
+		if (!on && w.classes.find(std::string(panel) + '|' + cls) == w.classes.end())
+		{
+			return;
+		}
+		Class(player, w, layout, panel, cls, on);
+	}
+
 	// Один класс из набора на панели (обложка mc-*, тир t*, цвет avc*): снять прежний, поставить новый.
 	void Swap(KZPlayer *player, WindowState &w, CCSCustomHudLayout *layout, const char *panel, const std::string &cls)
 	{
@@ -337,6 +348,7 @@ bool KZ::gsmenu::ShowTable(KZPlayer *player, const Table &t, ClickFn onClick, co
 	// Топ прыжков (v3): без шапки с обложкой, заголовок и режимы в одной строке.
 	Class(player, *w, layout, "gw", "js", t.cols && !V_strcmp(t.cols, "cols-jumptop"));
 	Class(player, *w, layout, "gw_table", "no-tp", t.noTp);
+	ClassLazy(player, *w, layout, "gw", "empty", t.empty);
 	for (i32 j = 0; j < KZ_GSMENU_TABLE_COLS; j++)
 	{
 		V_snprintf(id, sizeof(id), "gh%i", j);
@@ -446,6 +458,7 @@ bool KZ::gsmenu::ShowList(KZPlayer *player, const List &l)
 		Class(player, *w, layout, id, "on", r.on);
 		Class(player, *w, layout, id, "grp", r.grp);
 		Class(player, *w, layout, id, "done", r.done);
+		ClassLazy(player, *w, layout, id, "nd", r.nd);
 		char sub[24];
 		V_snprintf(sub, sizeof(sub), "gs%i_l", i);
 		Var(player, *w, layout, sub, "l", r.label);

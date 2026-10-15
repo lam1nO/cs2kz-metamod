@@ -591,12 +591,14 @@ u32 KZJumpstatsService::CreateJumpstatsMenu()
 		g_pMenus->DestroyMenu(s_jsMenu[slot]);
 		s_jsMenu[slot] = kInvalidMenuHandle;
 	}
-	MenuHandle m = g_pMenus->CreateMenu(MenuType::Default, "Jumpstats", &OnJSMenuSelect);
+	const char *lang = this->player->languageService->GetLanguage();
+	// Заголовок — та же фраза, что у вкладки !options («Джампстаты»).
+	const std::string title = KZLanguageService::PrepareMessageWithLang(lang, "Options - Menu Cat Jumpstats");
+	MenuHandle m = g_pMenus->CreateMenu(MenuType::Default, title.c_str(), &OnJSMenuSelect);
 	if (m == kInvalidMenuHandle)
 	{
 		return kInvalidMenuHandle;
 	}
-	const char *lang = this->player->languageService->GetLanguage();
 	for (const auto &it : s_jsMenuItems)
 	{
 		std::string text = JSMenuItemText(this->player, it, lang);

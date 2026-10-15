@@ -267,8 +267,23 @@ public:
 			lines.push_back({i, {}});
 		}
 		const i32 total = (i32)lines.size();
-		const i32 first = (std::max)(0, (std::min)(cursorLine - 4, total - KZ_GSMENU_LIST_ROWS));
-		const i32 last = (std::min)(total, first + KZ_GSMENU_LIST_ROWS);
+		i32 first = (std::max)(0, (std::min)(cursorLine - 4, total - KZ_GSMENU_LIST_ROWS));
+		i32 last = (std::min)(total, first + KZ_GSMENU_LIST_ROWS);
+		// Окно не кончается заголовком группы без её пунктов: сдвиг на строку вниз, а если курсор
+		// стоит первой строкой окна — вверх. За заголовком всегда идёт пункт, перед ним — пункт или начало.
+		if (last < total && last > first && lines[last - 1].item < 0)
+		{
+			if (cursorLine > first)
+			{
+				first++;
+				last++;
+			}
+			else if (first > 0)
+			{
+				first--;
+				last--;
+			}
+		}
 		std::string sub;
 		if (count > KZ_GSMENU_LIST_ROWS)
 		{
@@ -300,6 +315,8 @@ public:
 			{
 				row.value = "›";
 			}
+			// Значение-слово («Не пройден», «PERFECT»): не время, не переключатель и не вход в подменю.
+			row.nd = !row.value.empty() && !row.done && !row.tog && it.child == kInvalidMenuHandle;
 			list.rows.push_back(row);
 		}
 		const Item *cur = (s.cursor >= 0 && s.cursor < count) ? &m->items[s.cursor] : nullptr;
@@ -342,6 +359,12 @@ public:
 		const u64 exitKey = spectator ? IN_SPEED : IN_LOOK_AT_WEAPON;
 
 		if (pressed & exitKey)
+		{
+			EndSession(slot, MenuEndReason::Exit);
+			return;
+		}
+		// R на корневом меню (ни стека, ни родителя) — выход, как F/Shift; во вложенном — назад.
+		if ((pressed & IN_RELOAD) && s->stack.size() <= 1 && !Find(m->parent))
 		{
 			EndSession(slot, MenuEndReason::Exit);
 			return;

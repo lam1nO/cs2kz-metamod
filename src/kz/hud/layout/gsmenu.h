@@ -64,6 +64,7 @@ namespace KZ::gsmenu
 		Row me;
 		std::string page, hint;
 		bool prev = false, next = false;
+		bool empty = false; // класс empty на gw: топ без строк (!maptop)
 	};
 
 	// Боковой список gs (без захвата курсора) — меню cs2menus (gsmenu_shim.cpp).
@@ -72,6 +73,7 @@ namespace KZ::gsmenu
 		std::string label, value;
 		bool sel = false, dim = false, adj = false, cap = false, tog = false, on = false, grp = false;
 		bool done = false; // значение — своё время (галочка «пройден» перед ним, v3)
+		bool nd = false;   // значение есть, но не время и не вкл/выкл («Не пройден», «PERFECT»)
 	};
 
 	struct List
