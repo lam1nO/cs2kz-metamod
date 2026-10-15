@@ -316,7 +316,7 @@ public:
 				row.value = "›";
 			}
 			// Значение-слово («Не пройден», «PERFECT»): не время, не переключатель и не вход в подменю.
-			row.nd = !row.value.empty() && !row.done && !row.tog && it.child == kInvalidMenuHandle;
+			row.nd = !row.value.empty() && !row.done && !row.tog && !it.adjustable && it.child == kInvalidMenuHandle;
 			list.rows.push_back(row);
 		}
 		const Item *cur = (s.cursor >= 0 && s.cursor < count) ? &m->items[s.cursor] : nullptr;
