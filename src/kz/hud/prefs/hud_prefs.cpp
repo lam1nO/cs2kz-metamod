@@ -373,7 +373,7 @@ void KZHUDService::InitMenuPrefs()
 	// позициями элементов; её пункт перенесён в скрытый узел ниже, а не удалён: rpmenuPosX/Y
 	// по-прежнему читает RefreshLayoutPrefs, и без пункта в реестре ключи выпали бы из обмена
 	// худом и из «Сбросить всё» — сохранённое смещение карточки стало бы неснимаемым.
-	// Кнопки сброса страницы нет: пункт на ней один, «Сбросить всё» его накрывает (слот ниже).
+	// Кнопки сброса страницы нет: «Сбросить всё» накрывает её пункты (слот ниже).
 	KZOptNode *rpmenu = KZ::menu::AddSub(hud, "HUD - Menu Cat ReplayMenu");
 	s_resettableNodes[RPMENU_RESET_SLOT] = rpmenu;
 	KZ::menu::AddChoice(rpmenu, "HUD - Menu Label ReplayMenuScale", &RpMenuScaleGetChoices, &RpMenuScaleGetCurrent, &RpMenuScaleOnPick);

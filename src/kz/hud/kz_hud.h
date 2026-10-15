@@ -225,7 +225,7 @@ struct MHUDLayoutPrefs
 	// Значения обязаны совпадать с RPMENU_DEF_SCALE/RPMENU_DEF_ANCHOR (layout.h).
 	struct ReplayMenu
 	{
-		i32 scale {100}; // проценты, ступени RPMENU_SCALE_STEPS
+		i32 scale {75}; // проценты, ступени RPMENU_SCALE_STEPS
 		i32 posX {-36};  // проценты от центра экрана, как у элементов худа
 		i32 posY {0};
 	};

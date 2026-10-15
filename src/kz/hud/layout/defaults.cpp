@@ -441,7 +441,8 @@ void KZHUDService::ApplyHudDefaultsRev4(i32 &written)
 		opts->SetPreferenceInt("rpmenuScale", RPMENU_DEF_SCALE);
 		written++;
 		const LayoutElementDef &progress = LAYOUT_ELEMENTS[(i32)LayoutElement::LeadProgress];
-		if (feq(progress.xKey, -43) && feq(progress.yKey, LAYOUT_DEF_LEADPROGRESS_Y))
+		constexpr f64 HUD_REV3_LEADPROGRESS_X = -43, HUD_REV3_LEADPROGRESS_Y = -4; // дефолт ревизии 3
+		if (feq(progress.xKey, HUD_REV3_LEADPROGRESS_X) && feq(progress.yKey, HUD_REV3_LEADPROGRESS_Y))
 		{
 			opts->SetPreferenceFloat(progress.xKey, (f64)LAYOUT_DEF_LEADPROGRESS_X);
 			written++;
