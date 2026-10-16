@@ -362,7 +362,7 @@ f64 MapChangeTick()
 		uint32 state = ugc->GetItemState(s_req.id);
 		downloading = state & (k_EItemStateDownloading | k_EItemStateDownloadPending);
 		uint64 done = 0, total = 0;
-		if (downloading && ugc->GetItemDownloadInfo(s_req.id, &done, &total) && done > s_req.lastBytes)
+		if (downloading && ugc->GetItemDownloadInfo(s_req.id, &done, &total) && done != s_req.lastBytes)  // != : Steam может начать закачку заново
 		{
 			s_req.lastBytes = done;
 			s_req.lastProgress = now;
@@ -392,7 +392,8 @@ f64 MapChangeTick()
 		}
 		return kTickSeconds;
 	}
-	if (downloading && s_req.issues > 0)
+	// Стартовую карту движок уже качает по `+host_workshop_map` из командной строки.
+	if (downloading && (s_req.issues > 0 || s_req.fromStartup))
 	{
 		return kTickSeconds;
 	}
