@@ -1,7 +1,5 @@
-// !mcustom при сбое связи со Steam раньше молча зависал (докачка через host_workshop_map
-// не даёт сигнала об ошибке). Здесь — явный ретрай на реальном ответе ISteamUGC, без
-// таймаутов: паттерн подсмотрен в KZRacingService (src/kz/racing/map.cpp), которая тем
-// же способом ждёт готовности воркшоп-карты перед сменой.
+// Смена workshop-карты для GG1/!mcustom: заявка с ожиданием связи со Steam и повтором
+// (см. блок ниже), плюс хуки «карта из общего кэша ноды = установлена».
 #include "kz_customchangemap.h"
 
 #include "kz/kz.h"
@@ -10,6 +8,8 @@
 #include "utils/logging.h"
 
 #include "public/steam/isteamugc.h"
+#include "public/steam/isteamgameserver.h"
+#include "utils/ctimer.h"
 
 #include <filesystem>
 #include <system_error>
@@ -45,16 +45,6 @@ static KHook::Virtual<ISteamUGC, bool, PublishedFileId_t, bool> s_downloadItemHo
 
 namespace
 {
-constexpr int CUSTOMMAP_MAX_ATTEMPTS = 6;
-
-struct CustomMapState
-{
-	bool pending = false;
-	PublishedFileId_t workshopId = 0;
-	int attempt = 0;
-};
-
-CustomMapState s_state;
 
 bool s_ugcHooked = false;
 std::unordered_set<PublishedFileId_t> s_loggedCacheItems;
@@ -250,24 +240,237 @@ static KHook::Return<bool> DownloadItemPre(ISteamUGC *pThis, PublishedFileId_t i
 namespace
 {
 
-bool IsMapReady(PublishedFileId_t id)
+// Смена workshop-карты (16.10, проверено опытами на канарейке srv-26 с отрезанным Steam):
+//  * host_workshop_map ВСЕГДА спрашивает Steam о последней версии карты; без связи команда —
+//    безопасная пустышка: сервер остаётся на текущей карте, отвечает, игроков не трогает;
+//  * карта, которую этот процесс уже загружал, грузится и без Steam;
+//  * обход Steam (`map <имя> customgamemode=<id> nomapvalidation=true`) вешает загрузку уровня.
+// Поэтому: одна заявка на смену; пока Steam недоступен — ждём связи и говорим об этом игрокам;
+// со связью — host_workshop_map и повтор, если карта не встала. Голосование не блокируем:
+// новая заявка заменяет старую. Обрывы связи со Steam на флоте — секунды, изредка ~2 мин.
+constexpr f64 kTickSeconds = 1.0;
+constexpr f64 kReissueSeconds = 20.0; // карта не встала за это время — команду повторяем
+constexpr f64 kGiveUpSeconds = 180.0; // покрывает обрыв связи со Steam до трёх минут
+constexpr f64 kStallSeconds = 60.0;   // идущая закачка без прироста байт дольше — сдаёмся
+constexpr f64 kRetryNoticeSeconds = 60.0;
+constexpr f64 kSteamNoticeSeconds = 3.0;
+constexpr f64 kStartMapGraceSeconds = 45.0; // штатная стартовая смена из командной строки
+
+// Причина немедленного отказа, выставленная колбэком закачки (карта удалена/скрыта).
+const char *s_failNow = nullptr;
+
+struct MapChangeRequest
 {
-	auto state = g_steamAPI.SteamUGC()->GetItemState(id);
-	return (state & (k_EItemStateInstalled | k_EItemStateNeedsUpdate | k_EItemStateDownloading | k_EItemStateDownloadPending))
-		   == k_EItemStateInstalled;
+	bool active = false;
+	PublishedFileId_t id = 0;
+	f64 since = 0;
+	f64 lastIssue = 0;
+	int issues = 0;
+	bool steamNoticeShown = false;
+	bool fromStartup = false;
+	u64 mapAtRequest = 0;  // workshop-карта сервера в момент заявки
+	u64 lastBytes = 0;     // прогресс закачки, которую ведёт Steam
+	f64 lastProgress = 0;  // когда байты в последний раз росли (или заявка создана)
+	f64 lastRetryNotice = 0;
+};
+
+MapChangeRequest s_req;
+
+void StartRequest(PublishedFileId_t id, bool fromStartup)
+{
+	s_failNow = nullptr;
+	s_req = {};
+	s_req.active = true;
+	s_req.id = id;
+	s_req.since = Plat_FloatTime();
+	s_req.lastProgress = s_req.since;
+	s_req.fromStartup = fromStartup;
+	s_req.mapAtRequest = g_pKZUtils->GetCurrentMapWorkshopID();
 }
 
-void SwitchToMap(PublishedFileId_t id)
+bool s_timerStarted = false;
+// Карты, на которых этот процесс уже стоял: движок помнит их сведения и меняет на них без
+// запроса в Steam (проверено 16.10 с отрезанным Steam) — для них связи не ждём.
+std::unordered_set<u64> s_hostedMaps;
+bool s_startMapChecked = false;
+f64 s_loadedAt = 0;
+
+f64 Now()
+{
+	return Plat_FloatTime();
+}
+
+bool SteamLoggedOn()
+{
+	return g_steamAPI.SteamGameServer() && g_steamAPI.SteamGameServer()->BLoggedOn();
+}
+
+void IssueHostWorkshopMap(PublishedFileId_t id)
 {
 	std::string command = "host_workshop_map " + std::to_string(id);
 	interfaces::pEngine->ServerCommand(command.c_str());
 }
 
-void StartDownload(PublishedFileId_t id)
+// Только CS:GO-версия айтема (<id>_legacy.bin без vpk): CS2 её не загрузит никогда.
+bool IsLegacyOnlyItem(PublishedFileId_t id)
 {
-	g_steamAPI.SteamUGC()->DownloadItem(id, true);
+	namespace fs = std::filesystem;
+	std::error_code ec;
+	fs::path dir = WorkshopContentDir() / std::to_string(id);
+	if (WorkshopContentDir().empty() || !fs::is_directory(dir, ec) || FindCachedItem(id, nullptr))
+	{
+		return false;
+	}
+	for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec))
+	{
+		if (it->path().filename().string().find("_legacy.bin") != std::string::npos)
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
+void Finish(const char *outcome)
+{
+	KZ_LOG_INFO(LogChannel::General, "[cyb] mapchange_%s id=%llu issues=%d elapsed=%.0f startup=%d\n", outcome, s_req.id, s_req.issues,
+				Now() - s_req.since, s_req.fromStartup);
+	s_req = {};
+}
+
+// Стартовая карта идёт `+host_workshop_map` из командной строки — раньше, чем подняты хуки и
+// связь со Steam; при сбое (EResult 2, 16.10 srv-26) сервер так и стоял на de_dust2.
+void CheckStartMap()
+{
+	if (s_startMapChecked || s_req.active || Now() - s_loadedAt < kStartMapGraceSeconds)
+	{
+		return;
+	}
+	s_startMapChecked = true;
+	if (g_pKZUtils->GetCurrentMapWorkshopID() != 0)
+	{
+		return;
+	}
+	const char *env = getenv("CS2_START_WORKSHOP_MAP");
+	PublishedFileId_t id = env ? strtoull(env, nullptr, 10) : 0;
+	if (id == 0)
+	{
+		return;
+	}
+	KZ_LOG_WARN(LogChannel::General, "[cyb] mapchange_start_map_missing id=%llu reason=still_on_official_map\n", id);
+	StartRequest(id, true);
+}
+
+f64 MapChangeTick()
+{
+	CheckStartMap();
+	if (u64 hosted = g_pKZUtils->GetCurrentMapWorkshopID())
+	{
+		s_hostedMaps.insert(hosted);
+	}
+	if (!s_req.active)
+	{
+		return kTickSeconds;
+	}
+	f64 now = Now();
+	u64 current = g_pKZUtils->GetCurrentMapWorkshopID();
+	if (s_failNow)
+	{
+		const char *reason = s_failNow;
+		s_failNow = nullptr;
+		if (!s_req.fromStartup)
+		{
+			KZLanguageService::PrintChatAll(true, "Mcustom - Unavailable", std::to_string(s_req.id).c_str());
+		}
+		KZ_LOG_WARN(LogChannel::General, "[cyb] mapchange_unavailable id=%llu reason=%s\n", s_req.id, reason);
+		Finish("failed_unavailable");
+		return kTickSeconds;
+	}
+	if (current == s_req.id)
+	{
+		Finish("done");
+		return kTickSeconds;
+	}
+	// Карту сменили мимо заявки (админ, другая команда) — не тащим сервер обратно.
+	if (current != 0 && current != s_req.mapAtRequest)
+	{
+		Finish("superseded_external");
+		return kTickSeconds;
+	}
+	// Закачку ведёт Steam (карты нет в кэше): пока растут байты, не торопим и не повторяем —
+	// повтор host_workshop_map поверх идущей закачки ничего не ускоряет.
+	bool downloading = false;
+	if (ISteamUGC *ugc = g_steamAPI.SteamUGC())
+	{
+		uint32 state = ugc->GetItemState(s_req.id);
+		downloading = state & (k_EItemStateDownloading | k_EItemStateDownloadPending);
+		uint64 done = 0, total = 0;
+		if (downloading && ugc->GetItemDownloadInfo(s_req.id, &done, &total) && done != s_req.lastBytes)  // != : Steam может начать закачку заново
+		{
+			s_req.lastBytes = done;
+			s_req.lastProgress = now;
+		}
+	}
+	if (!downloading && IsLegacyOnlyItem(s_req.id))
+	{
+		s_failNow = "legacy_csgo_item"; // разберётся следующий тик тем же путём, что и отказ закачки
+		return kTickSeconds;
+	}
+	bool stalled = now - s_req.lastProgress > kStallSeconds;
+	if (now - s_req.since > kGiveUpSeconds && (!downloading || stalled))
+	{
+		if (!s_req.fromStartup)
+		{
+			// ID, а не имя: игроку предлагают повторить `!mcustom <id>`.
+			KZLanguageService::PrintChatAll(true, "Mcustom - Exhausted", std::to_string(s_req.id).c_str());
+		}
+		Finish(!SteamLoggedOn() ? "failed_steam_offline" : downloading ? "failed_download_stalled" : "failed");
+		return kTickSeconds;
+	}
+	if (!SteamLoggedOn() && !s_hostedMaps.count(s_req.id))
+	{
+		if (!s_req.steamNoticeShown && now - s_req.since >= kSteamNoticeSeconds)
+		{
+			s_req.steamNoticeShown = true;
+			KZ_LOG_WARN(LogChannel::General, "[cyb] mapchange_wait id=%llu reason=steam_offline\n", s_req.id);
+			if (!s_req.fromStartup)
+			{
+				KZLanguageService::PrintChatAll(true, "Mcustom - Waiting Steam");
+			}
+		}
+		return kTickSeconds;
+	}
+	// Стартовую карту движок уже качает по `+host_workshop_map` из командной строки.
+	if (downloading && (s_req.issues > 0 || s_req.fromStartup))
+	{
+		return kTickSeconds;
+	}
+	if (s_req.issues == 0 || now - s_req.lastIssue >= kReissueSeconds)
+	{
+		s_req.issues++;
+		s_req.lastIssue = now;
+		KZ_LOG_INFO(LogChannel::General, "[cyb] mapchange_issue id=%llu attempt=%d\n", s_req.id, s_req.issues);
+		if (s_req.issues > 1 && !s_req.fromStartup && now - s_req.lastRetryNotice >= kRetryNoticeSeconds)
+		{
+			s_req.lastRetryNotice = now;
+			KZLanguageService::PrintChatAll(true, "Mcustom - Retry", s_req.issues);
+		}
+		IssueHostWorkshopMap(s_req.id);
+	}
+	return kTickSeconds;
+}
+
+void EnsureTimer()
+{
+	if (!s_timerStarted)
+	{
+		s_timerStarted = true;
+		// preserveMapChange: заявка переживает смену карты; realtime — тик и в паузе/гибернации.
+		StartTimer(MapChangeTick, kTickSeconds, true, true);
+	}
+}
+
+// Сбой закачки сам по себе состояние заявки не меняет (повтор — по таймеру), но EResult нужен в логе.
 static_function struct CustomMapDownloadHandler
 {
 	STEAM_GAMESERVER_CALLBACK_MANUAL(CustomMapDownloadHandler, OnDownloadResult, DownloadItemResult_t, m_CallbackDownloadItemResult);
@@ -275,92 +478,54 @@ static_function struct CustomMapDownloadHandler
 
 void CustomMapDownloadHandler::OnDownloadResult(DownloadItemResult_t *pParam)
 {
-	// Колбэк общий на весь сервер (в т.ч. чужие докачки, если появятся) — фильтруем по ID.
-	if (!s_state.pending || pParam->m_nPublishedFileId != s_state.workshopId)
+	if (s_req.active && pParam->m_nPublishedFileId == s_req.id && pParam->m_eResult != k_EResultOK)
 	{
-		return;
+		KZ_LOG_WARN(LogChannel::General, "[cyb] mapchange_download_failed id=%llu eresult=%d\n", s_req.id, pParam->m_eResult);
+		// Удалена или скрыта автором: ждать бессмысленно, говорим игрокам сразу (16.10: удалённая
+		// 3809766386 отвечала 15, затем 2 — и заявка висела бы 3 минуты).
+		// Только для карт вне кэша: vpk в кэше движок возьмёт через хук и без Steam.
+		if ((pParam->m_eResult == k_EResultFileNotFound || pParam->m_eResult == k_EResultAccessDenied) && !FindCachedItem(s_req.id, nullptr))
+		{
+			s_failNow = pParam->m_eResult == k_EResultFileNotFound ? "file_not_found" : "access_denied";
+		}
 	}
-
-	if (pParam->m_eResult == k_EResultOK)
-	{
-		KZ_LOG_INFO(LogChannel::General, "kz_customchangemap: попытка %d/%d для %llu — успех\n", s_state.attempt,
-					CUSTOMMAP_MAX_ATTEMPTS, s_state.workshopId);
-		SwitchToMap(s_state.workshopId);
-		s_state = {};
-		return;
-	}
-
-	KZ_LOG_WARN(LogChannel::General, "kz_customchangemap: попытка %d/%d для %llu — провал, EResult=%d\n", s_state.attempt,
-				CUSTOMMAP_MAX_ATTEMPTS, s_state.workshopId, pParam->m_eResult);
-
-	if (s_state.attempt >= CUSTOMMAP_MAX_ATTEMPTS)
-	{
-		// Здесь подставляется аргумент команды `!mcustom <...>`, которую игроку предлагают
-		// повторить, — поэтому ID, а не имя: по имени команда не сработает.
-		KZLanguageService::PrintChatAll(true, "Mcustom - Exhausted", std::to_string(s_state.workshopId).c_str());
-		s_state = {};
-		return;
-	}
-
-	s_state.attempt++;
-	KZLanguageService::PrintChatAll(true, "Mcustom - Retry", s_state.attempt, CUSTOMMAP_MAX_ATTEMPTS);
-	StartDownload(s_state.workshopId);
 }
 } // namespace
 
-// Настоящий движковый ConCommand, а НЕ SCMD: команду зовёт mcustom (CSSharp) через
-// Server.ExecuteCommand, т.е. серверным контекстом без игрока. SCMD-диспатч живёт в хуке
-// DispatchConCommand и требует controller — из серверной консоли/RCON такая команда
-// давала "Unknown command" (подтверждено вживую на srv-1, cyb.32).
-// Второй аргумент (display-имя карты) команда ПРИНИМАЕТ и игнорирует: он был нужен только
-// фразам «Скачиваю карту»/«Карта готова», а их убрали (#8). Через kz_customchangemap идёт
-// КАЖДАЯ смена workshop-карты (!rtv, !nominate, конец голосования), карта в норме уже лежит
-// на диске: «скачиваю» игроки читали как реальную закачку, а «готово» дублировало «Следующая
-// карта X» от GG1. Аргумент оставлен принимаемым намеренно: GG1/Mcustom его всё ещё передают,
-// и раскатка DLL с конфигом/GG1 не одномоментна.
-CON_COMMAND_F(kz_customchangemap, "Switch to a workshop map, downloading it with retries if needed (used by !mcustom). Usage: kz_customchangemap <workshop_id> [display_name (ignored)]", FCVAR_NONE)
+// Настоящий движковый ConCommand, а НЕ SCMD: его зовут GG1 и mcustom (CSSharp) серверным
+// контекстом без игрока, SCMD требует controller (cyb.33). Второй аргумент (имя карты)
+// принимается и игнорируется — GG1/Mcustom его передают.
+CON_COMMAND_F(kz_customchangemap, "Switch to a workshop map: waits for Steam if it is offline, retries until the map starts. Usage: kz_customchangemap <workshop_id> [display_name (ignored)]", FCVAR_NONE)
 {
-	// atoll — та же конвенция парсинга u64 из строкового аргумента, что в
-	// src/kz/anticheat/kz_anticheat.cpp:27.
-	PublishedFileId_t id = atoll(args.Arg(1));
+	PublishedFileId_t id = strtoull(args.Arg(1), nullptr, 10);
 	if (id == 0)
 	{
 		return;
 	}
-
-	if (IsMapReady(id))
+	EnsureTimer();
+	if (g_pKZUtils->GetCurrentMapWorkshopID() == id)
 	{
-		bool isCurrent = g_pKZUtils->GetCurrentMapWorkshopID() == static_cast<u32>(id);
-		if (isCurrent)
-		{
-			KZLanguageService::PrintChatAll(true, "Mcustom - Already Playing");
-			return;
-		}
-		// Карта уже готова — переключаемся сразу. Обнуляем state, чтобы более ранний
-		// pending-запрос (другой ID, чья докачка ещё идёт) не был подхвачен колбэком
-		// и не откатил это переключение на свою карту при своём успехе.
-		s_state = {};
-		SwitchToMap(id);
+		KZLanguageService::PrintChatAll(true, "Mcustom - Already Playing");
 		return;
 	}
-
-	if (s_state.pending && s_state.workshopId == id)
+	if (s_req.active && s_req.id != id)
 	{
-		// Повторный вызов на уже идущий запрос — просто печатаем текущий статус,
-		// попытки не сбрасываем и докачку не перезапускаем.
-		KZLanguageService::PrintChatAll(true, "Mcustom - Retry", s_state.attempt, CUSTOMMAP_MAX_ATTEMPTS);
-		return;
+		KZ_LOG_INFO(LogChannel::General, "[cyb] mapchange_superseded id=%llu by=%llu\n", s_req.id, id);
 	}
-
-	s_state.pending = true;
-	s_state.workshopId = id;
-	s_state.attempt = 1;
-	StartDownload(id);
+	if (!(s_req.active && s_req.id == id))
+	{
+		StartRequest(id, false);
+	}
+	MapChangeTick();
 }
 
-void KZ::misc::customchangemap::Init()
+void KZ::misc::customchangemap::Init(bool late)
 {
+	// Поздняя загрузка плагина (meta reload): сервер мог осознанно стоять на официальной карте.
+	s_startMapChecked = late;
 	s_downloadHandler.m_CallbackDownloadItemResult.Register(&s_downloadHandler, &CustomMapDownloadHandler::OnDownloadResult);
+	s_loadedAt = Now();
+	EnsureTimer();
 }
 
 void KZ::misc::customchangemap::OnSteamAPIActivated()

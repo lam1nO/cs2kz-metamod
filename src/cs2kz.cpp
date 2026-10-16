@@ -181,7 +181,7 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 	KZPistolService::Init();
 	KZWeaponService::Init();
 	KZ::misc::Init();
-	KZ::misc::customchangemap::Init();
+	KZ::misc::customchangemap::Init(late);
 	KZQuietService::Init();
 	KZInvisibleService::Init();
 	KZZtopwatchService::Init();
