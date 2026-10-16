@@ -11,9 +11,9 @@
 	// достаются CFormat во втором проходе.
 	"Mcustom - Retry"
 	{
-		"#format"	"attempt:d,total:d"
-		"en"	"The map has not started yet — retrying (attempt {attempt} of {total})…"
-		"ru"	"Карта ещё не встала — повторяю (попытка {attempt} из {total})…"
+		"#format"	"attempt:d"
+		"en"	"The map has not started yet — retrying (attempt {attempt})…"
+		"ru"	"Карта ещё не встала — повторяю (попытка {attempt})…"
 	}
 	// Здесь подставляется workshop-ID намеренно: это аргумент команды, которую игроку
 	// предлагают повторить — по названию карты !mcustom не сработает.

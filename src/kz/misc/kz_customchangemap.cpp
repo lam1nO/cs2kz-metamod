@@ -251,6 +251,8 @@ namespace
 constexpr f64 kTickSeconds = 1.0;
 constexpr f64 kReissueSeconds = 20.0; // карта не встала за это время — команду повторяем
 constexpr f64 kGiveUpSeconds = 180.0; // покрывает обрыв связи со Steam до трёх минут
+constexpr f64 kStallSeconds = 60.0;   // идущая закачка без прироста байт дольше — сдаёмся
+constexpr f64 kRetryNoticeSeconds = 60.0;
 constexpr f64 kSteamNoticeSeconds = 3.0;
 constexpr f64 kStartMapGraceSeconds = 45.0; // штатная стартовая смена из командной строки
 
@@ -263,9 +265,25 @@ struct MapChangeRequest
 	int issues = 0;
 	bool steamNoticeShown = false;
 	bool fromStartup = false;
+	u64 mapAtRequest = 0;  // workshop-карта сервера в момент заявки
+	u64 lastBytes = 0;     // прогресс закачки, которую ведёт Steam
+	f64 lastProgress = 0;  // когда байты в последний раз росли (или заявка создана)
+	f64 lastRetryNotice = 0;
 };
 
 MapChangeRequest s_req;
+
+void StartRequest(PublishedFileId_t id, bool fromStartup)
+{
+	s_req = {};
+	s_req.active = true;
+	s_req.id = id;
+	s_req.since = Plat_FloatTime();
+	s_req.lastProgress = s_req.since;
+	s_req.fromStartup = fromStartup;
+	s_req.mapAtRequest = g_pKZUtils->GetCurrentMapWorkshopID();
+}
+
 bool s_timerStarted = false;
 bool s_startMapChecked = false;
 f64 s_loadedAt = 0;
@@ -313,7 +331,7 @@ void CheckStartMap()
 		return;
 	}
 	KZ_LOG_WARN(LogChannel::General, "[cyb] mapchange_start_map_missing id=%llu reason=still_on_official_map\n", id);
-	s_req = {true, id, Now(), 0, 0, false, true};
+	StartRequest(id, true);
 }
 
 f64 MapChangeTick()
@@ -324,19 +342,41 @@ f64 MapChangeTick()
 		return kTickSeconds;
 	}
 	f64 now = Now();
-	if (g_pKZUtils->GetCurrentMapWorkshopID() == s_req.id)
+	u64 current = g_pKZUtils->GetCurrentMapWorkshopID();
+	if (current == s_req.id)
 	{
 		Finish("done");
 		return kTickSeconds;
 	}
-	if (now - s_req.since > kGiveUpSeconds)
+	// Карту сменили мимо заявки (админ, другая команда) — не тащим сервер обратно.
+	if (current != 0 && current != s_req.mapAtRequest)
+	{
+		Finish("superseded_external");
+		return kTickSeconds;
+	}
+	// Закачку ведёт Steam (карты нет в кэше): пока растут байты, не торопим и не повторяем —
+	// повтор host_workshop_map поверх идущей закачки ничего не ускоряет.
+	bool downloading = false;
+	if (ISteamUGC *ugc = g_steamAPI.SteamUGC())
+	{
+		uint32 state = ugc->GetItemState(s_req.id);
+		downloading = state & (k_EItemStateDownloading | k_EItemStateDownloadPending);
+		uint64 done = 0, total = 0;
+		if (downloading && ugc->GetItemDownloadInfo(s_req.id, &done, &total) && done > s_req.lastBytes)
+		{
+			s_req.lastBytes = done;
+			s_req.lastProgress = now;
+		}
+	}
+	bool stalled = now - s_req.lastProgress > kStallSeconds;
+	if (now - s_req.since > kGiveUpSeconds && (!downloading || stalled))
 	{
 		if (!s_req.fromStartup)
 		{
 			// ID, а не имя: игроку предлагают повторить `!mcustom <id>`.
 			KZLanguageService::PrintChatAll(true, "Mcustom - Exhausted", std::to_string(s_req.id).c_str());
 		}
-		Finish(SteamLoggedOn() ? "failed" : "failed_steam_offline");
+		Finish(!SteamLoggedOn() ? "failed_steam_offline" : downloading ? "failed_download_stalled" : "failed");
 		return kTickSeconds;
 	}
 	if (!SteamLoggedOn())
@@ -352,14 +392,19 @@ f64 MapChangeTick()
 		}
 		return kTickSeconds;
 	}
+	if (downloading && s_req.issues > 0)
+	{
+		return kTickSeconds;
+	}
 	if (s_req.issues == 0 || now - s_req.lastIssue >= kReissueSeconds)
 	{
 		s_req.issues++;
 		s_req.lastIssue = now;
 		KZ_LOG_INFO(LogChannel::General, "[cyb] mapchange_issue id=%llu attempt=%d\n", s_req.id, s_req.issues);
-		if (s_req.issues > 1 && !s_req.fromStartup)
+		if (s_req.issues > 1 && !s_req.fromStartup && now - s_req.lastRetryNotice >= kRetryNoticeSeconds)
 		{
-			KZLanguageService::PrintChatAll(true, "Mcustom - Retry", s_req.issues, static_cast<int>(kGiveUpSeconds / kReissueSeconds));
+			s_req.lastRetryNotice = now;
+			KZLanguageService::PrintChatAll(true, "Mcustom - Retry", s_req.issues);
 		}
 		IssueHostWorkshopMap(s_req.id);
 	}
@@ -413,13 +458,15 @@ CON_COMMAND_F(kz_customchangemap, "Switch to a workshop map: waits for Steam if 
 	}
 	if (!(s_req.active && s_req.id == id))
 	{
-		s_req = {true, id, Now(), 0, 0, false, false};
+		StartRequest(id, false);
 	}
 	MapChangeTick();
 }
 
-void KZ::misc::customchangemap::Init()
+void KZ::misc::customchangemap::Init(bool late)
 {
+	// Поздняя загрузка плагина (meta reload): сервер мог осознанно стоять на официальной карте.
+	s_startMapChecked = late;
 	s_downloadHandler.m_CallbackDownloadItemResult.Register(&s_downloadHandler, &CustomMapDownloadHandler::OnDownloadResult);
 	s_loadedAt = Now();
 	EnsureTimer();
