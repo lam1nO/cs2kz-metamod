@@ -256,6 +256,9 @@ constexpr f64 kRetryNoticeSeconds = 60.0;
 constexpr f64 kSteamNoticeSeconds = 3.0;
 constexpr f64 kStartMapGraceSeconds = 45.0; // штатная стартовая смена из командной строки
 
+// Причина немедленного отказа, выставленная колбэком закачки (карта удалена/скрыта).
+const char *s_failNow = nullptr;
+
 struct MapChangeRequest
 {
 	bool active = false;
@@ -275,6 +278,7 @@ MapChangeRequest s_req;
 
 void StartRequest(PublishedFileId_t id, bool fromStartup)
 {
+	s_failNow = nullptr;
 	s_req = {};
 	s_req.active = true;
 	s_req.id = id;
@@ -285,6 +289,9 @@ void StartRequest(PublishedFileId_t id, bool fromStartup)
 }
 
 bool s_timerStarted = false;
+// Карты, на которых этот процесс уже стоял: движок помнит их сведения и меняет на них без
+// запроса в Steam (проверено 16.10 с отрезанным Steam) — для них связи не ждём.
+std::unordered_set<u64> s_hostedMaps;
 bool s_startMapChecked = false;
 f64 s_loadedAt = 0;
 
@@ -302,6 +309,26 @@ void IssueHostWorkshopMap(PublishedFileId_t id)
 {
 	std::string command = "host_workshop_map " + std::to_string(id);
 	interfaces::pEngine->ServerCommand(command.c_str());
+}
+
+// Только CS:GO-версия айтема (<id>_legacy.bin без vpk): CS2 её не загрузит никогда.
+bool IsLegacyOnlyItem(PublishedFileId_t id)
+{
+	namespace fs = std::filesystem;
+	std::error_code ec;
+	fs::path dir = WorkshopContentDir() / std::to_string(id);
+	if (WorkshopContentDir().empty() || !fs::is_directory(dir, ec) || FindCachedItem(id, nullptr))
+	{
+		return false;
+	}
+	for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec))
+	{
+		if (it->path().filename().string().find("_legacy.bin") != std::string::npos)
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 void Finish(const char *outcome)
@@ -343,6 +370,22 @@ f64 MapChangeTick()
 	}
 	f64 now = Now();
 	u64 current = g_pKZUtils->GetCurrentMapWorkshopID();
+	if (current != 0)
+	{
+		s_hostedMaps.insert(current);
+	}
+	if (s_failNow || IsLegacyOnlyItem(s_req.id))
+	{
+		const char *reason = s_failNow ? s_failNow : "legacy_csgo_item";
+		s_failNow = nullptr;
+		if (!s_req.fromStartup)
+		{
+			KZLanguageService::PrintChatAll(true, "Mcustom - Unavailable", std::to_string(s_req.id).c_str());
+		}
+		KZ_LOG_WARN(LogChannel::General, "[cyb] mapchange_unavailable id=%llu reason=%s\n", s_req.id, reason);
+		Finish("failed_unavailable");
+		return kTickSeconds;
+	}
 	if (current == s_req.id)
 	{
 		Finish("done");
@@ -379,7 +422,7 @@ f64 MapChangeTick()
 		Finish(!SteamLoggedOn() ? "failed_steam_offline" : downloading ? "failed_download_stalled" : "failed");
 		return kTickSeconds;
 	}
-	if (!SteamLoggedOn())
+	if (!SteamLoggedOn() && !s_hostedMaps.count(s_req.id))
 	{
 		if (!s_req.steamNoticeShown && now - s_req.since >= kSteamNoticeSeconds)
 		{
@@ -433,6 +476,12 @@ void CustomMapDownloadHandler::OnDownloadResult(DownloadItemResult_t *pParam)
 	if (s_req.active && pParam->m_nPublishedFileId == s_req.id && pParam->m_eResult != k_EResultOK)
 	{
 		KZ_LOG_WARN(LogChannel::General, "[cyb] mapchange_download_failed id=%llu eresult=%d\n", s_req.id, pParam->m_eResult);
+		// Удалена или скрыта автором: ждать бессмысленно, говорим игрокам сразу (16.10: удалённая
+		// 3809766386 отвечала 15, затем 2 — и заявка висела бы 3 минуты).
+		if (pParam->m_eResult == k_EResultFileNotFound || pParam->m_eResult == k_EResultAccessDenied)
+		{
+			s_failNow = pParam->m_eResult == k_EResultFileNotFound ? "file_not_found" : "access_denied";
+		}
 	}
 }
 } // namespace

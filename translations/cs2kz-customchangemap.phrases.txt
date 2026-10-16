@@ -28,6 +28,12 @@
 		"en"	"Steam is unreachable right now — the map will change as soon as the connection is back. You can pick another map."
 		"ru"	"Steam сейчас недоступен — карта сменится, как только связь вернётся. Можно выбрать другую карту."
 	}
+	"Mcustom - Unavailable"
+	{
+		"#format"	"id:s"
+		"en"	"Map {darkred}{id}{default} is unavailable: removed, hidden by its author, or made for CS:GO. Pick another map."
+		"ru"	"Карта {darkred}{id}{default} недоступна: удалена, скрыта автором или сделана для CS:GO. Выберите другую."
+	}
 	"Mcustom - Already Playing"
 	{
 		"en"	"Already playing this map."
