@@ -364,19 +364,19 @@ void CheckStartMap()
 f64 MapChangeTick()
 {
 	CheckStartMap();
+	if (u64 hosted = g_pKZUtils->GetCurrentMapWorkshopID())
+	{
+		s_hostedMaps.insert(hosted);
+	}
 	if (!s_req.active)
 	{
 		return kTickSeconds;
 	}
 	f64 now = Now();
 	u64 current = g_pKZUtils->GetCurrentMapWorkshopID();
-	if (current != 0)
+	if (s_failNow)
 	{
-		s_hostedMaps.insert(current);
-	}
-	if (s_failNow || IsLegacyOnlyItem(s_req.id))
-	{
-		const char *reason = s_failNow ? s_failNow : "legacy_csgo_item";
+		const char *reason = s_failNow;
 		s_failNow = nullptr;
 		if (!s_req.fromStartup)
 		{
@@ -410,6 +410,11 @@ f64 MapChangeTick()
 			s_req.lastBytes = done;
 			s_req.lastProgress = now;
 		}
+	}
+	if (!downloading && IsLegacyOnlyItem(s_req.id))
+	{
+		s_failNow = "legacy_csgo_item"; // разберётся следующий тик тем же путём, что и отказ закачки
+		return kTickSeconds;
 	}
 	bool stalled = now - s_req.lastProgress > kStallSeconds;
 	if (now - s_req.since > kGiveUpSeconds && (!downloading || stalled))
@@ -478,7 +483,8 @@ void CustomMapDownloadHandler::OnDownloadResult(DownloadItemResult_t *pParam)
 		KZ_LOG_WARN(LogChannel::General, "[cyb] mapchange_download_failed id=%llu eresult=%d\n", s_req.id, pParam->m_eResult);
 		// Удалена или скрыта автором: ждать бессмысленно, говорим игрокам сразу (16.10: удалённая
 		// 3809766386 отвечала 15, затем 2 — и заявка висела бы 3 минуты).
-		if (pParam->m_eResult == k_EResultFileNotFound || pParam->m_eResult == k_EResultAccessDenied)
+		// Только для карт вне кэша: vpk в кэше движок возьмёт через хук и без Steam.
+		if ((pParam->m_eResult == k_EResultFileNotFound || pParam->m_eResult == k_EResultAccessDenied) && !FindCachedItem(s_req.id, nullptr))
 		{
 			s_failNow = pParam->m_eResult == k_EResultFileNotFound ? "file_not_found" : "access_denied";
 		}
