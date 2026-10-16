@@ -12,16 +12,21 @@
 	"Mcustom - Retry"
 	{
 		"#format"	"attempt:d,total:d"
-		"en"	"Still downloading (attempt {attempt} of {total})…"
-		"ru"	"Всё ещё качаю (попытка {attempt} из {total})…"
+		"en"	"The map has not started yet — retrying (attempt {attempt} of {total})…"
+		"ru"	"Карта ещё не встала — повторяю (попытка {attempt} из {total})…"
 	}
 	// Здесь подставляется workshop-ID намеренно: это аргумент команды, которую игроку
 	// предлагают повторить — по названию карты !mcustom не сработает.
 	"Mcustom - Exhausted"
 	{
 		"#format"	"id:s"
-		"en"	"Failed to download the map — Steam connection issue. Try {darkred}!mcustom {id}{default} again in a minute."
-		"ru"	"Не удалось загрузить карту — проблема связи со Steam. Попробуйте {darkred}!mcustom {id}{default} ещё раз через минуту."
+		"en"	"Could not switch to the map. Pick another one or try {darkred}!mcustom {id}{default} again later."
+		"ru"	"Не удалось сменить карту. Выберите другую или попробуйте {darkred}!mcustom {id}{default} позже."
+	}
+	"Mcustom - Waiting Steam"
+	{
+		"en"	"Steam is unreachable right now — the map will change as soon as the connection is back. You can pick another map."
+		"ru"	"Steam сейчас недоступен — карта сменится, как только связь вернётся. Можно выбрать другую карту."
 	}
 	"Mcustom - Already Playing"
 	{
