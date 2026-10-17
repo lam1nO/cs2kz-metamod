@@ -866,7 +866,9 @@ JumpType KZJumpstatsService::DetermineJumpType()
 		Jump &previousJump = this->jumps[this->jumps.Count() - 2];
 		if (this->player->duckBugged)
 		{
-			if (previousJump.IsValid() && previousJump.GetOffset() < JS_EPSILON && previousJump.GetJumpType() == JumpType_LongJump)
+			// cyber: |offset| как в GOKZ — без модуля JB засчитывался после LJ, закончившегося ниже отрыва.
+			if (previousJump.IsValid() && !previousJump.chainBroken && fabs(previousJump.GetOffset()) < JS_EPSILON
+				&& previousJump.GetJumpType() == JumpType_LongJump)
 			{
 				return JumpType_Jumpbug;
 			}
@@ -878,7 +880,7 @@ JumpType KZJumpstatsService::DetermineJumpType()
 		if (this->HitBhop() && !this->HitDuckbugRecently())
 		{
 			// Check for no offset
-			if (previousJump.DidHitHead() || !previousJump.IsValid())
+			if (previousJump.DidHitHead() || !previousJump.IsValid() || previousJump.chainBroken)
 			{
 				return JumpType_Invalid;
 			}
@@ -949,6 +951,7 @@ void KZJumpstatsService::OnProcessMovement()
 	if (this->player->triggerService->ShouldDisableJumpstats())
 	{
 		this->InvalidateJumpstats("Disabled By Map");
+		this->BreakJumpChain();
 	}
 	this->CheckValidMoveType();
 	this->DetectExternalModifications();
@@ -1137,6 +1140,7 @@ void KZJumpstatsService::HandleTeleport()
 	Jump *jump = &this->jumps.Tail();
 	if (jump->AlreadyEnded())
 	{
+		this->BreakJumpChain();
 		return;
 	}
 
@@ -1160,6 +1164,14 @@ void KZJumpstatsService::InvalidateJumpstats(const char *reason)
 	if (this->jumps.Count() > 0 && !this->jumps.Tail().AlreadyEnded())
 	{
 		this->jumps.Tail().Invalidate(reason);
+	}
+}
+
+void KZJumpstatsService::BreakJumpChain()
+{
+	if (this->jumps.Count() > 0 && this->jumps.Tail().AlreadyEnded())
+	{
+		this->jumps.Tail().chainBroken = true;
 	}
 }
 
@@ -1219,4 +1231,8 @@ void KZJumpstatsService::OnProcessMovementPost()
 	this->ladderHopThisMove = false;
 	this->TrackJumpstatsVariables();
 	this->DetectWater();
+	if (this->player->GetPlayerPawn()->m_flWaterLevel() > 0.0f)
+	{
+		this->BreakJumpChain();
+	}
 }

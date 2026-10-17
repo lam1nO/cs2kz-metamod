@@ -255,6 +255,10 @@ public:
 	bool hitHead {};
 	bool valid = true;
 	bool ended {};
+	// cyber: после приземления был телепорт/noclip/base velocity/вода/зона без jumpstats —
+	// следующий прыжок не продолжает цепочку (BH/MBH/WJ/JB), как в GOKZ (там такие события
+	// инвалидируют прыжок трекера и на земле). Сам прыжок уже засчитан, его valid не трогаем.
+	bool chainBroken {};
 
 	f32 release;
 
@@ -541,6 +545,7 @@ public:
 	void OnStartTouchGround();
 	void HandleTeleport();
 	void InvalidateJumpstats(const char *reason = NULL);
+	void BreakJumpChain();
 	void OnAirAccelerate();
 	void OnAirAcceleratePost(Vector wishdir, f32 wishspeed, f32 accel);
 

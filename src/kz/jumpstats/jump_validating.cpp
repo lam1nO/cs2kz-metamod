@@ -6,6 +6,7 @@ void KZJumpstatsService::CheckValidMoveType()
 	if (this->player->GetPlayerPawn()->m_MoveType() != MOVETYPE_WALK && this->player->GetPlayerPawn()->m_MoveType() != MOVETYPE_LADDER)
 	{
 		this->InvalidateJumpstats("Invalid movetype");
+		this->BreakJumpChain();
 	}
 }
 
@@ -85,10 +86,12 @@ void KZJumpstatsService::DetectExternalModifications()
 	if ((this->player->currentMoveData->m_vecAbsOrigin - this->player->moveDataPost.m_vecAbsOrigin).LengthSqr() > JS_TELEPORT_DISTANCE_SQUARED)
 	{
 		this->InvalidateJumpstats("Externally modified");
+		this->BreakJumpChain();
 	}
 	if (this->player->GetPlayerPawn()->m_vecBaseVelocity().Length() > 0.0f || this->player->GetPlayerPawn()->m_fFlags() & FL_BASEVELOCITY)
 	{
 		this->InvalidateJumpstats("Base velocity detected");
+		this->BreakJumpChain();
 	}
 	if (this->player->GetPlayerPawn()->m_flGravityScale() != 1 || this->player->GetPlayerPawn()->m_flActualGravityScale() != 1)
 	{
