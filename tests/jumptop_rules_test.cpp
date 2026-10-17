@@ -18,12 +18,28 @@ int main()
 	assert(!PassesDistanceRules(typeLadderJump, 49.9f, 0.0f));
 	assert(!PassesDistanceRules(1, 100.0f, 0.0f)); // бхоп 100 — не LAJ, порог 186
 
-	// Понижение: до -eps можно, ниже — нет; вверх можно; LAJ — исключение.
+	// Понижение: до -eps можно, ниже — нет; вверх можно.
 	assert(PassesDistanceRules(0, 250.0f, -0.03125f));
 	assert(!PassesDistanceRules(0, 250.0f, -0.04f));
 	assert(PassesDistanceRules(3, 270.0f, 8.0f));
-	assert(PassesDistanceRules(typeLadderJump, 120.0f, -30.0f));
 	assert(!PassesDistanceRules(5, 250.0f, -1.0f)); // LAH — не исключение
+
+	// LAJ: отрыв с лестницы чуть ниже/выше её верха — допуск 2 юнита; на площадку ниже — нет
+	// (LAJ 300 с offset -175 на kz_divert); выше — можно.
+	assert(PassesDistanceRules(typeLadderJump, 200.0f, -2.0f));
+	assert(!PassesDistanceRules(typeLadderJump, 200.0f, -2.01f));
+	assert(!PassesDistanceRules(typeLadderJump, 300.0f, -175.0f));
+	assert(PassesDistanceRules(typeLadderJump, 120.0f, 30.0f));
+
+	// NaN/inf не проходят: сравнения с NaN ложны, и он проскочил бы оба порога.
+	const float nan = __builtin_nanf("");
+	const float inf = __builtin_inff();
+	assert(!PassesDistanceRules(0, nan, 0.0f));
+	assert(!PassesDistanceRules(0, 250.0f, nan));
+	assert(!PassesDistanceRules(typeLadderJump, nan, 0.0f));
+	assert(!PassesDistanceRules(typeLadderJump, 200.0f, nan));
+	assert(!PassesDistanceRules(0, inf, 0.0f));
+	assert(!PassesDistanceRules(1, 250.0f, -inf));
 
 	// PB по дистанции — строго больше.
 	assert(IsBetter(false, 0, 250.1, 0, 250.0));

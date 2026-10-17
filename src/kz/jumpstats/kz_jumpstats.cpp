@@ -1,3 +1,5 @@
+#include <cmath>
+
 #include "kz/kz.h"
 #include "utils/utils.h"
 #include "utils/simplecmds.h"
@@ -176,6 +178,12 @@ f32 AACall::CalcIdealGain()
 
 void Strafe::UpdateCollisionVelocityChange(f32 delta)
 {
+	// cyber: изредка приходит NaN (5 прыжков CKZ в джамптопе с gain = null) — один такой тик
+	// навсегда превращает gain/gainEff прыжка в NaN.
+	if (!std::isfinite(delta))
+	{
+		return;
+	}
 	if (delta < 0.0f)
 	{
 		this->collisionLoss -= delta;
@@ -381,6 +389,19 @@ void Jump::Init()
 	this->originalJumpType = this->jumpType;
 
 	this->valid = this->GetJumpPlayer()->styleServices.Count() == 0;
+
+	// cyber: точка отрыва с лестницы — lastValidLadderOrigin из хука LadderMove. Если лестница не была
+	// пройдена этим хуком (movetype LADDER выставлен в обход, сразу после спавна/телепорта), там (0,0,0)
+	// или старая лестница с другого конца карты: дистанция считается от неё (LAJ 432 с пре 0, kz_houbou 15.10).
+	if (this->jumpType == JumpType_LadderJump)
+	{
+		Vector origin;
+		this->player->GetOrigin(&origin);
+		if ((origin - this->takeoffOrigin).LengthSqr() > JS_MAX_LADDER_TAKEOFF_DRIFT * JS_MAX_LADDER_TAKEOFF_DRIFT)
+		{
+			this->Invalidate("Invalid ladder takeoff");
+		}
+	}
 
 	// Block / failstat / edge fields
 	this->block = 0.0f;
@@ -666,6 +687,13 @@ void Jump::End()
 		{
 			this->valid = false;
 			this->jumpType = JumpType_Invalid;
+		}
+		// cyber: LAJ — только на площадку на уровне отрыва, как в GOKZ (TraceLadderOffset: приземление на
+		// высоте верха лестницы). Спрыгнув на площадку ниже, летишь дольше и дальше: в топе были LAJ 300
+		// с offset -175..-197. Выше отрыва — можно: так только труднее.
+		else if (this->jumpType == JumpType_LadderJump && this->GetOffset() < -JS_MAX_LADDERJUMP_OFFSET)
+		{
+			this->Invalidate("Ladder jump landed lower");
 		}
 	}
 	// cyber: edge отрыва считаем на каждом прыжке, а не только при найденном блоке
@@ -1071,6 +1099,28 @@ void KZJumpstatsService::EndJump()
 	{
 		KZ::jumptop::OnJumpFinish(this->player, jump);
 	}
+}
+
+void KZJumpstatsService::OnStartTouchGround()
+{
+	// cyber: приземление, у которого не было отрыва. Телепорт карты (trigger_teleport) срабатывает внутри
+	// движения и сам снимает FL_ONGROUND, поэтому переход земля→воздух не ловится ни в ProcessMovement, ни в
+	// CategorizePosition: AddJump не зовётся, хвостом остаётся давно закончившийся прыжок. Полёт после
+	// телепорта (в т.ч. разгон noclip'ом до 1000+ u/s) тогда ничем не инвалидируется, а перф на приземлении
+	// становится BH/MBH от прошлого валидного прыжка: мод режет пре с ~1150 до 350, и чем выше входящая
+	// скорость, тем выше пре (kz_spacemario_h, CKZ, 11.10). Такой полёт заводим отдельным недействительным
+	// прыжком — следующий отрыв видит previousJump !IsValid() и цепочку не продолжает.
+	if (!KZ::replaysystem::IsReplayBot(this->player) && this->jumps.Count() > 0 && this->jumps.Tail().AlreadyEnded())
+	{
+		Jump untracked(this->player);
+		untracked.jumpType = JumpType_FullInvalid;
+		untracked.originalJumpType = JumpType_FullInvalid;
+		untracked.ended = true;
+		untracked.Invalidate("Untracked takeoff");
+		this->jumps.AddToTail(untracked);
+		return;
+	}
+	this->EndJump();
 }
 
 void KZJumpstatsService::HandleTeleport()

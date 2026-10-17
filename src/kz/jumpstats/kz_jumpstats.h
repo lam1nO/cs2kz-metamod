@@ -39,6 +39,7 @@ enum DistanceTier : u8
 #define IGNORE_JUMP_TIME                (0.2f + 0.001f) // To take floating errors into account
 #define JS_EPSILON                      0.03125f
 #define JS_MAX_LADDERJUMP_OFFSET        2.0f
+#define JS_MAX_LADDER_TAKEOFF_DRIFT     64.0f
 #define JS_MAX_BHOP_GROUND_TIME         0.05f
 #define JS_MAX_DUCKBUG_RESET_TIME       0.05f
 #define JS_MAX_NOCLIP_RESET_TIME        0.4f
@@ -537,6 +538,7 @@ public:
 	void AddJump();
 	void UpdateJump();
 	void EndJump();
+	void OnStartTouchGround();
 	void HandleTeleport();
 	void InvalidateJumpstats(const char *reason = NULL);
 	void OnAirAccelerate();

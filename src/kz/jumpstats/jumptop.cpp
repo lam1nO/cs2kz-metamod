@@ -566,6 +566,7 @@ static_assert(KZ::jumptop::rules::typeJumpbug == JumpType_Jumpbug);
 static_assert(KZ::jumptop::rules::minDistance == (float)JS_MIN_BLOCK_DISTANCE);
 static_assert(KZ::jumptop::rules::minLadderDistance == (float)JS_MIN_LAJ_BLOCK_DISTANCE);
 static_assert(KZ::jumptop::rules::offsetEpsilon == JS_EPSILON);
+static_assert(KZ::jumptop::rules::maxLadderDrop == JS_MAX_LADDERJUMP_OFFSET);
 
 void KZ::jumptop::Init()
 {
