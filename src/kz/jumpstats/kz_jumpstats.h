@@ -543,7 +543,7 @@ public:
 	void UpdateJump();
 	void EndJump();
 	void OnStartTouchGround();
-	void HandleTeleport();
+	void HandleTeleport(bool moved = true);
 	void InvalidateJumpstats(const char *reason = NULL);
 	void BreakJumpChain();
 	void OnAirAccelerate();

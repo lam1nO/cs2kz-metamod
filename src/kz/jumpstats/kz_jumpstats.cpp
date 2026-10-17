@@ -1111,22 +1111,17 @@ void KZJumpstatsService::OnStartTouchGround()
 	// CategorizePosition: AddJump не зовётся, хвостом остаётся давно закончившийся прыжок. Полёт после
 	// телепорта (в т.ч. разгон noclip'ом до 1000+ u/s) тогда ничем не инвалидируется, а перф на приземлении
 	// становится BH/MBH от прошлого валидного прыжка: мод режет пре с ~1150 до 350, и чем выше входящая
-	// скорость, тем выше пре (kz_spacemario_h, CKZ, 11.10). Такой полёт заводим отдельным недействительным
-	// прыжком — следующий отрыв видит previousJump !IsValid() и цепочку не продолжает.
+	// скорость, тем выше пре (kz_spacemario_h, CKZ, 11.10). Приземлились без отрыва —
+	// рвём цепочку: следующий отрыв не продолжит её от прыжка до телепорта.
 	if (!KZ::replaysystem::IsReplayBot(this->player) && this->jumps.Count() > 0 && this->jumps.Tail().AlreadyEnded())
 	{
-		Jump untracked(this->player);
-		untracked.jumpType = JumpType_FullInvalid;
-		untracked.originalJumpType = JumpType_FullInvalid;
-		untracked.ended = true;
-		untracked.Invalidate("Untracked takeoff");
-		this->jumps.AddToTail(untracked);
+		this->BreakJumpChain();
 		return;
 	}
 	this->EndJump();
 }
 
-void KZJumpstatsService::HandleTeleport()
+void KZJumpstatsService::HandleTeleport(bool moved)
 {
 	if (KZ::replaysystem::IsReplayBot(this->player))
 	{
@@ -1140,7 +1135,11 @@ void KZJumpstatsService::HandleTeleport()
 	Jump *jump = &this->jumps.Tail();
 	if (jump->AlreadyEnded())
 	{
-		this->BreakJumpChain();
+		// Только углы (SendFullUpdate, чекпоинт без позиции) — не телепорт для цепочки.
+		if (moved)
+		{
+			this->BreakJumpChain();
+		}
 		return;
 	}
 
