@@ -867,7 +867,7 @@ JumpType KZJumpstatsService::DetermineJumpType()
 		if (this->player->duckBugged)
 		{
 			// cyber: |offset| как в GOKZ — без модуля JB засчитывался после LJ, закончившегося ниже отрыва.
-			if (previousJump.IsValid() && !previousJump.chainBroken && fabs(previousJump.GetOffset()) < JS_EPSILON
+			if (previousJump.IsValid() && !previousJump.chainBroken && fabs(previousJump.GetLandingOffset()) < JS_EPSILON
 				&& previousJump.GetJumpType() == JumpType_LongJump)
 			{
 				return JumpType_Jumpbug;
@@ -884,7 +884,7 @@ JumpType KZJumpstatsService::DetermineJumpType()
 			{
 				return JumpType_Invalid;
 			}
-			if (fabs(previousJump.GetOffset()) < JS_EPSILON)
+			if (fabs(previousJump.GetLandingOffset()) < JS_EPSILON)
 			{
 				switch (previousJump.GetJumpType())
 				{
@@ -993,7 +993,7 @@ bool KZJumpstatsService::ValidWeirdJumpDropDistance()
 		return false;
 	}
 	Jump &previousJump = this->jumps[this->jumps.Count() - 2];
-	return previousJump.GetOffset() > -1 * JS_MAX_WEIRDJUMP_FALL_OFFSET;
+	return previousJump.GetLandingOffset() > -1 * JS_MAX_WEIRDJUMP_FALL_OFFSET;
 }
 
 bool KZJumpstatsService::GroundSpeedCappedRecently()

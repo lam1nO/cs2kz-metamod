@@ -359,6 +359,14 @@ public:
 		return adjustedLandingOrigin.z - adjustedTakeoffOrigin.z;
 	}
 
+	// cyber: реальная высота приземления относительно отрыва. GetOffset у failstat отдаёт офсет точки провала (~0),
+	// и цепочка шла дальше после падения на любую глубину: LJ мимо блока, падение 1920 юнитов с разгоном
+	// стрейфами до 570, перф → BH с пре 313 (kz_sp1_bloodyljs_v2). GOKZ в End пересчитывает offset по факту.
+	f32 GetLandingOffset()
+	{
+		return adjustedLandingOrigin.z - adjustedTakeoffOrigin.z;
+	}
+
 	f32 GetDistance(bool useDistbugFix = true, bool disableAddDist = false, i32 floorLevel = -1);
 
 	f32 GetMaxSpeed()
