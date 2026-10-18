@@ -26,6 +26,7 @@ extern const Color MHUD_DEF_SHOWPOS_COLOR;
 extern const Color MHUD_DEF_PERF_COLOR;
 extern const Color MHUD_DEF_JUMPBUG_COLOR;
 extern const Color MHUD_DEF_CJ_COLOR;
+extern const Color MHUD_DEF_JOF_COLOR;
 extern const Color MHUD_DEF_TIMER_TP_COLOR;
 extern const Color MHUD_DEF_TIMER_PRO_COLOR;
 extern const Color MHUD_DEF_TIMER_PAUSED_COLOR;
@@ -62,8 +63,32 @@ enum class LayoutElement
 	ShowPos,
 	Course,
 	RunType,
+	// Бейджи прыжка (18.10): каждый — свой элемент со своим тумблером, цветом и местом. По
+	// умолчанию прицеплены к престрейфу (полоса mhud_ind, см. MHUDLayoutPrefs::badgeAttach);
+	// отцепленный бейдж — своя панель mhud_b_* со всеми полями элемента. Порядок — как
+	// JUMP_IND_IDS (layout/mhud.cpp) и KZ_JUMP_BADGES: PERF, JB, CJ, JOF.
+	BadgePerf,
+	BadgeJb,
+	BadgeCj,
+	BadgeJof,
 	Count
 };
+
+#define KZ_JUMP_BADGES 4
+constexpr i32 KZ_BADGE_FIRST = (i32)LayoutElement::BadgePerf;
+
+inline bool IsBadgeElement(i32 e)
+{
+	return e >= KZ_BADGE_FIRST && e < KZ_BADGE_FIRST + KZ_JUMP_BADGES;
+}
+
+// Ключ «рядом с престрейфом» бейджа (BadgePerf … BadgeJof по порядку).
+extern const char *const BADGE_ATTACH_KEYS[KZ_JUMP_BADGES];
+// Ключ цвета бейджа и прежний общий ключ (цвет перфа/джампбага престрейфа, CJ скорости), из
+// которого цвет берётся, пока у игрока своего нет: до 18.10 бейдж красился им.
+extern const char *const BADGE_COLOR_KEYS[KZ_JUMP_BADGES];
+extern const char *const BADGE_LEGACY_COLOR_KEYS[KZ_JUMP_BADGES];
+extern const Color *const BADGE_DEF_COLORS[KZ_JUMP_BADGES];
 
 struct LayoutElementDef
 {
@@ -126,6 +151,9 @@ struct SpeedInfo
 	// Ушёл с края, а не отпрыгнул (и не с лестницы) — апстримный walkedOff. Валиден только
 	// вместе с hasPrespeed; читает его mhudPrespeedHideWalkOff (см. UpdatePrespeedElement).
 	bool walkedOff {};
+	// JOF — край площадки на отрыве, юниты (Jump::takeoffEdge); -1 — нет (с середины блока,
+	// уход с края, лестница, реплей-бот без джампстатов).
+	f32 jof {-1.0f};
 	// Ключ взлёта для бейджей PERF/JB/CJ (UpdatePrespeedElement): perfing и jumpbug гаснут на
 	// приземлении, а престрейф ещё висит KZ_HUD_ON_GROUND_THRESHOLD — флаги защёлкиваются на
 	// взлёт, узнаваемый по takeoffTime, и обновляются только пока игрок в воздухе.
@@ -170,6 +198,9 @@ struct MHUDLayoutPrefs
 	Color showPosColor {};
 	Color courseColor {};
 	Color leadProgressColor {};
+	// Бейджи прыжка (BadgePerf … BadgeJof): свой цвет и «рядом с престрейфом».
+	Color badgeColor[KZ_JUMP_BADGES] {};
+	bool badgeAttach[KZ_JUMP_BADGES] {};
 
 	bool timerDetailed {};
 	// Элемент PB/WR (редактор `!hud`): четыре независимых ячейки (hudPbNub/hudPbPro/hudWrNub/
@@ -188,7 +219,7 @@ struct MHUDLayoutPrefs
 	bool prespeedPrecise {};     // %.2f вместо %.0f
 	bool prespeedBrackets {};    // «(784)» вместо «784»
 	bool prespeedHideWalkOff {}; // не показывать, когда игрок ушёл с края, а не отпрыгнул
-	bool indicators {};          // hudIndicators: бейджи PERF/JB/CJ под престрейфом
+	bool indicators {};          // hudIndicators: общий тумблер бейджей PERF/JB/CJ/JOF
 	bool keysOverlapEnabled {};
 	// Клавиши (Task 5, транш "клавиши"): опции апстрима, ранее не заводившиеся — см. mhud.cpp.
 	bool keysOverlapAxis {}; // красить только пару клавиш конфликтующей оси, не весь контейнер
@@ -598,7 +629,7 @@ public:
 	// подъём = один заход каждого игрока с потерей его персональных настроек худа.
 	// Ревизии 2 (худ v2, 14.10) и 3 (дефолты владельца, 15.10) ВЫБОРОЧНЫЕ: меняют только то,
 	// что игрок не трогал (см. defaults.cpp).
-	static constexpr i32 HUD_DEFAULTS_REV = 4;
+	static constexpr i32 HUD_DEFAULTS_REV = 5;
 	static constexpr const char *HUD_DEFAULTS_REV_KEY = "hudDefaultsRev";
 	// Выборочная ревизия 2 (худ v2) для игроков с ревизией 1 — layout/defaults.cpp.
 	void ApplyHudDefaultsRev2(i32 &written);
@@ -606,6 +637,8 @@ public:
 	void ApplyHudDefaultsRev3(i32 &written);
 	// Ревизия 4 (15.10): меню реплея 75 % ВСЕМ, прогресс к PB/WR тем, кто его не двигал — layout/defaults.cpp.
 	void ApplyHudDefaultsRev4(i32 &written);
+	// Ревизия 5 (18.10): свой цвет бейджей PERF/JB/CJ — из прежнего общего (перф/джампбаг престрейфа, CJ скорости).
+	void ApplyHudDefaultsRev5(i32 &written);
 	// Перезаписывает ключи ВИДА худа новыми дефолтами, если применённая ревизия старше
 	// HUD_DEFAULTS_REV, и поднимает маркер (реализация и полный список ключей —
 	// hud/layout/defaults.cpp). В набор НЕ входят mhudMimicSpec (поведение спектейта),
@@ -1011,18 +1044,20 @@ private:
 		// Худ v2: слово типа рана на своём лейбле rt2_text.
 		std::string runTypeText {};
 		const char *runTypeFont {};
-		// Бейджи прыжка под престрейфом: полоса mhud_ind и ind_perf/ind_jb/ind_cj (hidden, кегль).
+		// Бейджи прыжка у престрейфа: полоса mhud_ind и ind_perf/ind_jb/ind_cj/ind_jof (hidden, кегль).
 		i32 indStripHidden {-1};
-		i32 indHidden[3] {-1, -1, -1};
-		i32 indSize[3] {INT_MIN, INT_MIN, INT_MIN};
-		// Цвет индикатора — из настроек престрейфа/скорости (perf, jumpbug, cj): класс pal-fg-N.
-		const char *indColorClass[3] {};
-		const char *indFontClass[3] {};
+		i32 indHidden[KZ_JUMP_BADGES] {-1, -1, -1, -1};
+		i32 indSize[KZ_JUMP_BADGES] {INT_MIN, INT_MIN, INT_MIN, INT_MIN};
+		// Цвет бейджа — свой преф (mhudBadge*Color): класс pal-fg-N.
+		const char *indColorClass[KZ_JUMP_BADGES] {};
+		const char *indFontClass[KZ_JUMP_BADGES] {};
+		std::string indJofText {};
 		// Защёлка флагов взлёта (см. SpeedInfo::takeoffTime): чей взлёт и какой.
 		bool indLatchValid {};
 		i32 indLatchSlot {-1};
 		f32 indLatchTakeoff {};
-		bool indLatch[3] {};
+		bool indLatch[KZ_JUMP_BADGES] {};
+		f32 indLatchJof {-1.0f};
 	};
 
 	LayoutExtraState layoutExtra {};
@@ -1047,7 +1082,9 @@ private:
 	void ApplyShowPosLines(CCSCustomHudLayout *layout, const char *prefix, LayoutExtraState &extra, const char *pos, const char *ang,
 						   const MHUDLayoutPrefs::Element &style, const Color &color);
 	// Бейджи PERF/JB/CJ престрейфа (lit: perf, jb, cj); show=false гасит полосу целиком.
-	void ApplyJumpIndicators(CCSCustomHudLayout *layout, const char *prefix, LayoutExtraState &extra, bool show, const bool (&lit)[3], i32 size);
+	// lit — горит ли бейдж на этом взлёте (PERF/JB/CJ/JOF), jof — значение для текста JOF.
+	void ApplyJumpIndicators(CCSCustomHudLayout *layout, const char *prefix, LayoutExtraState &extra, const MHUDLayoutPrefs &prefs, bool show,
+							 const bool (&lit)[KZ_JUMP_BADGES], f32 jof);
 	void ApplyLeadProgressParts(CCSCustomHudLayout *layout, const char *prefix, LayoutExtraState &extra, i32 percent,
 								const MHUDLayoutPrefs::Element &style, const Color &color);
 	// Запись элемента на ЛЮБЫЕ id и ЛЮБОЙ кэш (реплика редактора: e_*/x_* на сущности меню).
@@ -1257,7 +1294,12 @@ private:
 		bool etOn[KZ_EDITOR_LIST_ROWS] {};
 		bool elSel[KZ_EDITOR_LIST_ROWS] {};
 		bool eSel[KZ_EDITOR_ITEMS] {};
-		bool retiredRowHidden {};
+		// Строки el10..el13 (бейджи): разметка заводит el11..13 скрытыми — снимаем один раз.
+		bool elHidden[KZ_EDITOR_LIST_ROWS] {true, true, true, true, true, true, true, true, true, true, true, true, true, true};
+		// Строки «Позиция»/«Вид» панели свойств (ep_gt_pos, ep_prow_pos/step/size, ep_gt_look,
+		// ep_prow_font/op/outline): у прицепленного к престрейфу бейджа их нет — место и вид у
+		// него от престрейфа. Разметка заводит их видимыми.
+		bool epFreeRowHidden[8] {};
 		bool propsHidden {true};
 		// Вариант B (контракт port2): has-sel/dock-l на edit_root, tag-dn на e_*, open на ep_font,
 		// hidden на заголовках пустых групп и строке цвета без основного цвета.

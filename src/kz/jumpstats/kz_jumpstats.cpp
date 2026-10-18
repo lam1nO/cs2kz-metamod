@@ -445,6 +445,15 @@ void Jump::Init()
 	{
 		this->release = 0;
 	}
+
+	// cyber: JOF для бейджа худа — только у настоящего прыжка: уход с края (Fall) отрыва не имеет,
+	// у прыжка с лестницы край — сама лестница (это не jumpoff).
+	this->takeoffEdge = -1.0f;
+	if (this->jumpType != JumpType_LadderJump && this->jumpType != JumpType_Fall && this->jumpType != JumpType_FullInvalid
+		&& this->takeoffVelocity.Length2DSqr() > 1.0f)
+	{
+		this->takeoffEdge = this->TraceTakeoffEdge();
+	}
 }
 
 void Jump::UpdateAACallPost(Vector wishdir, f32 wishspeed, f32 accel)

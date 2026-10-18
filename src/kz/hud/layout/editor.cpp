@@ -43,7 +43,9 @@
 #include "tier0/memdbgon.h"
 
 // Реплика элемента в cyber/options.xml. Порядок = LayoutElement (Timer, Speed, Prespeed, Keys,
-// Checkpoint, LeadProgress, PbWr, ShowPos, Course, RunType) — он же порядок el{i}/et{i}.
+// Checkpoint, LeadProgress, PbWr, ShowPos, Course, RunType, бейджи PERF/JB/CJ/JOF) — он же
+// порядок el{i}/et{i}. Реплика бейджа e_b_* — только отцепленного: прицепленный виден в полосе
+// x_mhud_ind внутри e_prespeed.
 struct EditorReplicaDef
 {
 	const char *buttonId; // e_<name>: позиция, прозрачность, hidden, sel
@@ -66,6 +68,10 @@ static_global const EditorReplicaDef EDITOR_REPLICA[(i32)LayoutElement::Count] =
 	{"e_showpos",      "x_mhud_showpos",      "pos",          "tag_showpos",      "HUD Editor - Element ShowPos"},
 	{"e_course",       "x2_mhud_course",      "course",       "tag_course",       "HUD Editor - Element Course"},
 	{"e_runtype",      "x2_mhud_runtype",     "runtype",      "tag_runtype",      "HUD Editor - Element RunType"},
+	{"e_b_perf",       "x2_mhud_b_perf",      "b_perf",       "tag_b_perf",       "HUD Editor - Element BadgePerf"},
+	{"e_b_jb",         "x2_mhud_b_jb",        "b_jb",         "tag_b_jb",         "HUD Editor - Element BadgeJb"},
+	{"e_b_cj",         "x2_mhud_b_cj",        "b_cj",         "tag_b_cj",         "HUD Editor - Element BadgeCj"},
+	{"e_b_jof",        "x2_mhud_b_jof",       "b_jof",        "tag_b_jof",        "HUD Editor - Element BadgeJof"},
 };
 // clang-format on
 
@@ -161,6 +167,12 @@ static_global const EditorToggleDef EDITOR_PBWR_TOGGLES[] =
 	{"hudWrNub", "HUD - Menu Label WrNub", true, NULL},
 	{"hudWrPro", "HUD - Menu Label WrPro", true, NULL},
 };
+// «Рядом с престрейфом»: вкл — бейдж в полосе у числа (место, кегль и шрифт престрейфа), выкл —
+// свой элемент. Клик по сетке у прицепленного бейджа сам его отцепляет (HandleEditorClick).
+static_global const EditorToggleDef EDITOR_BADGE_PERF_TOGGLES[] = {{"mhudBadgePerfAttach", "HUD Editor - Prop BadgeAttach", true, NULL}};
+static_global const EditorToggleDef EDITOR_BADGE_JB_TOGGLES[] = {{"mhudBadgeJbAttach", "HUD Editor - Prop BadgeAttach", true, NULL}};
+static_global const EditorToggleDef EDITOR_BADGE_CJ_TOGGLES[] = {{"mhudBadgeCjAttach", "HUD Editor - Prop BadgeAttach", true, NULL}};
+static_global const EditorToggleDef EDITOR_BADGE_JOF_TOGGLES[] = {{"mhudBadgeJofAttach", "HUD Editor - Prop BadgeAttach", true, NULL}};
 // clang-format on
 static_assert(KZ_ARRAYSIZE(EDITOR_KEYS_TOGGLES) <= KZ_EDITOR_TROWS, "строк ep_trow в разметке восемь");
 static_assert(KZ_ARRAYSIZE(EDITOR_PRESPEED_TOGGLES) <= KZ_EDITOR_TROWS, "строк ep_trow в разметке восемь");
@@ -184,6 +196,10 @@ static_function const EditorToggleDef *GetEditorToggles(i32 element, i32 &count)
 		KZ_EDITOR_TOGGLES_CASE(Prespeed, EDITOR_PRESPEED_TOGGLES)
 		KZ_EDITOR_TOGGLES_CASE(Keys, EDITOR_KEYS_TOGGLES)
 		KZ_EDITOR_TOGGLES_CASE(PbWr, EDITOR_PBWR_TOGGLES)
+		KZ_EDITOR_TOGGLES_CASE(BadgePerf, EDITOR_BADGE_PERF_TOGGLES)
+		KZ_EDITOR_TOGGLES_CASE(BadgeJb, EDITOR_BADGE_JB_TOGGLES)
+		KZ_EDITOR_TOGGLES_CASE(BadgeCj, EDITOR_BADGE_CJ_TOGGLES)
+		KZ_EDITOR_TOGGLES_CASE(BadgeJof, EDITOR_BADGE_JOF_TOGGLES)
 		default:
 			count = 0;
 			return NULL;
@@ -244,6 +260,7 @@ static_function bool HasEditorStepper(i32 sel)
 #define KZ_EDITOR_DELTA_PLACEHOLDER 0.312
 #define KZ_EDITOR_PROGRESS_PLACEHOLDER 38
 #define KZ_EDITOR_PROGRESS_TEXT "38%"
+#define KZ_EDITOR_JOF_PLACEHOLDER 1.4f
 // Док (список + свойства) уходит влево (dock-l), если выбранный элемент правее 15% от центра и
 // ниже верха дока: верх 96 px из 1080 = (96 - 540) / 10.8 ≈ -41 (контракт port2 §4).
 #define KZ_EDITOR_DOCK_LEFT_X 15
@@ -419,12 +436,12 @@ void KZHUDService::RenderEditor()
 		this->SetMenuBoolClass(layout, r.buttonId, "tag-dn", this->menuApplied.eTagDn[i],
 							   KZ::hudfmt::ClampEditorPos(prefs.elements[i].y) <= KZ_EDITOR_TAG_DOWN_Y);
 	}
-	// Реплики прицела больше нет (прицел родной, см. KZQuietService::UpdateWeaponCamera).
-	this->SetMenuBoolClass(layout, KZ_EDITOR_RETIRED_ROW, "hidden", this->menuApplied.retiredRowHidden, true);
 	// sel — строка выбранного элемента, on — по-прежнему «включён»: это разные
-	// состояния, у выключенного элемента выбранной строка быть может.
+	// состояния, у выключенного элемента выбранной строка быть может. hidden — строки бейджей
+	// (el10..el13): разметка прячет новые строки от старых KZ, снимаем здесь.
 	for (i32 i = 0; i < KZ_EDITOR_LIST_ROWS; i++)
 	{
+		this->SetMenuBoolClass(layout, ElPanel(i), "hidden", this->menuApplied.elHidden[i], false);
 		this->SetMenuBoolClass(layout, ElPanel(i), "sel", this->menuApplied.elSel[i], i == this->editorSelected);
 	}
 
@@ -522,6 +539,16 @@ void KZHUDService::RenderEditor()
 				this->SetMenuBoolClass(layout, EDITOR_SG_IDS[k], "on", this->menuApplied.epSgOn[k], current == seg->values[k]);
 			}
 		}
+		// Прицепленный бейдж: место, кегль, шрифт, прозрачность и обводка — от престрейфа, строк нет.
+		{
+			static const char *const freeRows[8] = {"ep_gt_pos",  "ep_prow_pos", "ep_prow_step", "ep_prow_size",
+													"ep_gt_look", "ep_prow_font", "ep_prow_op",  "ep_prow_outline"};
+			const bool attached = IsBadgeElement(sel) && prefs.badgeAttach[sel - KZ_BADGE_FIRST];
+			for (i32 k = 0; k < 8; k++)
+			{
+				this->SetMenuBoolClass(layout, freeRows[k], "hidden", this->menuApplied.epFreeRowHidden[k], attached);
+			}
+		}
 		this->SetMenuBoolClass(layout, "ep_srow", "hidden", this->menuApplied.epSrowHidden, !HasEditorStepper(sel));
 		this->SetMenuBoolClass(layout, "ep_grow", "hidden", this->menuApplied.epGrowHidden, seg == NULL);
 		// Заголовки пустых групп: «Цвет» — ни основного, ни дельты, ни доп. цветов (Тип рана);
@@ -602,10 +629,20 @@ void KZHUDService::RenderEditorReplica(CCSCustomHudLayout *layout, bool tickOnly
 	apply(LayoutElement::Speed, true, prefs.speedPrecise ? "327.00" : "327", prefs.speed);
 	const char *prespeed = prefs.prespeedBrackets ? (prefs.prespeedPrecise ? "(291.00)" : "(291)") : (prefs.prespeedPrecise ? "291.00" : "291");
 	apply(LayoutElement::Prespeed, true, prespeed, prefs.prespeed);
-	// Плейсхолдер бейджей: горят PERF и CJ — оба вида (перф/джамбаг и присед) видны сразу.
-	const bool indLit[3] = {true, false, true};
-	this->ApplyJumpIndicators(layout, "x_", this->editorExtra, prefs.elements[(i32)LayoutElement::Prespeed].enabled && prefs.indicators, indLit,
-							  prefs.elements[(i32)LayoutElement::Prespeed].size);
+	// Плейсхолдер бейджей: горят PERF, CJ и JOF 1.4 — перф/джамбаг, присед и край видны сразу. JB
+	// с PERF одновременно не горит, но выбранный JB показываем вместо PERF — иначе его не видно.
+	{
+		const bool jbSel = this->editorSelected == (i32)LayoutElement::BadgeJb;
+		const bool indLit[KZ_JUMP_BADGES] = {prefs.indicators && !jbSel, prefs.indicators && jbSel, prefs.indicators, prefs.indicators};
+		this->ApplyJumpIndicators(layout, "x_", this->editorExtra, prefs, prefs.elements[(i32)LayoutElement::Prespeed].enabled, indLit,
+								  KZ_EDITOR_JOF_PLACEHOLDER);
+		for (i32 b = 0; b < KZ_JUMP_BADGES; b++)
+		{
+			char badgeText[24];
+			FormatJumpBadgeText(b, KZ_EDITOR_JOF_PLACEHOLDER, badgeText, sizeof(badgeText));
+			apply((LayoutElement)(KZ_BADGE_FIRST + b), indLit[b] && !prefs.badgeAttach[b], badgeText, prefs.badgeColor[b]);
+		}
+	}
 
 	// Клавиши: нажаты W, A, J (порядок C W J A S D, как KEY_PANELS в mhud.cpp).
 	apply(LayoutElement::Keys, true, NULL, prefs.keys);
@@ -888,8 +925,14 @@ bool KZHUDService::HandleEditorClick(const char *id)
 		// элементом сетки не бывает — места на экране у него нет.
 		if (IsEditorElement(this->editorSelected))
 		{
+			// Прицепленный бейдж места не имеет: клик по сетке его отцепляет и ставит туда.
+			const i32 sel = this->editorSelected;
+			if (IsBadgeElement(sel) && this->GetOwnLayoutPrefs().badgeAttach[sel - KZ_BADGE_FIRST])
+			{
+				this->player->optionService->SetPreferenceBool(BADGE_ATTACH_KEYS[sel - KZ_BADGE_FIRST], false);
+			}
 			// Сетка — проценты от левого-верхнего угла, преф — от центра (см. шапку).
-			this->EditorSetPos(this->editorSelected, x - 50, y - 50);
+			this->EditorSetPos(sel, x - 50, y - 50);
 		}
 		return true;
 	}

@@ -41,7 +41,7 @@ void KZHUDService::ApplyHudDefaults()
 	// Ревизия 1 у игрока уже есть — ревизии 2 и 3 ВЫБОРОЧНЫЕ: трогают только то, что игрок не
 	// менял. Цепочкой 1 → 2 → 3 (у каждой свой пакет и свой маркер). Без ревизии вообще — полная
 	// перезапись ниже, уже текущими дефолтами, и сразу маркер HUD_DEFAULTS_REV.
-	if (storedRev >= 1 && storedRev <= 3)
+	if (storedRev >= 1 && storedRev <= 4)
 	{
 		if (storedRev == 1)
 		{
@@ -53,7 +53,12 @@ void KZHUDService::ApplyHudDefaults()
 			this->ApplyHudDefaultsRev3(written);
 			written = 0;
 		}
-		this->ApplyHudDefaultsRev4(written);
+		if (storedRev <= 3)
+		{
+			this->ApplyHudDefaultsRev4(written);
+			written = 0;
+		}
+		this->ApplyHudDefaultsRev5(written);
 		return;
 	}
 	{
@@ -170,6 +175,10 @@ void KZHUDService::ApplyHudDefaults()
 			{"mhudShowPosColor", &MHUD_DEF_SHOWPOS_COLOR},
 			{"mhudCourseColor", &MHUD_DEF_BASE_COLOR},
 			{"mhudLeadProgressColor", &MHUD_DEF_LEADPROGRESS_COLOR},
+			{"mhudBadgePerfColor", &MHUD_DEF_PERF_COLOR},
+			{"mhudBadgeJbColor", &MHUD_DEF_JUMPBUG_COLOR},
+			{"mhudBadgeCjColor", &MHUD_DEF_CJ_COLOR},
+			{"mhudBadgeJofColor", &MHUD_DEF_JOF_COLOR},
 		};
 
 		for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(kColors); i++)
@@ -213,8 +222,10 @@ namespace
 		const char *font;
 	};
 
-	// Порядок — LayoutElement (Timer … RunType).
-	const Rev1Element HUD_REV1[(i32)LayoutElement::Count] = {
+	// Порядок — LayoutElement (Timer … RunType). Бейджи прыжка (18.10) появились после ревизии 1
+	// и в выборочных ревизиях 2–4 не участвуют — таблица только на первые десять элементов.
+	constexpr i32 HUD_REV1_ELEMENTS = 10;
+	const Rev1Element HUD_REV1[HUD_REV1_ELEMENTS] = {
 		{0, 35, 24, "lato-bold"},          // Timer
 		{0, 8, 34, "lato-bold"},           // Speed
 		{0, 12, 22, "lato-bold"},          // Prespeed
@@ -226,7 +237,7 @@ namespace
 		{0, -39, 13, "stratum2-bold"},     // Course
 		{0, 40, 15, "stratum2-bold"},      // RunType
 	};
-	static_assert((i32)LayoutElement::Count == 10, "HUD_REV1: новый элемент — добавить его значения ревизии 1");
+	static_assert((i32)LayoutElement::RunType + 1 == HUD_REV1_ELEMENTS, "HUD_REV1: элементы ревизии 1 — Timer … RunType");
 
 	// До 28.09 «Прогресс» жил под таймером и выключенным — такие значения тоже «не менял».
 	constexpr f64 HUD_REV0_LEADPROGRESS_X = 0;
@@ -450,4 +461,38 @@ void KZHUDService::ApplyHudDefaultsRev4(i32 &written)
 		opts->SetPreferenceInt(HUD_DEFAULTS_REV_KEY, 4);
 	}
 	KZ_LOG_INFO(LogChannel::Option, "[cyb] hud_defaults_rev4 steam_id=%llu keys=%i\n", this->player->GetSteamId64(false), written);
+}
+
+// === Ревизия 5: свой цвет бейджей прыжка (18.10) ============================================
+// До 18.10 бейдж PERF красился цветом перфа престрейфа, JB — цветом джампбага престрейфа, CJ —
+// цветом CJ скорости (решение 27.09). Теперь у каждого бейджа свой ключ; чтобы ни у кого бейдж
+// не перекрасился, прежнее значение переносится в новый ключ, если своего там ещё нет. Наличие
+// ключа — чтением с двумя разными дефолтами (HasPreference нет, см. GetElementOutlinePref).
+// У JOF прежнего цвета нет — его дефолт читается из кода.
+void KZHUDService::ApplyHudDefaultsRev5(i32 &written)
+{
+	KZOptionService *opts = this->player->optionService;
+	{
+		KZOptionService::BatchScope batch(opts);
+		for (i32 b = 0; b < KZ_JUMP_BADGES; b++)
+		{
+			if (!BADGE_LEGACY_COLOR_KEYS[b])
+			{
+				continue;
+			}
+			const bool present = opts->GetPreferenceInt(BADGE_COLOR_KEYS[b], 0) == opts->GetPreferenceInt(BADGE_COLOR_KEYS[b], 1);
+			if (present)
+			{
+				continue;
+			}
+			// Свои префы, не MHUDSettingsSource(): миграция — про хранилище игрока (как в ревизии 3).
+			const Color &def = *BADGE_DEF_COLORS[b];
+			const i64 packed =
+				opts->GetPreferenceInt(BADGE_LEGACY_COLOR_KEYS[b], ((i64)def.r() << 24) | ((i64)def.g() << 16) | ((i64)def.b() << 8) | (i64)def.a());
+			opts->SetPreferenceInt(BADGE_COLOR_KEYS[b], packed);
+			written++;
+		}
+		opts->SetPreferenceInt(HUD_DEFAULTS_REV_KEY, 5);
+	}
+	KZ_LOG_INFO(LogChannel::Option, "[cyb] hud_defaults_rev5 steam_id=%llu keys=%i\n", this->player->GetSteamId64(false), written);
 }

@@ -74,6 +74,17 @@ inline bool LayoutOutlineDefault(LayoutElement element)
 // Ревизия 3: бейдж крупнее (был 12).
 #define LAYOUT_DEF_RUNTYPE_SIZE 16
 
+// Бейджи прыжка PERF/JB/CJ/JOF (18.10) — отдельные элементы. По умолчанию «рядом с престрейфом»
+// (mhudBadge*Attach): полоса mhud_ind у числа, кегль и шрифт престрейфа — как было до 18.10.
+// X/Y/кегль/шрифт ниже действуют, только когда игрок отцепил бейдж (клик по сетке редактора
+// или тумблер). Дефолты свободного режима — справа от престрейфа, в его строке.
+#define LAYOUT_DEF_BADGE_PERF_X 5
+#define LAYOUT_DEF_BADGE_JB_X   5
+#define LAYOUT_DEF_BADGE_CJ_X   8
+#define LAYOUT_DEF_BADGE_JOF_X  12
+#define LAYOUT_DEF_BADGE_Y      LAYOUT_DEF_PRESPEED_Y
+#define LAYOUT_DEF_BADGE_SIZE   LAYOUT_DEF_PRESPEED_SIZE
+
 #define LAYOUT_SIZE_MIN 8
 #define LAYOUT_SIZE_MAX 100
 
@@ -135,6 +146,9 @@ i32 SnapReplayMenuScale(i32 percent);
 // Отказ SetHasClass/SetDialogVariableString по упору в HUD_LAYOUT_MAX_INTERNED_STRINGS —
 // общий лог для entity.cpp и rpmenu.cpp (реализация в entity.cpp).
 void LogHudInternFailure(KZPlayer *player, const char *panelId, const char *className);
+
+// Текст бейджа прыжка (badge — индекс BadgePerf … BadgeJof от KZ_BADGE_FIRST), layout/mhud.cpp.
+void FormatJumpBadgeText(i32 badge, f32 jof, char *out, u32 len);
 
 // id панели с префиксом: "" — как есть (настоящий худ), "x_" — реплика в редакторе !hud
 // (cyber/options.xml повторяет mhud.xml под теми же id с префиксом). buf — буфер вызывающего:

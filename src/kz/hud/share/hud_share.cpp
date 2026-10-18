@@ -543,7 +543,8 @@ static_function bool ApplyVisibilityFloor(KZPlayer *player)
 		// игрока нет загруженного маршрута `!lead` (kz/lead), то есть у почти всех и почти
 		// всегда. Учитывать его здесь — значит считать худ видимым по элементу, которого на
 		// экране нет.
-		if ((LayoutElement)e == LayoutElement::LeadProgress)
+		// Бейджи прыжка — тоже: они горят только на взлёте.
+		if ((LayoutElement)e == LayoutElement::LeadProgress || IsBadgeElement(e))
 		{
 			continue;
 		}

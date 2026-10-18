@@ -43,8 +43,21 @@ extern const LayoutElementDef LAYOUT_ELEMENTS[(i32)LayoutElement::Count] =
 	{"mhud_showpos",    "mhud_showpos",    "pos",        "hudShowPos",    "mhudShowPosX",    "mhudShowPosY",    "mhudShowPosSize",    "mhudShowPosFont",    "mhudShowPosOutline",    "mhudShowPosOpacity",    LAYOUT_DEF_SHOWPOS_X,    LAYOUT_DEF_SHOWPOS_Y,    LAYOUT_DEF_SHOWPOS_SIZE,    true, "stratum2-mono"},
 	{"mhud_course",     "mhud_course",     "course",     "hudCourse",     "mhudCourseX",     "mhudCourseY",     "mhudCourseSize",     "mhudCourseFont",     "mhudCourseOutline",     "mhudCourseOpacity",     LAYOUT_DEF_COURSE_X,     LAYOUT_DEF_COURSE_Y,     LAYOUT_DEF_COURSE_SIZE,     true, LAYOUT_V2_FONT},
 	{"mhud_runtype",    "mhud_runtype",    "runtype",    "hudRunType",    "mhudRunTypeX",    "mhudRunTypeY",    "mhudRunTypeSize",    "mhudRunTypeFont",    "mhudRunTypeOutline",    "mhudRunTypeOpacity",    LAYOUT_DEF_RUNTYPE_X,    LAYOUT_DEF_RUNTYPE_Y,    LAYOUT_DEF_RUNTYPE_SIZE,    true, LAYOUT_V2_FONT},
+	// Бейджи прыжка (18.10): свободная панель mhud_b_* (mhud2.xml). Прицепленный к престрейфу
+	// бейдж — это ind_* в полосе mhud_ind, его пишет ApplyJumpIndicators (layout/mhud.cpp).
+	{"mhud_b_perf",     "mhud_b_perf",     "b_perf",     "hudBadgePerf",  "mhudBadgePerfX",  "mhudBadgePerfY",  "mhudBadgePerfSize",  "mhudBadgePerfFont",  "mhudBadgePerfOutline",  "mhudBadgePerfOpacity",  LAYOUT_DEF_BADGE_PERF_X, LAYOUT_DEF_BADGE_Y,      LAYOUT_DEF_BADGE_SIZE,      true, LAYOUT_DEFAULT_FONT},
+	{"mhud_b_jb",       "mhud_b_jb",       "b_jb",       "hudBadgeJb",    "mhudBadgeJbX",    "mhudBadgeJbY",    "mhudBadgeJbSize",    "mhudBadgeJbFont",    "mhudBadgeJbOutline",    "mhudBadgeJbOpacity",    LAYOUT_DEF_BADGE_JB_X,   LAYOUT_DEF_BADGE_Y,      LAYOUT_DEF_BADGE_SIZE,      true, LAYOUT_DEFAULT_FONT},
+	{"mhud_b_cj",       "mhud_b_cj",       "b_cj",       "hudBadgeCj",    "mhudBadgeCjX",    "mhudBadgeCjY",    "mhudBadgeCjSize",    "mhudBadgeCjFont",    "mhudBadgeCjOutline",    "mhudBadgeCjOpacity",    LAYOUT_DEF_BADGE_CJ_X,   LAYOUT_DEF_BADGE_Y,      LAYOUT_DEF_BADGE_SIZE,      true, LAYOUT_DEFAULT_FONT},
+	{"mhud_b_jof",      "mhud_b_jof",      "b_jof",      "hudBadgeJof",   "mhudBadgeJofX",   "mhudBadgeJofY",   "mhudBadgeJofSize",   "mhudBadgeJofFont",   "mhudBadgeJofOutline",   "mhudBadgeJofOpacity",   LAYOUT_DEF_BADGE_JOF_X,  LAYOUT_DEF_BADGE_Y,      LAYOUT_DEF_BADGE_SIZE,      true, LAYOUT_DEFAULT_FONT},
 };
 // clang-format on
+
+const char *const BADGE_ATTACH_KEYS[KZ_JUMP_BADGES] = {"mhudBadgePerfAttach", "mhudBadgeJbAttach", "mhudBadgeCjAttach", "mhudBadgeJofAttach"};
+const char *const BADGE_COLOR_KEYS[KZ_JUMP_BADGES] = {"mhudBadgePerfColor", "mhudBadgeJbColor", "mhudBadgeCjColor", "mhudBadgeJofColor"};
+// У JOF прежнего цвета нет (бейдж новый) — NULL.
+const char *const BADGE_LEGACY_COLOR_KEYS[KZ_JUMP_BADGES] = {"mhudPrespeedPerfColor", "mhudPrespeedJumpbugColor", "mhudSpeedCjColor", NULL};
+const Color *const BADGE_DEF_COLORS[KZ_JUMP_BADGES] = {&MHUD_DEF_PERF_COLOR, &MHUD_DEF_JUMPBUG_COLOR, &MHUD_DEF_CJ_COLOR, &MHUD_DEF_JOF_COLOR};
+static_assert(KZ_BADGE_FIRST + KZ_JUMP_BADGES == (i32)LayoutElement::Count, "бейджи — последние элементы, массивы BADGE_* по их порядку");
 
 // === Запись классов на сущность (глобальный слой — у нас сущность персональная, но апстримный
 // API работает с глобальным layout-состоянием, per-player состояние нам не нужно) =============

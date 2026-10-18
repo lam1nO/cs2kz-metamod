@@ -611,30 +611,35 @@ void Jump::CalcAlwaysEdge()
 	}
 	else
 	{
-		// Standard: trace backward along takeoff velocity to find the block face
-		Vector vel = this->takeoffVelocity;
-		i32 coordDist = fabsf(vel.x) < fabsf(vel.y) ? 1 : 0;
-		i32 distSign = vel[coordDist] > 0.0f ? 1 : -1;
+		this->edge = this->TraceTakeoffEdge();
+	}
+}
 
-		this->edge = -1.0f;
+// Standard: trace backward along takeoff velocity to find the block face. Только мир и точка/скорость
+// отрыва — поэтому годится и в момент отрыва (cyber: JOF-бейдж худа, Jump::Init), и на приземлении.
+f32 Jump::TraceTakeoffEdge()
+{
+	Vector vel = this->takeoffVelocity;
+	i32 coordDist = fabsf(vel.x) < fabsf(vel.y) ? 1 : 0;
+	i32 distSign = vel[coordDist] > 0.0f ? 1 : -1;
 
-		// Sweep back from slightly behind the takeoff edge
-		Vector traceEnd = this->adjustedTakeoffOrigin;
-		traceEnd[coordDist] -= 16.0f * distSign;
-		traceEnd.z -= 1.0f;
+	// Sweep back from slightly behind the takeoff edge
+	Vector traceEnd = this->adjustedTakeoffOrigin;
+	traceEnd[coordDist] -= 16.0f * distSign;
+	traceEnd.z -= 1.0f;
 
-		Vector traceStart = traceEnd;
-		traceStart[coordDist] += 20.0f * distSign;
+	Vector traceStart = traceEnd;
+	traceStart[coordDist] += 20.0f * distSign;
 
-		Vector hitPos;
-		if (TraceRayPosition(this->player, traceStart, traceEnd, hitPos))
+	Vector hitPos;
+	if (TraceRayPosition(this->player, traceStart, traceEnd, hitPos))
+	{
+		if (fabsf(hitPos[coordDist] - traceStart[coordDist]) > JS_EPSILON)
 		{
-			if (fabsf(hitPos[coordDist] - traceStart[coordDist]) > JS_EPSILON)
-			{
-				this->edge = fabsf(hitPos[coordDist] - this->adjustedTakeoffOrigin[coordDist] + (16.0f - JS_OFFSET_EPSILON) * distSign);
-			}
+			return fabsf(hitPos[coordDist] - this->adjustedTakeoffOrigin[coordDist] + (16.0f - JS_OFFSET_EPSILON) * distSign);
 		}
 	}
+	return -1.0f;
 }
 
 // ============================================================

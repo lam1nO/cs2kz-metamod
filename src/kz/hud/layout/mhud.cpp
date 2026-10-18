@@ -245,18 +245,20 @@ void KZHUDService::UpdatePrespeedElement(CCSCustomHudLayout *layout, KZPlayer *s
 	// info.hasPrespeed — тот же useTakeoff/showTakeoff, что и в остальных ветках худа (общий
 	// GetSpeedInfo, R3): без взлёта престрейфу нечего показывать. walkedOff — уход с края
 	// вместо прыжка: с mhudPrespeedHideWalkOff такой «престрейф» не показываем (апстрим:
-	// origin/master:src/kz/hud/layout/mhud.cpp:82).
-	const bool show = this->IsLayoutElementEnabled(LayoutElement::Prespeed) && info.hasPrespeed && !(prefs.prespeedHideWalkOff && info.walkedOff);
+	// origin/master:src/kz/hud/layout/mhud.cpp:82). Бейджи живут ровно по тому же условию.
+	const bool takeoffShown = info.hasPrespeed && !(prefs.prespeedHideWalkOff && info.walkedOff);
+	const bool show = this->IsLayoutElementEnabled(LayoutElement::Prespeed) && takeoffShown;
 
-	// Бейджи PERF/JB/CJ живут ровно столько же, сколько число престрейфа их взлёта. perfing
+	// Бейджи PERF/JB/CJ/JOF живут ровно столько же, сколько число престрейфа их взлёта. perfing
 	// (inPerf) и jumpbug (fromDuckbug) сбрасываются на приземлении, а престрейф висит ещё
 	// KZ_HUD_ON_GROUND_THRESHOLD — поэтому флаги защёлкиваются: новый взлёт (другой takeoffTime
 	// или другой источник при спектейте) берёт их заново, в воздухе они обновляются (KZT
 	// выставляет перф сам и не обязательно в тик отрыва), на земле — заморожены. JB важнее PERF,
-	// как и в цвете престрейфа выше: одновременно горят максимум два (JB/PERF + CJ).
+	// как и в цвете престрейфа выше. Защёлка — по взлёту, а не по показу числа: отцепленный
+	// бейдж виден и при выключенном престрейфе.
 	LayoutExtraState &extra = this->layoutExtra;
 	const i32 slot = source->GetPlayerSlot().Get();
-	if (!show)
+	if (!takeoffShown)
 	{
 		extra.indLatchValid = false;
 	}
@@ -268,35 +270,74 @@ void KZHUDService::UpdatePrespeedElement(CCSCustomHudLayout *layout, KZPlayer *s
 		extra.indLatch[0] = info.perfing && !info.jumpbug;
 		extra.indLatch[1] = info.jumpbug;
 		extra.indLatch[2] = info.crouchJump;
+		extra.indLatch[3] = info.jof >= 0.0f;
+		extra.indLatchJof = info.jof;
 	}
-	this->ApplyJumpIndicators(layout, "", extra, show && prefs.indicators, extra.indLatch, prefs.elements[(i32)LayoutElement::Prespeed].size);
+	const bool lit = takeoffShown && extra.indLatchValid && prefs.indicators;
+	bool litNow[KZ_JUMP_BADGES];
+	for (i32 b = 0; b < KZ_JUMP_BADGES; b++)
+	{
+		litNow[b] = lit && extra.indLatch[b];
+	}
+	// Прицепленные — полосой у числа (только когда число на экране), отцепленные — своими элементами.
+	this->ApplyJumpIndicators(layout, "", extra, prefs, show, litNow, extra.indLatchJof);
 	this->UpdateLayoutElement(layout, LayoutElement::Prespeed, show, text, color, force);
+	for (i32 b = 0; b < KZ_JUMP_BADGES; b++)
+	{
+		const LayoutElement e = (LayoutElement)(KZ_BADGE_FIRST + b);
+		char badgeText[24];
+		FormatJumpBadgeText(b, extra.indLatchJof, badgeText, sizeof(badgeText));
+		const bool showFree = litNow[b] && !prefs.badgeAttach[b] && this->IsLayoutElementEnabled(e);
+		this->UpdateLayoutElement(layout, e, showFree, badgeText, prefs.badgeColor[b], force);
+	}
 }
 
-// Общая для худа (prefix "") и реплики редактора ("x_") запись бейджей прыжка: hidden на каждом
-// бейдже и на полосе mhud_ind (пустая полоса не должна держать место под престрейфом), кегль
-// элемента — на каждом бейдже (font-size ребёнку через класс корня не наследуется). Без анимаций:
-// бейдж появляется и гаснет в тот же тик, что и число.
-static_global const char *const JUMP_IND_IDS[3] = {"ind_perf", "ind_jb", "ind_cj"};
+// Текст бейджа: PERF/JB/CJ — слово, JOF — «JOF 1.4» (юниты до края, одна десятая, как в чате
+// джампстатов edge). Общий для полосы, свободных бейджей и реплики редактора.
+void FormatJumpBadgeText(i32 badge, f32 jof, char *out, u32 len)
+{
+	static const char *const words[KZ_JUMP_BADGES] = {"PERF", "JB", "CJ", "JOF"};
+	if (badge == KZ_JUMP_BADGES - 1)
+	{
+		V_snprintf(out, len, "JOF %.1f", jof < 0.0f ? 0.0f : jof);
+	}
+	else
+	{
+		V_strncpy(out, words[badge], len);
+	}
+}
 
-void KZHUDService::ApplyJumpIndicators(CCSCustomHudLayout *layout, const char *prefix, LayoutExtraState &extra, bool show, const bool (&lit)[3], i32 size)
+// Общая для худа (prefix "") и реплики редактора ("x_") запись бейджей у престрейфа: hidden на
+// каждом бейдже и на полосе mhud_ind (пустая полоса не должна держать место под престрейфом),
+// кегль и шрифт престрейфа — на каждом бейдже (font-size ребёнку через класс корня не
+// наследуется). Без анимаций: бейдж появляется и гаснет в тот же тик, что и число. В полосе —
+// только включённые и прицепленные бейджи; цвет — свой у каждого (mhudBadge*Color, 18.10).
+static_global const char *const JUMP_IND_IDS[KZ_JUMP_BADGES] = {"ind_perf", "ind_jb", "ind_cj", "ind_jof"};
+
+void KZHUDService::ApplyJumpIndicators(CCSCustomHudLayout *layout, const char *prefix, LayoutExtraState &extra, const MHUDLayoutPrefs &prefs,
+									   bool show, const bool (&lit)[KZ_JUMP_BADGES], f32 jof)
 {
 	char idBuf[64];
 	bool any = false;
-	// Цвета индикаторов = цвета тех же событий у чисел (решение владельца 27.09): PERF —
-	// «цвет перфа» престрейфа, JB — «цвет джампбага», CJ — «цвет CJ» скорости. Отдельной
-	// настройки нет: игрок красит один раз, число и метка совпадают.
-	const MHUDLayoutPrefs &prefs = this->GetLayoutPrefs();
-	const Color *indColors[3] = {&prefs.prespeedPerf, &prefs.prespeedJumpbug, &prefs.speedCj};
-	for (i32 i = 0; i < 3; i++)
+	const MHUDLayoutPrefs::Element &pre = prefs.elements[(i32)LayoutElement::Prespeed];
+	for (i32 i = 0; i < KZ_JUMP_BADGES; i++)
 	{
 		const char *id = PrefixLayoutId(idBuf, sizeof(idBuf), prefix, JUMP_IND_IDS[i]);
-		this->SetLayoutValueClass(layout, id, extra.indSize[i], size, "font-size", false);
-		this->SetLayoutClass(layout, id, extra.indColorClass[i], panorama::ResolveColorClass(*indColors[i]));
-		// Шрифт — тот же, что у престрейфа (решение владельца 27.09): индикатор — часть элемента.
-		this->SetLayoutClass(layout, id, extra.indFontClass[i], prefs.elements[(i32)LayoutElement::Prespeed].fontClass);
-		this->SetLayoutBoolClass(layout, id, "hidden", extra.indHidden[i], !(show && lit[i]));
-		any |= show && lit[i];
+		const bool on = show && lit[i] && prefs.badgeAttach[i] && prefs.elements[KZ_BADGE_FIRST + i].enabled;
+		if (on)
+		{
+			this->SetLayoutValueClass(layout, id, extra.indSize[i], pre.size, "font-size", false);
+			this->SetLayoutClass(layout, id, extra.indColorClass[i], panorama::ResolveColorClass(prefs.badgeColor[i]));
+			this->SetLayoutClass(layout, id, extra.indFontClass[i], pre.fontClass);
+			if (i == KZ_JUMP_BADGES - 1)
+			{
+				char text[24];
+				FormatJumpBadgeText(i, jof, text, sizeof(text));
+				this->SetLayoutVar(layout, id, "jof", extra.indJofText, text);
+			}
+		}
+		this->SetLayoutBoolClass(layout, id, "hidden", extra.indHidden[i], !on);
+		any |= on;
 	}
 	this->SetLayoutBoolClass(layout, PrefixLayoutId(idBuf, sizeof(idBuf), prefix, "mhud_ind"), "hidden", extra.indStripHidden, !any);
 }

@@ -1239,10 +1239,10 @@
 	}
 	"HUD Editor - Prop Indicators"
 	{
-		"en"		"PERF/JB/CJ indicators"
-		"ru"		"Индикаторы PERF/JB/CJ"
-		"chi"		"PERF/JB/CJ indicators"
-		"ua"		"Індикатори PERF/JB/CJ"
+		"en"		"Jump badges"
+		"ru"		"Бейджи прыжка"
+		"chi"		"Jump badges"
+		"ua"		"Бейджі стрибка"
 	}
 	"HUD Editor - Prop KeysAxisOnly"
 	{
@@ -1391,6 +1391,41 @@
 		"ru"		"Тип рана"
 		"chi"		"Run type"
 		"ua"		"Тип рану"
+	}
+	"HUD Editor - Element BadgePerf"
+	{
+		"en"		"PERF badge"
+		"ru"		"Бейдж PERF"
+		"chi"		"PERF badge"
+		"ua"		"Бейдж PERF"
+	}
+	"HUD Editor - Element BadgeJb"
+	{
+		"en"		"JB badge"
+		"ru"		"Бейдж JB"
+		"chi"		"JB badge"
+		"ua"		"Бейдж JB"
+	}
+	"HUD Editor - Element BadgeCj"
+	{
+		"en"		"CJ badge"
+		"ru"		"Бейдж CJ"
+		"chi"		"CJ badge"
+		"ua"		"Бейдж CJ"
+	}
+	"HUD Editor - Element BadgeJof"
+	{
+		"en"		"JOF (edge)"
+		"ru"		"JOF (край)"
+		"chi"		"JOF (edge)"
+		"ua"		"JOF (край)"
+	}
+	"HUD Editor - Prop BadgeAttach"
+	{
+		"en"		"Next to prespeed"
+		"ru"		"Рядом с престрейфом"
+		"chi"		"Next to prespeed"
+		"ua"		"Поруч із престрейфом"
 	}
 	"HUD - Menu Label DeltaAheadColor"
 	{

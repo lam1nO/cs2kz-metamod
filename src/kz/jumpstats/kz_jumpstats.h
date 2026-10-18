@@ -271,6 +271,10 @@ public:
 	f32 block {};
 	f32 edge = -1.0f;
 	f32 landingEdge = -1.0f;
+	// cyber: JOF (jumpoff) для бейджа худа — край площадки на отрыве, тем же лучом, что
+	// CalcAlwaysEdge, но в момент отрыва (edge выше досчитывается только на приземлении).
+	// -1 — края в 20 юнитах нет (прыжок с середины блока), с лестницы или уход с края.
+	f32 takeoffEdge = -1.0f;
 	f32 miss {};
 	f32 failstatDistance {};
 	f32 failstatOffset {};
@@ -423,6 +427,11 @@ public:
 
 	f32 GetEdge(bool landing);
 
+	f32 GetTakeoffEdge()
+	{
+		return this->takeoffEdge;
+	}
+
 	f32 GetBlock()
 	{
 		return this->block;
@@ -498,6 +507,7 @@ public:
 	void CalcBlockStats(Vector landingOrigin, bool checkOffset = false);
 	void CalcLadderBlockStats(Vector landingOrigin, bool checkOffset = false);
 	void CalcAlwaysEdge();
+	f32 TraceTakeoffEdge();
 	bool GetFailOrigin(f32 planeHeight, Vector &result, i32 poseOffset);
 };
 

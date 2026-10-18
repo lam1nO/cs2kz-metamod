@@ -131,6 +131,13 @@ void KZHUDService::RefreshLayoutPrefs()
 	this->layoutPrefs.showPosColor = this->GetMHUDColorPref("mhudShowPosColor", MHUD_DEF_SHOWPOS_COLOR);
 	this->layoutPrefs.courseColor = this->GetMHUDColorPref("mhudCourseColor", MHUD_DEF_BASE_COLOR);
 	this->layoutPrefs.leadProgressColor = this->GetMHUDColorPref("mhudLeadProgressColor", MHUD_DEF_LEADPROGRESS_COLOR);
+	// Бейджи прыжка: свой цвет (прежний общий перенесён ревизией 5, layout/defaults.cpp) и
+	// «рядом с престрейфом» — дефолт true, как жил бейдж до 18.10.
+	for (i32 b = 0; b < KZ_JUMP_BADGES; b++)
+	{
+		this->layoutPrefs.badgeColor[b] = this->GetMHUDColorPref(BADGE_COLOR_KEYS[b], *BADGE_DEF_COLORS[b]);
+		this->layoutPrefs.badgeAttach[b] = opts->GetPreferenceBool(BADGE_ATTACH_KEYS[b], true);
+	}
 
 	this->layoutPrefs.timerDetailed = opts->GetPreferenceBool("hudTimerDetail", true);
 	// Поля редактора `!hud`. Дефолты — те же, что пишет ApplyHudDefaults (layout/defaults.cpp)
@@ -245,6 +252,15 @@ const char *GetElementColorKey(LayoutElement element, Color &def)
 			return "mhudShowPosColor";
 		case LayoutElement::Course:
 			return "mhudCourseColor";
+		case LayoutElement::BadgePerf:
+		case LayoutElement::BadgeJb:
+		case LayoutElement::BadgeCj:
+		case LayoutElement::BadgeJof:
+		{
+			const i32 b = (i32)element - KZ_BADGE_FIRST;
+			def = *BADGE_DEF_COLORS[b];
+			return BADGE_COLOR_KEYS[b];
+		}
 		default:
 			return NULL;
 	}

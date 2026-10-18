@@ -49,6 +49,8 @@ const Color MHUD_DEF_SHOWPOS_COLOR(0xFF, 0xFF, 0xFF, 0xFF); // белый: #CFD8
 const Color MHUD_DEF_PERF_COLOR(0x40, 0xFF, 0x40, 0xFF);
 const Color MHUD_DEF_JUMPBUG_COLOR(0xFF, 0xFF, 0x20, 0xFF);
 const Color MHUD_DEF_CJ_COLOR(0x71, 0xEE, 0xB8, 0xFF);
+// JOF — голубой PRO из худа v2 (#5FB4FF): отличим от зелёного PERF, жёлтого JB и мятного CJ.
+const Color MHUD_DEF_JOF_COLOR(0x5F, 0xB4, 0xFF, 0xFF);
 const Color MHUD_DEF_TIMER_TP_COLOR(255, 255, 255, 255);
 const Color MHUD_DEF_TIMER_PRO_COLOR(0x5F, 0x99, 0xD9, 0xFF);
 const Color MHUD_DEF_TIMER_PAUSED_COLOR(0xFF, 0xFF, 0x00, 0xFF);
@@ -349,6 +351,15 @@ SpeedInfo KZHUDService::GetSpeedInfo()
 	info.walkedOff = info.hasPrespeed && !src->jumped && !src->takeoffFromLadder;
 	info.takeoffTime = src->takeoffTime;
 	info.onGround = (src->GetPlayerPawn()->m_fFlags() & FL_ONGROUND) != 0;
+	// JOF — край площадки, посчитанный в Jump::Init на отрыве (хвост jumps — текущий прыжок).
+	// Уход с края — не прыжок: у Fall его и так нет, проверка walkedOff — на случай отрыва без
+	// своего Jump (реплей-бот, первый прыжок после спавна).
+	// На лестнице и в noclip hasPrespeed тоже бывает, а хвост jumps — прошлый прыжок: там JOF нет.
+	if (info.hasPrespeed && !info.walkedOff && src->GetPlayerPawn()->m_MoveType() == MOVETYPE_WALK && src->jumpstatsService
+		&& src->jumpstatsService->jumps.Count() > 0)
+	{
+		info.jof = src->jumpstatsService->jumps.Tail().GetTakeoffEdge();
+	}
 	return info;
 }
 

@@ -305,6 +305,14 @@ static_function const char *HiddenElementPageKey(i32 index)
 			return "HUD - Menu Cat LeadProgress";
 		case LayoutElement::PbWr:
 			return "HUD - Menu Cat PbWr";
+		case LayoutElement::BadgePerf:
+			return "HUD Editor - Element BadgePerf";
+		case LayoutElement::BadgeJb:
+			return "HUD Editor - Element BadgeJb";
+		case LayoutElement::BadgeCj:
+			return "HUD Editor - Element BadgeCj";
+		case LayoutElement::BadgeJof:
+			return "HUD Editor - Element BadgeJof";
 		default:
 			return "HUD - Menu Cat HiddenElements";
 	}
@@ -505,6 +513,14 @@ void KZHUDService::InitMenuPrefs()
 	KZ::menu::AddToggle(pbwr, "HUD - Menu Label WrPro", "hudWrPro", true);
 	KZ::menu::AddColor(elementNodes[(i32)LayoutElement::ShowPos], "HUD - Menu Label Color", "mhudShowPosColor", MHUD_DEF_SHOWPOS_COLOR);
 	KZ::menu::AddColor(elementNodes[(i32)LayoutElement::Course], "HUD - Menu Label Color", "mhudCourseColor", MHUD_DEF_BASE_COLOR);
+	// Бейджи прыжка (18.10): свой цвет и «рядом с престрейфом» (правят ep_color и ep_trow1
+	// редактора). Ключи и дефолты — те же, что читает RefreshLayoutPrefs.
+	for (i32 b = 0; b < KZ_JUMP_BADGES; b++)
+	{
+		KZOptNode *badge = elementNodes[KZ_BADGE_FIRST + b];
+		KZ::menu::AddColor(badge, "HUD - Menu Label Color", BADGE_COLOR_KEYS[b], *BADGE_DEF_COLORS[b]);
+		KZ::menu::AddToggle(badge, "HUD Editor - Prop BadgeAttach", BADGE_ATTACH_KEYS[b], true);
+	}
 	// У «Прогресса» своего цвета нет (в дизайне не просили) — только общие поля.
 
 	// Позиция карточки меню реплея — см. комментарий у видимой страницы ReplayMenu выше. Классы

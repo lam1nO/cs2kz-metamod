@@ -24,10 +24,10 @@
 #define KZ_MENU_LUMS     8  // cv0..cv7 — яркости выбранного оттенка
 #define KZ_MENU_LIST_ROWS 8 // li0..li7 — строки попапа списка
 #define KZ_MENU_FAMILIES 3  // lf0..lf2 — семейства шрифтов Stratum2/Noto/Arial
-#define KZ_EDITOR_ITEMS  10 // el{i}/et{i} — элементы худа в порядке LayoutElement
-#define KZ_EDITOR_LIST_ROWS 10 // el{i}/et{i} списка — элементы худа
-// el10/et10 в разметке аддона — бывшая строка прицела; прячется из плагина до перепубликации аддона.
-#define KZ_EDITOR_RETIRED_ROW "el10"
+#define KZ_EDITOR_ITEMS  14 // el{i}/et{i} — элементы худа в порядке LayoutElement
+#define KZ_EDITOR_LIST_ROWS 14 // el{i}/et{i} списка — элементы худа
+// el10 — бывшая строка прицела, с 18.10 — бейдж PERF (старые KZ её прячут сами). el11..el13 —
+// бейджи JB/CJ/JOF: в разметке скрыты (старые KZ их не знают), класс hidden снимает плагин.
 #define KZ_EDITOR_GRID_COLS 64 // g{c}_{r} — сетка кликов редактора
 #define KZ_EDITOR_GRID_ROWS 36
 // Интерн-таблицы сущности (HUD_LAYOUT_MAX_INTERNED_STRINGS = 1024 на каждую из трёх: id
