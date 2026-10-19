@@ -126,7 +126,6 @@ void KZHUDService::ApplyHudDefaults()
 			{"mhudPrespeedPrecise", false},     // престрейф с двумя знаками
 			{"mhudPrespeedBrackets", false},    // престрейф в скобках
 			{"mhudPrespeedHideWalkOff", false}, // не показывать престрейф при уходе с края
-			{"hudIndicators", true},            // бейджи PERF/JB/CJ под престрейфом
 			{"hudPbNub", true},                 // ячейка PB NUB элемента PB/WR
 			{"hudPbPro", true},                 // ячейка PB PRO
 			{"hudWrNub", true},                 // ячейка WR NUB

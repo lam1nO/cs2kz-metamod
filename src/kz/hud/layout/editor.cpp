@@ -147,7 +147,6 @@ static_global const EditorToggleDef EDITOR_PRESPEED_TOGGLES[] =
 	{"mhudPrespeedPrecise",     "HUD Editor - Prop Decimals",    false, NULL},
 	{"mhudPrespeedBrackets",    "HUD Editor - Prop Brackets",    false, NULL},
 	{"mhudPrespeedHideWalkOff", "HUD Editor - Prop HideWalkOff", false, NULL},
-	{"hudIndicators",           "HUD Editor - Prop Indicators",  true,  NULL},
 };
 static_global const EditorToggleDef EDITOR_KEYS_TOGGLES[] =
 {
@@ -633,7 +632,7 @@ void KZHUDService::RenderEditorReplica(CCSCustomHudLayout *layout, bool tickOnly
 	// с PERF одновременно не горит, но выбранный JB показываем вместо PERF — иначе его не видно.
 	{
 		const bool jbSel = this->editorSelected == (i32)LayoutElement::BadgeJb;
-		const bool indLit[KZ_JUMP_BADGES] = {prefs.indicators && !jbSel, prefs.indicators && jbSel, prefs.indicators, prefs.indicators};
+		const bool indLit[KZ_JUMP_BADGES] = {!jbSel, jbSel, true, true};
 		this->ApplyJumpIndicators(layout, "x_", this->editorExtra, prefs, prefs.elements[(i32)LayoutElement::Prespeed].enabled, indLit,
 								  KZ_EDITOR_JOF_PLACEHOLDER);
 		for (i32 b = 0; b < KZ_JUMP_BADGES; b++)

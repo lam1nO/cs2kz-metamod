@@ -219,7 +219,6 @@ struct MHUDLayoutPrefs
 	bool prespeedPrecise {};     // %.2f вместо %.0f
 	bool prespeedBrackets {};    // «(784)» вместо «784»
 	bool prespeedHideWalkOff {}; // не показывать, когда игрок ушёл с края, а не отпрыгнул
-	bool indicators {};          // hudIndicators: общий тумблер бейджей PERF/JB/CJ/JOF
 	bool keysOverlapEnabled {};
 	// Клавиши (Task 5, транш "клавиши"): опции апстрима, ранее не заводившиеся — см. mhud.cpp.
 	bool keysOverlapAxis {}; // красить только пару клавиш конфликтующей оси, не весь контейнер

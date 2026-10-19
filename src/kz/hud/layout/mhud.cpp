@@ -273,7 +273,7 @@ void KZHUDService::UpdatePrespeedElement(CCSCustomHudLayout *layout, KZPlayer *s
 		extra.indLatch[3] = info.jof >= 0.0f;
 		extra.indLatchJof = info.jof;
 	}
-	const bool lit = takeoffShown && extra.indLatchValid && prefs.indicators;
+	const bool lit = takeoffShown && extra.indLatchValid;
 	bool litNow[KZ_JUMP_BADGES];
 	for (i32 b = 0; b < KZ_JUMP_BADGES; b++)
 	{
