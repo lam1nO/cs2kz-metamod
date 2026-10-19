@@ -1786,6 +1786,21 @@ const KZCourseDescriptor *KZ::course::GetCourseByCyberNumber(i32 n)
 	// Зеркало FindBonusCourse ниже, но без ограничения n >= 1 (Task 4: main-курс тоже
 	// нужно резолвить обратно, cyber-номер 0). При нескольких курсах с одним номером — тот, у
 	// которого есть старт-зона: иначе сейв рана восстанавливался на пустой дубль (kz_sakhalin).
+	if (n == 0)
+	{
+		// Номер 0 привязан к первому курсу карты (см. GetCyberCourseNumber) — дублей у него не
+		// бывает, а худ зовёт этот путь каждый тик: без полного прохода по курсам.
+		const KZCourseDescriptor *first = Mapi_FirstCourseIncludingDisabled();
+		FOR_EACH_VEC(g_sortedCourses, i)
+		{
+			if (first && g_sortedCourses[i]->guid == first->guid)
+			{
+				// Первый курс с именем "Bonus N" получает номер N, а не 0.
+				return KZ::course::GetCyberCourseNumber(g_sortedCourses[i]) == 0 ? g_sortedCourses[i] : nullptr;
+			}
+		}
+		return nullptr;
+	}
 	return Mapi_PickPlayableCourse([n](const KZCourseDescriptor *c) { return KZ::course::GetCyberCourseNumber(c) == n; });
 }
 

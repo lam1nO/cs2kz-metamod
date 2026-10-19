@@ -1,5 +1,6 @@
 #include "cs2kz.h"
 #include "kz_recording.h"
+#include "utils/async_file_io.h"
 #include "kz/timer/kz_timer.h"
 #include "kz/timer/submission.h"
 #include "kz/checkpoint/kz_checkpoint.h"
@@ -344,6 +345,16 @@ void KZRecordingService::QueueRunRecorderWrite(RunRecorder &&recorder)
 			if (sub)
 			{
 				sub->OnReplayReady(std::move(buffer));
+				return;
+			}
+			// Сабмишена уже нет (смена карты в передышке: Clear() раньше этого колбэка) —
+			// хотя бы файл на диск, как было до ветки дисконнекта в OnClientDisconnect.
+			if (g_asyncFileIO)
+			{
+				char replayPath[512];
+				V_snprintf(replayPath, sizeof(replayPath), "%s/%s.replay", KZ_REPLAY_PATH, localUUID.ToString().c_str());
+				g_asyncFileIO->QueueWriteBuffer(replayPath, std::move(buffer));
+				KZ_LOG_INFO(LogChannel::Recording, "[cyb] run_replay_orphan_saved run=%s\n", localUUID.ToString().c_str());
 			}
 		},
 		// Failure: notify the player and log
