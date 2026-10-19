@@ -829,6 +829,63 @@ static_function MapiCourseZoneCounts Mapi_CountCourseZones(const KZCourseDescrip
 	return counts;
 }
 
+// Есть ли у курса живая старт-зона (своя карты или наложенная платформой). Нужна поискам курса
+// по имени/cyber-номеру: маппер может оставить дескриптор без зон с тем же именем и номером, что
+// у настоящего курса (kz_sakhalin 3818832735: "[PR#]bonus1" рядом с "[PR#]course_bonus1",
+// оба "Bonus 1" номер 2). Первый по id находился пустой — восстановленный ран уходил на него, и
+// финиш настоящего курса отвечал wrong_course.
+static_function bool Mapi_CourseHasStartZone(const KZCourseDescriptor *course)
+{
+	FOR_EACH_VEC(g_mappingApi.triggers, i)
+	{
+		const KzTrigger *trigger = &g_mappingApi.triggers[i];
+		if (trigger->type != KZTRIGGER_ZONE_START || !KZ_STREQ(trigger->zone.courseDescriptor, course->entityTargetname))
+		{
+			continue;
+		}
+		if (GameEntitySystem() && GameEntitySystem()->GetEntityInstance(trigger->entity))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+// Первый курс g_sortedCourses, подходящий под match; если подходящих несколько — первый из них со
+// старт-зоной, а без неё у всех — просто первый (поведение апстрима). Зоны перебираются только при
+// реальном дубле: GetCourseByCyberNumber(0) худ зовёт каждый кадр.
+template<typename Match>
+static_function const KZCourseDescriptor *Mapi_PickPlayableCourse(Match match)
+{
+	const KZCourseDescriptor *first = nullptr;
+	bool duplicate = false;
+	FOR_EACH_VEC(g_sortedCourses, i)
+	{
+		if (!match(g_sortedCourses[i]))
+		{
+			continue;
+		}
+		if (first)
+		{
+			duplicate = true;
+			break;
+		}
+		first = g_sortedCourses[i];
+	}
+	if (!duplicate)
+	{
+		return first;
+	}
+	FOR_EACH_VEC(g_sortedCourses, i)
+	{
+		if (match(g_sortedCourses[i]) && Mapi_CourseHasStartZone(g_sortedCourses[i]))
+		{
+			return g_sortedCourses[i];
+		}
+	}
+	return first;
+}
+
 void KZ::mapapi::OnRoundStart()
 {
 	g_mappingApi.roundIsStarting = false;
@@ -1437,13 +1494,15 @@ const KZCourseDescriptor *KZ::course::GetCourseByGlobalCourseID(u32 id)
 
 const KZCourseDescriptor *KZ::course::GetCourse(const char *courseName, bool caseSensitive, bool matchPartial)
 {
-	FOR_EACH_VEC(g_sortedCourses, i)
+	// Точное совпадение. Одноимённых курсов может быть несколько — тогда берём тот, у которого
+	// есть старт-зона (см. Mapi_PickPlayableCourse).
+	auto exactMatch = [&](const KZCourseDescriptor *c)
 	{
-		const char *name = g_sortedCourses[i]->name;
-		if (caseSensitive ? KZ_STREQ(name, courseName) : KZ_STREQI(name, courseName))
-		{
-			return g_sortedCourses[i];
-		}
+		return caseSensitive ? KZ_STREQ(c->name, courseName) : KZ_STREQI(c->name, courseName);
+	};
+	if (const KZCourseDescriptor *exact = Mapi_PickPlayableCourse(exactMatch))
+	{
+		return exact;
 	}
 	FOR_EACH_VEC(g_sortedCourses, i)
 	{
@@ -1731,15 +1790,9 @@ void KZ::course::ReportCoursesToPlatform()
 const KZCourseDescriptor *KZ::course::GetCourseByCyberNumber(i32 n)
 {
 	// Зеркало FindBonusCourse ниже, но без ограничения n >= 1 (Task 4: main-курс тоже
-	// нужно резолвить обратно, cyber-номер 0).
-	FOR_EACH_VEC(g_sortedCourses, i)
-	{
-		if (KZ::course::GetCyberCourseNumber(g_sortedCourses[i]) == n)
-		{
-			return g_sortedCourses[i];
-		}
-	}
-	return nullptr;
+	// нужно резолвить обратно, cyber-номер 0). При нескольких курсах с одним номером — тот, у
+	// которого есть старт-зона: иначе сейв рана восстанавливался на пустой дубль (kz_sakhalin).
+	return Mapi_PickPlayableCourse([n](const KZCourseDescriptor *c) { return KZ::course::GetCyberCourseNumber(c) == n; });
 }
 
 u32 KZ::course::GetCourseDescriptorTotal()
@@ -1952,14 +2005,7 @@ static_function const KZCourseDescriptor *FindBonusCourse(i32 n)
 {
 	// Зеркало конвенции эмиттера: бонус N = курс, чей GetCyberCourseNumber == n.
 	// Так !b3 находит и "bonus_3"/"BONUS STAGE 3", а не только "Bonus 3".
-	FOR_EACH_VEC(g_sortedCourses, i)
-	{
-		if (KZ::course::GetCyberCourseNumber(g_sortedCourses[i]) == n)
-		{
-			return g_sortedCourses[i];
-		}
-	}
-	return nullptr;
+	return KZ::course::GetCourseByCyberNumber(n);
 }
 
 static_function bool GotoBonus(CCSPlayerController *controller, i32 n)
