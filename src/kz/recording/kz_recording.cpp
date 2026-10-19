@@ -325,6 +325,43 @@ void KZRecordingService::RecordCommand(PlayerCommand *cmds, i32 numCmds)
 	}
 }
 
+void KZRecordingService::QueueRunRecorderWrite(RunRecorder &&recorder)
+{
+	if (!KZRecordingService::fileWriter)
+	{
+		return;
+	}
+
+	auto recorderPtr = std::make_unique<RunRecorder>(std::move(recorder));
+	this->CopyWeaponsToRecorder(recorderPtr.get());
+	UUID_t localUUID = recorderPtr->uuid; // capture before move
+	KZRecordingService::fileWriter->QueueWrite(
+		std::move(recorderPtr),
+		// Success: deliver buffer to RunSubmission state machine
+		[localUUID](const UUID_t &, f32, std::vector<char> &&buffer)
+		{
+			RunSubmission *sub = RunSubmission::GetByUUID(localUUID);
+			if (sub)
+			{
+				sub->OnReplayReady(std::move(buffer));
+			}
+		},
+		// Failure: notify the player and log
+		[localUUID](const char *error)
+		{
+			KZ_LOG_WARN(LogChannel::Recording, "Run replay serialization failed for UUID %s: %s\n", localUUID.ToString().c_str(), error);
+			RunSubmission *sub = RunSubmission::GetByUUID(localUUID);
+			if (sub)
+			{
+				KZPlayer *callbackPlayer = g_pKZPlayerManager->ToPlayer(sub->userID);
+				if (callbackPlayer)
+				{
+					callbackPlayer->languageService->PrintChat(true, false, "Replay - Run Replay Failed");
+				}
+			}
+		});
+}
+
 void KZRecordingService::CheckRecorders()
 {
 	for (auto it = this->runRecorders.begin(); it != this->runRecorders.end();)
@@ -333,37 +370,7 @@ void KZRecordingService::CheckRecorders()
 		if (recorder.ShouldStopAndSave(g_pKZUtils->GetServerGlobals()->curtime))
 		{
 			KZ_LOG_DEBUG(LogChannel::Recording, "Run recorder stopped\n");
-			if (KZRecordingService::fileWriter)
-			{
-				auto recorderPtr = std::make_unique<RunRecorder>(std::move(recorder));
-				this->CopyWeaponsToRecorder(recorderPtr.get());
-				UUID_t localUUID = recorderPtr->uuid; // capture before move
-				KZRecordingService::fileWriter->QueueWrite(
-					std::move(recorderPtr),
-					// Success: deliver buffer to RunSubmission state machine
-					[localUUID](const UUID_t &, f32, std::vector<char> &&buffer)
-					{
-						RunSubmission *sub = RunSubmission::GetByUUID(localUUID);
-						if (sub)
-						{
-							sub->OnReplayReady(std::move(buffer));
-						}
-					},
-					// Failure: notify the player and log
-					[localUUID](const char *error)
-					{
-						KZ_LOG_WARN(LogChannel::Recording, "Run replay serialization failed for UUID %s: %s\n", localUUID.ToString().c_str(), error);
-						RunSubmission *sub = RunSubmission::GetByUUID(localUUID);
-						if (sub)
-						{
-							KZPlayer *callbackPlayer = g_pKZPlayerManager->ToPlayer(sub->userID);
-							if (callbackPlayer)
-							{
-								callbackPlayer->languageService->PrintChat(true, false, "Replay - Run Replay Failed");
-							}
-						}
-					});
-			}
+			this->QueueRunRecorderWrite(std::move(recorder));
 			it = this->runRecorders.erase(it);
 		}
 		else

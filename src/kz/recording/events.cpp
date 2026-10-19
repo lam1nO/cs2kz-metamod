@@ -1,5 +1,6 @@
 #include "cs2kz.h"
 #include "kz_recording.h"
+#include "kz/timer/submission.h"
 #include "kz/timer/kz_timer.h"
 #include "kz/checkpoint/kz_checkpoint.h"
 #include "kz/replays/kz_replaysystem.h"
@@ -419,6 +420,15 @@ void KZRecordingService::OnClientDisconnect()
 	{
 		if (recorder.desiredStopTime > 0.0f && fileWriter)
 		{
+			// Законченный ран (его RunSubmission ещё жив): буфер — в сабмишен, иначе выход в
+			// «передышку» после финиша терял центральный аплоад. Рекорд засчитывался, а реплея
+			// на платформе не было — `!replay wr` отвечал «нет реплея» (kz_tense KZT, 18.10).
+			if (RunSubmission::GetByUUID(recorder.uuid))
+			{
+				KZ_LOG_INFO(LogChannel::Recording, "[cyb] run_replay_flush_on_disconnect run=%s\n", recorder.uuid.ToString().c_str());
+				this->QueueRunRecorderWrite(std::move(recorder));
+				continue;
+			}
 			auto recorderPtr = std::make_unique<RunRecorder>(std::move(recorder));
 			this->CopyWeaponsToRecorder(recorderPtr.get());
 			fileWriter->QueueWriteToFile(std::move(recorderPtr));

@@ -532,6 +532,8 @@ public:
 	void MarkJumpForJumptop(const UUID_t &uuid, Jump *jump);
 	// Остановленный jump-рекордер → файл (обычный) либо буфер в базу (джамптоп).
 	void QueueJumpRecorderWrite(JumpRecorder &&recorder);
+	// Остановленный рекордер законченного рана → буфер в RunSubmission (диск + центральный аплоад).
+	void QueueRunRecorderWrite(RunRecorder &&recorder);
 
 	enum class RecorderType
 	{

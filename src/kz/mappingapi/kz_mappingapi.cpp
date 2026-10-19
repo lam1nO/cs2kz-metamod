@@ -1470,26 +1470,14 @@ const KZCourseDescriptor *KZ::course::GetCourseByCourseID(i32 id)
 
 const KZCourseDescriptor *KZ::course::GetCourseByLocalCourseID(u32 id)
 {
-	FOR_EACH_VEC(g_sortedCourses, i)
-	{
-		if (g_sortedCourses[i]->localDatabaseID == id)
-		{
-			return g_sortedCourses[i];
-		}
-	}
-	return nullptr;
+	// ID у одноимённых дублей общий (см. UpdateCourseLocalID) — берём курс со старт-зоной.
+	return Mapi_PickPlayableCourse([id](const KZCourseDescriptor *c) { return c->localDatabaseID == id; });
 }
 
 const KZCourseDescriptor *KZ::course::GetCourseByGlobalCourseID(u32 id)
 {
-	FOR_EACH_VEC(g_sortedCourses, i)
-	{
-		if (g_sortedCourses[i]->globalDatabaseID == id)
-		{
-			return g_sortedCourses[i];
-		}
-	}
-	return nullptr;
+	// ID у одноимённых дублей общий (см. UpdateCourseLocalID) — берём курс со старт-зоной.
+	return Mapi_PickPlayableCourse([id](const KZCourseDescriptor *c) { return c->globalDatabaseID == id; });
 }
 
 const KZCourseDescriptor *KZ::course::GetCourse(const char *courseName, bool caseSensitive, bool matchPartial)
@@ -1549,28 +1537,34 @@ void KZ::course::SetupLocalCourses()
 
 bool KZ::course::UpdateCourseLocalID(const char *courseName, u32 databaseID)
 {
+	// Всем одноимённым: строка БД ключуется (карта, имя), и пустой дубль-дескриптор иначе
+	// забирал ID себе, а настоящий курс оставался с 0 (Times падал на FK, kz_sakhalin).
+	bool found = false;
 	FOR_EACH_VEC(g_sortedCourses, i)
 	{
 		if (g_sortedCourses[i]->GetName() == courseName)
 		{
 			g_sortedCourses[i]->localDatabaseID = databaseID;
-			return true;
+			found = true;
 		}
 	}
-	return false;
+	return found;
 }
 
 bool KZ::course::UpdateCourseGlobalID(const char *courseName, u32 globalID)
 {
+	// Всем одноимённым: строка БД ключуется (карта, имя), и пустой дубль-дескриптор иначе
+	// забирал ID себе, а настоящий курс оставался с 0 (Times падал на FK, kz_sakhalin).
+	bool found = false;
 	FOR_EACH_VEC(g_sortedCourses, i)
 	{
 		if (g_sortedCourses[i]->GetName() == courseName)
 		{
 			g_sortedCourses[i]->globalDatabaseID = globalID;
-			return true;
+			found = true;
 		}
 	}
-	return false;
+	return found;
 }
 
 i32 KZ::course::GetCyberCourseNumber(const KZCourseDescriptor *course)
