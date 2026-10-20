@@ -1287,13 +1287,13 @@
 	"Jumpstats Report - Chat Segment - Direction"
 	{
 		"#format"	"value:s"
-		"en"		" | {olive}{value}{grey}"
-		"ru"		" | {olive}{value}{grey}"
+		"en"		" | JumpDirection: {olive}{value}{grey}"
+		"ru"		" | JumpDirection: {olive}{value}{grey}"
 	}
 	"Jumpstat Report - Console Segment - Direction"
 	{
 		"#format"	"value:s"
-		"en"		" | {value}"
-		"ru"		" | {value}"
+		"en"		" | JumpDirection: {value}"
+		"ru"		" | JumpDirection: {value}"
 	}
 }
