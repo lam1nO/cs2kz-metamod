@@ -6,6 +6,7 @@
 #include "kz/noclip/kz_noclip.h"
 #include "kz/prac/kz_prac.h"
 #include "kz/timer/kz_timer.h"
+#include "kz/timer/run_teleport_rules.h"
 #include "kz/language/kz_language.h"
 #include "kz/replays/kz_replaysystem.h"
 
@@ -417,13 +418,23 @@ void KZTriggerService::OnMappingApiTriggerEndTouchPost(TriggerTouchTracker track
 			// и быть не может — на timerRunning висит весь сабмит; ResetCheckpoints тоже не
 			// зовём (чекпоинты замороженного рана живые). Вето OnTimerStart остаётся вторым
 			// рубежом (prac/events.cpp).
-			if (this->player->pracService->IsInPrac())
+			// Ран, который идёт при ВЫХОДЕ из зоны, в неё не входил (вход остановил бы таймер) — его
+			// туда поставило восстановление (SavedRuns/!prac), а наружу вывел телепорт. Сброс ТП здесь
+			// делал такой ран PRO со старым временем (T-19), см. run_teleport_rules.h.
+			switch (KZ::timer::rules::OnStartZoneExit(this->player->pracService->IsInPrac(), this->player->timerService->GetTimerRunning()))
 			{
-				this->player->pracService->OnStartZoneEndTouch(course);
-				break;
+				case KZ::timer::rules::StartZoneExit::PracClock:
+					this->player->pracService->OnStartZoneEndTouch(course);
+					break;
+				case KZ::timer::rules::StartZoneExit::KeepRun:
+					KZ_LOG_INFO(LogChannel::Timer, "[cyb] start_zone_exit_keep_run steam_id=%llu course=%s tps=%u\n",
+								this->player->GetSteamId64(false), course->name, this->player->checkpointService->GetTeleportCount());
+					break;
+				case KZ::timer::rules::StartZoneExit::ResetAndStart:
+					this->player->checkpointService->ResetCheckpoints();
+					this->player->timerService->StartZoneEndTouch(course);
+					break;
 			}
-			this->player->checkpointService->ResetCheckpoints();
-			this->player->timerService->StartZoneEndTouch(course);
 		}
 		break;
 

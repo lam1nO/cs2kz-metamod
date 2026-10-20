@@ -292,7 +292,7 @@ bool KZSavedRunService::ApplySnapshot(i32 course, u32 tpCount, const std::string
 	// Тот же кламп, что на записи (см. SaveOnDisconnect): восстановленный ран не может быть PRO.
 	// Дублируется здесь намеренно — строки, записанные ДО этой правки, лежат в БД с TpCount=0 и
 	// без клампа на чтении доживали бы до финиша как PRO ещё 30 дней (TTL сейва, см. PurgeExpired).
-	tpCount = MAX(tpCount, 1u);
+	tpCount = KZ::timer::rules::RestoredTeleports(tpCount);
 
 	KZTimerService *timerService = this->player->timerService;
 	KZCheckpointService *checkpointService = this->player->checkpointService;
@@ -442,7 +442,7 @@ void KZSavedRunService::SaveOnDisconnect()
 	// хотя половину трассы игрок «проехал» технической перезаливкой состояния из БД. Клампим
 	// до 1 здесь, на записи, чтобы строка в БД была честной сама по себе. Prac-путь уже пришёл
 	// со штрафом +1 (см. KZPracService::EnterPrac) — для него это no-op.
-	tpCount = MAX(tpCount, 1u);
+	tpCount = KZ::timer::rules::RestoredTeleports(tpCount);
 
 	KZDatabaseService::SaveRun(this->player, runTime, tpCount, snapshot);
 }
