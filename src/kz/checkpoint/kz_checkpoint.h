@@ -1,4 +1,5 @@
 #pragma once
+#include "kz/timer/run_teleport_rules.h"
 #include "kz/kz.h"
 
 class KZCheckpointService : public KZBaseService
@@ -42,6 +43,9 @@ public:
 private:
 	i32 currentCpIndex {};
 	u32 tpCount {};
+	// Пол счётчика ТП восстановленного рана (T-19, run_teleport_rules.h): ставит восстановление,
+	// снимает новый старт/стоп таймера. Финиш видит max(tpCount, tpFloor).
+	u32 tpFloor {};
 	bool holdingStill {};
 	f32 teleportTime {};
 	CUtlVector<Checkpoint> checkpoints;
@@ -68,7 +72,19 @@ public:
 
 	u32 GetTeleportCount()
 	{
-		return this->tpCount;
+		return KZ::timer::rules::EffectiveTeleports(this->tpCount, this->tpFloor);
+	}
+
+	// Ран восстановлен (SavedRuns/prac) и ещё не перезапущен — пол ТП стоит.
+	bool HasTeleportFloor()
+	{
+		return this->tpFloor > 0;
+	}
+
+	// Новый ран (TimerStart) или конец рана (TimerStop/TimerEnd): пол восстановления больше не действует.
+	void ClearTeleportFloor()
+	{
+		this->tpFloor = 0;
 	}
 
 	i32 GetCurrentCpIndex()
@@ -114,6 +130,7 @@ public:
 	void SetTeleportCountForRestore(u32 tpCountValue)
 	{
 		this->tpCount = tpCountValue;
+		this->tpFloor = tpCountValue;
 	}
 
 	void SetStartPosition();

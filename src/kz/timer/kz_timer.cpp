@@ -7,6 +7,7 @@
 #include "kz/noclip/kz_noclip.h"
 #include "kz/option/kz_option.h"
 #include "kz/prac/kz_prac.h"
+#include "kz/checkpoint/kz_checkpoint.h"
 #include "kz/language/kz_language.h"
 #include "kz/profile/kz_profile.h"
 #include "kz/trigger/kz_trigger.h"
@@ -322,6 +323,8 @@ bool KZTimerService::TimerStart(const KZCourseDescriptor *courseDesc, bool playS
 	this->currentTime = g_pKZUtils->GetGlobals()->curtime - g_pKZUtils->GetServerGlobals()->curtime;
 	assert(this->currentTime <= 0 && this->currentTime > -ENGINE_FIXED_TICK_INTERVAL);
 	this->timerRunning = true;
+	// Новый ран с нуля: пол ТП прошлого восстановленного рана к нему не относится (T-19).
+	this->player->checkpointService->ClearTeleportFloor();
 	this->currentStage = 0;
 	this->reachedCheckpoints = 0;
 	this->lastCheckpoint = 0;
@@ -534,6 +537,8 @@ bool KZTimerService::TimerEnd(const KZCourseDescriptor *courseDesc)
 
 	// Успешный финиш - ран завершён, сейв незавершённого рана по этому ключу больше не актуален.
 	this->player->savedRunService->InvalidateCurrent("finish");
+	// Пол ТП восстановленного рана — только до его конца; сабмишен выше его уже учёл.
+	this->player->checkpointService->ClearTeleportFloor();
 
 	return true;
 }
@@ -545,6 +550,7 @@ bool KZTimerService::TimerStop(bool playSound, const char *reason)
 		return false;
 	}
 	this->timerRunning = false;
+	this->player->checkpointService->ClearTeleportFloor();
 	// Главный класс багрепортов — «таймер сбросился сам». Одна строка с причиной
 	// закрывает разбор без воспроизведения. Событие редкое (раз на ран), не на тик.
 	KZ_LOG_INFO(LogChannel::Timer, "[cyb] run_stop steam_id=%llu map=%s mode=%s time=%.3f reason=%s\n", this->player->GetSteamId64(false),
