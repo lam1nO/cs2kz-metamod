@@ -50,6 +50,12 @@
 		"en"		"Mode: {mode}"
 		"ru"		"Режим: {mode}"
 	}
+	"Jumptop - Menu Direction"
+	{
+		"#format"	"direction:s"
+		"en"		"Direction: {direction}"
+		"ru"		"Направление: {direction}"
+	}
 	"Jumptop - Menu Board Distance"
 	{
 		"en"		"Top: by distance"
@@ -118,8 +124,8 @@
 	}
 	"Jumptop - Usage"
 	{
-		"en"		"{grey}Usage: {default}!jumptop <lj|bh|mbh|wj|laj|lah|jb> [block] [ckz|kzt|vnl]"
-		"ru"		"{grey}Использование: {default}!jumptop <lj|bh|mbh|wj|laj|lah|jb> [block] [ckz|kzt|vnl]"
+		"en"		"{grey}Usage: {default}!jumptop <lj|bh|mbh|wj|laj|lah|jb> [block] [sw|bw] [ckz|kzt|vnl]"
+		"ru"		"{grey}Использование: {default}!jumptop <lj|bh|mbh|wj|laj|lah|jb> [block] [sw|bw] [ckz|kzt|vnl]"
 	}
 	"Jumptop - Database Unavailable"
 	{

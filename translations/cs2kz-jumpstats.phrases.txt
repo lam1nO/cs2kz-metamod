@@ -1283,4 +1283,17 @@
 		"en"		"{grey}{line}"
 		"ru"		"{grey}{line}"
 	}
+	// [cyb] Направление прыжка (jump_direction.h): в чате — только Sideways/Backwards, в консоли — всегда.
+	"Jumpstats Report - Chat Segment - Direction"
+	{
+		"#format"	"value:s"
+		"en"		" | {olive}{value}"
+		"ru"		" | {olive}{value}"
+	}
+	"Jumpstat Report - Console Segment - Direction"
+	{
+		"#format"	"value:s"
+		"en"		" | {value}"
+		"ru"		" | {value}"
+	}
 }

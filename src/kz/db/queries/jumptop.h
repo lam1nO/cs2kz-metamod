@@ -65,6 +65,21 @@ constexpr char sqlite_jumptop_create[] = R"(
         CONSTRAINT PK_Jumptop PRIMARY KEY (ID))
 )";
 
+// [cyb] Направление прыжка (Forward 0 / Sideways 1 / Backwards 2, jump_direction.h) — как отдельный
+// стиль: PB, топ и место ведутся на каждое направление отдельно. NULL — строка записана сборкой без
+// направления (до миграции или флотом на старой версии): считается Forward, в карточке — «неизвестно».
+// Колонка NULL без NOT NULL — аддитивно для флота на старой сборке (см. терпимость в migrations.cpp).
+constexpr char mysql_jumptop_add_direction[] = R"(
+    ALTER TABLE Jumptop ADD COLUMN Direction TINYINT UNSIGNED NULL DEFAULT NULL
+)";
+
+constexpr char sqlite_jumptop_add_direction[] = R"(
+    ALTER TABLE Jumptop ADD COLUMN Direction INTEGER NULL DEFAULT NULL
+)";
+
+// Направление строки для фильтров: NULL (старые строки) — Forward.
+#define JUMPTOP_DIRECTION_SQL "COALESCE(j.Direction, 0)"
+
 // Реплей прыжка (~7 с: 5 до приземления, 2 после) — сериализованный файл реплея в base64.
 // В базе, а не на диске инстанса: kzreplays/ живёт в контейнере и пропадает при пересоздании,
 // а центральное хранилище реплеев (api /replays/v1) знает только раны. Ключ — UUID реплея,
@@ -86,18 +101,18 @@ constexpr char sqlite_jumptop_replays_create[] = R"(
 )";
 
 // Порядок параметров: SteamID64, Mode, JumpType, IsBlockJump, Block, Distance, Strafes, Sync, Pre,
-// Max, Airtime, Height, Offset, MapName, ServerID, ReplayUUID, Details (строки экранированы).
+// Max, Airtime, Height, Offset, MapName, ServerID, ReplayUUID, Details (строки экранированы), Direction.
 constexpr char sql_jumptop_insert[] = R"(
     INSERT INTO Jumptop (SteamID64, Mode, JumpType, IsBlockJump, Block, Distance, Strafes, Sync, Pre, Max, Airtime, Height, Offset,
-        MapName, ServerID, ReplayUUID, Details)
-        VALUES (%llu, %d, %d, %d, %d, %.6f, %d, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, '%s', '%s', '%s', '%s')
+        MapName, ServerID, ReplayUUID, Details, Direction)
+        VALUES (%llu, %d, %d, %d, %d, %.6f, %d, %.6f, %.6f, %.6f, %.6f, %.6f, %.6f, '%s', '%s', '%s', '%s', %d)
 )";
 
 // Личные рекорды игрока по всем режимам/типам — для кэша на заходе. Лучшая строка выбирается в
 // коде (истории PB у игрока немного), SQL общий для MySQL и SQLite. Strafes/Sync/Pre/MapName —
-// для строки «Вы» окна !jstop.
+// для строки «Вы» окна !jstop. Последняя колонка — направление (NULL = Forward).
 constexpr char sql_jumptop_getpbs[] = R"(
-    SELECT Mode, JumpType, IsBlockJump, Block, Distance, Strafes, Sync, Pre, MapName
+    SELECT Mode, JumpType, IsBlockJump, Block, Distance, Strafes, Sync, Pre, MapName, COALESCE(Direction, 0)
         FROM Jumptop
         WHERE SteamID64 = %llu AND Removed = 0
 )";
@@ -109,28 +124,31 @@ constexpr char sql_jumptop_getpbs[] = R"(
 // Место прыжка в топе: сколько ДРУГИХ игроков имеют строку лучше (дистанционный топ — по
 // дистанции; блочный — по блоку, затем по дистанции), плюс общее число игроков в топе.
 // Ровно равная дистанция — первенство у более ранней строки (меньший ID), иначе #1 получили бы оба.
-// Параметры: Mode, JumpType, IsBlockJump, Block, Block, Distance, Distance, ID, SteamID64, Mode, JumpType, IsBlockJump.
+// Параметры: Mode, JumpType, IsBlockJump, Direction, Block, Block, Distance, Distance, ID, SteamID64, Mode, JumpType, IsBlockJump,
+// Direction.
 constexpr char sql_jumptop_rank[] = R"(
     SELECT
         (SELECT COUNT(DISTINCT j.SteamID64) FROM Jumptop j
-            WHERE j.Mode = %d AND j.JumpType = %d AND j.IsBlockJump = %d AND j.Removed = 0
+            WHERE j.Mode = %d AND j.JumpType = %d AND j.IsBlockJump = %d AND )" JUMPTOP_DIRECTION_SQL R"( = %d AND j.Removed = 0
                 AND (j.Block > %d OR (j.Block = %d AND (j.Distance > %.6f OR (j.Distance = %.6f AND j.ID < %u))))
                 AND j.SteamID64 <> %llu AND )" JUMPTOP_NOT_BANNED_SQL R"(),
         (SELECT COUNT(DISTINCT j.SteamID64) FROM Jumptop j
-            WHERE j.Mode = %d AND j.JumpType = %d AND j.IsBlockJump = %d AND j.Removed = 0 AND )" JUMPTOP_NOT_BANNED_SQL R"()
+            WHERE j.Mode = %d AND j.JumpType = %d AND j.IsBlockJump = %d AND )" JUMPTOP_DIRECTION_SQL R"( = %d AND j.Removed = 0
+                AND )" JUMPTOP_NOT_BANNED_SQL R"()
 )";
 
 // Топ: лучшая строка каждого игрока (окно по игроку), без снятых и забаненных. MySQL 8 и
 // SQLite >= 3.25 умеют ROW_NUMBER. Для дистанционного топа Block у всех строк 0, поэтому
 // одна сортировка годится обоим видам.
-// Параметры: Mode, JumpType, IsBlockJump, Limit.
+// Параметры: Mode, JumpType, IsBlockJump, Direction, Limit.
 constexpr char sql_jumptop_gettop[] = R"(
     SELECT t.ID, t.SteamID64, COALESCE(p.Alias, ''), t.Block, t.Distance, t.Strafes, t.Sync, t.Pre, t.Max, t.Airtime, t.ReplayUUID,
         t.MapName
         FROM (
             SELECT j.*, ROW_NUMBER() OVER (PARTITION BY j.SteamID64 ORDER BY j.Block DESC, j.Distance DESC, j.ID ASC) AS rn
                 FROM Jumptop j
-                WHERE j.Mode = %d AND j.JumpType = %d AND j.IsBlockJump = %d AND j.Removed = 0 AND )" JUMPTOP_NOT_BANNED_SQL R"(
+                WHERE j.Mode = %d AND j.JumpType = %d AND j.IsBlockJump = %d AND )" JUMPTOP_DIRECTION_SQL R"( = %d AND j.Removed = 0
+                    AND )" JUMPTOP_NOT_BANNED_SQL R"(
         ) t
         LEFT JOIN Players p ON p.SteamID64 = t.SteamID64
         WHERE t.rn = 1
@@ -138,26 +156,29 @@ constexpr char sql_jumptop_gettop[] = R"(
         LIMIT %d
 )";
 
-// Одна строка целиком — для !jumpinfo (разбор на АХК). Параметр: ID.
+// Одна строка целиком — для !jumpinfo (разбор на АХК). Последняя колонка — направление, -1 = не записано.
+// Параметр: ID.
 constexpr char sql_jumptop_getjump[] = R"(
     SELECT j.ID, j.SteamID64, COALESCE(p.Alias, ''), j.Mode, j.JumpType, j.IsBlockJump, j.Block, j.Distance, j.Strafes, j.Sync, j.Pre,
-        j.Max, j.Airtime, j.Height, j.Offset, j.MapName, j.ServerID, j.ReplayUUID, j.Details, j.Removed, j.Created
+        j.Max, j.Airtime, j.Height, j.Offset, j.MapName, j.ServerID, j.ReplayUUID, j.Details, j.Removed, j.Created,
+        COALESCE(j.Direction, -1)
         FROM Jumptop j
         LEFT JOIN Players p ON p.SteamID64 = j.SteamID64
         WHERE j.ID = %d
 )";
 
-// Личные рекорды для !jspb: лучшая строка игрока в каждом (тип, вид) для одного режима.
+// Личные рекорды для !jspb: лучшая строка игрока в каждом (тип, вид, направление) для одного режима.
 // Параметры: SteamID64, Mode.
 constexpr char sql_jumptop_getplayerbests[] = R"(
-    SELECT t.ID, t.JumpType, t.IsBlockJump, t.Block, t.Distance, t.Strafes, t.Sync, t.Pre, t.Max, t.Airtime, t.MapName
+    SELECT t.ID, t.JumpType, t.IsBlockJump, t.Block, t.Distance, t.Strafes, t.Sync, t.Pre, t.Max, t.Airtime, t.MapName, t.Dir
         FROM (
-            SELECT j.*, ROW_NUMBER() OVER (PARTITION BY j.JumpType, j.IsBlockJump ORDER BY j.Block DESC, j.Distance DESC, j.ID ASC) AS rn
+            SELECT j.*, )" JUMPTOP_DIRECTION_SQL R"( AS Dir,
+                ROW_NUMBER() OVER (PARTITION BY j.JumpType, j.IsBlockJump, )" JUMPTOP_DIRECTION_SQL R"( ORDER BY j.Block DESC, j.Distance DESC, j.ID ASC) AS rn
                 FROM Jumptop j
                 WHERE j.SteamID64 = %llu AND j.Mode = %d AND j.Removed = 0
         ) t
         WHERE t.rn = 1
-        ORDER BY t.JumpType ASC, t.IsBlockJump ASC
+        ORDER BY t.JumpType ASC, t.Dir ASC, t.IsBlockJump ASC
 )";
 
 // Снятие/возврат прыжка админом. Параметры: Removed (0/1), ID.

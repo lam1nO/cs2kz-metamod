@@ -52,6 +52,7 @@ static_global const std::string mysqlMigrations[] =
 	trimString(mysql_hudshares_create),
 	trimString(mysql_jumptop_create),
 	trimString(mysql_jumptop_replays_create),
+	trimString(mysql_jumptop_add_direction),
 };
 
 static_global const std::string sqliteMigrations[] = 
@@ -73,6 +74,7 @@ static_global const std::string sqliteMigrations[] =
 	trimString(sqlite_hudshares_create),
 	trimString(sqlite_jumptop_create),
 	trimString(sqlite_jumptop_replays_create),
+	trimString(sqlite_jumptop_add_direction),
 };
 
 // clang-format on

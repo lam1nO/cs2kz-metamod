@@ -529,6 +529,20 @@ void Jump::UpdateAACallPost(Vector wishdir, f32 wishspeed, f32 accel)
 	}
 }
 
+i32 Jump::GetDirection()
+{
+	KZ::jumpstats::direction::Accumulator acc;
+	FOR_EACH_VEC(this->strafes, i)
+	{
+		FOR_EACH_VEC(this->strafes[i].aaCalls, j)
+		{
+			const AACall &call = this->strafes[i].aaCalls[j];
+			acc.Add(call.currentYaw, call.velocityPre.x, call.velocityPre.y, call.duration);
+		}
+	}
+	return acc.Result();
+}
+
 void Jump::Update()
 {
 	if (this->AlreadyEnded())

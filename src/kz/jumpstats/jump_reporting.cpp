@@ -84,6 +84,15 @@ void KZJumpstatsService::PrintJumpToChat(KZPlayer *target, Jump *jump, bool exte
 		edgeStats = KZLanguageService::PrepareMessageWithLang(language, "Jumpstats Report - Chat Segment - Edge", jump->GetEdge(false));
 	}
 
+	// [cyb] Направление: «вперёд» в чате не пишем — это обычный прыжок, строка и так длинная.
+	i32 direction = jump->GetDirection();
+	if (direction != KZ::jumpstats::direction::Forward)
+	{
+		edgeStats = KZLanguageService::PrepareMessageWithLang(language, "Jumpstats Report - Chat Segment - Direction",
+															  KZ::jumpstats::direction::Name(direction))
+					+ edgeStats;
+	}
+
 	std::string deviationStats = "";
 	if (jump->GetBlock() > 0.0f)
 	{
@@ -196,6 +205,8 @@ void KZJumpstatsService::PrintJumpToConsole(KZPlayer *target, Jump *jump, bool b
 	{
 		releaseString = jump->GetReleaseString(false);
 	}
+	modeStyleNames += KZLanguageService::PrepareMessageWithLang(language, "Jumpstat Report - Console Segment - Direction",
+																KZ::jumpstats::direction::Name(jump->GetDirection()));
 	// Build inline stats for console
 	std::string edgeString = "";
 	std::string landingEdgeString = "";

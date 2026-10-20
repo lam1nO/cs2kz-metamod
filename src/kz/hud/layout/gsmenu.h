@@ -19,7 +19,7 @@
 #define KZ_GSMENU_TABLE_ROWS    20
 #define KZ_GSMENU_TABLE_COLS    8
 #define KZ_GSMENU_ROW_ACTIONS   3
-#define KZ_GSMENU_FILTER_GROUPS 3
+#define KZ_GSMENU_FILTER_GROUPS 4
 #define KZ_GSMENU_FILTER_CHIPS  8
 #define KZ_GSMENU_LIST_ROWS     10
 // Пересоздание сущности на открытии, когда её интерн-таблица (лимит 1024) подошла к краю:

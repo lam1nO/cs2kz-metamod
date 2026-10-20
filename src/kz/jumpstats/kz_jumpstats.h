@@ -5,6 +5,7 @@
 #include "sdk/datatypes.h"
 
 #include "kz/kz.h"
+#include "jump_direction.h"
 
 class KZPlayer;
 
@@ -328,6 +329,10 @@ public:
 	}
 
 	JumpType GetReportJumpType();
+
+	// cyber: Forward/Sideways/Backwards (jump_direction.h) — по вызовам AirAccelerate всего полёта.
+	// Считается на лету из aaCalls, поэтому верно и для прыжка, восстановленного из реплея.
+	i32 GetDirection();
 
 	KZPlayer *GetJumpPlayer()
 	{
