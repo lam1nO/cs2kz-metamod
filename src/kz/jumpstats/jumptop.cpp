@@ -1896,6 +1896,9 @@ namespace
 		}
 		if (v.rows.empty())
 		{
+			// [cyb] класс empty: плашка в теле окна вместо заголовков и клавиш (как у !maptop) —
+			// с направлениями пустые топы (Sideways/Backwards редких типов) попадаются часто.
+			t.empty = true;
 			t.hint = "В этом топе пока пусто";
 		}
 		KZ::gsmenu::ShowTable(player, t, OnJumptopWindowClick, "jumptop");
