@@ -40,11 +40,13 @@ void KZHUDService::OpenLayoutMenuSkins()
 	}
 	if (KZMenuSkinsTab() >= 0)
 	{
-		this->SelectMenuSkins();
+		// Явный запрос (!ws) — сессия cyber-menu заводится заново, даже если вкладка уже открыта: пропавшая
+		// сессия (перезагрузка плагина) иначе оставила бы замершую сетку.
+		this->SelectMenuSkins(true);
 	}
 }
 
-void KZHUDService::SelectMenuSkins()
+void KZHUDService::SelectMenuSkins(bool force)
 {
 	if (!this->menuOpen || KZMenuSkinsTab() < 0)
 	{
@@ -54,7 +56,7 @@ void KZHUDService::SelectMenuSkins()
 	{
 		this->CloseMenuPopup();
 	}
-	if (!this->menuSkins)
+	if (!this->menuSkins || force)
 	{
 		this->menuSkins = true;
 		// cyber-menu начнёт с чистого листа (yield сбрасывает его диф-кэш), а сущность окна та же: снимаем всё,
@@ -93,31 +95,6 @@ void KZHUDService::LeaveMenuSkins()
 	interfaces::pEngine->ServerCommand(cmd);
 }
 
-void KZHUDService::ForwardMenuEmbedClick(const char *id)
-{
-	const i32 slot = this->player->GetPlayerSlot().Get();
-	const size_t len = strlen(id);
-	const bool badId = len == 0 || len > 48 || strspn(id, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != len;
-	// Не чаще 16 в секунду: cyber-menu перерисовывает страницу на каждый клик (как у моста, layout/gsmenu.cpp).
-	const f64 now = g_pKZUtils->GetServerGlobals()->curtime;
-	if (now - this->menuEmbedClickStart > 1.0 || now < this->menuEmbedClickStart)
-	{
-		this->menuEmbedClickStart = now;
-		this->menuEmbedClicks = 0;
-	}
-	if (++this->menuEmbedClicks > 16 || badId)
-	{
-		if (badId || this->menuEmbedClicks == 17)
-		{
-			KZ_LOG_WARN(LogChannel::General, "[cyb] menu_skins_click_dropped reason=%s slot=%i\n", badId ? "bad_id" : "rate", slot);
-		}
-		return;
-	}
-	char cmd[96];
-	V_snprintf(cmd, sizeof(cmd), "css_ui_click %i %s\n", slot, id);
-	interfaces::pEngine->ServerCommand(cmd);
-}
-
 // Id встроенной страницы → id панели окна; false — операция не наша (шапка/футер/подсказка cyber-menu).
 static_function bool MapEmbedPanel(const std::string &panel, std::string &out)
 {
@@ -147,6 +124,35 @@ static_function bool MapEmbedPanel(const std::string &panel, std::string &out)
 		out = KZ_MENU_EMBED_PREFIX + panel;
 	}
 	return ok;
+}
+
+void KZHUDService::ForwardMenuEmbedClick(const char *id)
+{
+	const i32 slot = this->player->GetPlayerSlot().Get();
+	const size_t len = strlen(id);
+	std::string mapped;
+	// Только кнопки страницы сетки: подделанный ks_gsm_close/ks_tab0 до cyber-menu не доходит.
+	const bool badId = len == 0 || len > 48 || strspn(id, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != len
+					   || !MapEmbedPanel(id, mapped) || !V_strncmp(id, "te", 2) || !V_strncmp(id, "ti", 2) || !V_strncmp(id, "tk", 2)
+					   || !V_strcmp(id, "page_grid");
+	// Не чаще 16 в секунду: cyber-menu перерисовывает страницу на каждый клик (как у моста, layout/gsmenu.cpp).
+	const f64 now = g_pKZUtils->GetServerGlobals()->curtime;
+	if (now - this->menuEmbedClickStart > 1.0 || now < this->menuEmbedClickStart)
+	{
+		this->menuEmbedClickStart = now;
+		this->menuEmbedClicks = 0;
+	}
+	if (++this->menuEmbedClicks > 16 || badId)
+	{
+		if (badId || this->menuEmbedClicks == 17)
+		{
+			KZ_LOG_WARN(LogChannel::General, "[cyb] menu_skins_click_dropped reason=%s slot=%i\n", badId ? "bad_id" : "rate", slot);
+		}
+		return;
+	}
+	char cmd[96];
+	V_snprintf(cmd, sizeof(cmd), "css_ui_click %i %s\n", slot, id);
+	interfaces::pEngine->ServerCommand(cmd);
 }
 
 void KZHUDService::ApplyMenuEmbedOps(const char *ops)

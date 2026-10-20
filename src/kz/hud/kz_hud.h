@@ -1375,7 +1375,8 @@ private:
 
 	void SelectMenuTab(i32 tab);
 	void SelectMenuSub(i32 sub);
-	void SelectMenuSkins();
+	// force — заново завести сессию cyber-menu (yield + embed), даже если вкладка уже открыта.
+	void SelectMenuSkins(bool force = false);
 	// Уйти с вкладки «Скины» (смена вкладки, закрытие окна, снос сущности): cyber-menu перестаёт рисовать.
 	void LeaveMenuSkins();
 	void ForwardMenuEmbedClick(const char *id);

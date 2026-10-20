@@ -1714,7 +1714,8 @@ bool KZHUDService::HandleMenuWindowClick(const char *id)
 	{
 		if (a >= 0 && a == KZMenuSkinsTab())
 		{
-			this->SelectMenuSkins();
+			// Повторный клик по открытой вкладке переподключает сетку (на случай пропавшей сессии cyber-menu).
+			this->SelectMenuSkins(this->menuSkins);
 		}
 		else
 		{
