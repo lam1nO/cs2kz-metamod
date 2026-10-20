@@ -241,8 +241,37 @@ void KZDatabaseService::CheckMigrations(std::vector<ISQLQuery *> queries)
 		txn.queries.push_back(query);
 	}
 
+	// [cyb] ADD COLUMN в MySQL не повторяем (нет IF NOT EXISTS), а DDL коммитится сам: колонка могла
+	// появиться без строки в Migrations (два инстанса стартовали разом, обрыв между ALTER и INSERT).
+	// Тогда «Duplicate column name» (1060) — не отказ: дописываем строку этой миграции и проверяем
+	// заново. Без этого инстанс остался бы без базы, а в случае обрыва — каждая следующая сборка.
+	static_persist u32 s_duplicateColumnRetries = 0;
+	auto onTxnFailure = [onFailure, current, max](std::string error, int failIndex)
+	{
+		u32 migration = current + (u32)(failIndex / 2);
+		bool duplicateColumn = KZDatabaseService::GetDatabaseType() == DatabaseType::MySQL && failIndex >= 0 && failIndex % 2 == 0
+							   && migration < max && error.find("Duplicate column name") != std::string::npos;
+		if (!duplicateColumn || s_duplicateColumnRetries >= max)
+		{
+			KZ_LOG_WARN(LogChannel::DB, "[cyb] db_migration_failed index=%d error=%s\n", failIndex, error.c_str());
+			onFailure();
+			return;
+		}
+		s_duplicateColumnRetries++;
+		KZ_LOG_WARN(LogChannel::DB, "[cyb] db_migration_duplicate_column migration=%u — колонка уже есть, дописываю строку миграции\n",
+					migration + 1);
+		char insert[256];
+		V_snprintf(insert, sizeof(insert), mysql_migrations_insert,
+				   CRC32_ProcessSingleBuffer(mysqlMigrations[migration].c_str(), (int)mysqlMigrations[migration].length()));
+		Transaction fix;
+		fix.queries.push_back(insert);
+		GetDatabaseConnection()->ExecuteTransaction(
+			fix, [](std::vector<ISQLQuery *>) { KZDatabaseService::RunMigrations(); },
+			[onFailure](std::string, int) { onFailure(); });
+	};
+
 	GetDatabaseConnection()->ExecuteTransaction(
-		txn, [onSuccess](std::vector<ISQLQuery *> queries) { onSuccess(); }, [onFailure](std::string error, int failIndex) { onFailure(); });
+		txn, [onSuccess](std::vector<ISQLQuery *> queries) { onSuccess(); }, onTxnFailure);
 }
 
 bool KZDatabaseService::IsReady()

@@ -1287,8 +1287,8 @@
 	"Jumpstats Report - Chat Segment - Direction"
 	{
 		"#format"	"value:s"
-		"en"		" | {olive}{value}"
-		"ru"		" | {olive}{value}"
+		"en"		" | {olive}{value}{grey}"
+		"ru"		" | {olive}{value}{grey}"
 	}
 	"Jumpstat Report - Console Segment - Direction"
 	{
