@@ -27,6 +27,8 @@ struct Sim
 	} frozen;
 	bool justTeleported = false;
 	bool inStartZone = false;
+	int zoneCourse = 0; // курс стартовой зоны, где стоит игрок
+	int runCourse = -1; // курс идущего рана
 
 	uint32_t Tps() const
 	{
@@ -48,10 +50,11 @@ struct Sim
 
 	bool TimerStart()
 	{
-		if (justTeleported || running) return false; // CanStartRunHere / тот же курс
+		if (justTeleported || (running && runCourse == zoneCourse)) return false; // CanStartRunHere / тот же курс
 		running = true;
 		time = 0;
 		tpFloor = 0;
+		runCourse = zoneCourse;
 		return true;
 	}
 
@@ -66,7 +69,7 @@ struct Sim
 	void StartZoneExit()
 	{
 		inStartZone = false;
-		switch (OnStartZoneExit(inPrac, running))
+		switch (OnStartZoneExit(inPrac, running, runCourse == zoneCourse, tpFloor > 0))
 		{
 			case StartZoneExit::PracClock: break;
 			case StartZoneExit::KeepRun: break;
@@ -115,6 +118,7 @@ struct Sim
 		checkpoints = r.cps;
 		tpCount = tpFloor = RestoredTeleports(r.tp);
 		running = true;
+		runCourse = 0; // курс бэкапа
 		time = r.time;
 		justTeleported = true;
 		if (inStartZone) StartZoneExit();
@@ -283,10 +287,43 @@ int main()
 	}
 
 	// 9. Правило выхода из зоны.
-	assert(OnStartZoneExit(true, true) == StartZoneExit::PracClock);
-	assert(OnStartZoneExit(true, false) == StartZoneExit::PracClock);
-	assert(OnStartZoneExit(false, true) == StartZoneExit::KeepRun);
-	assert(OnStartZoneExit(false, false) == StartZoneExit::ResetAndStart);
+	for (int m = 0; m < 4; m++)
+	{
+		assert(OnStartZoneExit(true, true, m & 1, m & 2) == StartZoneExit::PracClock);
+		assert(OnStartZoneExit(true, false, m & 1, m & 2) == StartZoneExit::PracClock);
+		assert(OnStartZoneExit(false, false, m & 1, m & 2) == StartZoneExit::ResetAndStart);
+	}
+	assert(OnStartZoneExit(false, true, true, false) == StartZoneExit::KeepRun);
+	assert(OnStartZoneExit(false, true, false, true) == StartZoneExit::KeepRun);
+	assert(OnStartZoneExit(false, true, true, true) == StartZoneExit::KeepRun);
+	assert(OnStartZoneExit(false, true, false, false) == StartZoneExit::ResetAndStart);
+
+	// 10. Перекрытые стартовые зоны курсов A(0) и B(1), обычный ран: вышел из A (ран A), потом
+	//     из B — стартует ран B с нуля, как в апстриме.
+	{
+		Sim s;
+		s.inStartZone = true;
+		s.zoneCourse = 0;
+		s.Tick(1);
+		s.StartZoneExit();
+		assert(s.running && s.runCourse == 0);
+		s.Tick(1);
+		s.zoneCourse = 1;
+		s.inStartZone = true; // ещё стоит в B
+		s.StartZoneExit();
+		assert(s.running && s.runCourse == 1 && s.time == 0 && s.Tps() == 0);
+	}
+
+	// 11. Бэкап курса 0, спаун в стартовой зоне курса 1 (бонус у спауна) — ран не теряет ТП.
+	{
+		Sim a = NubRunWithTps(4);
+		Sim b;
+		b.inStartZone = true;
+		b.zoneCourse = 1;
+		b.StartZoneEnter();
+		b.Restore(a.Save());
+		assert(b.running && b.runCourse == 0 && b.Tps() == 4 && !b.FinishIsPro());
+	}
 	assert(EffectiveTeleports(0, 4) == 4 && EffectiveTeleports(9, 4) == 9 && EffectiveTeleports(0, 0) == 0);
 	assert(RestoredTeleports(0) == 1 && RestoredTeleports(6) == 6);
 

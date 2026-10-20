@@ -537,6 +537,8 @@ bool KZTimerService::TimerEnd(const KZCourseDescriptor *courseDesc)
 
 	// Успешный финиш - ран завершён, сейв незавершённого рана по этому ключу больше не актуален.
 	this->player->savedRunService->InvalidateCurrent("finish");
+	// Пол ТП восстановленного рана — только до его конца; сабмишен выше его уже учёл.
+	this->player->checkpointService->ClearTeleportFloor();
 
 	return true;
 }

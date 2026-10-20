@@ -421,7 +421,10 @@ void KZTriggerService::OnMappingApiTriggerEndTouchPost(TriggerTouchTracker track
 			// Ран, который идёт при ВЫХОДЕ из зоны, в неё не входил (вход остановил бы таймер) — его
 			// туда поставило восстановление (SavedRuns/!prac), а наружу вывел телепорт. Сброс ТП здесь
 			// делал такой ран PRO со старым временем (T-19), см. run_teleport_rules.h.
-			switch (KZ::timer::rules::OnStartZoneExit(this->player->pracService->IsInPrac(), this->player->timerService->GetTimerRunning()))
+			const KZCourseDescriptor *runCourse = this->player->timerService->GetCourse();
+			switch (KZ::timer::rules::OnStartZoneExit(this->player->pracService->IsInPrac(), this->player->timerService->GetTimerRunning(),
+													  runCourse && course && runCourse->guid == course->guid,
+													  this->player->checkpointService->HasTeleportFloor()))
 			{
 				case KZ::timer::rules::StartZoneExit::PracClock:
 					this->player->pracService->OnStartZoneEndTouch(course);

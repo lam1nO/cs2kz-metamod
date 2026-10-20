@@ -75,7 +75,13 @@ public:
 		return KZ::timer::rules::EffectiveTeleports(this->tpCount, this->tpFloor);
 	}
 
-	// Новый ран (TimerStart) или конец рана (TimerStop): пол восстановления больше не действует.
+	// Ран восстановлен (SavedRuns/prac) и ещё не перезапущен — пол ТП стоит.
+	bool HasTeleportFloor()
+	{
+		return this->tpFloor > 0;
+	}
+
+	// Новый ран (TimerStart) или конец рана (TimerStop/TimerEnd): пол восстановления больше не действует.
 	void ClearTeleportFloor()
 	{
 		this->tpFloor = 0;
