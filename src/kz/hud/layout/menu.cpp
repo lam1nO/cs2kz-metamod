@@ -417,6 +417,13 @@ static_function const MenuTabRows *GetMenuTab(i32 tab)
 	return (tab >= 0 && tab < (i32)tabs.size()) ? &tabs[tab] : NULL;
 }
 
+// Вкладка «Скины» (layout/menu_skins.cpp) — сразу за вкладками таблицы; -1 — места в шапке нет или вкладка недоступна.
+i32 KZMenuSkinsTab()
+{
+	const i32 idx = (i32)GetMenuLayout().size();
+	return (idx < KZ_MENU_TABS && KZHUDService::IsMenuSkinsAvailable()) ? idx : -1;
+}
+
 static_function const MenuSubRows *GetMenuSub(i32 tab, i32 sub)
 {
 	const MenuTabRows *t = GetMenuTab(tab);
@@ -773,6 +780,7 @@ CCSCustomHudLayout *KZHUDService::EnsureMenuLayout(bool &created)
 	// выставлено, и не отправило бы ничего — пустая рамка до реконнекта.
 	this->menuApplied = MenuAppliedState();
 	this->menuVars.clear();
+	this->menuEmbedOn.clear();
 	for (i32 i = 0; i < (i32)LayoutElement::Count; i++)
 	{
 		this->editorElements[i] = LayoutElementState();
@@ -808,6 +816,8 @@ void KZHUDService::RecycleMenuLayoutIfFull()
 
 void KZHUDService::DestroyOwnedMenuLayout()
 {
+	this->LeaveMenuSkins();
+	this->menuEmbedOn.clear();
 	if (CBaseEntity *ent = this->ownedMenuLayout.Get())
 	{
 		// Снимаем захват ЯВНО, до удаления сущности — не полагаемся на побочный эффект
@@ -958,10 +968,13 @@ void KZHUDService::RenderMenu()
 	// Футер §1.5: действие мыши и инфо, без подсказки закрытия (есть крестик).
 	this->SetMenuVar(layout, "opt_root", "f_key", KZLanguageService::PrepareMessageWithLang(lang, "Options - Footer Key").c_str());
 	this->SetMenuVar(layout, "opt_root", "f_act", KZLanguageService::PrepareMessageWithLang(lang, "Options - Footer Select").c_str());
-	this->SetMenuVar(layout, "opt_root", "hint", KZLanguageService::PrepareMessageWithLang(lang, "Options - Hint").c_str());
+	this->SetMenuVar(layout, "opt_root", "hint",
+					 KZLanguageService::PrepareMessageWithLang(lang, this->menuSkins ? "Options - Skins Hint" : "Options - Hint").c_str());
+	// Вкладка «Скины»: класс прячет подвкладки и строки и показывает ks_pane (сетку рисует cyber-menu).
+	this->SetMenuBoolClass(layout, "opt_root", "skins", this->menuApplied.optSkins, this->menuSkins);
 
 	// Карточка редактора — только на «Худ» → «Общее», над строками подраздела.
-	const bool heroShown = IsHudGeneralSub(this->menuCategory, this->menuSub);
+	const bool heroShown = !this->menuSkins && IsHudGeneralSub(this->menuCategory, this->menuSub);
 	if (heroShown)
 	{
 		this->SetMenuVar(layout, "edit_open", "hero_t", KZLanguageService::PrepareMessageWithLang(lang, "Options - Hero Title").c_str());
@@ -984,18 +997,21 @@ void KZHUDService::RenderMenuTabs(CCSCustomHudLayout *layout)
 {
 	const std::vector<MenuTabRows> &tabs = GetMenuLayout();
 	const char *lang = this->player->languageService->GetLanguage();
+	const i32 skinsTab = KZMenuSkinsTab();
 	for (i32 i = 0; i < KZ_MENU_TABS; i++)
 	{
-		const bool used = i < (i32)tabs.size();
+		const bool skins = i == skinsTab;
+		const bool used = i < (i32)tabs.size() || skins;
 		if (used)
 		{
-			const std::string label = KZLanguageService::PrepareMessageWithLang(lang, tabs[i].phraseKey);
+			const std::string label = KZLanguageService::PrepareMessageWithLang(lang, skins ? "Options - Tab Skins" : tabs[i].phraseKey);
 			this->SetMenuVar(layout, TabPanel(i), TabVar(i), label.c_str());
-			this->SetMenuBoolClass(layout, TabPanel(i), "on", this->menuApplied.tabOn[i], i == this->menuCategory);
+			this->SetMenuBoolClass(layout, TabPanel(i), "on", this->menuApplied.tabOn[i], this->menuSkins ? skins : i == this->menuCategory);
 		}
 		this->SetMenuBoolClass(layout, TabPanel(i), "hidden", this->menuApplied.tabHidden[i], !used);
 	}
-	const MenuTabRows *tab = GetMenuTab(this->menuCategory);
+	// На «Скинах» подвкладок нет (разделы — полоса самой сетки).
+	const MenuTabRows *tab = this->menuSkins ? NULL : GetMenuTab(this->menuCategory);
 	for (i32 i = 0; i < KZ_MENU_SUBS; i++)
 	{
 		const bool used = tab && i < (i32)tab->subs.size();
@@ -1284,6 +1300,7 @@ void KZHUDService::SelectMenuTab(i32 tab)
 	{
 		return;
 	}
+	this->LeaveMenuSkins();
 	if (this->menuPopup != MenuPopup::None)
 	{
 		this->CloseMenuPopup();
@@ -1302,6 +1319,7 @@ void KZHUDService::SelectMenuSub(i32 sub)
 	{
 		return;
 	}
+	this->LeaveMenuSkins();
 	if (this->menuPopup != MenuPopup::None)
 	{
 		this->CloseMenuPopup();
@@ -1686,9 +1704,22 @@ bool KZHUDService::HandleMenuWindowClick(const char *id)
 		this->OpenHudEditor();
 		return true;
 	}
+	// Встроенная страница «Скины»: кнопки ks_* — клики cyber-menu (без префикса, как у моста).
+	if (this->menuSkins && !V_strncmp(id, "ks_", 3))
+	{
+		this->ForwardMenuEmbedClick(id + 3);
+		return true;
+	}
 	if (ParseIndexed(id, "tab", a, b) && b < 0)
 	{
-		this->SelectMenuTab(a);
+		if (a >= 0 && a == KZMenuSkinsTab())
+		{
+			this->SelectMenuSkins();
+		}
+		else
+		{
+			this->SelectMenuTab(a);
+		}
 		return true;
 	}
 	if (ParseIndexed(id, "stab", a, b) && b < 0)
@@ -1879,6 +1910,7 @@ void KZHUDService::CloseLayoutMenu()
 	{
 		return;
 	}
+	this->LeaveMenuSkins();
 	// onEdit закрытия обязан прийти и на этом пути (правка Vector-пункта осела бы только в БД).
 	const KZOptItem *it = this->menuPopupTarget;
 	if (this->menuPopup != MenuPopup::None && this->menuPopup != MenuPopup::Confirm && it && it->onEdit)

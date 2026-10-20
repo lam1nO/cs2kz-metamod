@@ -130,10 +130,8 @@ void KZTipService::OnPlayerJoinTeam(i32 team)
 	}
 
 	this->teamJoinedAtLeastOnce = true;
-	if (g_pMultiAddonManager)
-	{
-		this->player->languageService->PrintChat(true, false, "Menu Hint");
-	}
+	// Подсказка «меню через радио (Z)» снята: с патча CS2 14.10 клиент не пускает команды радио-панели аддона
+	// (WORKSHOP COMMAND … does not exist) — меню открываются удержанием E, !menu, !options, скины — !ws.
 
 	this->player->globalService->PrintAnnouncements();
 

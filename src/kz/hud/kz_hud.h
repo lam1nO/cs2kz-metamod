@@ -5,6 +5,7 @@
 #include "entityhandle.h"
 #include "sdk/entity/cparticlesystem.h"
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #define KZ_HUD_TIMER_STOPPED_GRACE_TIME 3.0f
@@ -687,6 +688,14 @@ public:
 		return this->menuOpen;
 	}
 
+	// Вкладка «Скины» окна !options (layout/menu_skins.cpp): сетку рисует cyber-menu (вкладка cyber-skins, как на
+	// 35hp/dm), форк встраивает её в своё окно. Открыть окно сразу на «Скинах» / переключить открытое (!ws).
+	void OpenLayoutMenuSkins();
+	// cyb_ui_embed: операции встроенной страницы (формат cyb_ui_batch) — только при открытой вкладке «Скины».
+	void ApplyMenuEmbedOps(const char *ops);
+	// Вкладка доступна: на сервере cyber-menu со встраиванием (команда cyb_menu_embed).
+	static bool IsMenuSkinsAvailable();
+
 	// === Редактор `!hud` (спека 2026-09-26-hud-editor-options §4.5, layout/editor.cpp) ======
 	// Живёт на ТОЙ ЖЕ сущности, что и окно !options (ownedMenuLayout, разметка cyber/options.xml):
 	// два корня opt_root/edit_root, режим один в момент времени. Открытие редактора закрывает
@@ -1189,6 +1198,13 @@ private:
 	// layout/menu.cpp, пустые вкладки/подразделы выброшены). Смена вкладки сбрасывает подраздел.
 	i32 menuCategory {};
 	i32 menuSub {};
+	// Открыта вкладка «Скины» (встроенная страница cyber-menu, layout/menu_skins.cpp).
+	bool menuSkins {};
+	// Классы, включённые встроенной страницей на ks_* панелях ("панель\x1eкласс"): при новом входе на вкладку
+	// cyber-menu рисует с чистого листа, а сущность окна та же — старые иконки плиток снимаем сами.
+	std::unordered_set<std::string> menuEmbedOn;
+	f64 menuEmbedClickStart {};
+	i32 menuEmbedClicks {};
 
 	enum class MenuPopup
 	{
@@ -1252,6 +1268,7 @@ private:
 		bool colorPopupDockL {};
 		bool listPopupDockL {};
 		bool editOpenHidden {true};
+		bool optSkins {}; // класс skins на opt_root — открыта вкладка «Скины»
 
 		bool tabHidden[KZ_MENU_TABS] {};
 		bool tabOn[KZ_MENU_TABS] {};
@@ -1358,6 +1375,10 @@ private:
 
 	void SelectMenuTab(i32 tab);
 	void SelectMenuSub(i32 sub);
+	void SelectMenuSkins();
+	// Уйти с вкладки «Скины» (смена вкладки, закрытие окна, снос сущности): cyber-menu перестаёт рисовать.
+	void LeaveMenuSkins();
+	void ForwardMenuEmbedClick(const char *id);
 	void MenuRowAction(i32 row, i32 control, i32 arg);
 	void OpenMenuPopup(MenuPopup kind, const KZOptItem *item);
 	void CloseMenuPopup();

@@ -142,6 +142,7 @@ def configure_main(sdk_target, sdk, cxx):
     os.path.join(builder.sourcePath, 'src', 'kz', 'hud', 'layout', 'defaults.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'hud', 'layout', 'mhud.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'hud', 'layout', 'menu.cpp'),
+    os.path.join(builder.sourcePath, 'src', 'kz', 'hud', 'layout', 'menu_skins.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'hud', 'layout', 'rpmenu.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'hud', 'layout', 'gsmenu.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'hud', 'layout', 'gsmenu_fill.cpp'),

@@ -36,6 +36,13 @@
 // RecycleMenuLayoutIfFull) — закрытая сущность ничего не держит, пересоздание бесплатно.
 #define KZ_MENU_INTERN_RECYCLE 900
 
+// Вкладка «Скины» окна (layout/menu_skins.cpp): индекс в шапке сразу за вкладками таблицы раскладки;
+// -1 — места нет или на сервере нет cyber-menu со встраиванием (команда cyb_menu_embed).
+i32 KZMenuSkinsTab();
+// Встроенная страница скинов шлёт операции на id своей разметки (gymstrike/menu.xml: page_grid, cat*, t*/te*/ti*/tk*,
+// sk_*); в options.xml те же панели — с этим префиксом (блок GEN:skins, tools/gen_options_xml.py аддона).
+#define KZ_MENU_EMBED_PREFIX "ks_"
+
 // Класс типа строки по умолчанию (разметка ставит его всем row{i}) — стабильный указатель для
 // диф-кэша MenuAppliedState::rowType (SetMenuSwapClass сравнивает указатели).
 extern const char *const KZ_MENU_ROW_TYPE_NONE;

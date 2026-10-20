@@ -61,6 +61,13 @@ SCMD(kz_options, SCFL_PLAYER | SCFL_PREFERENCE | SCFL_HELP)
 	{
 		return true;
 	}
+	// «/options skins» — так !ws (cyber-skins → cyber-menu ForwardTab) открывает окно сразу на вкладке «Скины»;
+	// открытое окно не закрывается, а переключается (layout/menu_skins.cpp).
+	if (args && args->ArgC() >= 2 && !V_stricmp(args->Arg(1), "skins"))
+	{
+		player->hudService->OpenLayoutMenuSkins();
+		return true;
+	}
 	// Открытый редактор !hud окно не «переключает», а сменяет: OpenLayoutMenu сам закрывает
 	// редактор (одна сущность — один режим, §4.5).
 	if (player->hudService->IsLayoutMenuOpen())

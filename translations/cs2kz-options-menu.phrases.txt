@@ -272,6 +272,20 @@
 		"chi"	"玩法"
 		"ua"	"Геймплей"
 	}
+	"Options - Tab Skins"
+	{
+		"en"	"Skins"
+		"ru"	"Скины"
+		"chi"	"皮肤"
+		"ua"	"Скіни"
+	}
+	"Options - Skins Hint"
+	{
+		"en"	"Wear, stickers and StatTrak at gymstrike.net/skins"
+		"ru"	"Износ, наклейки и StatTrak — на gymstrike.net/skins"
+		"chi"	"磨损、贴纸和 StatTrak — 在 gymstrike.net/skins"
+		"ua"	"Знос, наліпки і StatTrak — на gymstrike.net/skins"
+	}
 	"Options - Tab SoundChat"
 	{
 		"en"	"Sound & chat"
