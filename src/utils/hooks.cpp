@@ -1282,21 +1282,21 @@ static KHook::Return<void> AirMovePost(CCSPlayer_MovementServices *ms, CMoveData
 
 static KHook::Member<CCSPlayer_MovementServices, void, CMoveData *> AirMove(AirMovePre, AirMovePost);
 
+static KHook::Return<void> AirAcceleratePre(CCSPlayer_MovementServices *ms, CMoveData *mv, Vector &wishdir, f32 wishspeed, f32 accel);
+
+static KHook::Member<CCSPlayer_MovementServices, void, CMoveData *, Vector &, f32, f32> AirAccelerate(AirAcceleratePre, nullptr);
+
+// wishspeed и accel KHook отдаёт копиями: правки режима (KZT — сетка 1/128 и нормализация престрейфа) доходят
+// до движка, только если вызвать оригинал с ними самим (с перехода на KHook 08.10.2026 они терялись).
 static KHook::Return<void> AirAcceleratePre(CCSPlayer_MovementServices *ms, CMoveData *mv, Vector &wishdir, f32 wishspeed, f32 accel)
 {
 	VPROF_BUDGET(__func__, "CS2KZ");
-	playerManager->ToPlayer(ms)->OnAirAccelerate(wishdir, wishspeed, accel);
-	return {KHook::Action::Ignore};
+	MovementPlayer *player = playerManager->ToPlayer(ms);
+	player->OnAirAccelerate(wishdir, wishspeed, accel);
+	AirAccelerate.CallOriginal(ms, mv, wishdir, wishspeed, accel);
+	player->OnAirAcceleratePost(wishdir, wishspeed, accel);
+	return {KHook::Action::Supersede};
 }
-
-static KHook::Return<void> AirAcceleratePost(CCSPlayer_MovementServices *ms, CMoveData *mv, Vector &wishdir, f32 wishspeed, f32 accel)
-{
-	VPROF_BUDGET(__func__, "CS2KZ");
-	playerManager->ToPlayer(ms)->OnAirAcceleratePost(wishdir, wishspeed, accel);
-	return {KHook::Action::Ignore};
-}
-
-static KHook::Member<CCSPlayer_MovementServices, void, CMoveData *, Vector &, f32, f32> AirAccelerate(AirAcceleratePre, AirAcceleratePost);
 
 static KHook::Return<void> FrictionPre(CCSPlayer_MovementServices *ms, CMoveData *mv)
 {
