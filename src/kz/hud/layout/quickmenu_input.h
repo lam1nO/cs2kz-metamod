@@ -10,6 +10,7 @@ namespace KZ::quickmenu
 	{
 		std::uint64_t held = 0;
 		std::uint64_t pending = 0;
+		std::uint64_t consumedUntilRelease = 0;
 		std::int32_t lastCommand = 0;
 
 		// ProcessUsercmds содержит и backup-команды, которые наш фильтр уже мог
@@ -20,6 +21,7 @@ namespace KZ::quickmenu
 			if (otherOwner) pending = 0;
 			if (command <= lastCommand) return;
 			lastCommand = command;
+			consumedUntilRelease &= buttons;
 			Observe(buttons, navigation, otherOwner);
 		}
 
@@ -30,8 +32,16 @@ namespace KZ::quickmenu
 			pending = otherOwner ? 0 : pending | (edge & navigation);
 		}
 
-		void Transition()
+		// Только инструментальные кнопки: движение здесь никогда не захватывается.
+		std::uint64_t SuppressionMask(std::uint64_t controls, bool active)
 		{
+			if (active) consumedUntilRelease |= held & controls;
+			return (active ? controls : 0) | (consumedUntilRelease & controls);
+		}
+
+		void Transition(std::uint64_t controls = 0)
+		{
+			consumedUntilRelease |= held & controls;
 			pending = 0;
 		}
 

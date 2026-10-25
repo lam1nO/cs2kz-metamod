@@ -84,5 +84,79 @@ int main()
 	dedupe = InputLatch(); // новый слот/карта принимает новую нумерацию
 	dedupe.ObserveCommand(1, use, allNav, false);
 	assert(dedupe.Take() == use);
-	std::puts("quickmenu input transitions and duplicate commands: ok");
+	// Инструмент гасит только E/R/F. Любая комбинация движения, прыжка,
+	// приседания, ходьбы и чужих действий проходит без изменения.
+	constexpr std::uint64_t tool = use | reload | close;
+	constexpr std::uint64_t movement = (1ull << 16) | (1ull << 17) | (1ull << 18) | (1ull << 19) | (1ull << 20) | (1ull << 21) | (1ull << 22);
+	InputLatch guard;
+	guard.ObserveCommand(1, movement | use | reload, tool, false);
+	assert(guard.Take() == (use | reload));
+	const auto activeMask = guard.SuppressionMask(tool, true);
+	assert(activeMask == tool);
+	assert((activeMask & movement) == 0);
+	assert(((movement | use | reload) & ~activeMask) == movement);
+
+	// F закрывает помощник при удержанных E/R: хвост этих кнопок не
+	// становится +use/+reload в игре после закрытия.
+	guard.ObserveCommand(2, movement | use | reload | close, tool, false);
+	assert(guard.Take() == close);
+	guard.SuppressionMask(tool, true);
+	guard.Transition(tool);
+	assert(guard.SuppressionMask(tool, false) == tool);
+	guard.ObserveCommand(2, 0, tool, false); // обнулённый backup не снимает guard
+	assert(guard.SuppressionMask(tool, false) == tool);
+	guard.ObserveCommand(3, movement | use | reload, tool, false);
+	assert(guard.SuppressionMask(tool, false) == (use | reload));
+	assert(guard.Take() == 0);
+	guard.ObserveCommand(4, movement, tool, false); // настоящие отпускания
+	assert(guard.SuppressionMask(tool, false) == 0);
+	guard.ObserveCommand(5, movement | use, tool, false);
+	assert(guard.Take() == use);
+	assert(guard.SuppressionMask(tool, false) == 0); // новая E снова игровая
+
+	// Guard не разрастается на движение, даже если все кнопки удержаны.
+	for (std::uint64_t combination = 0; combination < 128; combination++)
+	{
+		InputLatch sample;
+		const auto rawMovement = combination << 16;
+		sample.ObserveCommand(1, rawMovement | tool, tool, false);
+		sample.SuppressionMask(tool, true);
+		sample.Transition(tool);
+		const auto closedMask = sample.SuppressionMask(tool, false);
+		assert((closedMask & rawMovement) == 0);
+		assert(((rawMovement | tool) & ~closedMask) == rawMovement);
+	}
+
+	// Close() закрытой quickmenu вызывается чужими меню. Он не захватывает
+	// их R/F: Transition без собственных controlled keys не заводит guard.
+	InputLatch foreign;
+	foreign.ObserveCommand(1, reload | close | movement, tool, true);
+	foreign.Transition();
+	assert(foreign.SuppressionMask(tool, false) == 0);
+	assert(foreign.Take() == 0);
+	// Мышь в помощнике только целится. LMB/RMB не являются навигацией,
+	// но их нажатия и хвост удержания после F должны оставаться погашены.
+	constexpr std::uint64_t attacks = (1ull << 32) | (1ull << 33);
+	constexpr std::uint64_t owned = tool | attacks;
+	InputLatch mouse;
+	mouse.ObserveCommand(1, movement | attacks, tool, false);
+	assert(mouse.Take() == 0); // атаки не запускают действия помощника
+	assert(mouse.SuppressionMask(owned, true) == owned);
+	assert(((movement | attacks) & ~owned) == movement);
+	mouse.ObserveCommand(2, movement | attacks | close, tool, false);
+	assert(mouse.Take() == close);
+	mouse.SuppressionMask(owned, true);
+	mouse.Transition(owned);
+	mouse.ObserveCommand(2, 0, tool, false); // мутировавший backup не отпускает мышь
+	assert(mouse.SuppressionMask(owned, false) == (attacks | close));
+	mouse.ObserveCommand(3, movement | attacks, tool, false);
+	assert(mouse.SuppressionMask(owned, false) == attacks);
+	assert(mouse.Take() == 0);
+	mouse.ObserveCommand(4, movement, tool, false);
+	assert(mouse.SuppressionMask(owned, false) == 0);
+	mouse.ObserveCommand(5, movement | attacks, tool, false);
+	assert(mouse.SuppressionMask(owned, false) == 0); // свежий клик после выхода — игровой
+	assert(mouse.Take() == 0);
+	assert((owned & movement) == 0);
+	std::puts("quickmenu input transitions, duplicates, movement, attack and exit guard: ok");
 }

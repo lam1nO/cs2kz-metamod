@@ -35,7 +35,7 @@ namespace
 		CHandle<CBaseEntity> entity {};
 		Mode mode = Mode::Closed;
 		KZ::quickmenu::InputLatch input;
-		i32 row = 0;
+		u64 actions = 0;
 		bool continuous = false;
 		bool ownsAutoPaint = false;
 		bool shown = false;
@@ -45,7 +45,11 @@ namespace
 		std::unordered_map<std::string, bool> classes;
 	};
 	State states[MAXPLAYERS];
-	constexpr u64 kNav = IN_FORWARD | IN_BACK | IN_MOVELEFT | IN_MOVERIGHT | IN_USE | IN_RELOAD | IN_LOOK_AT_WEAPON;
+	constexpr u64 kToolKeys = IN_USE | IN_RELOAD | IN_LOOK_AT_WEAPON;
+	constexpr u64 kAttackKeys = IN_ATTACK | IN_ATTACK2;
+	constexpr u64 kOwnedKeys = kToolKeys | kAttackKeys;
+	constexpr u64 kMovementKeys = IN_FORWARD | IN_BACK | IN_MOVELEFT | IN_MOVERIGHT | IN_JUMP | IN_DUCK | IN_SPEED | IN_JOYAUTOSPRINT | IN_TURNLEFT | IN_TURNRIGHT;
+	static_assert((kOwnedKeys & kMovementKeys) == 0, "quickmenu controls must preserve movement");
 
 	State *Of(KZPlayer *player)
 	{
@@ -117,11 +121,11 @@ namespace
 	}
 	void SetMode(KZPlayer *player, State &s, Mode mode)
 	{
+		const bool hadInput = s.mode != Mode::Closed;
 		if (s.mode == Mode::Paint && mode != Mode::Paint) StopPaint(player, s);
 		if (s.mode == Mode::Measure && mode != Mode::Measure) player->measureService->CancelMeasure(false);
 		s.mode = mode;
-		s.row = 0;
-		s.input.Transition();
+		s.input.Transition(hadInput ? kOwnedKeys : 0);
 		s.feedback.clear();
 		if (auto layout = (CCSCustomHudLayout *)s.entity.Get()) layout->SetInputCaptureEnabled(player->GetPlayerSlot(), mode == Mode::Drawer);
 	}
@@ -132,17 +136,11 @@ namespace
 		CPlayerSlot slot = player->GetPlayerSlot();
 		scmd::OnClientCommand(slot, args);
 	}
-	void ToggleMode(KZPlayer *player, State &s)
-	{
-		if (s.mode != Mode::Paint || s.row != 1) return;
-		StopPaint(player, s);
-		s.continuous = !s.continuous;
-	}
 	void ToolAction(KZPlayer *player, State &s)
 	{
+		s.actions++;
 		if (s.mode == Mode::Paint)
 		{
-			if (s.row == 1) { ToggleMode(player, s); return; }
 			if (s.continuous)
 			{
 				if (s.ownsAutoPaint) StopPaint(player, s);
@@ -157,7 +155,6 @@ namespace
 		else if (s.mode == Mode::Measure)
 		{
 			auto measure = player->measureService;
-			if (s.row == 1) { measure->CancelMeasure(true); s.feedback.clear(); return; }
 			if (measure->startPos.IsValid()) measure->EndMeasure();
 			else measure->StartMeasure();
 			s.feedback = !measure->startPos.IsValid() && !measure->lastResult.valid ? Text(player, "Quick - No Surface") : "";
@@ -210,7 +207,7 @@ namespace
 					Text(player, "Quick - Height").c_str(), measure->lastResult.vertical, Text(player, "Quick - Effective").c_str(), measure->lastResult.effective);
 				result = buf;
 			}
-			Var(player, s, layout, "qt1", "label", Text(player, "Quick - Reset Measure"));
+			Var(player, s, layout, "qt1", "label", "");
 			Var(player, s, layout, "qt1", "value", "");
 		}
 		Var(player, s, layout, "qm_tool", "hint", hint);
@@ -222,8 +219,8 @@ namespace
 		for (i32 row = 0; row < 3; row++)
 		{
 			char id[12]; V_snprintf(id, sizeof(id), "qt%i", row);
-			Class(player, s, layout, id, "hidden", row >= 2);
-			Class(player, s, layout, id, "selected", row == s.row);
+			Class(player, s, layout, id, "hidden", row >= 2 || (s.mode == Mode::Measure && row == 1));
+			Class(player, s, layout, id, "selected", false);
 		}
 	}
 }
@@ -296,8 +293,6 @@ void KZ::quickmenu::Tick(KZPlayer *player)
 	}
 	else if (s->mode == Mode::Paint || s->mode == Mode::Measure)
 	{
-		if (pressed & (IN_FORWARD | IN_BACK)) s->row = (s->row + 1) % 2;
-		if (pressed & (IN_MOVELEFT | IN_MOVERIGHT)) ToggleMode(player, *s);
 		if (pressed & IN_USE) ToolAction(player, *s);
 	}
 	Render(player, *s, layout);
@@ -316,13 +311,14 @@ bool KZ::quickmenu::OnClick(KZPlayer *player, uint32 packedHandle, const char *i
 	const f64 now = g_pKZUtils->GetServerGlobals()->curtime;
 	if (s->lastClick >= 0 && now >= s->lastClick && now - s->lastClick < .15) return true;
 	s->lastClick = now;
-	if (KZ_STREQ(id, "qm_paint"))
+	if (KZ_STREQ(id, "qm_paint") || KZ_STREQ(id, "qm_paint_single") || KZ_STREQ(id, "qm_paint_auto"))
 	{
+		if (KZ_STREQ(id, "qm_paint_single")) s->continuous = false;
+		if (KZ_STREQ(id, "qm_paint_auto")) s->continuous = true;
 		SetMode(player, *s, Mode::Paint);
 		// Вход в инструмент не запускает рисование. Уже включённый togglepaint останавливаем
 		// осознанным выбором инструмента, не меняя сохранённые параметры цвета/размера.
 		if (player->paintService->IsAutoPaintEnabled()) player->paintService->ToggleAutoPaint();
-		s->continuous = false;
 	}
 	else if (KZ_STREQ(id, "qm_measure")) { SetMode(player, *s, Mode::Measure); player->measureService->CancelMeasure(true); }
 	else if (KZ_STREQ(id, "qm_lead")) player->leadService->Toggle(CybReplayDownload::Kind::AWR);
@@ -346,25 +342,26 @@ void KZ::quickmenu::OnUsercmds(KZPlayer *player, PlayerCommand *cmds, i32 count)
 		auto buttons = base->mutable_buttons_pb();
 		const u64 held = buttons->buttonstate1();
 		const bool otherOwner = OtherUi(player);
-		s->input.ObserveCommand(pc->cmdNum, held, kNav, otherOwner);
-		if (otherOwner) continue;
-		const bool active = s->mode != Mode::Closed;
-		const u64 mask = active ? kNav | IN_ATTACK | IN_ATTACK2 : (held & IN_LOOK_AT_WEAPON);
+		s->input.ObserveCommand(pc->cmdNum, held, kToolKeys, otherOwner);
+		const bool active = s->mode != Mode::Closed && !otherOwner;
+		// Мышь в помощнике только целится: атаки подавляем, не используя их как навигацию.
+		// После F удержанные E/R/F/атаки погашены до отпускания в новой cmd.
+		// Чужое меню получает новые нажатия, но не хвост прежнего действия помощника.
+		const u64 mask = s->input.SuppressionMask(kOwnedKeys, active) | (!otherOwner ? (held & IN_LOOK_AT_WEAPON) : 0);
 		if (!mask) continue;
 		buttons->set_buttonstate1(buttons->buttonstate1() & ~mask);
 		buttons->set_buttonstate2(buttons->buttonstate2() & ~mask);
 		buttons->set_buttonstate3(buttons->buttonstate3() & ~mask);
 		for (i32 word = 0; word < 3; word++) pc->buttonstates.m_pButtonStates[word] &= ~mask;
-		if (active)
-		{
-			base->set_forwardmove(0);
-			base->set_leftmove(0);
-		}
 		for (i32 j = 0; j < base->subtick_moves_size(); j++)
 		{
 			auto step = base->mutable_subtick_moves(j);
-			if (step->button() & mask) step->set_pressed(false);
-			if (active) { step->set_analog_forward_delta(0); step->set_analog_left_delta(0); }
+			if (step->button() & mask)
+			{
+				const u64 remaining = step->button() & ~mask;
+				if (remaining) step->set_button(remaining);
+				else step->set_pressed(false);
+			}
 		}
 	}
 }
@@ -377,3 +374,22 @@ SCMD(kz_quick, SCFL_HUD)
 	return true;
 }
 SCMD_LINK(kz_qmenu, kz_quick);
+
+// Только собственная консоль: acceptance-проверки не читают чужое состояние и не спамят чат.
+SCMD(kz_quickstatus, SCFL_HIDDEN)
+{
+	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
+	State *s = Of(player);
+	if (!player || !s) return true;
+	const char *mode = s->mode == Mode::Drawer ? "drawer" : s->mode == Mode::Paint ? "paint" : s->mode == Mode::Measure ? "measure" : "closed";
+	auto layout = (CCSCustomHudLayout *)s->entity.Get();
+	const bool capture = layout && layout->IsInputCaptureEnabled(player->GetPlayerSlot());
+	Vector position {};
+	if (player->GetPlayerPawn()) player->GetOrigin(&position);
+	utils::PrintConsole(controller,
+		"[kz_quickstatus] mode=%s capture=%d continuous=%d autopaint=%d point_a=%d result=%d actions=%llu pos=%.2f/%.2f/%.2f\n",
+		mode, capture ? 1 : 0, s->continuous ? 1 : 0, player->paintService->IsAutoPaintEnabled() ? 1 : 0,
+		player->measureService->startPos.IsValid() ? 1 : 0, player->measureService->lastResult.valid ? 1 : 0,
+		(unsigned long long)s->actions, position.x, position.y, position.z);
+	return true;
+}
