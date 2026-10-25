@@ -1,3 +1,4 @@
+#include "kz/hud/layout/quickmenu.h"
 #include "kz/hud/layout/gsmenu.h"
 #include "kz.h"
 #include "utils/utils.h"
@@ -268,6 +269,7 @@ void KZPlayer::OnPhysicsSimulatePost()
 	KZ::replaysystem::OnPhysicsSimulatePost(this);
 	// Меню cs2menus ведёт прослойка (hud/layout/gsmenu_shim.cpp): ввод и перерисовка каждый такт,
 	// в любом состоянии игрока (в т.ч. мёртвом без цели наблюдения, где худ не рисуется).
+	KZ::quickmenu::Tick(this);
 	KZ::gsmenu::ShimTick(this);
 	if (this->specService->GetSpectatedPlayer())
 	{
@@ -330,6 +332,9 @@ void KZPlayer::OnPhysicsSimulatePost()
 void KZPlayer::OnProcessUsercmds(PlayerCommand *cmds, int numcmds)
 {
 	VPROF_BUDGET(__func__, "CS2KZ");
+	// Навигация инструмента — UI, не движение рана: сначала гасим её в командах,
+	// иначе запись сохранила бы W/S/A/D, и бот без состояния quickmenu пошёл бы иначе.
+	KZ::quickmenu::OnUsercmds(this, cmds, numcmds);
 	this->recordingService->OnProcessUsercmds(cmds, numcmds);
 	// ПОСЛЕ recordingService осознанно: в реплей пишется исходное нажатие атаки, а
 	// применяется погашенное. При воспроизведении бот гейтится тем же хуком, так что

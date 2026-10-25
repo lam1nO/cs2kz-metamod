@@ -1,0 +1,153 @@
+"Phrases"
+{
+	"Quick - On"
+	{
+		"en"		"On"
+		"ru"		"Вкл"
+	}
+	"Quick - Off"
+	{
+		"en"		"Off"
+		"ru"		"Выкл"
+	}
+	"Quick - No Surface"
+	{
+		"en"		"Aim at a solid surface"
+		"ru"		"Наведите прицел на поверхность"
+	}
+	"Quick - Stop Painting"
+	{
+		"en"		"Stop painting"
+		"ru"		"Остановить рисование"
+	}
+	"Quick - Start Painting"
+	{
+		"en"		"Start painting"
+		"ru"		"Начать рисование"
+	}
+	"Quick - Place Paint"
+	{
+		"en"		"Place paint"
+		"ru"		"Поставить метку"
+	}
+	"Quick - Painting"
+	{
+		"en"		"Painting enabled — move your crosshair"
+		"ru"		"Рисование включено — ведите прицелом"
+	}
+	"Quick - Aim Surface"
+	{
+		"en"		"Aim at a surface"
+		"ru"		"Наведите прицел на поверхность"
+	}
+	"Quick - Mode"
+	{
+		"en"		"Mode"
+		"ru"		"Режим"
+	}
+	"Quick - Continuous"
+	{
+		"en"		"Continuous"
+		"ru"		"Непрерывно"
+	}
+	"Quick - Single"
+	{
+		"en"		"Single mark"
+		"ru"		"Одна метка"
+	}
+	"Quick - New Measure"
+	{
+		"en"		"New measurement"
+		"ru"		"Новый замер"
+	}
+	"Quick - Point A"
+	{
+		"en"		"Set point A"
+		"ru"		"Поставить точку A"
+	}
+	"Quick - Point B"
+	{
+		"en"		"Set point B"
+		"ru"		"Поставить точку B"
+	}
+	"Quick - Measure Result"
+	{
+		"en"		"Measurement result"
+		"ru"		"Результат измерения"
+	}
+	"Quick - Aim A"
+	{
+		"en"		"Choose point A with your crosshair"
+		"ru"		"Выберите точку A прицелом"
+	}
+	"Quick - Aim B"
+	{
+		"en"		"Choose point B with your crosshair"
+		"ru"		"Выберите точку B прицелом"
+	}
+	"Quick - Horizontal"
+	{
+		"en"		"Horizontal"
+		"ru"		"Горизонталь"
+	}
+	"Quick - Height"
+	{
+		"en"		"Height"
+		"ru"		"Высота"
+	}
+	"Quick - Effective"
+	{
+		"en"		"Effective"
+		"ru"		"Эффективно"
+	}
+	"Quick - Reset Measure"
+	{
+		"en"		"Reset measurement"
+		"ru"		"Сбросить замер"
+	}
+	"Quick - Color Red"
+	{
+		"en"		"Red"
+		"ru"		"Красный"
+	}
+	"Quick - Color White"
+	{
+		"en"		"White"
+		"ru"		"Белый"
+	}
+	"Quick - Color Black"
+	{
+		"en"		"Black"
+		"ru"		"Чёрный"
+	}
+	"Quick - Color Blue"
+	{
+		"en"		"Blue"
+		"ru"		"Синий"
+	}
+	"Quick - Color Brown"
+	{
+		"en"		"Brown"
+		"ru"		"Коричневый"
+	}
+	"Quick - Color Green"
+	{
+		"en"		"Green"
+		"ru"		"Зелёный"
+	}
+	"Quick - Color Yellow"
+	{
+		"en"		"Yellow"
+		"ru"		"Жёлтый"
+	}
+	"Quick - Color Purple"
+	{
+		"en"		"Purple"
+		"ru"		"Фиолетовый"
+	}
+	"Quick - Color Custom"
+	{
+		"en"		"Custom"
+		"ru"		"Свой цвет"
+	}
+}

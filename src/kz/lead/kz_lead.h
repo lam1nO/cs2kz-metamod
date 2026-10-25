@@ -135,6 +135,7 @@ public:
 
 	// `!lead` / `!lead pb|wr|awr`: включить, если выключен, иначе выключить.
 	void Toggle(CybReplayDownload::Kind kind);
+	bool IsBeamEnabled() const { return this->beam || this->beamOnLoad; }
 	// `!lead off`, смена карты/режима, дисконнект, телепорт-петля данных. Снимает ЛУЧ; путь
 	// остаётся жить, если его держит элемент «Прогресс» худа (см. progress).
 	void Disable(const char *reason);

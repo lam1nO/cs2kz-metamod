@@ -1126,6 +1126,15 @@ bool KZ::gsmenu::ShimClosedRecently(KZPlayer *player)
 	return d >= 0 && d <= 1;
 }
 
+bool KZ::gsmenu::ShimIsOpen(KZPlayer *player)
+{
+	if (!g_shim || !player) return false;
+	const i32 slot = player->GetPlayerSlot().Get();
+	if (slot < 0 || slot > MAXPLAYERS) return false;
+	return g_shim->SessionOf(slot) != nullptr
+		   || (g_menusHasSlotStatus && (g_shim->real->GetActiveMenu(slot) != kInvalidMenuHandle || g_shim->real->GetExternalBusy(slot)));
+}
+
 void KZ::gsmenu::ShimCancel(KZPlayer *player)
 {
 	if (!g_shim || !player)

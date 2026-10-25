@@ -1,3 +1,4 @@
+#include "kz/hud/layout/quickmenu.h"
 // Окно настроек !options на своей разметке cyber/options.xml (спека 2026-09-26-hud-editor-options
 // §3.2/§4.4, навигация — контракт options v4). Реестр (KZOptNode/KZOptItem, KZ::menu::Add*,
 // kz/option/menu/model.h) регистрируют hud/prefs/hud_prefs.cpp и локальные ветки; на нём держатся
@@ -1757,6 +1758,7 @@ bool KZHUDService::HandleMenuWindowClick(const char *id)
 
 void KZHUDService::OnLayoutMenuClick(uint32 packedHandle, const char *panelId)
 {
+	if (KZ::quickmenu::OnClick(this->player, packedHandle, panelId)) return;
 	// Общее окно (layout/gsmenu.cpp) — своя сущность; сверка хэндла внутри.
 	if (KZ::gsmenu::OnClick(this->player, packedHandle, panelId))
 	{
@@ -1855,6 +1857,7 @@ static_function void FindMenuTab(const char *categoryKey, i32 &tab, i32 &sub)
 
 void KZHUDService::OpenLayoutMenu(const char *categoryKey)
 {
+	KZ::quickmenu::Close(this->player);
 	if (this->menuOpen)
 	{
 		this->CloseLayoutMenu();

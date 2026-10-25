@@ -49,6 +49,7 @@ void KZMeasureService::TryMeasure()
 
 void KZMeasureService::StartMeasure()
 {
+	this->lastResult = {};
 	this->player->measureService->startPos = this->player->measureService->GetLookAtPos();
 	this->player->measureService->startPosSetTime = g_pKZUtils->GetServerGlobals()->curtime;
 	if (!this->player->measureService->startPos.IsValid())
@@ -101,6 +102,7 @@ bool KZMeasureService::EndMeasure(f32 minDistThreshold)
 	}
 	utils::PlaySoundToClient(this->player->GetPlayerSlot(), KZ_MEASURE_SOUND_END);
 	this->player->languageService->PrintChat(true, false, "Measure - Result", horizontalDist, effectiveDist, verticalDist);
+	this->lastResult = {true, horizontalDist, verticalDist, effectiveDist};
 	this->lastMeasureTime = g_pKZUtils->GetServerGlobals()->curtime;
 
 	if (this->measurerHandle.Get())
@@ -248,4 +250,12 @@ SCMD(kz_measureblock, SCFL_MEASURE | SCFL_HELP)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	player->measureService->MeasureBlock();
 	return true;
+}
+
+void KZMeasureService::CancelMeasure(bool clearResult)
+{
+	this->startPos.Invalidate();
+	if (this->measurerHandle.Get()) g_pKZUtils->RemoveEntity(this->measurerHandle.Get());
+	this->measurerHandle = {};
+	if (clearResult) this->lastResult = {};
 }

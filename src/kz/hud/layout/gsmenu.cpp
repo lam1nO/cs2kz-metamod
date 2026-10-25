@@ -1,3 +1,4 @@
+#include "kz/hud/layout/quickmenu.h"
 // Общее panorama-окно GYMSTRIKE — см. шапку gsmenu.h.
 //
 // Захват ввода (SetInputCaptureEnabled) — как у !options (layout/menu.cpp): включается на
@@ -293,6 +294,7 @@ static void YieldExtGrid(KZPlayer *player);
 
 bool KZ::gsmenu::ShowTable(KZPlayer *player, const Table &t, ClickFn onClick, const char *owner)
 {
+	KZ::quickmenu::Close(player);
 	WindowState *w = StateOf(player);
 	if (!w)
 	{
@@ -420,6 +422,7 @@ bool KZ::gsmenu::ShowTable(KZPlayer *player, const Table &t, ClickFn onClick, co
 
 bool KZ::gsmenu::ShowList(KZPlayer *player, const List &l)
 {
+	KZ::quickmenu::Close(player);
 	WindowState *w = StateOf(player);
 	if (!w)
 	{
@@ -647,6 +650,7 @@ static void YieldExtGrid(KZPlayer *player)
 // Сетка GG1 взяла захват — окно gw и боковое меню форка закрыть, как по ✕.
 static void CloseForExt(KZPlayer *player)
 {
+	KZ::quickmenu::Close(player);
 	const i32 slot = player->GetPlayerSlot().Get();
 	g_closingForExt[slot] = true;
 	KZ::gsmenu::Close(player, "ext_grid");

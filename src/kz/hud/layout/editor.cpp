@@ -1,3 +1,4 @@
+#include "kz/hud/layout/quickmenu.h"
 // Редактор худа `!hud` (спека 2026-09-26-hud-editor-options §3.2/§4.5). Живёт на сущности окна
 // !options (ownedMenuLayout, cyber/options.xml, корень edit_root): одна сущность, один режим в
 // момент времени, тот же курсорный захват и те же пять путей его снятия (шапка layout/menu.cpp).
@@ -296,6 +297,7 @@ static_function bool EditorDockLeftFor(const MHUDLayoutPrefs &prefs, i32 sel)
 
 void KZHUDService::OpenHudEditor()
 {
+	KZ::quickmenu::Close(this->player);
 	if (this->editorOpen)
 	{
 		return;

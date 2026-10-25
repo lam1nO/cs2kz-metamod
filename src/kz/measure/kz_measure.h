@@ -23,6 +23,14 @@ public:
 		Vector normal {};
 	};
 
+	struct Result
+	{
+		bool valid = false;
+		f32 horizontal = 0, vertical = 0, effective = 0;
+	};
+	Result lastResult {};
+	void CancelMeasure(bool clearResult);
+
 	f32 startPosSetTime {};
 	MeasurePos startPos {};
 	f32 lastMeasureTime {};
@@ -30,6 +38,7 @@ public:
 
 	virtual void Reset() override
 	{
+		lastResult = {};
 		startPosSetTime = {};
 		startPos.Invalidate();
 		lastMeasureTime = {};

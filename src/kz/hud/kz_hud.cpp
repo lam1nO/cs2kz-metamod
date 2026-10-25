@@ -1,3 +1,4 @@
+#include "kz/hud/layout/quickmenu.h"
 #include "kz/hud/layout/gsmenu.h"
 #include "kz/replays/session.h"
 #include "kz/kz.h"
@@ -462,6 +463,7 @@ void KZHUDService::Reset()
 	// обязан снять его так же, как ownedLayout выше, иначе следующий игрок в этом слоте
 	// унаследует чужой menuOpen/diff-кэш, а у отключившегося сам захват уйдёт вместе с
 	// сущностью, но наш флаг остался бы висеть, если не сбросить явно.
+	KZ::quickmenu::Reset(this->player);
 	this->DestroyOwnedMenuLayout();
 	// Состояние обмена настройками худа (KZ::hudshare): слот отката живёт в памяти сессии, не в
 	// префах, и по тому же правилу, что и кэши выше — слот реально освобождается, чужой снимок
@@ -501,6 +503,7 @@ void KZHUDService::OnRoundStart()
 		{
 			continue;
 		}
+		KZ::quickmenu::Reset(player);
 		player->hudService->ResetBottomPanelCache();
 		// Меню (Task 11): смена карты сносит саму сущность движком (переживает её только наш
 		// menuOpen-флаг на KZPlayer) — CloseLayoutMenu() безопасен и без валидной сущности

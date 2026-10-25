@@ -114,6 +114,7 @@ namespace KZ::gsmenu
 	void ShimDisconnect(KZPlayer *player);
 	void ShimCancel(KZPlayer *player); // закрыть боковое меню прослойки (onEnd с Cancelled)
 	void ShimRedrawAll(); // сущность пересоздана/снесена — перерисовать открытые списки
+	bool ShimIsOpen(KZPlayer *player); // боковое меню владеет W/S/E/R/F
 	bool ShimClosedRecently(KZPlayer *player); // меню прослойки закрылось в этом/прошлом такте
 	// Заголовок группы перед пунктом item меню (только панорама; cs2menus его не видит).
 	void SetItemGroup(uint32_t menu, int item, const char *title);
