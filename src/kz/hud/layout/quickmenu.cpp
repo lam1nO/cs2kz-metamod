@@ -337,6 +337,7 @@ bool KZ::quickmenu::OnClick(KZPlayer *player, uint32 packedHandle, const char *i
 	else if (KZ_STREQ(id, "qm_measure")) { SetMode(player, *s, Mode::Measure); player->measureService->CancelMeasure(true); }
 	else if (KZ_STREQ(id, "qm_lead")) player->leadService->Toggle(CybReplayDownload::Kind::AWR);
 	else if (KZ_STREQ(id, "qm_practice")) player->pracService->TogglePrac();
+	else if (KZ_STREQ(id, "qm_spec")) { Close(player); Execute(player, "kz_spec @me"); }
 	else if (KZ_STREQ(id, "qm_hide")) player->quietService->ToggleHide();
 	else if (KZ_STREQ(id, "qm_wr")) { Close(player); CybReplayDownload::RequestAndPlay(player, CybReplayDownload::Kind::WR, 0); }
 	else if (KZ_STREQ(id, "qm_records")) { Close(player); Execute(player, "kz_maptop"); }
