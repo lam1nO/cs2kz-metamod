@@ -46,6 +46,7 @@
 #include "kz/pistol/kz_pistol.h"
 #include "kz/recording/kz_recording.h"
 #include "kz/replays/kz_replaysystem.h"
+#include "kz/replays/session.h"
 #include "kz/racing/kz_racing.h"
 #include "kz/misc/kz_customchangemap.h"
 #include "utils/utils.h"
@@ -363,6 +364,8 @@ static KHook::Return<void> ClientDisconnectPost(ISource2GameClients *pThis, CPla
 	// Сериализация читает только сервисные поля, пешку не трогает (kz_savedrun.cpp) — здесь
 	// состояние заведомо целее, чем после тирдауна.
 	player->timerService->OnClientDisconnect();
+	// Invalidate downloads and remove this player's replay bot before controller teardown.
+	KZ::replaysystem::session::ReleaseForPlayer(player);
 	// Раздеваем ПЕРЕД тирдауном: SwitchTeam(0) уничтожает пешку, а с mp_death_drop_gun 1
 	// движок роняет её оружие на пол. Уборщик (kz_weapon_ground_cleanup) его подберёт, но
 	// только через период, и до тех пор ствол лежит у всех на виду — а реконнекты это

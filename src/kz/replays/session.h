@@ -27,6 +27,7 @@ namespace KZ::replaysystem::session
 	bool Owns(KZPlayer *player);
 	bool CanControlObserved(KZPlayer *player);
 	void Release();
+	void ReleaseForPlayer(KZPlayer *player);
 	void ProcessFrames();
 
 	// Контекст локален потоку и восстанавливается после вложенных вызовов.
