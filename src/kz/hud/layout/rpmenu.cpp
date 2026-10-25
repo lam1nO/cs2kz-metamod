@@ -1,3 +1,4 @@
+#include "kz/replays/session.h"
 // Меню управления реплеем спектатора на СВОЕЙ panorama-странице (KZ_RPMENU_LAYOUT, аддон
 // GYMSTRIKE-KZ; исходники разметки — gymstrike-kz/content/panorama: rpmenu.xml, rpmenu.css,
 // rpmenu-positions.css; спека — docs/design/2026-09-11-replay-player-panorama). Семантика
@@ -479,6 +480,11 @@ namespace
 
 const char *KZHUDService::ReplayMenuUnavailableReason()
 {
+	KZ::replaysystem::session::Scope scope(this->player);
+	if (!KZ::replaysystem::session::CanControlObserved(this->player))
+	{
+		return "foreign_or_missing_replay";
+	}
 	if (g_KZPlugin.unloading)
 	{
 		return "unloading";
@@ -606,6 +612,7 @@ void KZHUDService::CloseReplayMenu(const char *reason)
 
 void KZHUDService::UpdateReplayMenu(KZPlayer *source)
 {
+	KZ::replaysystem::session::Scope scope(this->player);
 	// Меню живёт ровно пока игрок наблюдает бота с идущим плейбеком и есть аддон. source —
 	// то, что DrawPanels считает источником данных; для спектатора это наблюдаемый.
 	// Спрятанное игроком (!rpmenu) меню не рисуется и не читает ввод, пока его не вернут.
@@ -666,6 +673,10 @@ void KZHUDService::UpdateReplayMenu(KZPlayer *source)
 
 void KZHUDService::ReadReplayMenuInput()
 {
+	if (!KZ::replaysystem::session::CanControlObserved(this->player))
+	{
+		return;
+	}
 	const u64 held = HeldButtons(this->player);
 	const u64 pressed = held & ~this->replayMenuHeld;
 	this->replayMenuHeld = held;
@@ -921,7 +932,7 @@ void KZHUDService::RenderReplayMenu(CCSCustomHudLayout *layout, bool force)
 
 	// Отметки чекпоинтов и телепортов. Считаются один раз на запись (проход по tickData) и
 	// дальше не трогаются: позиции отметок от плейбека не зависят. Ключ пересчёта — uuid
-	// записи: плейбек один на сервер, но запись в нём может смениться, пока меню открыто.
+	// записи: владелец может сменить реплей, пока меню открыто.
 	const std::string markUuid = KZ::replaysystem::data::IsReplayPlaying() ? KZ::replaysystem::data::GetCurrentReplay()->uuid.ToString() : "";
 	if (force || state.markUuid != markUuid)
 	{

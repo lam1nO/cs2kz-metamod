@@ -1,3 +1,4 @@
+#include "kz/replays/session.h"
 #include "kz/kz.h"
 #include "cs2kz.h"
 #include "kz_hud.h"
@@ -625,6 +626,7 @@ static_function int CountHtmlLines(const std::string &html)
 
 Vector KZHUDService::GetDisplayVelocity(KZPlayer *src)
 {
+	KZ::replaysystem::session::Scope replayScope(src);
 	Vector velocity, baseVelocity;
 	src->GetVelocity(&velocity);
 	src->GetBaseVelocity(&baseVelocity);
@@ -651,6 +653,7 @@ Vector KZHUDService::GetDisplayVelocity(KZPlayer *src)
 // («HUD - Bottom CP/TP Text», BuildVersionCHud) — его формат не тронут.
 std::string KZHUDService::GetCheckpointText(const char *language)
 {
+	KZ::replaysystem::session::Scope replayScope(this->player);
 	const bool isReplay = KZ::replaysystem::IsReplayBot(this->player);
 	const i32 cp = isReplay ? KZ::replaysystem::GetCurrentCpIndex() : this->player->checkpointService->GetCurrentCpIndex();
 	// AWR-реплей: телепорты вырезаны, счётчик ТП кадра врал бы про то, что видит зритель —
@@ -664,6 +667,7 @@ std::string KZHUDService::GetCheckpointText(const char *language)
 
 std::string KZHUDService::GetTimerText(const char *language)
 {
+	KZ::replaysystem::session::Scope replayScope(this->player);
 	if (KZ::replaysystem::IsReplayBot(this->player))
 	{
 		char timeText[128];
@@ -718,6 +722,7 @@ std::string KZHUDService::GetTimerText(const char *language)
 // false — только реплей-бот, которому показывать нечего.
 bool KZHUDService::GetTimerNumbers(f64 &outTime, bool &outRunning, bool &outPaused, bool &outIdleZero)
 {
+	KZ::replaysystem::session::Scope replayScope(this->player);
 	outTime = 0.0;
 	outRunning = false;
 	outPaused = false;
@@ -877,6 +882,7 @@ static_function void GetModeTagUpper(KZPlayer *dataSource, char *out, i32 size)
 std::string KZHUDService::BuildVersionCHud(KZPlayer *dataSource, bool suppressSpeed, bool suppressTimer, bool suppressKeys, bool masterMode,
 										   const char *language)
 {
+	KZ::replaysystem::session::Scope replayScope(dataSource);
 	// Данные (скорость/таймер/стейдж/PB-WR/CP-TP) — из dataSource (наблюдаемый при спектировании).
 	// Настройки (тумблеры/цвета/язык/раскладка) — из this (сам игрок/спектатор): своя раскладка,
 	// чужие данные. В мастер-режиме элемент рисуется, только если его per-element тумблер ВКЛ.
@@ -1573,6 +1579,7 @@ static_function bool MenuStatusAvailable()
 // время/клавиши вместо CP/TP (см. FormatBottomText).
 void KZHUDService::ComputeBottomState(KZPlayer *player, KZPlayer *target, BottomPanelState &out, bool menuOpen, int linesAbove)
 {
+	KZ::replaysystem::session::Scope replayScope(player);
 	out = BottomPanelState {};
 	KZHUDService *cfg = target->hudService;
 	const bool isReplay = KZ::replaysystem::IsReplayBot(player);

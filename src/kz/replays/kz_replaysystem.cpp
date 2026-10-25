@@ -6,6 +6,156 @@
 #include "playback.h"
 #include "events.h"
 #include "commands.h"
+#include "session.h"
+#include "cyb_replay_download.h"
+#include "kz/spec/kz_spec.h"
+#include "kz/timer/kz_timer.h"
+
+namespace KZ::replaysystem::session
+{
+	static thread_local int current = 0;
+	static CHandle<CCSPlayerController> owners[Count];
+	static uint64_t generations[Count] {};
+	static ProgressAnchor anchors[Count];
+	static bool captured[Count] {};
+
+	int Current()
+	{
+		return current;
+	}
+
+	uint64_t Generation()
+	{
+		return generations[current];
+	}
+
+	int ForPlayer(KZPlayer *player)
+	{
+		if (!player || !player->GetController())
+		{
+			return 0;
+		}
+		const int botIndex = bot::SessionForBot(player->GetController());
+		if (botIndex)
+		{
+			return botIndex;
+		}
+		if (player->IsFakeClient())
+		{
+			return 0;
+		}
+		const int slot = player->GetPlayerSlot().Get();
+		return slot >= 0 && slot <= MAXPLAYERS ? slot + 1 : 0;
+	}
+
+	Scope::Scope(int index) : previous(current)
+	{
+		current = index >= 0 && index < Count ? index : 0;
+	}
+
+	Scope::Scope(KZPlayer *player) : Scope(ForPlayer(player)) {}
+
+	Scope::~Scope()
+	{
+		current = previous;
+	}
+
+	void CaptureProgress(KZPlayer *player)
+	{
+		Scope scope(player);
+		Bind(player);
+		if (!Owns(player))
+		{
+			return;
+		}
+		auto &anchor = anchors[current];
+		anchor = {};
+		anchor.active = player->timerService->GetTimerRunning();
+		player->GetOrigin(&anchor.origin);
+		const auto *course = player->timerService->GetCourse();
+		if (course)
+		{
+			anchor.course = course->GetName().Get();
+		}
+		captured[current] = true;
+	}
+
+	ProgressAnchor TakeProgress(KZPlayer *player)
+	{
+		if (!captured[current])
+		{
+			CaptureProgress(player);
+		}
+		captured[current] = false;
+		return anchors[current];
+	}
+
+	void Release()
+	{
+		++generations[current];
+		anchors[current] = {};
+		captured[current] = false;
+		data::CancelAsyncLoad();
+		bot::KickBot();
+		playback::ClearPauseSegments();
+		data::FreeReplayData(data::GetCurrentReplay());
+		data::FreeReplayData(&data::GetLoadStatus()->completedReplay);
+		auto status = data::GetLoadStatus();
+		status->successCallback = {};
+		status->failureCallback = {};
+		status->state = data::LoadingState::Idle;
+		CybReplayDownload::ClearPending();
+		owners[current].Term();
+	}
+
+	void Bind(KZPlayer *player)
+	{
+		if (!current || !player)
+		{
+			return;
+		}
+		if (owners[current] != player->GetController())
+		{
+			Release();
+			owners[current] = player->GetController();
+		}
+	}
+
+	bool Owns(KZPlayer *player)
+	{
+		return player && current && owners[current] == player->GetController();
+	}
+
+	bool CanControlObserved(KZPlayer *player)
+	{
+		Scope scope(player);
+		if (!Owns(player) || !data::IsReplayPlaying())
+		{
+			return false;
+		}
+		auto target = player->specService->GetSpectatedPlayer();
+		return target && target->GetController() == bot::GetBot();
+	}
+
+	void ProcessFrames()
+	{
+		for (int i = 1; i < Count; ++i)
+		{
+			Scope scope(i);
+			auto controller = owners[i].Get();
+			auto owner = controller ? g_pKZPlayerManager->ToPlayer(controller) : nullptr;
+			if (!owner || !owner->IsConnected())
+			{
+				if (data::IsReplayValid() || data::IsLoading() || owners[i].IsValid() || bot::GetBot())
+				{
+					Release();
+				}
+				continue;
+			}
+			data::ProcessAsyncLoadCompletion();
+		}
+	}
+} // namespace KZ::replaysystem::session
 
 namespace KZ::replaysystem
 {
@@ -17,18 +167,26 @@ namespace KZ::replaysystem
 
 	void Cleanup()
 	{
-		bot::KickBot();
+		for (int i = 0; i < session::Count; ++i)
+		{
+			session::Scope scope(i);
+			session::Release();
+		}
 		CleanupWatcher();
 	}
 
 	void OnRoundStart()
 	{
-		bot::KickBot();
+		for (int i = 0; i < session::Count; ++i)
+		{
+			session::Scope scope(i);
+			session::Release();
+		}
 	}
 
 	void OnGameFrame()
 	{
-		data::ProcessAsyncLoadCompletion();
+		session::ProcessFrames();
 	}
 
 	void OnPhysicsSimulate(KZPlayer *player)

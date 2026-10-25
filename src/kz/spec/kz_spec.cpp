@@ -1,3 +1,4 @@
+#include "kz/replays/session.h"
 #include "kz_spec.h"
 #include "kz_spec_menu.h"
 #include "../timer/kz_timer.h"
@@ -253,6 +254,7 @@ KZInfoSubject KZSpecService::GetInfoSubject()
 
 	// Реплей-бот: курс — из идущего рана записи (ставится событием старта таймера), до старта —
 	// из шапки ран-реплея; владелец — из шапки. Чего нет — от вызывающего.
+	KZ::replaysystem::session::Scope replayScope(target);
 	KZ::replaysystem::data::ReplayPlayback *replay = KZ::replaysystem::data::GetCurrentReplay();
 	if (replay && replay->valid)
 	{

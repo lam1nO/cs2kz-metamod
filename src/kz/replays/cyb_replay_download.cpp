@@ -1,4 +1,5 @@
 #include "cyb_replay_download.h"
+#include "session.h"
 
 #include "cs2kz.h"
 #include "kz/kz.h"
@@ -20,11 +21,9 @@
 #include <cstdlib> // strtoull: steamId64 приезжает строкой (u64 не влезает в число JSON)
 #include <string>
 
-// Ожидание вида записи и AWR-режима (см. заголовок): ставится перед докачкой, снимается
-// первым же LoadReplay ЭТОГО uuid. Один активный реплей на сервер — состояние глобальное, как
-// и сам плейбек. Хранится строка uuid, а не флаг: чужой `!replay <uuid>` не должен его подобрать.
-static_global char g_pendingUuid[40] = {};
-static_global CybReplayDownload::Pending g_pending {};
+// Одноразовая метка типа записи принадлежит владельцу, а не всему серверу.
+static_global char g_pendingUuids[KZ::replaysystem::session::Count][40] = {};
+static_global CybReplayDownload::Pending g_pendings[KZ::replaysystem::session::Count] {};
 
 void CybReplayDownload::SetPendingKind(const char *uuid, Kind kind)
 {
@@ -33,9 +32,9 @@ void CybReplayDownload::SetPendingKind(const char *uuid, Kind kind)
 		CybReplayDownload::ClearPending();
 		return;
 	}
-	V_strncpy(g_pendingUuid, uuid, sizeof(g_pendingUuid));
-	g_pending.hasKind = true;
-	g_pending.kind = kind;
+	V_strncpy(g_pendingUuids[KZ::replaysystem::session::Current()], uuid, sizeof(g_pendingUuids[KZ::replaysystem::session::Current()]));
+	g_pendings[KZ::replaysystem::session::Current()].hasKind = true;
+	g_pendings[KZ::replaysystem::session::Current()].kind = kind;
 }
 
 void CybReplayDownload::SetPendingAwr(const char *uuid, u64 awrMs)
@@ -45,21 +44,22 @@ void CybReplayDownload::SetPendingAwr(const char *uuid, u64 awrMs)
 		CybReplayDownload::ClearPending();
 		return;
 	}
-	V_strncpy(g_pendingUuid, uuid, sizeof(g_pendingUuid));
-	g_pending.awr = true;
-	g_pending.awrMs = awrMs;
+	V_strncpy(g_pendingUuids[KZ::replaysystem::session::Current()], uuid, sizeof(g_pendingUuids[KZ::replaysystem::session::Current()]));
+	g_pendings[KZ::replaysystem::session::Current()].awr = true;
+	g_pendings[KZ::replaysystem::session::Current()].awrMs = awrMs;
 }
 
 void CybReplayDownload::ClearPending()
 {
-	g_pendingUuid[0] = '\0';
-	g_pending = CybReplayDownload::Pending();
+	g_pendingUuids[KZ::replaysystem::session::Current()][0] = '\0';
+	g_pendings[KZ::replaysystem::session::Current()] = CybReplayDownload::Pending();
 }
 
 bool CybReplayDownload::TakePending(const char *uuid, Pending &out)
 {
-	const bool match = g_pendingUuid[0] != '\0' && uuid && uuid[0] != '\0' && KZ_STREQI(g_pendingUuid, uuid);
-	out = match ? g_pending : CybReplayDownload::Pending();
+	const bool match = g_pendingUuids[KZ::replaysystem::session::Current()][0] != '\0' && uuid && uuid[0] != '\0'
+					   && KZ_STREQI(g_pendingUuids[KZ::replaysystem::session::Current()], uuid);
+	out = match ? g_pendings[KZ::replaysystem::session::Current()] : CybReplayDownload::Pending();
 	// Гасим ВСЕГДА: ожидание одноразовое, и мимо своего uuid ему жить незачем.
 	CybReplayDownload::ClearPending();
 	return match;
@@ -181,6 +181,9 @@ namespace
 	// `courseText`/`mode` — то же самое словами, для фразы в чат.
 	struct ResolveContext
 	{
+		CHandle<CCSPlayerController> requester;
+		uint64_t generation {};
+		std::string map;
 		std::string logKey;
 		std::string courseText;
 		std::string mode;
@@ -313,22 +316,48 @@ namespace
 	// ожидание одновременно запущенного `!replay awr`.
 	void DownloadAndPlay(CPlayerUserId userID, const std::string &replayUuid, const std::string &downloadUrl)
 	{
+		auto *requester = g_pKZPlayerManager->ToPlayer(userID);
+		if (!requester)
+		{
+			return;
+		}
+		const CHandle<CCSPlayerController> owner = requester->GetController();
+		const uint64_t generation = KZ::replaysystem::session::Generation();
 		FetchReplayFile(userID, replayUuid, downloadUrl, true,
-						 [replayUuid](CPlayerUserId uid, bool ok, std::string)
-						 {
-							 KZPlayer *player = ok ? g_pKZPlayerManager->ToPlayer(uid) : nullptr;
-							 if (!player)
-							 {
-								 CybReplayDownload::ClearPending();
-								 return;
-							 }
-							 KZ::replaysystem::commands::LoadReplay(player, replayUuid.c_str());
-						 });
+						[replayUuid, owner, generation](CPlayerUserId uid, bool ok, std::string)
+						{
+							KZPlayer *player = g_pKZPlayerManager->ToPlayer(uid);
+							if (!player || owner.Get() != player->GetController())
+							{
+								return;
+							}
+							KZ::replaysystem::session::Scope scope(player);
+							if (KZ::replaysystem::session::Generation() != generation)
+							{
+								return;
+							}
+							if (!ok)
+							{
+								CybReplayDownload::ClearPending();
+								return;
+							}
+							KZ::replaysystem::commands::LoadReplay(player, replayUuid.c_str());
+						});
 	}
 
 	void OnResolveResponse(CPlayerUserId userID, HTTP::Response resp, CybReplayDownload::Kind kind, bool targetIsSelf, ResolveContext ctx)
 	{
 		KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
+		if (!player || !player->IsConnected())
+		{
+			return;
+		}
+		KZ::replaysystem::session::Scope scope(player);
+		if (ctx.requester.Get() != player->GetController() || ctx.generation != KZ::replaysystem::session::Generation()
+			|| ctx.map != g_pKZUtils->GetCurrentMapName().Get())
+		{
+			return;
+		}
 
 		// Любой резолв начинается с чистого ожидания: привязка к uuid уже не даёт подобрать
 		// чужое, но незачем и держать протухшее.
@@ -507,7 +536,12 @@ void CybReplayDownload::RequestAndPlay(KZPlayer *player, Kind kind, u64 targetSt
 	// Фолбэк на локальный pro-PB возможен только для СВОЕГО реплея (см. OnResolveResponse).
 	const bool targetIsSelf = targetSteamId64 != 0 && targetSteamId64 == player->GetSteamId64();
 
-	const ResolveContext ctx = MakeContext(key);
+	KZ::replaysystem::session::Scope scope(player);
+	KZ::replaysystem::session::Bind(player);
+	ResolveContext ctx = MakeContext(key);
+	ctx.requester = player->GetController();
+	ctx.generation = KZ::replaysystem::session::Generation();
+	ctx.map = g_pKZUtils->GetCurrentMapName().Get();
 
 	req.Send([userID, kind, targetIsSelf, ctx](HTTP::Response resp) { OnResolveResponse(userID, resp, kind, targetIsSelf, ctx); },
 			 [userID]()
@@ -732,8 +766,13 @@ void CybReplayDownload::RequestAndPlayByUuid(KZPlayer *player, const char *uuid)
 	CPlayerUserId userID = player->GetClient()->GetUserID();
 
 	// Формат ответа идентичен resolve (url + replayUuid) — общий обработчик.
+	KZ::replaysystem::session::Scope scope(player);
+	KZ::replaysystem::session::Bind(player);
 	ResolveContext ctx;
 	ctx.byUuid = true;
+	ctx.requester = player->GetController();
+	ctx.generation = KZ::replaysystem::session::Generation();
+	ctx.map = g_pKZUtils->GetCurrentMapName().Get();
 
 	req.Send([userID, ctx](HTTP::Response resp) { OnResolveResponse(userID, resp, CybReplayDownload::Kind::PB, false, ctx); },
 			 [userID]()

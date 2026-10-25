@@ -1,10 +1,12 @@
 #include "cs2kz.h"
 #include "data.h"
+#include "session.h"
 #include "filesystem.h"
 #include "utils/utils.h"
 #include "utils/uuid.h"
 #include "compression.h"
 #include "playback.h"
+#include "bot.h"
 #include <thread>
 #include <mutex>
 #include <atomic>
@@ -14,10 +16,10 @@ CConVar<bool> kz_replay_playback_skins_enable("kz_replay_playback_skins_enable",
 CConVar<CUtlString> kz_replay_bot_default_crosshair("kz_replay_bot_default_crosshair", FCVAR_NONE,
 													"Static crosshair code for the replay bot when the replay has none.", "");
 
-static KZ::replaysystem::data::ReplayPlayback g_currentReplay = {};
-static KZ::replaysystem::data::AsyncLoadStatus g_loadStatus = {};
-static std::thread g_loadThread;
-static std::atomic<bool> g_cancelLoad {false};
+static KZ::replaysystem::data::ReplayPlayback g_currentReplays[KZ::replaysystem::session::Count] = {};
+static KZ::replaysystem::data::AsyncLoadStatus g_loadStatuses[KZ::replaysystem::session::Count] = {};
+static std::thread g_loadThreads[KZ::replaysystem::session::Count];
+static std::atomic<bool> g_cancelLoads[KZ::replaysystem::session::Count] {};
 
 namespace KZ::replaysystem::data
 {
@@ -54,7 +56,7 @@ namespace KZ::replaysystem::data
 			replay->events = nullptr;
 		}
 		// AWR-разрез принадлежит реплею (ReplayPlayback копируется по значению, владелец —
-		// текущий g_currentReplay), поэтому освобождается здесь же, вместе с кадрами.
+		// текущий g_currentReplays[session::Current()]), поэтому освобождается здесь же, вместе с кадрами.
 		if (replay->awrDead)
 		{
 			delete replay->awrDead;
@@ -97,85 +99,86 @@ namespace KZ::replaysystem::data
 
 	ReplayPlayback *GetCurrentReplay()
 	{
-		return &g_currentReplay;
+		return &g_currentReplays[session::Current()];
 	}
 
 	bool IsReplayValid()
 	{
-		return g_currentReplay.valid;
+		return g_currentReplays[session::Current()].valid;
 	}
 
 	bool IsReplayPlaying()
 	{
-		return g_currentReplay.playingReplay;
+		return g_currentReplays[session::Current()].playingReplay;
 	}
 
 	void SetCurrentTick(u32 tick)
 	{
-		g_currentReplay.currentTick = tick;
+		g_currentReplays[session::Current()].currentTick = tick;
 	}
 
 	u32 GetCurrentTick()
 	{
-		return g_currentReplay.currentTick;
+		return g_currentReplays[session::Current()].currentTick;
 	}
 
 	u32 GetTickCount()
 	{
-		return g_currentReplay.tickCount;
+		return g_currentReplays[session::Current()].tickCount;
 	}
 
 	i32 GetCurrentCpIndex()
 	{
-		return g_currentReplay.currentCpIndex;
+		return g_currentReplays[session::Current()].currentCpIndex;
 	}
 
 	i32 GetCheckpointCount()
 	{
-		return g_currentReplay.currentCheckpoint;
+		return g_currentReplays[session::Current()].currentCheckpoint;
 	}
 
 	i32 GetTeleportCount()
 	{
-		return g_currentReplay.currentTeleport;
+		return g_currentReplays[session::Current()].currentTeleport;
 	}
 
 	bool IsAwrMode()
 	{
-		return g_currentReplay.awrMode;
+		return g_currentReplays[session::Current()].awrMode;
 	}
 
 	f32 GetReplayTime()
 	{
-		if (g_currentReplay.startTime == 0.0f)
+		if (g_currentReplays[session::Current()].startTime == 0.0f)
 		{
 			return 0.0f;
 		}
-		if (g_currentReplay.paused)
+		if (g_currentReplays[session::Current()].paused)
 		{
 			// На записанной паузе время заморожено (TIMER_PAUSE в events.cpp).
-			return g_currentReplay.pausedTime;
+			return g_currentReplays[session::Current()].pausedTime;
 		}
 		// Активное время ВСЕГДА исключает всю накопленную паузу.
-		return g_pKZUtils->GetServerGlobals()->curtime - g_currentReplay.startTime - g_currentReplay.accumulatedPauseTime;
+		return g_pKZUtils->GetServerGlobals()->curtime - g_currentReplays[session::Current()].startTime
+			   - g_currentReplays[session::Current()].accumulatedPauseTime;
 	}
 
 	f32 GetEndTime()
 	{
-		if (g_currentReplay.stopTick == 0)
+		if (g_currentReplays[session::Current()].stopTick == 0)
 		{
 			return 0.0f;
 		}
-		if (g_currentReplay.stopTick + 192 < g_currentReplay.currentTick) // 3 seconds
+		if (g_currentReplays[session::Current()].stopTick + 192 < g_currentReplays[session::Current()].currentTick) // 3 seconds
 		{
 			return 0.0f;
 		}
-		return g_currentReplay.endTime;
+		return g_currentReplays[session::Current()].endTime;
 	}
 
 	bool GetPaused()
 	{
-		return g_currentReplay.paused;
+		return g_currentReplays[session::Current()].paused;
 	}
 
 	static_function void UpdateProgress(const char *cursor, const char *dataStart, size_t totalSize, std::atomic<f32> &progress)
@@ -582,102 +585,107 @@ namespace KZ::replaysystem::data
 	static_function void PrepareAsyncLoad(LoadSuccessCallback onSuccess, LoadFailureCallback onFailure)
 	{
 		CancelAsyncLoad();
-		g_loadStatus.state = LoadingState::Loading;
-		g_loadStatus.progress = 0.0f;
-		g_cancelLoad = false;
+		g_loadStatuses[session::Current()].state = LoadingState::Loading;
+		g_loadStatuses[session::Current()].progress = 0.0f;
+		g_cancelLoads[session::Current()] = false;
 		{
-			std::lock_guard<std::mutex> lock(g_loadStatus.callbackMutex);
-			g_loadStatus.successCallback = onSuccess;
-			g_loadStatus.failureCallback = onFailure;
+			std::lock_guard<std::mutex> lock(g_loadStatuses[session::Current()].callbackMutex);
+			g_loadStatuses[session::Current()].successCallback = onSuccess;
+			g_loadStatuses[session::Current()].failureCallback = onFailure;
 		}
 		{
-			std::lock_guard<std::mutex> lock(g_loadStatus.errorMutex);
-			g_loadStatus.errorMessage.clear();
+			std::lock_guard<std::mutex> lock(g_loadStatuses[session::Current()].errorMutex);
+			g_loadStatuses[session::Current()].errorMessage.clear();
 		}
 		{
-			std::lock_guard<std::mutex> lock(g_loadStatus.replayMutex);
-			FreeReplayData(&g_loadStatus.completedReplay);
-			g_loadStatus.completedReplay = {};
+			std::lock_guard<std::mutex> lock(g_loadStatuses[session::Current()].replayMutex);
+			FreeReplayData(&g_loadStatuses[session::Current()].completedReplay);
+			g_loadStatuses[session::Current()].completedReplay = {};
 		}
 	}
 
 	static_function void HandleAsyncResult(ReplayPlayback &result)
 	{
-		if (g_cancelLoad)
+		if (g_cancelLoads[session::Current()])
 		{
 			// Load was cancelled, cleanup and exit
 			FreeReplayData(&result);
-			g_loadStatus.state = LoadingState::Failed;
 			{
-				std::lock_guard<std::mutex> lock(g_loadStatus.errorMutex);
-				g_loadStatus.errorMessage = "Replay - Load Cancelled";
+				std::lock_guard<std::mutex> lock(g_loadStatuses[session::Current()].errorMutex);
+				g_loadStatuses[session::Current()].errorMessage = "Replay - Load Cancelled";
 			}
+			g_loadStatuses[session::Current()].state = LoadingState::Failed;
 			return;
 		}
 
 		if (!result.valid)
 		{
-			g_loadStatus.state = LoadingState::Failed;
 			{
-				std::lock_guard<std::mutex> lock(g_loadStatus.errorMutex);
-				g_loadStatus.errorMessage = "Replay - Invalid File Format";
+				std::lock_guard<std::mutex> lock(g_loadStatuses[session::Current()].errorMutex);
+				g_loadStatuses[session::Current()].errorMessage = "Replay - Invalid File Format";
 			}
+			g_loadStatuses[session::Current()].state = LoadingState::Failed;
 			return;
 		}
 
 		// Success - store result for main thread to process
 		{
-			std::lock_guard<std::mutex> lock(g_loadStatus.replayMutex);
-			g_loadStatus.completedReplay = result;
+			std::lock_guard<std::mutex> lock(g_loadStatuses[session::Current()].replayMutex);
+			g_loadStatuses[session::Current()].completedReplay = result;
 		}
-		g_loadStatus.state = LoadingState::Completed;
+		g_loadStatuses[session::Current()].state = LoadingState::Completed;
 	}
 
 	void LoadReplayAsync(std::string path, LoadSuccessCallback onSuccess, LoadFailureCallback onFailure)
 	{
 		PrepareAsyncLoad(onSuccess, onFailure);
-		g_loadThread = std::thread(
-			[path = std::move(path)]()
+		g_loadThreads[session::Current()] = std::thread(
+			[path = std::move(path), index = session::Current()]()
 			{
-				ReplayPlayback result = LoadReplayWithProgress(path.c_str(), g_loadStatus.progress, g_cancelLoad);
+				session::Scope scope(index);
+				ReplayPlayback result =
+					LoadReplayWithProgress(path.c_str(), g_loadStatuses[session::Current()].progress, g_cancelLoads[session::Current()]);
 				HandleAsyncResult(result);
 			});
-		g_loadThread.detach();
 	}
 
 	void LoadReplayMemoryAsync(std::vector<char> data, UUID_t uuid, LoadSuccessCallback onSuccess, LoadFailureCallback onFailure)
 	{
 		PrepareAsyncLoad(onSuccess, onFailure);
-		g_loadThread = std::thread(
-			[data = std::move(data), uuid]() mutable
+		g_loadThreads[session::Current()] = std::thread(
+			[data = std::move(data), uuid, index = session::Current()]() mutable
 			{
-				ReplayPlayback result = LoadReplayWithProgress(data.data(), data.size(), uuid, g_loadStatus.progress, g_cancelLoad);
+				session::Scope scope(index);
+				ReplayPlayback result = LoadReplayWithProgress(data.data(), data.size(), uuid, g_loadStatuses[session::Current()].progress,
+															   g_cancelLoads[session::Current()]);
 				HandleAsyncResult(result);
 			});
-		g_loadThread.detach();
 	}
 
 	AsyncLoadStatus *GetLoadStatus()
 	{
-		return &g_loadStatus;
+		return &g_loadStatuses[session::Current()];
 	}
 
 	bool IsLoading()
 	{
-		return g_loadStatus.state == LoadingState::Loading;
+		return g_loadStatuses[session::Current()].state == LoadingState::Loading;
 	}
 
 	void CancelAsyncLoad()
 	{
-		if (IsLoading())
+		g_cancelLoads[session::Current()] = true;
+		auto &worker = g_loadThreads[session::Current()];
+		if (worker.joinable())
 		{
-			g_cancelLoad = true;
+			worker.join();
 		}
+		g_loadStatuses[session::Current()].state = LoadingState::Idle;
 	}
 
 	void ProcessAsyncLoadCompletion()
 	{
-		LoadingState currentState = g_loadStatus.state.load();
+		LoadingState currentState = g_loadStatuses[session::Current()].state.load();
 
 		if (currentState == LoadingState::Completed)
 		{
@@ -687,22 +695,24 @@ namespace KZ::replaysystem::data
 
 			// Get the completed replay and callback
 			{
-				std::lock_guard<std::mutex> replayLock(g_loadStatus.replayMutex);
-				std::lock_guard<std::mutex> callbackLock(g_loadStatus.callbackMutex);
+				std::lock_guard<std::mutex> replayLock(g_loadStatuses[session::Current()].replayMutex);
+				std::lock_guard<std::mutex> callbackLock(g_loadStatuses[session::Current()].callbackMutex);
 
-				completedReplay = g_loadStatus.completedReplay;
-				successCallback = g_loadStatus.successCallback;
+				completedReplay = g_loadStatuses[session::Current()].completedReplay;
+				successCallback = g_loadStatuses[session::Current()].successCallback;
 
 				// Clear the completed replay from the status struct
-				g_loadStatus.completedReplay = {};
+				g_loadStatuses[session::Current()].completedReplay = {};
 			}
 
 			// Process the completion on the main thread
 			if (completedReplay.valid)
 			{
-				// Store the replay
-				FreeReplayData(&g_currentReplay);
-				g_currentReplay = completedReplay;
+				// Заменяется только бот текущего владельца; чужая/битая карта не оставит старую пешку.
+				bot::KickBot();
+				playback::ClearPauseSegments();
+				FreeReplayData(&g_currentReplays[session::Current()]);
+				g_currentReplays[session::Current()] = completedReplay;
 
 				// Call the success callback if it exists
 				if (successCallback)
@@ -712,7 +722,7 @@ namespace KZ::replaysystem::data
 			}
 
 			// Reset state to idle
-			g_loadStatus.state = LoadingState::Idle;
+			g_loadStatuses[session::Current()].state = LoadingState::Idle;
 		}
 		else if (currentState == LoadingState::Failed)
 		{
@@ -722,11 +732,11 @@ namespace KZ::replaysystem::data
 
 			// Get the error message and callback
 			{
-				std::lock_guard<std::mutex> errorLock(g_loadStatus.errorMutex);
-				std::lock_guard<std::mutex> callbackLock(g_loadStatus.callbackMutex);
+				std::lock_guard<std::mutex> errorLock(g_loadStatuses[session::Current()].errorMutex);
+				std::lock_guard<std::mutex> callbackLock(g_loadStatuses[session::Current()].callbackMutex);
 
-				errorMessage = g_loadStatus.errorMessage;
-				failureCallback = g_loadStatus.failureCallback;
+				errorMessage = g_loadStatuses[session::Current()].errorMessage;
+				failureCallback = g_loadStatuses[session::Current()].failureCallback;
 			}
 
 			// Call the failure callback if it exists
@@ -736,7 +746,7 @@ namespace KZ::replaysystem::data
 			}
 
 			// Reset state to idle
-			g_loadStatus.state = LoadingState::Idle;
+			g_loadStatuses[session::Current()].state = LoadingState::Idle;
 		}
 	}
 
