@@ -1714,6 +1714,7 @@ SCMD(kz_rpgototick, SCFL_REPLAY)
 SCMD(kz_rpspeed, SCFL_REPLAY)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
+	KZ::replaysystem::session::Scope scope(player);
 	if (!player)
 	{
 		return true;
