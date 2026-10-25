@@ -106,10 +106,10 @@ int main()
 	guard.ObserveCommand(2, 0, tool, false); // обнулённый backup не снимает guard
 	assert(guard.SuppressionMask(tool, false) == tool);
 	guard.ObserveCommand(3, movement | use | reload, tool, false);
-	assert(guard.SuppressionMask(tool, false) == (use | reload));
+	assert(guard.SuppressionMask(tool, false) == tool); // F-release остаётся погашенным
 	assert(guard.Take() == 0);
 	guard.ObserveCommand(4, movement, tool, false); // настоящие отпускания
-	assert(guard.SuppressionMask(tool, false) == 0);
+	assert(guard.SuppressionMask(tool, false) == (use | reload));
 	guard.ObserveCommand(5, movement | use, tool, false);
 	assert(guard.Take() == use);
 	assert(guard.SuppressionMask(tool, false) == 0); // новая E снова игровая
@@ -150,10 +150,15 @@ int main()
 	mouse.ObserveCommand(2, 0, tool, false); // мутировавший backup не отпускает мышь
 	assert(mouse.SuppressionMask(owned, false) == (attacks | close));
 	mouse.ObserveCommand(3, movement | attacks, tool, false);
-	assert(mouse.SuppressionMask(owned, false) == attacks);
+	assert(mouse.SuppressionMask(owned, false) == (attacks | close));
 	assert(mouse.Take() == 0);
 	mouse.ObserveCommand(4, movement, tool, false);
-	assert(mouse.SuppressionMask(owned, false) == 0);
+	// Регрессия LIVE: выстрел возникал на отпускании LMB после F, хотя
+	// во время удержания серверный clip не менялся. Release-команда обязана
+	// сохранить attack-mask для всех слов, subtick и history-index.
+	assert(mouse.SuppressionMask(owned, false) == attacks);
+	mouse.ObserveCommand(4, 0, tool, false); // backup того же отпускания
+	assert(mouse.SuppressionMask(owned, false) == attacks);
 	mouse.ObserveCommand(5, movement | attacks, tool, false);
 	assert(mouse.SuppressionMask(owned, false) == 0); // свежий клик после выхода — игровой
 	assert(mouse.Take() == 0);
