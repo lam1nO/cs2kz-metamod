@@ -105,7 +105,7 @@ bool ShouldEnforceCheatCvars()
 	return cheatCvarCheckerGraceUntil < 0 || (f64)unixTime > cheatCvarCheckerGraceUntil;
 }
 
-static_global void OnCvarChanged(ConVarRefAbstract *ref, CSplitScreenSlot nSlot, const char *pNewValue, const char *pOldValue, void *__unk01)
+static_global void OnCvarChanged(ConVarRefAbstract *ref, CSplitScreenSlot nSlot, const char *pNewValue, const char *pOldValue, ConVarUserInfoSet_t *__unk01)
 {
 	assert(sv_cheats.IsValidRef() && sv_cheats.IsConVarDataAvailable());
 	time_t unixTime = 0;

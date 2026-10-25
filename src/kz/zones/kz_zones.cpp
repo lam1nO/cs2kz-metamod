@@ -429,7 +429,8 @@ static_function bool SpawnZone(const KzCyberZone &zone, const char **outReason =
 	collision->m_vecMins(Vector(-half.x, -half.y, -half.z));
 	collision->m_vecMaxs(Vector(half.x, half.y, half.z));
 	collision->m_nSolidType(SOLID_BBOX);
-	collision->m_usSolidFlags((uint8)(FSOLID_NOT_SOLID | FSOLID_TRIGGER));
+	// Сохраняем прежнюю маску 0x0c: SDK убрал старое имя FSOLID_TRIGGER (0x08).
+	collision->m_usSolidFlags((uint8)(FSOLID_NOT_SOLID | 0x08));
 	collision->m_CollisionGroup((uint8)COLLISION_GROUP_TRIGGER);
 	// Фильтр касаний ищет слой CONTENTS_TRIGGER (1<<2) — энтити обязана объявить себя им.
 	collision->m_collisionAttribute().m_nInteractsAs(collision->m_collisionAttribute().m_nInteractsAs() | (1ull << LAYER_INDEX_CONTENTS_TRIGGER));
