@@ -10,6 +10,18 @@ namespace KZ::quickmenu
 	{
 		std::uint64_t held = 0;
 		std::uint64_t pending = 0;
+		std::int32_t lastCommand = 0;
+
+		// ProcessUsercmds содержит и backup-команды, которые наш фильтр уже мог
+		// обнулить. Их нельзя принять за отпускание: watermark — как у рекордера.
+		// Вызывающий всё равно маскирует повторные команды перед движком.
+		void ObserveCommand(std::int32_t command, std::uint64_t buttons, std::uint64_t navigation, bool otherOwner)
+		{
+			if (otherOwner) pending = 0;
+			if (command <= lastCommand) return;
+			lastCommand = command;
+			Observe(buttons, navigation, otherOwner);
+		}
 
 		void Observe(std::uint64_t buttons, std::uint64_t navigation, bool otherOwner)
 		{

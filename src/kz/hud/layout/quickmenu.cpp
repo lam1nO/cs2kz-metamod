@@ -346,7 +346,7 @@ void KZ::quickmenu::OnUsercmds(KZPlayer *player, PlayerCommand *cmds, i32 count)
 		auto buttons = base->mutable_buttons_pb();
 		const u64 held = buttons->buttonstate1();
 		const bool otherOwner = OtherUi(player);
-		s->input.Observe(held, kNav, otherOwner);
+		s->input.ObserveCommand(pc->cmdNum, held, kNav, otherOwner);
 		if (otherOwner) continue;
 		const bool active = s->mode != Mode::Closed;
 		const u64 mask = active ? kNav | IN_ATTACK | IN_ATTACK2 : (held & IN_LOOK_AT_WEAPON);
