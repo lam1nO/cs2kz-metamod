@@ -279,6 +279,11 @@ void KZ::replaysystem::menu::GetReplayMenuStatus(ReplayMenuStatus &out)
 // приземлялся на 5 с раньше подсказки. У записи без таймера шкала и есть эффективное время.
 void KZ::replaysystem::menu::SeekReplayMenuTo(KZPlayer *player, f64 seconds)
 {
+	session::Scope scope(player);
+	if (!session::CanControlObserved(player))
+	{
+		return;
+	}
 	using namespace KZ::replaysystem;
 	if (!player || !data::IsReplayPlaying())
 	{

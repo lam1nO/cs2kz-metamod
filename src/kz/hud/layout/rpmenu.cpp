@@ -1149,6 +1149,7 @@ void KZHUDService::SetReplayMouse(bool on)
 // Подсказка времени над каждой из 101 кнопки шкалы — один раз на запись (длительность не меняется).
 void KZHUDService::RefreshReplayTips()
 {
+	KZ::replaysystem::session::Scope scope(this->player);
 	CBaseEntity *ent = this->ownedReplayLayout.Get();
 	if (!ent || !KZ::replaysystem::data::IsReplayPlaying())
 	{
@@ -1180,12 +1181,13 @@ void KZHUDService::RefreshReplayTips()
 
 bool KZHUDService::HandleReplayClick(uint32 packedHandle, const char *panelId)
 {
+	KZ::replaysystem::session::Scope scope(this->player);
 	CCSCustomHudLayout *layout = CCSCustomHudLayout::FromClickHandle(packedHandle);
 	if (!layout || !panelId || (CBaseEntity *)layout != this->ownedReplayLayout.Get())
 	{
 		return false;
 	}
-	if (!this->replayMenuOpen || !this->replayMouse)
+	if (!KZ::replaysystem::session::CanControlObserved(this->player) || !this->replayMenuOpen || !this->replayMouse)
 	{
 		return true;
 	}
