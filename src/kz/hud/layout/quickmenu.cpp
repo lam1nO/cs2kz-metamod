@@ -48,8 +48,7 @@ namespace
 	};
 	State states[MAXPLAYERS];
 	constexpr u64 kToolKeys = IN_USE | IN_RELOAD | IN_LOOK_AT_WEAPON;
-	constexpr u64 kAttackKeys = IN_ATTACK | IN_ATTACK2;
-	constexpr u64 kOwnedKeys = kToolKeys | kAttackKeys;
+	constexpr u64 kOwnedKeys = kToolKeys;
 	constexpr u64 kMovementKeys = IN_FORWARD | IN_BACK | IN_MOVELEFT | IN_MOVERIGHT | IN_JUMP | IN_DUCK | IN_SPEED | IN_JOYAUTOSPRINT | IN_TURNLEFT | IN_TURNRIGHT;
 	static_assert((kOwnedKeys & kMovementKeys) == 0, "quickmenu controls must preserve movement");
 
@@ -360,15 +359,11 @@ void KZ::quickmenu::OnUsercmds(KZPlayer *player, PlayerCommand *cmds, i32 count)
 		const bool otherOwner = OtherUi(player);
 		s->input.ObserveCommand(pc->cmdNum, held, kToolKeys, otherOwner);
 		const bool active = s->mode != Mode::Closed && !otherOwner;
-		// Мышь в помощнике только целится: атаки подавляем, не используя их как навигацию.
-		// После F удержанные E/R/F/атаки погашены до отпускания в новой cmd.
+		// Помощник владеет только E/R/F; мышь и обычное оружие остаются игре.
+		// После F удержанные E/R/F погашены вместе с командой отпускания.
 		// Чужое меню получает новые нажатия, но не хвост прежнего действия помощника.
 		const u64 mask = s->input.SuppressionMask(kOwnedKeys, active) | (!otherOwner ? (held & IN_LOOK_AT_WEAPON) : 0);
 		if (!mask) continue;
-		// История атаки — отдельный канал protobuf помимо кнопок и subtick-шагов.
-		// Сам input_history сохраняем: он содержит прицеливание и интерполяцию.
-		if (mask & IN_ATTACK) pc->set_attack1_start_history_index(-1);
-		if (mask & IN_ATTACK2) pc->set_attack2_start_history_index(-1);
 		buttons->set_buttonstate1(buttons->buttonstate1() & ~mask);
 		buttons->set_buttonstate2(buttons->buttonstate2() & ~mask);
 		buttons->set_buttonstate3(buttons->buttonstate3() & ~mask);

@@ -134,34 +134,27 @@ int main()
 	foreign.Transition();
 	assert(foreign.SuppressionMask(tool, false) == 0);
 	assert(foreign.Take() == 0);
-	// Мышь в помощнике только целится. LMB/RMB не являются навигацией,
-	// но их нажатия и хвост удержания после F должны оставаться погашены.
+	// ЛКМ/ПКМ остаются обычной игре: они не являются действиями инструмента,
+	// не попадают в его suppression/exit guard и не теряются на переходах.
 	constexpr std::uint64_t attacks = (1ull << 32) | (1ull << 33);
-	constexpr std::uint64_t owned = tool | attacks;
 	InputLatch mouse;
 	mouse.ObserveCommand(1, movement | attacks, tool, false);
-	assert(mouse.Take() == 0); // атаки не запускают действия помощника
-	assert(mouse.SuppressionMask(owned, true) == owned);
-	assert(((movement | attacks) & ~owned) == movement);
+	assert(mouse.Take() == 0);
+	auto mask = mouse.SuppressionMask(tool, true);
+	assert(((movement | attacks) & ~mask) == (movement | attacks));
 	mouse.ObserveCommand(2, movement | attacks | close, tool, false);
 	assert(mouse.Take() == close);
-	mouse.SuppressionMask(owned, true);
-	mouse.Transition(owned);
-	mouse.ObserveCommand(2, 0, tool, false); // мутировавший backup не отпускает мышь
-	assert(mouse.SuppressionMask(owned, false) == (attacks | close));
+	mouse.SuppressionMask(tool, true);
+	mouse.Transition(tool);
+	mouse.ObserveCommand(2, 0, tool, false); // backup не снимает guard F
+	assert(mouse.SuppressionMask(tool, false) == close);
 	mouse.ObserveCommand(3, movement | attacks, tool, false);
-	assert(mouse.SuppressionMask(owned, false) == (attacks | close));
+	assert(mouse.SuppressionMask(tool, false) == close); // release F погашен
 	assert(mouse.Take() == 0);
 	mouse.ObserveCommand(4, movement, tool, false);
-	// Регрессия LIVE: выстрел возникал на отпускании LMB после F, хотя
-	// во время удержания серверный clip не менялся. Release-команда обязана
-	// сохранить attack-mask для всех слов, subtick и history-index.
-	assert(mouse.SuppressionMask(owned, false) == attacks);
-	mouse.ObserveCommand(4, 0, tool, false); // backup того же отпускания
-	assert(mouse.SuppressionMask(owned, false) == attacks);
+	assert(mouse.SuppressionMask(tool, false) == 0); // release мыши не принадлежит UI
 	mouse.ObserveCommand(5, movement | attacks, tool, false);
-	assert(mouse.SuppressionMask(owned, false) == 0); // свежий клик после выхода — игровой
+	assert(mouse.SuppressionMask(tool, false) == 0);
 	assert(mouse.Take() == 0);
-	assert((owned & movement) == 0);
 	std::puts("quickmenu input transitions, duplicates, movement, attack and exit guard: ok");
 }
