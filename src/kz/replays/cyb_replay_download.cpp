@@ -284,7 +284,9 @@ namespace
 				// путь с диска (см. commands.cpp:52-98, data::LoadReplayAsync), файл обязан
 				// физически существовать к этому моменту — гонка с асинхронной записью здесь
 				// недопустима.
-				if (!utils::WriteBufferToFile(replayPath, *raw))
+				// Другой игрок мог уже скачать этот UUID, пока шёл HTTP-запрос.
+				// Не перезаписываем файл, который его загрузчик сейчас читает.
+				if (!g_pFullFileSystem->FileExists(replayPath) && !utils::WriteBufferToFile(replayPath, *raw))
 				{
 					KZ_LOG_WARN(LogChannel::Replays, "[cyb_replay] failed to write downloaded replay to %s\n", replayPath);
 					if (player) player->languageService->PrintChat(true, false, "Replay Request - Error");
