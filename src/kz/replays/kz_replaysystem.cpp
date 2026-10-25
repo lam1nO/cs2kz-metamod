@@ -10,6 +10,7 @@
 #include "cyb_replay_download.h"
 #include "kz/spec/kz_spec.h"
 #include "kz/timer/kz_timer.h"
+#include "kz/invisible/kz_invisible.h"
 
 namespace KZ::replaysystem::session
 {
@@ -18,6 +19,14 @@ namespace KZ::replaysystem::session
 	static uint64_t generations[Count] {};
 	static ProgressAnchor anchors[Count];
 	static bool captured[Count] {};
+	static bool observing[Count] {};
+
+	static bool IsObserving(KZPlayer *player)
+	{
+		auto controller = player ? player->GetController() : nullptr;
+		return controller && (controller->GetTeam() == CS_TEAM_SPECTATOR
+			|| (controller->GetTeam() == CS_TEAM_NONE && player->invisibleService->IsObserving()));
+	}
 
 	int Current()
 	{
@@ -95,6 +104,7 @@ namespace KZ::replaysystem::session
 		++generations[current];
 		anchors[current] = {};
 		captured[current] = false;
+		observing[current] = false;
 		data::CancelAsyncLoad();
 		bot::KickBot();
 		playback::ClearPauseSegments();
@@ -108,6 +118,20 @@ namespace KZ::replaysystem::session
 		owners[current].Term();
 	}
 
+	void ReleaseForPlayer(KZPlayer *player)
+	{
+		// Replay bots resolve to their owner session; their disconnect/team changes must not release it.
+		if (!player || player->IsFakeClient())
+		{
+			return;
+		}
+		Scope scope(player);
+		if (Owns(player))
+		{
+			Release();
+		}
+	}
+
 	void Bind(KZPlayer *player)
 	{
 		if (!current || !player)
@@ -118,6 +142,7 @@ namespace KZ::replaysystem::session
 		{
 			Release();
 			owners[current] = player->GetController();
+			observing[current] = IsObserving(player);
 		}
 	}
 
@@ -144,7 +169,7 @@ namespace KZ::replaysystem::session
 			Scope scope(i);
 			auto controller = owners[i].Get();
 			auto owner = controller ? g_pKZPlayerManager->ToPlayer(controller) : nullptr;
-			if (!owner || !owner->IsConnected())
+			if (!owner || !owner->IsConnected() || (observing[i] && !IsObserving(owner)))
 			{
 				if (data::IsReplayValid() || data::IsLoading() || owners[i].IsValid() || bot::GetBot())
 				{
@@ -152,6 +177,8 @@ namespace KZ::replaysystem::session
 				}
 				continue;
 			}
+			// Loading may start while still playing: only stop after the owner has entered spectator.
+			observing[i] = IsObserving(owner);
 			data::ProcessAsyncLoadCompletion();
 		}
 	}

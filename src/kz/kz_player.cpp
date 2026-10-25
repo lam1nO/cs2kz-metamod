@@ -29,6 +29,7 @@
 #include "recording/kz_recording.h"
 #include "savedrun/kz_savedrun.h"
 #include "replays/kz_replaysystem.h"
+#include "replays/session.h"
 #include "racing/kz_racing.h"
 #include "weapon/kz_weapon.h"
 #include "global/kz_global.h"
@@ -1111,6 +1112,10 @@ void KZPlayer::OnChangeTeamPost(i32 team)
 	// проглатывается строкой выше. Осталась бы только ложь: Hook_ClientDisconnect зовёт
 	// SwitchTeam(0) на КАЖДОМ выходе, и подмена ставила бы паузу и дёргала prac на уже
 	// сохранённом ране уходящего игрока.
+	if (team >= CS_TEAM_T)
+	{
+		KZ::replaysystem::session::ReleaseForPlayer(this);
+	}
 	this->timerService->OnPlayerJoinTeam(team);
 	if (team == CS_TEAM_SPECTATOR)
 	{
