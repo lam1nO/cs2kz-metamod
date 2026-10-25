@@ -1089,4 +1089,9 @@
 	}
 	// Метки типа реплея в шапке карточки (PB/WR/AWR) фразы не имеют: это одинаковые во всех
 	// локалях сокращения, они заданы литералами в GetReplayMenuBadge (replays/menu.cpp).
+	"Replay - Bot Unavailable"
+	{
+		"en" "Unable to create your replay bot. There are no free slots."
+		"ru" "Не удалось создать реплей-бота: нет свободных слотов."
+	}
 }

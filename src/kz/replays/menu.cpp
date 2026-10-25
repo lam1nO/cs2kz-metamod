@@ -7,6 +7,7 @@
 #include "kz/hud/kz_hud.h" // !rpmenu — тумблер скрытия меню реплея
 #include "menu.h"
 #include "commands.h"
+#include "session.h"
 #include "kz_replaysystem.h" // GetPaused — строка состояния карточки
 #include "data.h"
 #include "cyb_replay_download.h" // Kind — вид запроса, которым запущен плейбек (бейдж шапки)
@@ -58,6 +59,11 @@ namespace
 
 void KZ::replaysystem::menu::ApplyReplayMenuInput(KZPlayer *player, ReplayMenuLine line, ReplayMenuInput input)
 {
+	session::Scope scope(player);
+	if (!session::CanControlObserved(player))
+	{
+		return;
+	}
 	if (!player)
 	{
 		return;
@@ -492,6 +498,10 @@ SCMD(kz_rpmenu, SCFL_REPLAY | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player)
+	{
+		return true;
+	}
+	if (!KZ::replaysystem::session::CanControlObserved(player))
 	{
 		return true;
 	}

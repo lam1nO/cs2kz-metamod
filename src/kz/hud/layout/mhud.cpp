@@ -1,3 +1,4 @@
+#include "kz/replays/session.h"
 // Пять элементов panorama-худа + точка сборки (Task 6). Перенесено с апстрима
 // (origin/master:src/kz/hud/layout/mhud.cpp), расхождения с ним — см. заметки планирования
 // задачи в отдельном (не этом) репозитории, кратко (R1-R4):
@@ -33,6 +34,7 @@
 
 void KZHUDService::UpdateTimerElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force)
 {
+	KZ::replaysystem::session::Scope replayScope(source);
 	// prac: настоящий таймер на входе честно остановлен (kz_prac), поэтому GetTimerText давал
 	// «(СТОП)» на время показа после стопа, а потом элемент пропадал совсем — хотя попытка идёт
 	// по prac-часам. Показываем их, как стандартный (HTML) худ: идут — как живой ран, стоят —
@@ -614,6 +616,7 @@ void KZHUDService::ApplyKeysSizing(CCSCustomHudLayout *layout, LayoutKeysState &
 
 void KZHUDService::UpdateCheckpointElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force)
 {
+	KZ::replaysystem::session::Scope replayScope(source);
 	std::string text = source->hudService->GetCheckpointText(this->player->languageService->GetLanguage());
 	const Color color = this->GetLayoutPrefs().checkpoint;
 	// Под открытым меню реплея (layout/rpmenu.cpp) строка CP/TP гаснет: её место по смыслу
@@ -731,6 +734,7 @@ void KZHUDService::ApplyPbWrCells(CCSCustomHudLayout *layout, const char *prefix
 
 void KZHUDService::UpdatePbWrElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force)
 {
+	KZ::replaysystem::session::Scope replayScope(source);
 	const MHUDLayoutPrefs &prefs = this->GetLayoutPrefs();
 	const bool cells[4] = {prefs.pbNub, prefs.pbPro, prefs.wrNub, prefs.wrPro};
 	// Все четыре ячейки выключены — элемент гаснет целиком (Review Focus 5), иначе на экране
@@ -835,6 +839,7 @@ void KZHUDService::ApplyCourseParts(CCSCustomHudLayout *layout, const char *pref
 
 void KZHUDService::UpdateCourseElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force)
 {
+	KZ::replaysystem::session::Scope replayScope(source);
 	// Реплей-бот: курс и стили живого игрока к записи не относятся — строку не показываем.
 	const bool replay = KZ::replaysystem::IsReplayBot(source);
 	const KZCourseDescriptor *course = (!replay && this->IsLayoutElementEnabled(LayoutElement::Course)) ? GetHudDisplayCourse(source) : NULL;
@@ -884,6 +889,7 @@ static_function const char *GetRunTypeText(KZPlayer *source, const char *&cls)
 
 void KZHUDService::UpdateRunTypeElement(CCSCustomHudLayout *layout, KZPlayer *source, bool force)
 {
+	KZ::replaysystem::session::Scope replayScope(source);
 	const char *cls = NULL;
 	// Реплей-бот — как HTML-худ, метки нет (его timerService/checkpointService не про запись).
 	const char *text = KZ::replaysystem::IsReplayBot(source) ? NULL : GetRunTypeText(source, cls);
@@ -990,6 +996,7 @@ void KZHUDService::UpdateLeadProgressElement(CCSCustomHudLayout *layout, KZPlaye
 
 bool KZHUDService::UpdateHudLayout(KZPlayer *source)
 {
+	KZ::replaysystem::session::Scope replayScope(source);
 	bool created = false;
 	CCSCustomHudLayout *layout = this->EnsureOwnedLayout(created);
 	if (!layout)

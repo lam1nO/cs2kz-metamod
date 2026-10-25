@@ -1,6 +1,7 @@
 #include "cs2kz.h"
 #include "kz/kz.h"
 #include "bot.h"
+#include "session.h"
 #include "kz_replay.h"
 #include "data.h"
 #include "item.h"
@@ -9,16 +10,21 @@
 #include "vendor/sql_mm/src/public/sql_mm.h"
 #include "utils/ctimer.h"
 
-static_global CHandle<CCSPlayerController> g_replayBot;
+static_global CHandle<CCSPlayerController> g_replayBots[KZ::replaysystem::session::Count];
 // Персистентный буфер кода прицела: schema-сеттер хранит сырой указатель,
 // память хедера/cvar ему отдавать нельзя (умирает при смене реплея/значения).
-static_global char g_botCrosshairCode[256];
+static_global char g_botCrosshairCodes[KZ::replaysystem::session::Count][256];
 extern CConVar<bool> kz_replay_playback_skins_enable;
 extern CConVar<CUtlString> kz_replay_bot_default_crosshair;
 
-static_function f64 SetBotModel()
+static_function f64 SetBotModel(int index, CHandle<CCSPlayerController> handle, UUID_t uuid)
 {
-	auto bot = g_replayBot.Get();
+	KZ::replaysystem::session::Scope scope(index);
+	if (!handle.Get() || g_replayBots[index] != handle.Get() || !(KZ::replaysystem::data::GetCurrentReplay()->uuid == uuid))
+	{
+		return -1.0;
+	}
+	auto bot = g_replayBots[KZ::replaysystem::session::Current()].Get();
 	if (!bot)
 	{
 		return -1.0f;
@@ -62,18 +68,18 @@ namespace KZ::replaysystem::bot
 		{
 			return;
 		}
-		auto bot = g_replayBot.Get();
+		auto bot = g_replayBots[KZ::replaysystem::session::Current()].Get();
 		if (!bot)
 		{
 			return;
 		}
+		g_replayBots[KZ::replaysystem::session::Current()].Term();
 		interfaces::pEngine->KickClient(bot->GetPlayerSlot(), "bye bot", NETWORK_DISCONNECT_KICKED);
-		g_replayBot.Term();
 	}
 
 	void SpawnBot()
 	{
-		if (g_replayBot.Get())
+		if (g_replayBots[KZ::replaysystem::session::Current()].Get())
 		{
 			return;
 		}
@@ -88,13 +94,13 @@ namespace KZ::replaysystem::bot
 			return;
 		}
 
-		g_replayBot = bot;
+		g_replayBots[KZ::replaysystem::session::Current()] = bot;
 	}
 
 	void MakeBotAlive()
 	{
 		SpawnBot();
-		auto bot = g_replayBot.Get();
+		auto bot = g_replayBots[KZ::replaysystem::session::Current()].Get();
 		if (!bot)
 		{
 			return;
@@ -117,8 +123,9 @@ namespace KZ::replaysystem::bot
 		{
 			crosshairCode = kz_replay_bot_default_crosshair.Get().Get();
 		}
-		V_strncpy(g_botCrosshairCode, crosshairCode, sizeof(g_botCrosshairCode));
-		bot->SetCrosshairCodes(g_botCrosshairCode);
+		V_strncpy(g_botCrosshairCodes[KZ::replaysystem::session::Current()], crosshairCode,
+				  sizeof(g_botCrosshairCodes[KZ::replaysystem::session::Current()]));
+		bot->SetCrosshairCodes(g_botCrosshairCodes[KZ::replaysystem::session::Current()]);
 		// Клиент CS2 прицел ботов не рендерит (cl_observed_bot_crosshair, ветка «это бот»
 		// раньше кодов) — код ставим на будущее и для внешних потребителей (сайт/демо);
 		// зрителю даём подсказку в чате при загрузке реплея.
@@ -126,7 +133,7 @@ namespace KZ::replaysystem::bot
 
 	void MoveBotToSpec()
 	{
-		auto bot = g_replayBot.Get();
+		auto bot = g_replayBots[KZ::replaysystem::session::Current()].Get();
 		if (!bot)
 		{
 			return;
@@ -137,17 +144,33 @@ namespace KZ::replaysystem::bot
 
 	CCSPlayerController *GetBot()
 	{
-		return g_replayBot.Get();
+		return g_replayBots[KZ::replaysystem::session::Current()].Get();
+	}
+
+	int SessionForBot(CCSPlayerController *controller)
+	{
+		if (!controller)
+		{
+			return 0;
+		}
+		for (int i = 1; i < session::Count; ++i)
+		{
+			if (g_replayBots[i] == controller)
+			{
+				return i;
+			}
+		}
+		return 0;
 	}
 
 	bool IsValidBot(CCSPlayerController *controller)
 	{
-		return controller && g_replayBot == controller;
+		return SessionForBot(controller) != 0;
 	}
 
 	KZPlayer *GetBotPlayer()
 	{
-		auto bot = g_replayBot.Get();
+		auto bot = g_replayBots[KZ::replaysystem::session::Current()].Get();
 		if (!bot)
 		{
 			return nullptr;
@@ -168,8 +191,9 @@ namespace KZ::replaysystem::bot
 			return;
 		}
 		const UUID_t uuid = replay->uuid;
-		auto onSuccess = [uuid, steamId64](std::vector<ISQLQuery *> queries)
+		auto onSuccess = [uuid, steamId64, index = session::Current()](std::vector<ISQLQuery *> queries)
 		{
+			session::Scope scope(index);
 			ISQLResult *result = (!queries.empty() && queries[0]) ? queries[0]->GetResultSet() : nullptr;
 			if (!result || result->GetRowCount() == 0 || !result->FetchRow())
 			{
@@ -196,7 +220,7 @@ namespace KZ::replaysystem::bot
 	void InitializeBotForReplay(const ReplayHeader &header)
 	{
 		MakeBotAlive();
-		auto bot = g_replayBot.Get();
+		auto bot = g_replayBots[KZ::replaysystem::session::Current()].Get();
 		if (!bot)
 		{
 			return;
@@ -209,7 +233,10 @@ namespace KZ::replaysystem::bot
 		}
 		if (kz_replay_playback_skins_enable.Get())
 		{
-			StartTimer(SetBotModel, 0.05, false);
+			const int index = session::Current();
+			const auto handle = g_replayBots[index];
+			const UUID_t uuid = data::GetCurrentReplay()->uuid;
+			StartTimer<int, CHandle<CCSPlayerController>, UUID_t>(SetBotModel, index, handle, uuid, 0.05, false);
 		}
 	}
 

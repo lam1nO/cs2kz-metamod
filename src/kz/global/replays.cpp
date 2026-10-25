@@ -1,3 +1,4 @@
+#include "kz/replays/session.h"
 #include "kz/global/kz_global.h"
 #include "kz/language/kz_language.h"
 #include "kz/replays/kz_replay.h"
@@ -67,6 +68,8 @@ void KZGlobalService::ReplayManager::OnReplayRequestSuccess(const std::vector<ch
 		return;
 	}
 
+	session::Scope scope(requester);
+	session::Bind(requester);
 	// clang-format off
 	data::LoadReplayMemoryAsync(
 		binaryData, replayID,

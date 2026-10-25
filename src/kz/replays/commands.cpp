@@ -12,6 +12,8 @@
 #include "kz/spec/kz_spec.h"
 #include "kz/mappingapi/kz_mappingapi.h" // GetCourseByCourseID — сверка курса окна рана с шапкой
 #include "commands.h"
+#include "session.h"
+#include "progress_seek.h"
 #include "data.h"
 #include "bot.h"
 #include "events.h"
@@ -40,6 +42,11 @@ namespace KZ::replaysystem::commands
 
 	void NavigateReplay(KZPlayer *player, u32 targetTick)
 	{
+		session::Scope scope(player);
+		if (!session::Owns(player))
+		{
+			return;
+		}
 		auto replay = data::GetCurrentReplay();
 
 		// Сик внутрь записанной паузы приземляем на кадр возобновления (её интерьер —
@@ -331,6 +338,12 @@ namespace KZ::replaysystem::commands
 
 	void LoadReplay(KZPlayer *player, const char *uuid)
 	{
+		session::Scope scope(player);
+		session::Bind(player);
+		if (!session::Owns(player))
+		{
+			return;
+		}
 		if (!player)
 		{
 			return;
@@ -402,12 +415,17 @@ namespace KZ::replaysystem::commands
 		// uuid: `!replay <uuid>` с диска идёт сюда напрямую, мимо резолва).
 		const std::string loadedUuid = parsedUuid.ToString();
 
+		const auto anchor = session::TakeProgress(player);
+		const bool seekFromProgress = anchor.active;
+		const Vector progressOrigin = anchor.origin;
+		const std::string progressCourseName = anchor.course;
+
 		// Start async loading
 		// clang-format off
 		data::LoadReplayAsync(
 			replayPath,
 			// Success callback (runs on main thread via ProcessAsyncLoadCompletion)
-			data::LoadSuccessCallback([playerUserID, loadedUuid, fullRequested]() {
+			data::LoadSuccessCallback([playerUserID, loadedUuid, fullRequested, seekFromProgress, progressOrigin, progressCourseName]() {
 				// Вид записи (AWR-режим и метка PB/WR) доносит сюда одноразовое ожидание резолва —
 				// путь загрузки общий для всех видов и донести его иначе нечем. Ожидание
 				// привязано к uuid, поэтому чужой реплей его не подберёт; забираем всё равно
@@ -547,8 +565,33 @@ namespace KZ::replaysystem::commands
 				}
 
 				bot::InitializeBotForReplay(replay->header);
+				if (!bot::GetBot())
+				{
+					player->languageService->PrintChat(true, false, "Replay - Bot Unavailable");
+					return;
+				}
 				playback::StartReplay();
 				playback::InitializeWeapons();
+				if (seekFromProgress && !progressCourseName.empty() && replay->header.has_run()
+					&& KZ_STREQI(progressCourseName.c_str(), replay->header.run().course_name().c_str()))
+				{
+					u32 begin = 0, end = 0;
+					i32 courseId = -1;
+					if (playback::RunWindowFromEvents(replay->tickData, replay->tickCount, replay->events, replay->numEvents, begin, end, courseId))
+					{
+						const auto *course = KZ::course::GetCourseByCourseID(courseId);
+						if (course && course->GetName().IsEqual_FastCaseInsensitive(progressCourseName.c_str()))
+						{
+							// Только видимые кадры нужного рана; паузы/prac/AWR-петли пропускаются.
+							const auto target = progress::FindTick(replay->tickCount, begin, end, [&](u32 tick)
+							{
+								if (playback::IsTickIndexSkipped(tick) || replay->tickData[tick].pre.replayFlags.prac) return -1.0f;
+								return (replay->tickData[tick].pre.origin - progressOrigin).LengthSqr();
+							});
+							if (target) NavigateReplay(player, *target);
+						}
+					}
+				}
 				// Меню управления реплеем открывать здесь нечем: смену команды движок применит
 				// позже, а panorama-меню (hud/layout/rpmenu.cpp) само открывается тиком худа, как
 				// только игрок фактически наблюдает бота, и живёт, пока он его наблюдает.
@@ -568,6 +611,11 @@ namespace KZ::replaysystem::commands
 
 	void JumpToReplayTime(KZPlayer *player, const char *input)
 	{
+		session::Scope scope(player);
+		if (!session::Owns(player))
+		{
+			return;
+		}
 		if (!player)
 		{
 			return;
@@ -663,6 +711,11 @@ namespace KZ::replaysystem::commands
 
 	void JumpToReplayTick(KZPlayer *player, const char *input)
 	{
+		session::Scope scope(player);
+		if (!session::Owns(player))
+		{
+			return;
+		}
 		if (!player)
 		{
 			return;
@@ -741,6 +794,11 @@ namespace KZ::replaysystem::commands
 
 	void GetReplayInfo(KZPlayer *player)
 	{
+		session::Scope scope(player);
+		if (!session::Owns(player))
+		{
+			return;
+		}
 		if (!player)
 		{
 			return;
@@ -835,6 +893,11 @@ namespace KZ::replaysystem::commands
 
 	void ToggleReplayPause(KZPlayer *player)
 	{
+		session::Scope scope(player);
+		if (!session::Owns(player))
+		{
+			return;
+		}
 		if (!player)
 		{
 			return;
@@ -891,6 +954,11 @@ namespace KZ::replaysystem::commands
 
 	void SetReplaySpeed(KZPlayer *player, f32 speed, bool announce)
 	{
+		session::Scope scope(player);
+		if (!session::Owns(player))
+		{
+			return;
+		}
 		if (!player)
 		{
 			return;
@@ -917,6 +985,11 @@ namespace KZ::replaysystem::commands
 
 	void StepReplay(KZPlayer *player, i32 frames, bool announce)
 	{
+		session::Scope scope(player);
+		if (!session::Owns(player))
+		{
+			return;
+		}
 		if (!player)
 		{
 			return;
@@ -968,6 +1041,11 @@ namespace KZ::replaysystem::commands
 
 	void StopReplay(KZPlayer *player)
 	{
+		session::Scope scope(player);
+		if (!session::Owns(player))
+		{
+			return;
+		}
 		if (!data::IsReplayPlaying())
 		{
 			if (player)
@@ -992,6 +1070,11 @@ namespace KZ::replaysystem::commands
 
 	void CheckReplayLoadProgress(KZPlayer *player)
 	{
+		session::Scope scope(player);
+		if (!session::Owns(player))
+		{
+			return;
+		}
 		if (!player)
 		{
 			return;
@@ -1027,6 +1110,11 @@ namespace KZ::replaysystem::commands
 
 	void CancelReplayLoad(KZPlayer *player)
 	{
+		session::Scope scope(player);
+		if (!session::Owns(player))
+		{
+			return;
+		}
 		if (!player)
 		{
 			return;
@@ -1057,6 +1145,11 @@ namespace KZ::replaysystem::commands
 
 	void ToggleLegsVisibility(KZPlayer *player)
 	{
+		session::Scope scope(player);
+		if (!session::Owns(player))
+		{
+			return;
+		}
 		if (!player)
 		{
 			return;
@@ -1365,6 +1458,12 @@ namespace KZ::replaysystem::commands
 
 	void LoadReplayForRecord(KZPlayer *player, RecordType type, const char *courseArg, const char *modeArg)
 	{
+		session::Scope scope(player);
+		session::Bind(player);
+		if (!session::Owns(player))
+		{
+			return;
+		}
 		if (!player)
 		{
 			return;
@@ -1447,6 +1546,8 @@ SCMD(kz_replay, SCFL_REPLAY | SCFL_HELP)
 	{
 		return true;
 	}
+
+	KZ::replaysystem::session::CaptureProgress(player);
 
 	// `full` — необязательный модификатор в любом месте ПОСЛЕ вида (`!replay pb full`,
 	// `!replay pb <ник> full`, `!replay <uuid> full`): проиграть без вырезки пауз и `!prac`.

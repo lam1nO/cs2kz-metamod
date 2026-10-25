@@ -15,6 +15,8 @@ namespace KZ::replaysystem::bot
 	void MakeBotAlive();
 	void MoveBotToSpec();
 
+	int SessionForBot(CCSPlayerController *controller);
+
 	// Bot state management
 	CCSPlayerController *GetBot();
 	bool IsValidBot(CCSPlayerController *controller);

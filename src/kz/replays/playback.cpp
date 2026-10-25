@@ -3,6 +3,7 @@
 #include "kz_replay.h"
 #include "playback.h"
 #include "data.h"
+#include "session.h"
 #include "bot.h"
 #include "item.h"
 #include "events.h"
@@ -15,24 +16,22 @@ namespace KZ::replaysystem::playback
 {
 	// Последний itemDef, чей GiveNamedItem вернул null — гард от тикового цикла
 	// раздевания бота. Сбрасывается на старте реплея и при успешной выдаче.
-	static_global i32 g_lastFailedGiveItemDef = -1;
+	static_global i32 g_failedItemDefs[session::Count] = {};
 
 	// ПРОПУСКАЕМЫЕ сегменты в ИНДЕКСАХ тиков плейбека (не serverTick). Записанная пауза
 	// (пара событий TIMER_PAUSE→TIMER_RESUME) — частный случай; в AWR-режиме сюда же
 	// попадают мёртвые интервалы разреза телепорт-петель. Строятся один раз на
 	// старте/навигации, чтобы в тик-цикле проверка была O(1) по курсору без аллокаций.
-	// Единственный активный реплей — один глобальный бот, поэтому состояние статическое
-	// (как g_lastFailedGiveItemDef). Имена g_pauseSegments/g_nextPauseSegment оставлены
-	// как есть намеренно: переименование ради переименования утопило бы дифф.
+	// Каждый владелец имеет независимые сегменты и курсор пропуска.
 	struct PauseSegment
 	{
 		u32 startTick; // индекс первого пропускаемого кадра
 		u32 endTick;   // индекс первого кадра ПОСЛЕ сегмента (полуинтервал [startTick, endTick))
 	};
 
-	static_global std::vector<PauseSegment> g_pauseSegments;
+	static_global std::vector<PauseSegment> g_segments[session::Count];
 	// Курсор следующего непройденного сегмента (плейбек монотонен вперёд).
-	static_global size_t g_nextPauseSegment = 0;
+	static_global size_t g_cursors[session::Count] = {};
 
 	// Первый индекс тика с ticks[idx].serverTick >= serverTick. serverTick в записи
 	// монотонно не убывает (движковый tickcount), поэтому бинарный поиск корректен.
@@ -61,8 +60,8 @@ namespace KZ::replaysystem::playback
 
 	void ClearPauseSegments()
 	{
-		g_pauseSegments.clear();
-		g_nextPauseSegment = 0;
+		g_segments[session::Current()].clear();
+		g_cursors[session::Current()] = 0;
 	}
 
 	std::vector<awr::Interval> PauseIntervalsFromEvents(const TickData *ticks, u32 tickCount, const RpEvent *events, u32 numEvents)
@@ -367,7 +366,7 @@ namespace KZ::replaysystem::playback
 			for (const awr::Interval &iv : PauseIntervalsFromEvents(replay->tickData, replay->tickCount, replay->events, replay->numEvents))
 			{
 				// Интервалы включительны, сегменты — полуинтервалы [startTick, endTick).
-				g_pauseSegments.push_back({iv.from, iv.to + 1});
+				g_segments[session::Current()].push_back({iv.from, iv.to + 1});
 			}
 		}
 
@@ -379,7 +378,7 @@ namespace KZ::replaysystem::playback
 			{
 				if (iv.from < replay->tickCount && iv.to < replay->tickCount && iv.from <= iv.to)
 				{
-					g_pauseSegments.push_back({iv.from, iv.to + 1});
+					g_segments[session::Current()].push_back({iv.from, iv.to + 1});
 				}
 			}
 		}
@@ -387,31 +386,31 @@ namespace KZ::replaysystem::playback
 		// Пауза внутри вырезанной петли даёт пересечение — а весь остальной код (курсор
 		// AdvancePastPauses, RawTickToEffective, EffectiveTickToRaw) требует упорядоченных
 		// и НЕ пересекающихся сегментов. Сортируем и сливаем пересекающиеся и смежные.
-		std::sort(g_pauseSegments.begin(), g_pauseSegments.end(),
+		std::sort(g_segments[session::Current()].begin(), g_segments[session::Current()].end(),
 				  [](const PauseSegment &a, const PauseSegment &b) { return a.startTick < b.startTick; });
 		size_t merged = 0;
-		for (size_t i = 0; i < g_pauseSegments.size(); i++)
+		for (size_t i = 0; i < g_segments[session::Current()].size(); i++)
 		{
-			if (merged > 0 && g_pauseSegments[i].startTick <= g_pauseSegments[merged - 1].endTick)
+			if (merged > 0 && g_segments[session::Current()][i].startTick <= g_segments[session::Current()][merged - 1].endTick)
 			{
-				if (g_pauseSegments[i].endTick > g_pauseSegments[merged - 1].endTick)
+				if (g_segments[session::Current()][i].endTick > g_segments[session::Current()][merged - 1].endTick)
 				{
-					g_pauseSegments[merged - 1].endTick = g_pauseSegments[i].endTick;
+					g_segments[session::Current()][merged - 1].endTick = g_segments[session::Current()][i].endTick;
 				}
 				continue;
 			}
-			g_pauseSegments[merged++] = g_pauseSegments[i];
+			g_segments[session::Current()][merged++] = g_segments[session::Current()][i];
 		}
-		g_pauseSegments.resize(merged);
+		g_segments[session::Current()].resize(merged);
 	}
 
 	// Пропуск паузных сегментов при монотонном продвижении вперёд. O(1) амортизированно
-	// по курсору g_nextPauseSegment, без аллокаций — безопасно для тик-пути.
+	// по курсору g_cursors[session::Current()], без аллокаций — безопасно для тик-пути.
 	static_function u32 AdvancePastPauses(u32 tick)
 	{
-		while (g_nextPauseSegment < g_pauseSegments.size())
+		while (g_cursors[session::Current()] < g_segments[session::Current()].size())
 		{
-			const PauseSegment &seg = g_pauseSegments[g_nextPauseSegment];
+			const PauseSegment &seg = g_segments[session::Current()][g_cursors[session::Current()]];
 			if (tick < seg.startTick)
 			{
 				break; // до ближайшей паузы ещё не дошли
@@ -422,7 +421,7 @@ namespace KZ::replaysystem::playback
 				tick = seg.endTick;
 			}
 			// tick >= seg.endTick: сегмент пройден — к следующему (на случай смежных).
-			g_nextPauseSegment++;
+			g_cursors[session::Current()]++;
 		}
 		return tick;
 	}
@@ -430,11 +429,11 @@ namespace KZ::replaysystem::playback
 	bool IsTickIndexSkipped(u32 idx)
 	{
 		// Сегменты упорядочены и не пересекаются (BuildSkipSegments) — бинарный поиск.
-		size_t lo = 0, hi = g_pauseSegments.size();
+		size_t lo = 0, hi = g_segments[session::Current()].size();
 		while (lo < hi)
 		{
 			size_t mid = lo + (hi - lo) / 2;
-			if (g_pauseSegments[mid].endTick <= idx)
+			if (g_segments[session::Current()][mid].endTick <= idx)
 			{
 				lo = mid + 1;
 			}
@@ -443,12 +442,12 @@ namespace KZ::replaysystem::playback
 				hi = mid;
 			}
 		}
-		return lo < g_pauseSegments.size() && idx >= g_pauseSegments[lo].startTick;
+		return lo < g_segments[session::Current()].size() && idx >= g_segments[session::Current()][lo].startTick;
 	}
 
 	u32 SnapSeekTargetOutOfPause(u32 tick)
 	{
-		for (const PauseSegment &seg : g_pauseSegments)
+		for (const PauseSegment &seg : g_segments[session::Current()])
 		{
 			if (tick >= seg.startTick && tick < seg.endTick)
 			{
@@ -468,7 +467,7 @@ namespace KZ::replaysystem::playback
 	{
 		auto replay = data::GetCurrentReplay();
 		u32 skipped = 0;
-		for (const PauseSegment &seg : g_pauseSegments)
+		for (const PauseSegment &seg : g_segments[session::Current()])
 		{
 			skipped += seg.endTick - seg.startTick;
 		}
@@ -478,7 +477,7 @@ namespace KZ::replaysystem::playback
 	u32 RawTickToEffective(u32 rawTick)
 	{
 		u32 skipped = 0;
-		for (const PauseSegment &seg : g_pauseSegments)
+		for (const PauseSegment &seg : g_segments[session::Current()])
 		{
 			if (rawTick < seg.startTick)
 			{
@@ -495,7 +494,7 @@ namespace KZ::replaysystem::playback
 		// Сегменты упорядочены и не пересекаются: каждый, чьё начало уже позади, сдвигает сырой
 		// индекс на свою длину. Результат никогда не попадает внутрь паузы.
 		u32 raw = effectiveTick;
-		for (const PauseSegment &seg : g_pauseSegments)
+		for (const PauseSegment &seg : g_segments[session::Current()])
 		{
 			if (raw < seg.startTick)
 			{
@@ -508,10 +507,11 @@ namespace KZ::replaysystem::playback
 
 	void ResetPauseCursor(u32 tick)
 	{
-		g_nextPauseSegment = 0;
-		while (g_nextPauseSegment < g_pauseSegments.size() && g_pauseSegments[g_nextPauseSegment].endTick <= tick)
+		g_cursors[session::Current()] = 0;
+		while (g_cursors[session::Current()] < g_segments[session::Current()].size()
+			   && g_segments[session::Current()][g_cursors[session::Current()]].endTick <= tick)
 		{
-			g_nextPauseSegment++;
+			g_cursors[session::Current()]++;
 		}
 	}
 
@@ -600,6 +600,7 @@ namespace KZ::replaysystem::playback
 
 	bool GetDisplayedFrameVelocity(KZPlayer *player, Vector &out)
 	{
+		session::Scope scope(player);
 		if (!player || !bot::IsValidBot(player->GetController()))
 		{
 			return false;
@@ -618,6 +619,7 @@ namespace KZ::replaysystem::playback
 
 	void OnPhysicsSimulate(KZPlayer *player)
 	{
+		session::Scope scope(player);
 		if (!player || !bot::IsValidBot(player->GetController()))
 		{
 			return;
@@ -673,6 +675,7 @@ namespace KZ::replaysystem::playback
 
 	void OnProcessMovement(KZPlayer *player)
 	{
+		session::Scope scope(player);
 		if (!player || !bot::IsValidBot(player->GetController()))
 		{
 			return;
@@ -691,6 +694,7 @@ namespace KZ::replaysystem::playback
 
 	void OnProcessMovementPost(KZPlayer *player)
 	{
+		session::Scope scope(player);
 		if (!player || !bot::IsValidBot(player->GetController()))
 		{
 			return;
@@ -709,6 +713,7 @@ namespace KZ::replaysystem::playback
 
 	void OnFinishMovePre(KZPlayer *player, CMoveData *mv)
 	{
+		session::Scope scope(player);
 		if (!player || !bot::IsValidBot(player->GetController()))
 		{
 			return;
@@ -740,6 +745,7 @@ namespace KZ::replaysystem::playback
 
 	void OnPhysicsSimulatePost(KZPlayer *player)
 	{
+		session::Scope scope(player);
 		if (!player || !bot::IsValidBot(player->GetController()))
 		{
 			return;
@@ -873,6 +879,7 @@ namespace KZ::replaysystem::playback
 
 	void OnPlayerRunCommandPre(KZPlayer *player, PlayerCommand *command)
 	{
+		session::Scope scope(player);
 		if (!player || !bot::IsValidBot(player->GetController()))
 		{
 			return;
@@ -1018,7 +1025,7 @@ namespace KZ::replaysystem::playback
 
 			// Стоп-кровь: если выдача этого itemDef уже фейлилась — не пытаться каждый тик
 			// (повторный цикл RemoveAllItems+null-give раздевал бота, включая пистолет).
-			if ((i32)desiredWeapon.mainInfo.itemDef == g_lastFailedGiveItemDef)
+			if ((i32)desiredWeapon.mainInfo.itemDef == g_failedItemDefs[session::Current()])
 			{
 				return;
 			}
@@ -1044,11 +1051,11 @@ namespace KZ::replaysystem::playback
 			{
 				KZ::replaysystem::item::ApplyItemAttributesToWeapon(*newWeapon, desiredWeapon);
 				cmd.mutable_base()->set_weaponselect(newWeapon->entindex());
-				g_lastFailedGiveItemDef = -1;
+				g_failedItemDefs[session::Current()] = -1;
 			}
 			else
 			{
-				g_lastFailedGiveItemDef = desiredWeapon.mainInfo.itemDef;
+				g_failedItemDefs[session::Current()] = desiredWeapon.mainInfo.itemDef;
 			}
 			// Диагностика скинов бота: что записано в реплее и что выдали (ok=0 больше не ретраится).
 			// fflush — stdout контейнера буферизуется (урок kzt-саги).
@@ -1081,7 +1088,7 @@ namespace KZ::replaysystem::playback
 		// замедление, а следующий об этом не знает (бот и реплей в сети — одни на всех).
 		replay->playbackSpeed = 1.0f;
 		replay->tickFraction = 0.0f;
-		g_lastFailedGiveItemDef = -1;
+		g_failedItemDefs[session::Current()] = -1;
 		// Разбор пропускаемых сегментов: записанные паузы и, в AWR-режиме, мёртвые
 		// интервалы разреза. Строго после выставления awrMode/awrDead (commands.cpp).
 		BuildSkipSegments();
