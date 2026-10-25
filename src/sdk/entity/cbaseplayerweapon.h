@@ -6,6 +6,7 @@ struct EconInfo;
 class CBasePlayerWeapon : public CEconEntity
 {
 	DECLARE_SCHEMA_CLASS_ENTITY(CBasePlayerWeapon)
+	SCHEMA_FIELD(i32, m_iClip1)
 
 	EconInfo GetEconInfo();
 };

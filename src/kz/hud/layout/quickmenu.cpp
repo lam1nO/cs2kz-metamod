@@ -12,6 +12,7 @@
 #include "kz/option/kz_option.h"
 #include "kz/replays/cyb_replay_download.h"
 #include "sdk/entity/ccscustomhudlayout.h"
+#include "sdk/entity/cbaseplayerweapon.h"
 #include "sdk/usercmd.h"
 #include "utils/simplecmds.h"
 #include "utils/logging.h"
@@ -364,6 +365,10 @@ void KZ::quickmenu::OnUsercmds(KZPlayer *player, PlayerCommand *cmds, i32 count)
 		// Чужое меню получает новые нажатия, но не хвост прежнего действия помощника.
 		const u64 mask = s->input.SuppressionMask(kOwnedKeys, active) | (!otherOwner ? (held & IN_LOOK_AT_WEAPON) : 0);
 		if (!mask) continue;
+		// История атаки — отдельный канал protobuf помимо кнопок и subtick-шагов.
+		// Сам input_history сохраняем: он содержит прицеливание и интерполяцию.
+		if (mask & IN_ATTACK) pc->set_attack1_start_history_index(-1);
+		if (mask & IN_ATTACK2) pc->set_attack2_start_history_index(-1);
 		buttons->set_buttonstate1(buttons->buttonstate1() & ~mask);
 		buttons->set_buttonstate2(buttons->buttonstate2() & ~mask);
 		buttons->set_buttonstate3(buttons->buttonstate3() & ~mask);
@@ -401,10 +406,14 @@ SCMD(kz_quickstatus, SCFL_HIDDEN)
 	const bool capture = layout && layout->IsInputCaptureEnabled(player->GetPlayerSlot());
 	Vector position {};
 	if (player->GetPlayerPawn()) player->GetOrigin(&position);
+	auto pawn = player->GetPlayerPawn();
+	auto weapons = pawn ? pawn->m_pWeaponServices() : nullptr;
+	auto weapon = weapons ? weapons->m_hActiveWeapon().Get() : nullptr;
+	const i32 clip = weapon ? weapon->m_iClip1() : -1;
 	utils::PrintConsole(controller,
-		"[kz_quickstatus] mode=%s capture=%d continuous=%d autopaint=%d point_a=%d result=%d actions=%llu pos=%.2f/%.2f/%.2f\n",
+		"[kz_quickstatus] mode=%s capture=%d continuous=%d autopaint=%d point_a=%d result=%d actions=%llu pos=%.2f/%.2f/%.2f weapon=%s clip=%d\n",
 		mode, capture ? 1 : 0, s->continuous ? 1 : 0, player->paintService->IsAutoPaintEnabled() ? 1 : 0,
 		player->measureService->startPos.IsValid() ? 1 : 0, player->measureService->lastResult.valid ? 1 : 0,
-		(unsigned long long)s->actions, position.x, position.y, position.z);
+		(unsigned long long)s->actions, position.x, position.y, position.z, weapon ? weapon->GetClassname() : "none", clip);
 	return true;
 }
