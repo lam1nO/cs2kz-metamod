@@ -9,6 +9,7 @@
 #include "sdk/recipientfilters.h"
 #include "utils/logging.h"
 #include "bspflags.h"
+#include "kz/hud/layout/quickmenu.h"
 
 void KZPaintService::Reset()
 {
@@ -132,6 +133,7 @@ void KZPaintService::OnGameFrame()
 			continue;
 		}
 
+		KZ::quickmenu::FlushPaint(player);
 		player->paintService->TryAutoPaint();
 	}
 }

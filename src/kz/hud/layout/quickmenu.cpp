@@ -38,6 +38,7 @@ namespace
 		u64 actions = 0;
 		bool continuous = false;
 		bool ownsAutoPaint = false;
+		bool pendingPaint = false;
 		bool shown = false;
 		f64 retryAt = 0, lastClick = -1;
 		std::string feedback;
@@ -122,6 +123,7 @@ namespace
 	void SetMode(KZPlayer *player, State &s, Mode mode)
 	{
 		const bool hadInput = s.mode != Mode::Closed;
+		s.pendingPaint = false;
 		if (s.mode == Mode::Paint && mode != Mode::Paint) StopPaint(player, s);
 		if (s.mode == Mode::Measure && mode != Mode::Measure) player->measureService->CancelMeasure(false);
 		s.mode = mode;
@@ -150,7 +152,9 @@ namespace
 					s.ownsAutoPaint = true;
 				}
 			}
-			else player->paintService->PlacePaint();
+			// DecalTrace не отправляет событие из PhysicsSimulatePost. Выполняем
+			// запрос на ближайшем GameFrame вместе со штатным непрерывным Paint.
+			else s.pendingPaint = true;
 		}
 		else if (s.mode == Mode::Measure)
 		{
@@ -263,6 +267,16 @@ bool KZ::quickmenu::Owns(KZPlayer *player, CEntityHandle handle)
 {
 	State *s = Of(player);
 	return s && s->entity.IsValid() && s->entity.ToInt() == handle.ToInt();
+}
+
+void KZ::quickmenu::FlushPaint(KZPlayer *player)
+{
+	State *s = Of(player);
+	if (!s || !s->pendingPaint) return;
+	s->pendingPaint = false;
+	if (!Enabled(player) || OtherUi(player) || s->mode != Mode::Paint || s->continuous
+		|| !s->entity.IsValid()) return;
+	player->paintService->PlacePaint();
 }
 
 void KZ::quickmenu::Tick(KZPlayer *player)

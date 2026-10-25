@@ -7,6 +7,7 @@ class PlayerCommand;
 namespace KZ::quickmenu
 {
 	void Tick(KZPlayer *player);
+	void FlushPaint(KZPlayer *player);
 	void Open(KZPlayer *player);
 	void Close(KZPlayer *player);
 	void Reset(KZPlayer *player);
