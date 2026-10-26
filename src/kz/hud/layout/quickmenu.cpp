@@ -405,10 +405,12 @@ SCMD(kz_quickstatus, SCFL_HIDDEN)
 	auto weapons = pawn ? pawn->m_pWeaponServices() : nullptr;
 	auto weapon = weapons ? weapons->m_hActiveWeapon().Get() : nullptr;
 	const i32 clip = weapon ? weapon->m_iClip1() : -1;
+	const Color paint = player->paintService->GetColor();
 	utils::PrintConsole(controller,
-		"[kz_quickstatus] mode=%s capture=%d continuous=%d autopaint=%d point_a=%d result=%d actions=%llu pos=%.2f/%.2f/%.2f weapon=%s clip=%d\n",
+		"[kz_quickstatus] mode=%s capture=%d continuous=%d autopaint=%d point_a=%d result=%d actions=%llu pos=%.2f/%.2f/%.2f weapon=%s clip=%d paint_rgba=%d/%d/%d/%d\n",
 		mode, capture ? 1 : 0, s->continuous ? 1 : 0, player->paintService->IsAutoPaintEnabled() ? 1 : 0,
 		player->measureService->startPos.IsValid() ? 1 : 0, player->measureService->lastResult.valid ? 1 : 0,
-		(unsigned long long)s->actions, position.x, position.y, position.z, weapon ? weapon->GetClassname() : "none", clip);
+		(unsigned long long)s->actions, position.x, position.y, position.z, weapon ? weapon->GetClassname() : "none", clip,
+		paint.r(), paint.g(), paint.b(), paint.a());
 	return true;
 }
