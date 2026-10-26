@@ -8,6 +8,7 @@ namespace KZ::quickmenu
 {
 	void Tick(KZPlayer *player);
 	void FlushPaint(KZPlayer *player);
+	bool IsOpen(KZPlayer *player);
 	void Open(KZPlayer *player);
 	void Close(KZPlayer *player);
 	void Reset(KZPlayer *player);

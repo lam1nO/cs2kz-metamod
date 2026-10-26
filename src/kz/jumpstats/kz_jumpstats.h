@@ -62,6 +62,7 @@ extern const char *distanceTierSounds[DISTANCETIER_COUNT];
 
 struct JumpPose
 {
+	f32 reviewTime {}; // Время реальной позиции относительно отрыва; не failstat airtime.
 	Vector position;
 	// These fields are used for jsalways's backtracking.
 	f32 airtime;
@@ -76,6 +77,7 @@ class Jump;
 class AACall
 {
 public:
+	f32 reviewStart {-1.0f}; // Только live UI; формат реплея не меняется.
 	f32 externalSpeedDiff {};
 	f32 prevYaw {};
 	f32 currentYaw {};

@@ -1,3 +1,4 @@
+#include "kz/jumpstats/jump_review.h"
 #include "kz/hud/layout/quickmenu.h"
 // Окно настроек !options на своей разметке cyber/options.xml (спека 2026-09-26-hud-editor-options
 // §3.2/§4.4, навигация — контракт options v4). Реестр (KZOptNode/KZOptItem, KZ::menu::Add*,
@@ -1758,6 +1759,7 @@ bool KZHUDService::HandleMenuWindowClick(const char *id)
 
 void KZHUDService::OnLayoutMenuClick(uint32 packedHandle, const char *panelId)
 {
+	if (KZ::jumpreview::OnClick(this->player, packedHandle, panelId)) return;
 	if (KZ::quickmenu::OnClick(this->player, packedHandle, panelId)) return;
 	// Общее окно (layout/gsmenu.cpp) — своя сущность; сверка хэндла внутри.
 	if (KZ::gsmenu::OnClick(this->player, packedHandle, panelId))

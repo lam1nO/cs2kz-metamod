@@ -1,3 +1,4 @@
+#include "kz/jumpstats/jump_review.h"
 #include "kz/hud/layout/quickmenu.h"
 #include "kz/hud/layout/quickmenu_input.h"
 #include "kz/hud/layout/gsmenu.h"
@@ -66,7 +67,7 @@ namespace
 	bool OtherUi(KZPlayer *player)
 	{
 		return player->hudService->IsLayoutUiOpen() || player->hudService->IsReplayMenuOpen()
-			   || KZ::gsmenu::HidesHud(player) || KZ::gsmenu::ShimIsOpen(player);
+			   || KZ::gsmenu::HidesHud(player) || KZ::gsmenu::ShimIsOpen(player) || KZ::jumpreview::IsOpen(player);
 	}
 	std::string Text(KZPlayer *player, const char *key)
 	{
@@ -426,4 +427,11 @@ SCMD(kz_quickstatus, SCFL_HIDDEN)
 		(unsigned long long)s->actions, position.x, position.y, position.z, weapon ? weapon->GetClassname() : "none", clip,
 		paint.r(), paint.g(), paint.b(), paint.a());
 	return true;
+}
+
+// Владение вводом для соседних персональных окон.
+bool KZ::quickmenu::IsOpen(KZPlayer *player)
+{
+	auto s = Of(player);
+	return s && s->mode != Mode::Closed;
 }

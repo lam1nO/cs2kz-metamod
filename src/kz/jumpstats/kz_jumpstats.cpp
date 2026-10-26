@@ -1,3 +1,4 @@
+#include "kz/jumpstats/jump_review.h"
 #include <cmath>
 
 #include "kz/kz.h"
@@ -1035,6 +1036,7 @@ void KZJumpstatsService::OnAirAccelerate()
 		return;
 	}
 	AACall call;
+	call.reviewStart = g_pKZUtils->GetGlobals()->curtime - g_pKZUtils->GetGlobals()->frametime - this->player->takeoffTime;
 	this->player->GetMoveServices()->m_nButtons().GetButtons(call.buttons);
 	this->player->GetVelocity(&call.velocityPre);
 
@@ -1105,6 +1107,7 @@ void KZJumpstatsService::EndJump()
 		return;
 	}
 	jump->End();
+	KZ::jumpreview::OnJump(this->player, jump);
 	if (jump->GetJumpType() == JumpType_FullInvalid)
 	{
 		return;
