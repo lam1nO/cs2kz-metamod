@@ -9,6 +9,8 @@
 
 #include "public/steam/isteamugc.h"
 #include "public/steam/isteamgameserver.h"
+#include "public/steam/isteamclient.h"
+#include "map_recovery_policy.h"
 #include "utils/ctimer.h"
 
 #include <filesystem>
@@ -30,7 +32,7 @@ extern CSteamGameServerAPIContext g_steamAPI;
 // держит кэш равным публикации, поэтому кэш — истина: если vpk на месте, отвечаем
 // «установлена» сами. Хук на vtable ISteamUGC, а не на наш указатель: путь к аддону
 // при смене карты спрашивает libserver (CCSAddonManager), состояние — ещё и MAM;
-// все они на STEAMUGC_INTERFACE_VERSION019, то есть на одной таблице.
+// MAM и наш SDK используют 019, а движок — отдельный адаптер 021. Хукаем обе таблицы.
 //
 // KHook (Metamod API 18): решение принимается в PRE — оригинал зовём сами через CallOriginal и
 // отдаём Supersede со своим значением (тот же приём, что апстрим в ProcessUsercmds). Так не
@@ -43,26 +45,24 @@ static KHook::Virtual<ISteamUGC, bool, PublishedFileId_t, uint64 *, char *, uint
 static KHook::Return<bool> DownloadItemPre(ISteamUGC *pThis, PublishedFileId_t id, bool bHighPriority);
 static KHook::Virtual<ISteamUGC, bool, PublishedFileId_t, bool> s_downloadItemHook(DownloadItemPre, nullptr);
 
+// Версия интерфейса фиксирует ABI. В 021 перед GetItemState добавлены три метода:
+// 76 GetItemState, 77 GetItemInstallInfo, 79 DownloadItem (019: 73, 74, 76).
+// Указатель 021 используется только KHook с явным индексом, не методами SDK 019.
+static KHook::Return<uint32> GetItemState021Pre(ISteamUGC *pThis, PublishedFileId_t id);
+static KHook::Virtual<ISteamUGC, uint32, PublishedFileId_t> s_itemState021Hook(GetItemState021Pre, nullptr);
+static KHook::Return<bool> GetItemInstallInfo021Pre(ISteamUGC *pThis, PublishedFileId_t id, uint64 *size, char *folder, uint32 length, uint32 *timestamp);
+static KHook::Virtual<ISteamUGC, bool, PublishedFileId_t, uint64 *, char *, uint32, uint32 *> s_installInfo021Hook(GetItemInstallInfo021Pre, nullptr);
+static KHook::Return<bool> DownloadItem021Pre(ISteamUGC *pThis, PublishedFileId_t id, bool highPriority);
+static KHook::Virtual<ISteamUGC, bool, PublishedFileId_t, bool> s_downloadItem021Hook(DownloadItem021Pre, nullptr);
+
 namespace
 {
 
 bool s_ugcHooked = false;
+bool s_ugc021Hooked = false;
 std::unordered_set<PublishedFileId_t> s_loggedCacheItems;
 std::unordered_set<PublishedFileId_t> s_loggedSuppressedDownloads;
 std::thread::id s_mainThread;
-bool s_offThreadLogged = false;
-
-// При SourceHook общий стек контекстов портился от вызова хука из чужого потока; KHook держит
-// свои мьютексы, но наш FindCachedItem и s_loggedCacheItems не потокобезопасны. По открытому
-// коду все вызовы UGC — из главного потока; libserver закрыт, поэтому ловим обратное в лог.
-void CheckHookThread(const char *fn)
-{
-	if (!s_offThreadLogged && std::this_thread::get_id() != s_mainThread)
-	{
-		s_offThreadLogged = true;
-		KZ_LOG_WARN(LogChannel::General, "[cyb] workshop_cache_hook_off_main_thread fn=%s\n", fn);
-	}
-}
 
 struct CachedItem
 {
@@ -176,10 +176,14 @@ void LogCacheOverride(PublishedFileId_t id, uint32 steamState)
 
 } // namespace
 
-static KHook::Return<uint32> GetItemStatePre(ISteamUGC *pThis, PublishedFileId_t id)
+template<typename Hook>
+static KHook::Return<uint32> CachedItemState(Hook &hook, ISteamUGC *pThis, PublishedFileId_t id)
 {
-	CheckHookThread("GetItemState");
-	uint32 state = s_itemStateHook.CallOriginal(pThis, id);
+	uint32 state = hook.CallOriginal(pThis, id);
+	if (std::this_thread::get_id() != s_mainThread)
+	{
+		return {KHook::Action::Supersede, state};
+	}
 	bool installed = (state & k_EItemStateInstalled) && !(state & k_EItemStateNeedsUpdate);
 	if (installed || (state & k_EItemStateLegacyItem) || !IsSharedCacheMount() || !FindCachedItem(id, nullptr))
 	{
@@ -189,19 +193,19 @@ static KHook::Return<uint32> GetItemStatePre(ISteamUGC *pThis, PublishedFileId_t
 	return {KHook::Action::Supersede, k_EItemStateInstalled};
 }
 
-static KHook::Return<bool> GetItemInstallInfoPre(ISteamUGC *pThis, PublishedFileId_t id, uint64 *punSizeOnDisk, char *pchFolder, uint32 cchFolderSize,
-												 uint32 *punTimeStamp)
+template<typename Hook>
+static KHook::Return<bool> CachedItemInstallInfo(Hook &hook, ISteamUGC *pThis, PublishedFileId_t id, uint64 *punSizeOnDisk, char *pchFolder, uint32 cchFolderSize,
+                                                 uint32 *punTimeStamp)
 {
-	CheckHookThread("GetItemInstallInfo");
 	// Кэш спрашиваем ПЕРВЫМ, даже если Steam считает карту установленной: после обновления
 	// карты сторожем ACF инстанса держит старую запись, и Steam отдаёт старое время установки.
 	// CDedicatedServerWorkshopManager (libserver) сверяет его со временем публикации, видит
 	// «устарела» и зовёт DownloadItem — а докачка внутри контейнера падает (EResult 37,
 	// «Staging library folder not found»), смена карты молча не происходит (09.10, kz_dankality).
 	CachedItem item;
-	if (!pchFolder || cchFolderSize == 0 || !IsSharedCacheMount() || !FindCachedItem(id, &item) || item.folder.size() >= cchFolderSize)
+	if (std::this_thread::get_id() != s_mainThread || !pchFolder || cchFolderSize == 0 || !IsSharedCacheMount() || !FindCachedItem(id, &item) || item.folder.size() >= cchFolderSize)
 	{
-		return {KHook::Action::Supersede, s_installInfoHook.CallOriginal(pThis, id, punSizeOnDisk, pchFolder, cchFolderSize, punTimeStamp)};
+		return {KHook::Action::Supersede, hook.CallOriginal(pThis, id, punSizeOnDisk, pchFolder, cchFolderSize, punTimeStamp)};
 	}
 	// Время установки — «сейчас», а не mtime vpk: сторож кладёт новую сборку раньше, чем Steam
 	// поднимает time_updated публикации (метаданные правятся позже контента), и любое
@@ -223,18 +227,43 @@ static KHook::Return<bool> GetItemInstallInfoPre(ISteamUGC *pThis, PublishedFile
 // Докачку карты, которая уже лежит в общем кэше, не запускаем вовсе: её держит актуальной
 // сторож ноды, а внутри игрового процесса докачка в общий кэш падает (см. GetItemInstallInfoPre).
 // Отвечаем «запрос принят» — тот же ответ, что Steam даёт на уже установленный предмет.
-static KHook::Return<bool> DownloadItemPre(ISteamUGC *pThis, PublishedFileId_t id, bool bHighPriority)
+template<typename Hook>
+static KHook::Return<bool> CachedDownloadItem(Hook &hook, ISteamUGC *pThis, PublishedFileId_t id, bool bHighPriority)
 {
-	CheckHookThread("DownloadItem");
-	if (!IsSharedCacheMount() || !FindCachedItem(id, nullptr))
+	if (std::this_thread::get_id() != s_mainThread || !IsSharedCacheMount() || !FindCachedItem(id, nullptr))
 	{
-		return {KHook::Action::Supersede, s_downloadItemHook.CallOriginal(pThis, id, bHighPriority)};
+		return {KHook::Action::Supersede, hook.CallOriginal(pThis, id, bHighPriority)};
 	}
 	if (s_loggedSuppressedDownloads.insert(id).second)
 	{
 		KZ_LOG_INFO(LogChannel::General, "[cyb] workshop_download_suppressed id=%llu reason=in_shared_cache\n", id);
 	}
 	return {KHook::Action::Supersede, true};
+}
+
+static KHook::Return<uint32> GetItemStatePre(ISteamUGC *self, PublishedFileId_t id)
+{
+	return CachedItemState(s_itemStateHook, self, id);
+}
+static KHook::Return<uint32> GetItemState021Pre(ISteamUGC *self, PublishedFileId_t id)
+{
+	return CachedItemState(s_itemState021Hook, self, id);
+}
+static KHook::Return<bool> GetItemInstallInfoPre(ISteamUGC *self, PublishedFileId_t id, uint64 *size, char *folder, uint32 length, uint32 *timestamp)
+{
+	return CachedItemInstallInfo(s_installInfoHook, self, id, size, folder, length, timestamp);
+}
+static KHook::Return<bool> GetItemInstallInfo021Pre(ISteamUGC *self, PublishedFileId_t id, uint64 *size, char *folder, uint32 length, uint32 *timestamp)
+{
+	return CachedItemInstallInfo(s_installInfo021Hook, self, id, size, folder, length, timestamp);
+}
+static KHook::Return<bool> DownloadItemPre(ISteamUGC *self, PublishedFileId_t id, bool priority)
+{
+	return CachedDownloadItem(s_downloadItemHook, self, id, priority);
+}
+static KHook::Return<bool> DownloadItem021Pre(ISteamUGC *self, PublishedFileId_t id, bool priority)
+{
+	return CachedDownloadItem(s_downloadItem021Hook, self, id, priority);
 }
 
 namespace
@@ -292,7 +321,8 @@ bool s_timerStarted = false;
 // Карты, на которых этот процесс уже стоял: движок помнит их сведения и меняет на них без
 // запроса в Steam (проверено 16.10 с отрезанным Steam) — для них связи не ждём.
 std::unordered_set<u64> s_hostedMaps;
-bool s_startMapChecked = false;
+bool s_startMapRecoveryEnabled = false;
+f64 s_startMapRetryAt = 0;
 f64 s_loadedAt = 0;
 
 f64 Now()
@@ -335,19 +365,20 @@ void Finish(const char *outcome)
 {
 	KZ_LOG_INFO(LogChannel::General, "[cyb] mapchange_%s id=%llu issues=%d elapsed=%.0f startup=%d\n", outcome, s_req.id, s_req.issues,
 				Now() - s_req.since, s_req.fromStartup);
+	if (s_req.fromStartup)
+	{
+		s_startMapRetryAt = Now() + 60.0;
+	}
 	s_req = {};
 }
 
 // Стартовая карта идёт `+host_workshop_map` из командной строки — раньше, чем подняты хуки и
-// связь со Steam; при сбое (EResult 2, 16.10 srv-26) сервер так и стоял на de_dust2.
+// связь со Steam. После неудачи повторяем с паузой: одноразовая проверка оставляла
+// процесс на Dust2 навсегда (26.10 srv-23), несмотря на последующие перезагрузки карты.
 void CheckStartMap()
 {
-	if (s_startMapChecked || s_req.active || Now() - s_loadedAt < kStartMapGraceSeconds)
-	{
-		return;
-	}
-	s_startMapChecked = true;
-	if (g_pKZUtils->GetCurrentMapWorkshopID() != 0)
+	if (!KZ::misc::customchangemap::ShouldRecoverStartMap(s_startMapRecoveryEnabled, s_req.active,
+            g_pKZUtils->GetCurrentMapWorkshopID(), Now(), s_loadedAt + kStartMapGraceSeconds, s_startMapRetryAt))
 	{
 		return;
 	}
@@ -522,7 +553,8 @@ CON_COMMAND_F(kz_customchangemap, "Switch to a workshop map: waits for Steam if 
 void KZ::misc::customchangemap::Init(bool late)
 {
 	// Поздняя загрузка плагина (meta reload): сервер мог осознанно стоять на официальной карте.
-	s_startMapChecked = late;
+	s_startMapRecoveryEnabled = !late;
+	s_startMapRetryAt = 0;
 	s_downloadHandler.m_CallbackDownloadItemResult.Register(&s_downloadHandler, &CustomMapDownloadHandler::OnDownloadResult);
 	s_loadedAt = Now();
 	EnsureTimer();
@@ -544,11 +576,37 @@ void KZ::misc::customchangemap::OnSteamAPIActivated()
 	s_downloadItemHook.Configure(&ISteamUGC::DownloadItem);
 	s_downloadItemHook.AddGlobal(ugc);
 	s_ugcHooked = true;
+
+	ISteamUGC *ugc021 = g_steamAPI.SteamClient()->GetISteamUGC(SteamGameServer_GetHSteamUser(), SteamGameServer_GetHSteamPipe(),
+		                                                      "STEAMUGC_INTERFACE_VERSION021");
+	if (!ugc021 || KHook::GetVtableIndex(&ISteamUGC::GetItemState) != 73
+		   || KHook::GetVtableIndex(&ISteamUGC::GetItemInstallInfo) != 74
+		   || KHook::GetVtableIndex(&ISteamUGC::DownloadItem) != 76
+		   || *reinterpret_cast<void ***>(ugc021) == *reinterpret_cast<void ***>(ugc))
+	{
+		KZ_LOG_WARN(LogChannel::General, "[cyb] workshop_cache_hook version=021 active=0 reason=interface_unavailable_or_aliased\n");
+		return;
+	}
+	s_itemState021Hook.Configure(76);
+	s_installInfo021Hook.Configure(77);
+	s_downloadItem021Hook.Configure(79);
+	s_itemState021Hook.AddGlobal(ugc021);
+	s_installInfo021Hook.AddGlobal(ugc021);
+	s_downloadItem021Hook.AddGlobal(ugc021);
+	s_ugc021Hooked = true;
+	KZ_LOG_INFO(LogChannel::General, "[cyb] workshop_cache_hook version=021 active=1\n");
 }
 
 void KZ::misc::customchangemap::Cleanup()
 {
 	s_downloadHandler.m_CallbackDownloadItemResult.Unregister();
+	if (s_ugc021Hooked)
+	{
+		s_itemState021Hook.ClearHooks();
+		s_installInfo021Hook.ClearHooks();
+		s_downloadItem021Hook.ClearHooks();
+		s_ugc021Hooked = false;
+	}
 	if (s_ugcHooked)
 	{
 		s_itemStateHook.ClearHooks();
