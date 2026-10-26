@@ -366,7 +366,11 @@ void KZ::quickmenu::OnUsercmds(KZPlayer *player, PlayerCommand *cmds, i32 count)
 		auto buttons = base->mutable_buttons_pb();
 		const u64 held = buttons->buttonstate1();
 		const bool otherOwner = OtherUi(player);
+		const bool fresh = pc->cmdNum > s->input.lastCommand;
 		s->input.ObserveCommand(pc->cmdNum, held, kToolKeys, otherOwner);
+		// Release/repress внутри пачки usercmd тоже прерывает hold; Tick видит
+		// только последнее held. Backup-команды не являются отпусканием.
+		if (fresh && !(held & IN_USE)) s->hold.Cancel(false);
 		const bool active = s->mode != Mode::Closed && !otherOwner;
 		// Помощник владеет только E/R/F; мышь и обычное оружие остаются игре.
 		// После F удержанные E/R/F погашены вместе с командой отпускания.

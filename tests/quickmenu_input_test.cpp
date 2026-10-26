@@ -173,6 +173,17 @@ int main()
 	assert(!hold.Update(false, 22, .7));
 	assert(!hold.Update(true, 23, .7));
 	assert(hold.Update(true, 23.71, .7));
+	// Реальный release внутри пачки usercmd сбрасывает таймер и blocked,
+	// даже если до Tick уже пришёл новый press.
+	hold.Cancel(false);
+	assert(!hold.Update(true, 30, .7));
+	hold.Cancel(false); // fresh raw release в OnUsercmds
+	assert(!hold.Update(true, 30.6, .7));
+	assert(!hold.Update(true, 30.8, .7));
+	assert(hold.Update(true, 31.31, .7));
+	hold.Cancel(false); // release после срабатывания
+	assert(!hold.Update(true, 32, .7));
+	assert(hold.Update(true, 32.71, .7));
 	// Сброс времени карты не завершает старое удержание.
 	hold.Cancel(false);
 	assert(!hold.Update(true, 50, .7));
