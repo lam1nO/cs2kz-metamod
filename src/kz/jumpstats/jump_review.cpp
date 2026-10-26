@@ -535,7 +535,8 @@ namespace KZ::jumpreview
 				SetClass(s, l, Format("jr_m_row%i", i), "hidden", i * 2 >= static_cast<int>(fields.size()));
 			}
 			SetClass(s, l, "jr_m_path_box", "hidden", !path);
-			int ph = std::clamp(static_cast<int>((fields.size() + 1) / 2) * 42, 220, 480);
+			int rows = compact ? static_cast<int>(fields.size()) : static_cast<int>((fields.size() + 1) / 2);
+			int ph = std::clamp(rows * 42, 220, 480);
 			s.miniPlotHeight = Quantize(ph, 4, 128) * 4;
 			ValueClass(s, l, "jr_m_path", "ph", Quantize(ph, 4, 128));
 			ValueClass(s, l, "jr_m_path_box", "ph", Quantize(ph, 4, 128));
@@ -572,8 +573,14 @@ namespace KZ::jumpreview
 			Var(s, l, "jr_scale", Format("%i%%", Scale(p)));
 			Var(s, l, "jr_side_value", left ? "Left" : "Right");
 			SetClass(s, l, "jr_enabled", "on", p->optionService->GetPreferenceBool("jsReviewEnabled", true));
-			DrawLine(s, l, true);
-			DrawLine(s, l, false);
+			if (visible && path)
+			{
+				DrawLine(s, l, true);
+			}
+			if (s.open && !s.settings)
+			{
+				DrawLine(s, l, false);
+			}
 			l->GetGlobalLayoutState()->MarkFullChanged();
 		}
 	} // namespace
