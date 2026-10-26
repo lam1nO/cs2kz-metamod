@@ -156,5 +156,27 @@ int main()
 	mouse.ObserveCommand(5, movement | attacks, tool, false);
 	assert(mouse.SuppressionMask(tool, false) == 0);
 	assert(mouse.Take() == 0);
+	// Короткое E не открывает меню; hold срабатывает ровно один раз.
+	KZ::quickmenu::HoldGesture hold;
+	assert(!hold.Update(true, 10, .7));
+	assert(hold.Active());
+	assert(!hold.Update(true, 10.5, .7));
+	assert(!hold.Update(false, 10.6, .7));
+	assert(!hold.Active());
+	assert(!hold.Update(true, 11, .7));
+	assert(hold.Update(true, 11.71, .7));
+	assert(!hold.Active());
+	assert(!hold.Update(true, 20, .7));
+	// Переход/чужой UI требует реального отпускания.
+	hold.Cancel(true);
+	assert(!hold.Update(true, 21, .7));
+	assert(!hold.Update(false, 22, .7));
+	assert(!hold.Update(true, 23, .7));
+	assert(hold.Update(true, 23.71, .7));
+	// Сброс времени карты не завершает старое удержание.
+	hold.Cancel(false);
+	assert(!hold.Update(true, 50, .7));
+	assert(!hold.Update(true, 1, .7));
+	assert(hold.Update(true, 1.71, .7));
 	std::puts("quickmenu input transitions, duplicates, movement, attack and exit guard: ok");
 }

@@ -3,6 +3,24 @@
 
 namespace KZ::quickmenu
 {
+	// Один hold на физическое нажатие; переходы требуют отпускания E.
+	struct HoldGesture
+	{
+		double since = -1;
+		bool blocked = false;
+		void Cancel(bool held) { since = -1; blocked = held; }
+		bool Update(bool held, double now, double delay)
+		{
+			if (!held) { Cancel(false); return false; }
+			if (blocked) return false;
+			if (since < 0 || now < since) since = now;
+			if (now - since < delay) return false;
+			Cancel(true);
+			return true;
+		}
+		bool Active() const { return since >= 0 && !blocked; }
+	};
+
 	// На переходе UI очищаем события, но сохраняем raw-held: зажатая E не должна
 	// стать новым нажатием в следующем режиме. Чужой владелец ввода также съедает
 	// накопленные события, при этом отпускания продолжают отслеживаться.

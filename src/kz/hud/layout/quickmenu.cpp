@@ -36,6 +36,7 @@ namespace
 		CHandle<CBaseEntity> entity {};
 		Mode mode = Mode::Closed;
 		KZ::quickmenu::InputLatch input;
+		KZ::quickmenu::HoldGesture hold;
 		u64 actions = 0;
 		bool continuous = false;
 		bool ownsAutoPaint = false;
@@ -127,7 +128,8 @@ namespace
 		if (s.mode == Mode::Paint && mode != Mode::Paint) StopPaint(player, s);
 		if (s.mode == Mode::Measure && mode != Mode::Measure) player->measureService->CancelMeasure(false);
 		s.mode = mode;
-		s.input.Transition(hadInput ? kOwnedKeys : 0);
+		s.hold.Cancel((s.input.held & IN_USE) != 0);
+		s.input.Transition((hadInput || mode != Mode::Closed) ? kOwnedKeys : 0);
 		s.feedback.clear();
 		if (auto layout = (CCSCustomHudLayout *)s.entity.Get()) layout->SetInputCaptureEnabled(player->GetPlayerSlot(), mode == Mode::Drawer);
 	}
@@ -166,6 +168,7 @@ namespace
 	}
 	void Render(KZPlayer *player, State &s, CCSCustomHudLayout *layout)
 	{
+		Class(player, s, layout, "qm_tab", "holding", s.hold.Active());
 		Class(player, s, layout, "qm_tab", "hidden", !s.shown || s.mode != Mode::Closed);
 		Class(player, s, layout, "qm_drawer", "hidden", !s.shown || s.mode != Mode::Drawer);
 		const bool tool = s.mode == Mode::Paint || s.mode == Mode::Measure;
@@ -288,6 +291,7 @@ void KZ::quickmenu::Tick(KZPlayer *player)
 	{
 		if (s->mode != Mode::Closed) Close(player);
 		s->shown = false;
+		s->hold.Cancel((s->input.held & IN_USE) != 0);
 		s->input.Transition();
 		if (auto layout = (CCSCustomHudLayout *)s->entity.Get()) Render(player, *s, layout);
 		return;
@@ -296,9 +300,14 @@ void KZ::quickmenu::Tick(KZPlayer *player)
 	auto layout = Ensure(player, *s);
 	if (!layout) return;
 	const u64 pressed = s->input.Take();
-	if (pressed & IN_LOOK_AT_WEAPON)
+	if (s->mode == Mode::Closed)
 	{
-		if (s->mode == Mode::Closed) Open(player); else Close(player);
+		const bool held = (s->input.held & IN_USE) != 0 && !(s->input.consumedUntilRelease & IN_USE);
+		if (s->hold.Update(held, g_pKZUtils->GetServerGlobals()->curtime, .7)) Open(player);
+	}
+	else if ((s->mode == Mode::Drawer && (pressed & IN_USE)) || (pressed & IN_LOOK_AT_WEAPON))
+	{
+		Close(player);
 	}
 	else if (pressed & IN_RELOAD)
 	{
@@ -362,7 +371,7 @@ void KZ::quickmenu::OnUsercmds(KZPlayer *player, PlayerCommand *cmds, i32 count)
 		// Помощник владеет только E/R/F; мышь и обычное оружие остаются игре.
 		// После F удержанные E/R/F погашены вместе с командой отпускания.
 		// Чужое меню получает новые нажатия, но не хвост прежнего действия помощника.
-		const u64 mask = s->input.SuppressionMask(kOwnedKeys, active) | (!otherOwner ? (held & IN_LOOK_AT_WEAPON) : 0);
+		const u64 mask = s->input.SuppressionMask(kOwnedKeys, active);
 		if (!mask) continue;
 		buttons->set_buttonstate1(buttons->buttonstate1() & ~mask);
 		buttons->set_buttonstate2(buttons->buttonstate2() & ~mask);
