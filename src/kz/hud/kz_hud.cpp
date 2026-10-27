@@ -1,4 +1,3 @@
-#include "kz/jumpstats/jump_review.h"
 #include "kz/hud/layout/quickmenu.h"
 #include "kz/hud/layout/gsmenu.h"
 #include "kz/replays/session.h"
@@ -464,7 +463,6 @@ void KZHUDService::Reset()
 	// обязан снять его так же, как ownedLayout выше, иначе следующий игрок в этом слоте
 	// унаследует чужой menuOpen/diff-кэш, а у отключившегося сам захват уйдёт вместе с
 	// сущностью, но наш флаг остался бы висеть, если не сбросить явно.
-	KZ::jumpreview::Reset(this->player);
 	KZ::quickmenu::Reset(this->player);
 	this->DestroyOwnedMenuLayout();
 	// Состояние обмена настройками худа (KZ::hudshare): слот отката живёт в памяти сессии, не в
@@ -505,7 +503,6 @@ void KZHUDService::OnRoundStart()
 		{
 			continue;
 		}
-		KZ::jumpreview::Reset(player);
 		KZ::quickmenu::Reset(player);
 		player->hudService->ResetBottomPanelCache();
 		// Меню (Task 11): смена карты сносит саму сущность движком (переживает её только наш
@@ -1985,7 +1982,7 @@ void KZHUDService::DrawPanels(KZPlayer *player, KZPlayer *target)
 	}
 	// Окно перед лицом (layout/gsmenu.cpp, !maptop): худ — другая сущность и рисуется ПОВЕРХ окна
 	// (z-index между сущностями не действует), поэтому на время окна он снесён, как у редактора.
-	if (KZ::gsmenu::HidesHud(target) || KZ::jumpreview::IsOpen(target))
+	if (KZ::gsmenu::HidesHud(target))
 	{
 		cfg->DestroyAllParticles();
 		cfg->DestroyOwnedLayout();

@@ -210,7 +210,6 @@ void Jump::RecordPose()
 	JumpPose &p = this->poseHistory[this->poseIndex];
 	p.position = this->player->currentMoveData->m_vecAbsOrigin;
 	p.airtime = this->airtime;
-	p.reviewTime = g_pKZUtils->GetGlobals()->curtime - this->player->takeoffTime;
 
 	// Snapshot cumulative sync/BA/OL/DA from ended strafes.
 	// These running totals are updated whenever a strafe is closed.

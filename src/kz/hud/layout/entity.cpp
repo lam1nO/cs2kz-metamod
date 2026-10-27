@@ -1,4 +1,3 @@
-#include "kz/jumpstats/jump_review.h"
 #include "kz/hud/layout/quickmenu.h"
 // Сущность custom_hud_layout (Task 4): создание/уничтожение на игрока, запись классов
 // панелей и dialog-переменных. Перенесено с апстрима (src/kz/hud/layout/entity.cpp),
@@ -452,7 +451,6 @@ void KZHUDService::LayoutCleanup()
 	// Общее окно (layout/gsmenu.cpp) — четвёртая персональная сущность, со своим захватом.
 	KZ::gsmenu::Cleanup();
 	KZ::quickmenu::Cleanup();
-	KZ::jumpreview::Cleanup();
 }
 
 bool KZHUDService::OwnsLayoutEntity(CEntityHandle handle)
@@ -466,6 +464,5 @@ bool KZHUDService::OwnsLayoutEntity(CEntityHandle handle)
 		   || (this->ownedMenuLayout.IsValid() && this->ownedMenuLayout.ToInt() == handle.ToInt())
 		   || (this->ownedReplayLayout.IsValid() && this->ownedReplayLayout.ToInt() == handle.ToInt())
 		   || KZ::gsmenu::Owns(this->player, handle)
-		   || KZ::quickmenu::Owns(this->player, handle)
-		   || KZ::jumpreview::Owns(this->player, handle);
+		   || KZ::quickmenu::Owns(this->player, handle);
 }
