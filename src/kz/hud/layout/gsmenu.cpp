@@ -11,6 +11,8 @@
 // Смена класса на родителе не перестраивает стили детей (sdk ccscustomhudlayout.h, BUGS п.2) —
 // в кадре, где класс реально сменился, слой помечается на полный пересчёт.
 #include "kz/hud/layout/gsmenu.h"
+#include "kz/hud/layout/layout_fallback.h"
+#include "filesystem.h"
 #include "kz/hud/layout/layout.h"
 #include "sdk/entity/ccscustomhudlayout.h"
 #include "entitykeyvalues.h"
@@ -782,6 +784,14 @@ CON_COMMAND_F(cyb_ui_open, "cyb_ui_open <slot> <layout> — разметка в�
 	{
 		return;
 	}
+	const auto layoutPath = SelectHudLayout(args.Arg(2), args.ArgC() >= 4 ? args.Arg(3) : "", [](const char *path) {
+		return g_pFullFileSystem && g_pFullFileSystem->FileExists(path, "GAME");
+	});
+	if (layoutPath.empty())
+	{
+		KZ_LOG_WARN(LogChannel::General, "[cyb] gsmenu_ext_open_failed reason=layouts_missing slot=%i\n", slot);
+		return;
+	}
 	ExtState &e = g_ext[slot];
 	DestroyExt(player, e);
 	CCSCustomHudLayout *layout = utils::CreateEntityByName<CCSCustomHudLayout>("custom_hud_layout");
@@ -790,13 +800,13 @@ CON_COMMAND_F(cyb_ui_open, "cyb_ui_open <slot> <layout> — разметка в�
 		return;
 	}
 	CEntityKeyValues *kv = new CEntityKeyValues();
-	kv->SetString("layout", args.Arg(2));
+	kv->SetString("layout", layoutPath.c_str());
 	char name[32];
 	V_snprintf(name, sizeof(name), "kzgsext%i", slot);
 	kv->SetString("targetname", name);
 	layout->DispatchSpawn(kv);
 	e.entity = layout;
-	e.layout = args.Arg(2);
+	e.layout = layoutPath;
 }
 
 CON_COMMAND_F(cyb_ui_close, "cyb_ui_close <slot> — снять захват и убрать разметку внешнего владельца", FCVAR_NONE)
@@ -962,3 +972,5 @@ CON_COMMAND_F(cyb_ui_var, "cyb_ui_var <slot> <panel> <var> <значение д�
 
 // Версия протокола — плагины проверяют её, чтобы понять, что мост есть (как у cyber-ui).
 static CConVar<CUtlString> cyb_ui_version("cyb_ui_version", FCVAR_NONE, "Протокол моста cyb_ui_* (форк cs2kz)", "kz-1");
+
+static CConVar<bool> cyb_ui_layout_fallback("cyb_ui_layout_fallback", FCVAR_NONE, "cyb_ui_open supports mounted-resource fallback", true);
