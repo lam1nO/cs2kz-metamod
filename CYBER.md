@@ -47,6 +47,15 @@ cs2kz-linux-builder .`, иначе компилируется КОПИЯ ИЗ О
 
 ## Реестр отличий
 
+- **AWR checkpoint index (27.10.2026):** replay `checkpoint.index` comes from
+  `GetCurrentCpIndex()` and is one-based. The TickData→Frame adapter normalizes
+  it through `awr::CheckpointIndexFromRecording`; zero/negative means no indexed
+  checkpoint and uses coordinate fallback. Frame and `BuildCpSetIndex` stay
+  zero-based. Without normalization a failed attempt returning near its CP could
+  survive the cut (kz_kiwiconvulsion CKZ: 686492 ms instead of 654789 ms).
+  Replay format and normal timer are unchanged. Host regression:
+  `g++ -std=c++17 -O1 -Wall -Wextra -Werror tests/awr_recording_index_test.cpp src/kz/replays/awr_cut.cpp -o /tmp/awr-index && /tmp/awr-index`.
+
 - **anticheat**: cvar `kz_anticheat` отключает детекторы (SOCD и т.п.) на
   non-global; warning/cheater-принты тоже за этим гейтом.
 - **turn-бинды (`+left`/`+right`) разрешены**, cvar `kz_allow_turnbinds` (дефолт 1).

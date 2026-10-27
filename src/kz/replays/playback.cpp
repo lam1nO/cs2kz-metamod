@@ -310,7 +310,7 @@ namespace KZ::replaysystem::playback
 			}
 			const TickData &t = (ticks[i].post.replayFlags.prac && lastLive >= 0) ? ticks[lastLive] : ticks[i];
 			frames[i].serverTick = ticks[i].serverTick;
-			frames[i].cpIndex = t.checkpoint.index;
+			frames[i].cpIndex = awr::CheckpointIndexFromRecording(t.checkpoint.index);
 			frames[i].cpCount = t.checkpoint.checkpointCount;
 			if (i > 0 && ticks[i - 1].post.replayFlags.splice)
 			{

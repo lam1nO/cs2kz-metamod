@@ -7,10 +7,17 @@
 
 namespace KZ::replaysystem::awr
 {
+	// GetCurrentCpIndex() records checkpoint numbers starting at 1 (0 means no CP).
+	// Frame and BuildCpSetIndex use zero-based indices; missing CPs use position fallback.
+	inline constexpr int32_t CheckpointIndexFromRecording(int32_t checkpointNumber)
+	{
+		return checkpointNumber > 0 ? checkpointNumber - 1 : -1;
+	}
+
 	struct Frame
 	{
 		uint32_t serverTick;
-		int32_t cpIndex;    // TickData::checkpoint.index
+		int32_t cpIndex;    // zero-based index, normalized from TickData::checkpoint.index
 		int32_t cpCount;    // TickData::checkpoint.checkpointCount
 		int32_t tpCount;    // TickData::checkpoint.teleportCount
 		float origin[3];    // TickData::post.origin — конец тика
