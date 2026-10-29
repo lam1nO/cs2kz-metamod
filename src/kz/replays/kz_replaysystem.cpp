@@ -84,6 +84,12 @@ namespace KZ::replaysystem::session
 		anchor.active = progress::ShouldCapture(player->IsAlive(), player->timerService->GetTimerRunning(), player->pracService->IsInPrac());
 		player->GetOrigin(&anchor.origin);
 		const auto *course = player->timerService->GetCourse();
+		// A player may enter free practice before ever starting the timer. Match the
+		// replay resolver's null-course convention (platform main course = 0).
+		if (!course && player->pracService->IsInPrac())
+		{
+			course = KZ::course::GetCourseByCyberNumber(0);
+		}
 		if (course)
 		{
 			anchor.course = course->GetName().Get();
