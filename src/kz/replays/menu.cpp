@@ -496,6 +496,49 @@ bool KZ::replaysystem::menu::OpenReplaySearchMenu(KZPlayer *player, const std::v
 	return true;
 }
 
+bool KZ::replaysystem::menu::OpenSavedReplayMenu(KZPlayer *player, const char *uuid)
+{
+	if (!g_pMenus || !player || !uuid || !uuid[0])
+	{
+		return false;
+	}
+	const int slot = player->GetPlayerSlot().Get();
+	if (slot < 0 || slot > MAXPLAYERS)
+	{
+		return false;
+	}
+	static MenuHandle savedMenus[MAXPLAYERS + 1] = {};
+	if (savedMenus[slot] != kInvalidMenuHandle)
+	{
+		g_pMenus->DestroyMenu(savedMenus[slot]);
+		savedMenus[slot] = kInvalidMenuHandle;
+	}
+	const char *lang = player->languageService->GetLanguage();
+	const auto title = KZLanguageService::PrepareMessageWithLang(lang, "Replay Save Menu - Title");
+	MenuHandle m = g_pMenus->CreateMenu(MenuType::Default, title.c_str(),
+		[](MenuHandle menu, int slot, int item)
+		{
+			auto *p = g_pKZPlayerManager->ToPlayer(CPlayerSlot(slot));
+			const char *info = g_pMenus->GetItemInfo(menu, item);
+			if (!p || !info || !info[0]) return;
+			// This is a fresh explicit playback choice, not an old search/progress request.
+			commands::SetFullRequested(p, false);
+			session::CaptureProgress(p);
+			commands::LoadReplay(p, info);
+		});
+	if (m == kInvalidMenuHandle)
+	{
+		return false;
+	}
+	const auto yes = KZLanguageService::PrepareMessageWithLang(lang, "Replay Save Menu - Yes");
+	g_pMenus->AddItem(m, yes.c_str(), uuid, false);
+	g_pMenus->SetMenuKey(m, MenuNavAction::Select, MenuButton::Use);
+	g_pMenus->SetExitButton(m, true);
+	g_pMenus->SetCloseOnSelect(m, true);
+	savedMenus[slot] = m;
+	return g_pMenus->DisplayMenu(m, slot, 0);
+}
+
 // panorama-меню реплея само открыто, пока игрок наблюдает бота (hud/layout/rpmenu.cpp);
 // !rpmenu прячет его и возвращает обратно (по умолчанию показано) — за реплеем меню иногда
 // закрывает обзор. Само закрытие/открытие делает следующий тик UpdateReplayMenu.

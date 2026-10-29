@@ -27,6 +27,9 @@ namespace KZ::replaysystem::menu
 	// вызывающий сам решает, что делать, и грузит первого кандидата.
 	bool OpenReplaySearchMenu(KZPlayer *player, const std::vector<SearchHit> &hits);
 
+	// Offer playback only after the manual replay was successfully saved.
+	bool OpenSavedReplayMenu(KZPlayer *player, const char *uuid);
+
 	// Меню управления реплеем живёт ТОЛЬКО на panorama (hud/layout/rpmenu.cpp) и всегда открыто,
 	// пока игрок наблюдает реплей-бота; команды открытия нет, `!rpmenu` лишь напоминает об этом.
 	// Старое cs2menus-меню удалено 09.09 (решение пользователя). Здесь — словарь пунктов, их

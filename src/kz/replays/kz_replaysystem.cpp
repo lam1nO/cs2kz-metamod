@@ -11,6 +11,8 @@
 #include "kz/spec/kz_spec.h"
 #include "kz/timer/kz_timer.h"
 #include "kz/invisible/kz_invisible.h"
+#include "kz/prac/kz_prac.h"
+#include "progress_seek.h"
 
 namespace KZ::replaysystem::session
 {
@@ -79,7 +81,7 @@ namespace KZ::replaysystem::session
 		}
 		auto &anchor = anchors[current];
 		anchor = {};
-		anchor.active = player->timerService->GetTimerRunning();
+		anchor.active = progress::ShouldCapture(player->IsAlive(), player->timerService->GetTimerRunning(), player->pracService->IsInPrac());
 		player->GetOrigin(&anchor.origin);
 		const auto *course = player->timerService->GetCourse();
 		if (course)

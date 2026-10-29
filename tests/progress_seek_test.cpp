@@ -7,6 +7,13 @@
 int main()
 {
 	using KZ::replaysystem::progress::FindTick;
+	using KZ::replaysystem::progress::ShouldCapture;
+	assert(ShouldCapture(true, true, false));
+	assert(ShouldCapture(true, false, true)); // practice without running timer/clock
+	assert(ShouldCapture(true, true, true));
+	assert(!ShouldCapture(true, false, false));
+	assert(!ShouldCapture(false, true, false));
+	assert(!ShouldCapture(false, false, true));
 	// Ближайший кадр выбирается по позиции, без привязки ко времени игрока.
 	std::array<float, 7> distances {0, 10000, 900, 25, 100, 0, 0};
 	auto distance = [&](uint32_t tick) { return distances[tick]; };

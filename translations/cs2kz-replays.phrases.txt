@@ -1094,4 +1094,14 @@
 		"en" "Unable to create your replay bot. There are no free slots."
 		"ru" "Не удалось создать реплей-бота: нет свободных слотов."
 	}
+	"Replay Save Menu - Title"
+	{
+		"en" "Play the saved replay?"
+		"ru" "Воспроизвести сохраненный реплей?"
+	}
+	"Replay Save Menu - Yes"
+	{
+		"en" "Yes"
+		"ru" "Да"
+	}
 }

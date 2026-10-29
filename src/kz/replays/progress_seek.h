@@ -6,6 +6,11 @@
 
 namespace KZ::replaysystem::progress
 {
+	constexpr bool ShouldCapture(bool alive, bool timerRunning, bool inPractice)
+	{
+		return alive && (timerRunning || inPractice);
+	}
+
 	// Сканируем только окно рана; distance возвращает квадрат расстояния до видимого
 	// кадра или отрицательное значение для пропущенного кадра. При равенстве — первый.
 	template<typename Distance>

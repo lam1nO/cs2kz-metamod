@@ -5,6 +5,7 @@
 #include "kz/timer/submission.h"
 #include "kz/checkpoint/kz_checkpoint.h"
 #include "kz/replays/kz_replaysystem.h"
+#include "kz/replays/menu.h"
 #include "kz/language/kz_language.h"
 #include "kz/spec/kz_spec.h"
 #include "kz/prac/kz_prac.h"
@@ -661,6 +662,7 @@ SCMD(kz_rpsave, SCFL_REPLAY)
 				callbackPlayer->languageService->PrintChat(true, false, "Replay - Manual Replay Saved", uuid.ToString().c_str(), replayDuration);
 				callbackPlayer->languageService->PrintConsole(false, false, "Replay - Manual Replay Saved (Console)", uuid.ToString().c_str(),
 															  replayDuration);
+				KZ::replaysystem::menu::OpenSavedReplayMenu(callbackPlayer, uuid.ToString().c_str());
 			}
 		},
 		// Failure callback
