@@ -88,6 +88,10 @@ public:
 	}
 };
 
+// Четыре штатных слота + воздушный friction split + grenade split.
+#define FORCED_SUBTICK_SLOTS 4
+#define FRICTION_SPLIT_MARGIN 2.5f
+
 class KZClassicModeService : public KZModeService
 {
 	using KZModeService::KZModeService;
@@ -117,7 +121,7 @@ class KZClassicModeService : public KZModeService
 		(float)800.0f,  // sv_gravity
 		(float)302.0f,  // sv_jump_impulse
 		(bool)false,    // sv_jump_precision_enable
-		(float)0.0f,    // sv_jump_spam_penalty_time
+		(float)-1.267f, // sv_jump_spam_penalty_time
 		(float)-0.707f, // sv_ladder_angle
 		(float)1.0f,    // sv_ladder_dampen
 		(float)1.0f,    // sv_ladder_scale_speed
@@ -144,7 +148,9 @@ class KZClassicModeService : public KZModeService
 
 	bool hasValidDesiredViewAngle {};
 	QAngle lastValidDesiredViewAngle;
-	f32 lastJumpReleaseTime {};
+	// Серверный поворот (телепорт) не смешиваем с предыдущими углами мыши.
+	bool serverAngleChange {};
+	u32 lastConsumedAngleChange {};
 	bool oldDuckPressed {};
 	bool oldJumpPressed {};
 	bool forcedUnduck {};
@@ -188,6 +194,9 @@ public:
 
 	virtual DistanceTier GetDistanceTier(JumpType jumpType, f32 distance, f32 takeoffSpeed = -1.0f) override;
 	virtual const CVValue_t *GetModeConVarValues() override;
+
+	bool CanUseFrictionSplit();
+	void ClearFrictionSplit();
 
 	virtual void OnPhysicsSimulate() override;
 	virtual void OnPhysicsSimulatePost() override;

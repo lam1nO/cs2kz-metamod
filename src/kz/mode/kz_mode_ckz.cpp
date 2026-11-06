@@ -139,7 +139,8 @@ void KZClassicModeService::Reset()
 {
 	this->hasValidDesiredViewAngle = {};
 	this->lastValidDesiredViewAngle = vec3_angle;
-	this->lastJumpReleaseTime = {};
+	this->serverAngleChange = {};
+	this->lastConsumedAngleChange = {};
 	this->oldDuckPressed = {};
 	this->forcedUnduck = {};
 	this->postProcessMovementZSpeed = {};
@@ -168,6 +169,12 @@ void KZClassicModeService::Cleanup()
 	if (pawn)
 	{
 		pawn->m_flVelocityModifier(1.0f);
+	}
+	CCSPlayer_MovementServices *moveServices = this->player->GetMoveServices();
+	if (moveServices)
+	{
+		this->ClearFrictionSplit();
+		moveServices->m_fStashGrenadeParameterWhen(GameTime_t(0.0f));
 	}
 }
 
@@ -270,21 +277,39 @@ void KZClassicModeService::OnPhysicsSimulate()
 	{
 		return;
 	}
+	// Движок также делит команду по доле friction stash.
+	if (moveServices->m_bUseFrictionStashedSpeed() && moveServices->m_flUseFrictionStashedSpeedUntilFrac() == 0.5f)
+	{
+		return;
+	}
 	u32 tickCount = g_pKZUtils->GetServerGlobals()->tickcount;
 
 	f32 subtickMoveTime = (tickCount - 0.5) * ENGINE_FIXED_TICK_INTERVAL;
-	for (u32 i = 0; i < 4; i++)
+	f32 *slots = moveServices->m_arrForceSubtickMoveWhen;
+	u32 replace = 0;
+	for (u32 i = 0; i < FORCED_SUBTICK_SLOTS; i++)
 	{
-		if (fabs(subtickMoveTime - moveServices->m_arrForceSubtickMoveWhen[i]) < 0.001)
+		if (fabs(subtickMoveTime - slots[i]) < 0.001)
 		{
 			return;
 		}
-		if (subtickMoveTime > moveServices->m_arrForceSubtickMoveWhen[i])
+		if (slots[i] < slots[replace])
 		{
-			moveServices->SetForcedSubtickMove(i, subtickMoveTime, false);
-			return;
+			replace = i;
 		}
 	}
+	// Если просроченных слотов нет, заменяем самый дальний будущий.
+	if (slots[replace] > subtickMoveTime)
+	{
+		for (u32 i = 0; i < FORCED_SUBTICK_SLOTS; i++)
+		{
+			if (slots[i] > slots[replace])
+			{
+				replace = i;
+			}
+		}
+	}
+	moveServices->SetForcedSubtickMove(replace, subtickMoveTime, false);
 }
 
 void KZClassicModeService::OnPhysicsSimulatePost()
@@ -296,8 +321,43 @@ void KZClassicModeService::OnPhysicsSimulatePost()
 	}
 	u32 tickCount = g_pKZUtils->GetServerGlobals()->tickcount;
 
-	f32 subtickMoveTime = (tickCount + 0.5) * ENGINE_FIXED_TICK_INTERVAL;
-	for (u32 i = 0; i < 4; i++)
+	// Клиент предсказывает полушаги лишь для покрытых слотов. Friction stash и grenade stash
+	// покрывают ещё две команды. Friction stash влияет на наземное трение, поэтому используем
+	// его лишь при заведомом отсутствии контакта с землёй в следующем тике.
+	bool frictionSplit = this->CanUseFrictionSplit();
+	if (frictionSplit)
+	{
+		Vector velocity;
+		this->player->GetVelocity(&velocity);
+		f32 speed = velocity.Length2D();
+		if (!moveServices->m_bUseFrictionStashedSpeed())
+		{
+			moveServices->m_bUseFrictionStashedSpeed(true);
+		}
+		if (moveServices->m_flUseFrictionStashedSpeedUntilFrac() != 0.5f)
+		{
+			moveServices->m_flUseFrictionStashedSpeedUntilFrac(0.5f);
+		}
+		// При неожиданной посадке сохраняем скорость для обычного расчёта трения.
+		if (moveServices->m_flFrictionStashedSpeed() != speed)
+		{
+			moveServices->m_flFrictionStashedSpeed(speed);
+		}
+	}
+	else
+	{
+		this->ClearFrictionSplit();
+	}
+
+	f64 firstSplitTick = tickCount + (frictionSplit ? 1.5 : 0.5);
+	f32 grenadeSplitTime = (firstSplitTick + FORCED_SUBTICK_SLOTS) * ENGINE_FIXED_TICK_INTERVAL;
+	if (moveServices->m_fStashGrenadeParameterWhen().GetTime() != grenadeSplitTime)
+	{
+		moveServices->m_fStashGrenadeParameterWhen(GameTime_t(grenadeSplitTime));
+	}
+
+	f32 subtickMoveTime = firstSplitTick * ENGINE_FIXED_TICK_INTERVAL;
+	for (u32 i = 0; i < FORCED_SUBTICK_SLOTS; i++)
 	{
 		if (fabs(subtickMoveTime - moveServices->m_arrForceSubtickMoveWhen[i]) < 0.001)
 		{
@@ -312,6 +372,48 @@ void KZClassicModeService::OnPhysicsSimulatePost()
 	}
 }
 
+bool KZClassicModeService::CanUseFrictionSplit()
+{
+	CCSPlayerPawn *pawn = this->player->GetPlayerPawn();
+	if (!pawn || this->player->GetMoveType() != MOVETYPE_WALK || (pawn->m_fFlags() & FL_ONGROUND))
+	{
+		return false;
+	}
+
+	Vector origin, velocity, baseVelocity;
+	this->player->GetOrigin(&origin);
+	this->player->GetVelocity(&velocity);
+	this->player->GetBaseVelocity(&baseVelocity);
+	velocity += baseVelocity;
+
+	// Трасса учитывает боковое перемещение, падение за тик и запас на прилипание к земле.
+	f32 gravity = MAX(KZ::mode::modeCvarRefs[MODECVAR_SV_GRAVITY]->GetFloat() * pawn->m_flActualGravityScale(), 0.0f);
+	f32 drop = MAX(-velocity.z, 0.0f) * ENGINE_FIXED_TICK_INTERVAL + 0.5f * gravity * ENGINE_FIXED_TICK_INTERVAL * ENGINE_FIXED_TICK_INTERVAL;
+	f32 reach = velocity.Length2D() * ENGINE_FIXED_TICK_INTERVAL + FRICTION_SPLIT_MARGIN;
+
+	bbox_t bounds;
+	this->player->GetBBoxBounds(&bounds);
+	Vector widen(reach, reach, 0.0f);
+	Vector end = origin;
+	end.z -= drop + FRICTION_SPLIT_MARGIN;
+
+	CTraceFilterPlayerMovementCS filter(pawn);
+	trace_t trace;
+	INavPhysicsInterface::TraceShape(Ray_t(bounds.mins - widen, bounds.maxs + widen), origin, end, &filter, &trace);
+	return !trace.m_bStartInSolid && trace.m_flFraction == 1.0f;
+}
+
+void KZClassicModeService::ClearFrictionSplit()
+{
+	CCSPlayerPawn *pawn = this->player->GetPlayerPawn();
+	CCSPlayer_MovementServices *moveServices = this->player->GetMoveServices();
+	if (!pawn || !moveServices || (pawn->m_fFlags() & FL_ONGROUND) || !moveServices->m_bUseFrictionStashedSpeed())
+	{
+		return;
+	}
+	moveServices->m_bUseFrictionStashedSpeed(false);
+}
+
 void KZClassicModeService::OnSetupMove(PlayerCommand *pc)
 {
 	for (i32 j = 0; j < pc->mutable_base()->subtick_moves_size(); j++)
@@ -322,22 +424,18 @@ void KZClassicModeService::OnSetupMove(PlayerCommand *pc)
 			continue;
 		}
 		float when = subtickMove->when();
-		if (subtickMove->button() == IN_JUMP)
-		{
-			f32 inputTime = (g_pKZUtils->GetGlobals()->tickcount + when - 1) * ENGINE_FIXED_TICK_INTERVAL;
-			if (when != 0)
-			{
-				if (subtickMove->pressed() && inputTime - this->lastJumpReleaseTime > 0.5 * ENGINE_FIXED_TICK_INTERVAL)
-				{
-					this->player->GetMoveServices()->m_LegacyJump().m_bOldJumpPressed = false;
-				}
-				if (!subtickMove->pressed())
-				{
-					this->lastJumpReleaseTime = (g_pKZUtils->GetGlobals()->tickcount + when - 1) * ENGINE_FIXED_TICK_INTERVAL;
-				}
-			}
-		}
 		subtickMove->set_when(when >= 0.5 ? 0.5 : 0);
+	}
+
+	// Не интерполируем серверный поворот ни до подтверждения клиентом, ни в команде подтверждения.
+	u32 consumed = pc->base().consumed_server_angle_changes();
+	this->serverAngleChange = consumed > this->lastConsumedAngleChange;
+	this->lastConsumedAngleChange = MAX(this->lastConsumedAngleChange, consumed);
+	CSchemaCollection<ViewAngleServerChange_t> changes = this->player->GetPlayerPawn()->m_ServerViewAngleChanges();
+	for (i32 i = 0; i < changes.Count() && !this->serverAngleChange; i++)
+	{
+		auto *change = changes.Element(i);
+		this->serverAngleChange = change && change->nIndex() > consumed;
 	}
 }
 
@@ -389,7 +487,7 @@ void KZClassicModeService::InterpolateViewAngles()
 	CGlobalVars *globals = g_pKZUtils->GetGlobals();
 	f64 subtickFraction, whole;
 	subtickFraction = modf((f64)globals->curtime * ENGINE_FIXED_TICK_RATE, &whole);
-	if (subtickFraction < 0.001)
+	if (subtickFraction < 0.001 || this->serverAngleChange)
 	{
 		return;
 	}
@@ -1116,6 +1214,9 @@ void KZClassicModeService::OnWaterMovePost()
 
 void KZClassicModeService::OnTeleport(const Vector *newPosition, const QAngle *newAngles, const Vector *newVelocity)
 {
+	// Телепорт может вернуть на землю: убираем воздушную подсказку предсказания до перемещения.
+	this->ClearFrictionSplit();
+
 	// Чекпоинт/!tp со слайда: касание склона до телепорта к новому месту отношения не имеет.
 	// Смена одних углов (SetAngles зовёт Teleport без позиции и скорости) — не телепорт.
 	if (newPosition || newVelocity)
