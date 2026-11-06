@@ -9,6 +9,14 @@ class CPlayer_WeaponServices;
 
 #include "cbasemodelentity.h"
 
+// Элементы серверной очереди углов читаем через схему, без зависимости от размера структуры.
+class ViewAngleServerChange_t
+{
+public:
+	DECLARE_SCHEMA_CLASS_BASE(ViewAngleServerChange_t, 0)
+	SCHEMA_FIELD(uint32, nIndex)
+};
+
 class CBasePlayerPawn : public CBaseModelEntity
 {
 public:
@@ -22,6 +30,7 @@ public:
 	SCHEMA_FIELD(CCSPlayer_WaterServices *, m_pWaterServices)
 	SCHEMA_FIELD(CPlayer_CameraServices *, m_pCameraServices)
 	SCHEMA_FIELD(QAngle, v_angle)
+	SCHEMA_FIELD_COLLECTION(ViewAngleServerChange_t, m_ServerViewAngleChanges)
 
 	void CommitSuicide(bool bExplode, bool bForce)
 	{

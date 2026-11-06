@@ -3,14 +3,6 @@
 #include "cbaseplayerpawn.h"
 #include "sdk/econ/ceconitemview.h"
 
-// Элементы серверной очереди углов читаем через схему, без зависимости от размера структуры.
-class ViewAngleServerChange_t
-{
-public:
-	DECLARE_SCHEMA_CLASS_BASE(ViewAngleServerChange_t, 0)
-	SCHEMA_FIELD(uint32, nIndex)
-};
-
 class CCSPlayerPawnBase : public CBasePlayerPawn
 {
 public:
@@ -21,7 +13,6 @@ class CCSPlayerPawn : public CCSPlayerPawnBase
 {
 public:
 	DECLARE_SCHEMA_CLASS_ENTITY(CCSPlayerPawn);
-	SCHEMA_FIELD_COLLECTION(ViewAngleServerChange_t, m_ServerViewAngleChanges)
 	SCHEMA_FIELD(float, m_ignoreLadderJumpTime)
 	SCHEMA_FIELD(float, m_flVelocityModifier)
 
