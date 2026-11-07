@@ -39,6 +39,7 @@ int main()
 	using namespace leadgeometry;
 	const Vec a {-20, 0, 0}, b {0, 0, 0}, c {0, 20, 0};
 	auto q = RoundCorner(a, b, c, true);
+	assert(near(Midpoint(q), {-1, 1, 0}));
 	assert(q.rounded && near(q.entry, {-4, 0, 0}) && near(q.exit, {0, 4, 0}));
 	// Quadratic tangent at either end is collinear with its adjoining straight.
 	assert(near((q.control - q.entry) * .25f, {1, 0, 0}));

@@ -249,7 +249,7 @@ namespace
 	// Копия CreateMeasureBeam (kz_measure.cpp): тот же примитив, свой цвет на отрезок.
 	// ДЕФОЛТНЫЙ путь (с 16.09.2026): наша частица. CBeam остался дорогой назад под
 	// cyb_lead_beam_entity 1 (см. конвар).
-	CEntityHandle CreateLeadParticleSegment(const Vector &start, const Vector &end, const Color &color, const Vector &control)
+	CEntityHandle CreateLeadParticleSegment(const Vector &start, const Vector &end, const Color &color, const Vector &midpoint)
 	{
 		CParticleSystem *line = utils::CreateEntityByName<CParticleSystem>("info_particle_system");
 		if (!line)
@@ -279,7 +279,7 @@ namespace
 		// (LeadCpIndexChanged), здесь он повторился бы на каждый отрезок.
 		if (V_strcmp(effect, KZ_LEAD_PARTICLE) == 0)
 		{
-			line->SetControlPointValue(KZ_LEAD_CURVE_CP, control);
+			line->SetControlPointValue(KZ_LEAD_CURVE_CP, midpoint);
 		}
 		const i32 cp1 = cyb_lead_cp1_index.Get();
 		if (LeadCpIndexUsable(cp1))
@@ -706,13 +706,13 @@ namespace
 		return !cyb_lead_beam_entity.Get() && (!asset || !asset[0] || V_strcmp(asset, KZ_LEAD_PARTICLE) == 0);
 	}
 
-	CEntityHandle CreateLeadSegment(const Vector &start, const Vector &end, const Color &color, const Vector &control)
+	CEntityHandle CreateLeadSegment(const Vector &start, const Vector &end, const Color &color, const Vector &midpoint)
 	{
 		if (cyb_lead_beam_entity.Get())
 		{
 			return CreateLeadBeamSegment(start, end, color);
 		}
-		return CreateLeadParticleSegment(start, end, color, control);
+		return CreateLeadParticleSegment(start, end, color, midpoint);
 	}
 
 	// Снятие одного отрезка — ОБОИХ примитивов: сверка идёт по targetname, а он у частицы и у
@@ -2095,7 +2095,7 @@ void KZLeadService::ApplyWindow(u32 newFrom, u32 newTo)
 		group[0] = CreateLeadSegment(start.exit, end.entry, SegmentColor(a.onGround), (start.exit + end.entry) * 0.5f);
 		if (end.rounded)
 		{
-			group[1] = CreateLeadSegment(end.entry, end.exit, SegmentColor(b.onGround), end.control);
+			group[1] = CreateLeadSegment(end.entry, end.exit, SegmentColor(b.onGround), leadgeometry::Midpoint(end));
 		}
 		this->segments.push_back(group);
 	}

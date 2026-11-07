@@ -36,6 +36,13 @@ namespace leadgeometry
 		return result;
 	}
 
+	// MidControlPoint — точка на середине дуги, а не вершина/control point Безье.
+	template<class V>
+	V Midpoint(const Corner<V> &corner)
+	{
+		return (corner.entry + corner.control * 2.0f + corner.exit) * 0.25f;
+	}
+
 	inline bool RoundWithinBudget(unsigned cap)
 	{
 		return cap >= 2;
