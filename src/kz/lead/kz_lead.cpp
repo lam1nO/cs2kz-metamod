@@ -1,4 +1,3 @@
-#include "lead_geometry.h"
 #include "kz_lead.h"
 
 #include "cs2kz.h"
@@ -128,7 +127,7 @@ static std::atomic<i32> g_leadRebuildsInFlight {0};
 //     поверх них ломает геометрию или цвет, а не «толщину».
 static_function bool LeadCpIndexUsable(i32 index)
 {
-	return index >= 0 && index < KZ_LEAD_CP_COUNT && index != 1 && index != 16 && index != KZ_LEAD_CURVE_CP;
+	return index >= 0 && index < KZ_LEAD_CP_COUNT && index != 1 && index != 16;
 }
 
 // Перерисовать отрезки всем, у кого луч включён: значения читаются при создании сущностей,
@@ -145,13 +144,13 @@ static_function void LeadCpIndexChanged(i32 index)
 {
 	if (index != -1 && !LeadCpIndexUsable(index))
 	{
-		KZ_LOG_WARN(LogChannel::Replays, "[lead] cp_index_rejected value=%i reason=%s allowed=0..63_except_1_16_19 note=-1_disables\n", index,
+		KZ_LOG_WARN(LogChannel::Replays, "[lead] cp_index_rejected value=%i reason=%s allowed=0..63_except_1_16 note=-1_disables\n", index,
 					index < 0
 						? "negative"
 						: (index == 255 ? "sentinel_free_slot"
 										: (index >= KZ_LEAD_CP_COUNT
 											   ? "out_of_range"
-											   : (index == 1 ? "data_cp_taken" : (index == KZ_LEAD_CURVE_CP ? "curve_cp_taken" : "tint_cp_taken")))));
+											   : (index == 1 ? "data_cp_taken" : "tint_cp_taken"))));
 	}
 	LeadLookChanged();
 }
@@ -178,20 +177,23 @@ static_function void LeadRdpChanged(f32 value)
 // не нарисуется вовсе — новый ассет требует правки манифеста и пересборки.
 CConVar<CUtlString> cyb_lead_particle("cyb_lead_particle", FCVAR_NONE,
 									  "Lead segment particle asset. Only manifest-registered assets render: "
-									  "particles/gymstrike/lead_ribbon.vpcf (default), particles/gymstrike/lead_segment.vpcf (legacy), "
+									  "particles/gymstrike/lead_segment.vpcf (default), "
 									  "particles/ui/annotation/ui_annotation_line_segment.vpcf, "
 									  "particles/ui/hud/ui_map_def_utility_trail.vpcf.",
 									  CUtlString(KZ_LEAD_PARTICLE),
 									  [](CConVar<CUtlString> *, CSplitScreenSlot, const CUtlString *, const CUtlString *) { LeadLookChanged(); });
 
+CConVar<bool> cyb_lead_smooth("cyb_lead_smooth", FCVAR_NONE, "Round visible turns on the default lead path.", true,
+							 [](CConVar<bool> *, CSplitScreenSlot, const bool *, const bool *) { LeadLookChanged(); });
+
 CConVar<i32> cyb_lead_cp1_index(
 	"cyb_lead_cp1_index", FCVAR_NONE,
-	"Extra server control point index for the lead segment: 0..63 except 1 (data_cp), 16 (tint_cp) and 19 (curve_cp); -1 = unused.", -1,
+	"Extra server control point index for the lead segment: 0..63 except 1 (data_cp) and 16 (tint_cp); -1 = unused.", -1,
 	[](CConVar<i32> *, CSplitScreenSlot, const i32 *newValue, const i32 *) { LeadCpIndexChanged(newValue ? *newValue : -1); });
 CConVar<Vector> cyb_lead_cp1_value("cyb_lead_cp1_value", FCVAR_NONE, "Value written to cyb_lead_cp1_index (x y z).", Vector(0.0f, 0.0f, 0.0f),
 								   [](CConVar<Vector> *, CSplitScreenSlot, const Vector *, const Vector *) { LeadLookChanged(); });
 CConVar<i32> cyb_lead_cp2_index("cyb_lead_cp2_index", FCVAR_NONE,
-								"Second extra server control point index: 0..63 except 1 (data_cp), 16 (tint_cp) and 19 (curve_cp); -1 = unused.", -1,
+								"Second extra server control point index: 0..63 except 1 (data_cp) and 16 (tint_cp); -1 = unused.", -1,
 								[](CConVar<i32> *, CSplitScreenSlot, const i32 *newValue, const i32 *)
 								{ LeadCpIndexChanged(newValue ? *newValue : -1); });
 CConVar<Vector> cyb_lead_cp2_value("cyb_lead_cp2_value", FCVAR_NONE, "Value written to cyb_lead_cp2_index (x y z).", Vector(0.0f, 0.0f, 0.0f),
@@ -249,7 +251,7 @@ namespace
 	// Копия CreateMeasureBeam (kz_measure.cpp): тот же примитив, свой цвет на отрезок.
 	// ДЕФОЛТНЫЙ путь (с 16.09.2026): наша частица. CBeam остался дорогой назад под
 	// cyb_lead_beam_entity 1 (см. конвар).
-	CEntityHandle CreateLeadParticleSegment(const Vector &start, const Vector &end, const Color &color, const Vector &midpoint)
+	CEntityHandle CreateLeadParticleSegment(const Vector &start, const Vector &end, const Color &color)
 	{
 		CParticleSystem *line = utils::CreateEntityByName<CParticleSystem>("info_particle_system");
 		if (!line)
@@ -277,16 +279,17 @@ namespace
 		// печатает Warning, а слотов четыре против наших двух — упереться в них нельзя.
 		// Негодный индекс пропускаем МОЛЧА: отказ уже назван колбэком конвара
 		// (LeadCpIndexChanged), здесь он повторился бы на каждый отрезок.
-		if (V_strcmp(effect, KZ_LEAD_PARTICLE) == 0)
-		{
-			line->SetControlPointValue(KZ_LEAD_CURVE_CP, midpoint);
-		}
 		const i32 cp1 = cyb_lead_cp1_index.Get();
+		const i32 cp2 = cyb_lead_cp2_index.Get();
+		// CP20.x offsets the existing asset radius. Explicit operator settings take precedence.
+		if (V_strcmp(effect, KZ_LEAD_PARTICLE) == 0 && cp1 != 20 && cp2 != 20)
+		{
+			line->SetControlPointValue(20, Vector(-0.5f, 0.0f, 0.0f));
+		}
 		if (LeadCpIndexUsable(cp1))
 		{
 			line->SetControlPointValue(cp1, cyb_lead_cp1_value.Get());
 		}
-		const i32 cp2 = cyb_lead_cp2_index.Get();
 		if (LeadCpIndexUsable(cp2) && cp2 != cp1)
 		{
 			line->SetControlPointValue(cp2, cyb_lead_cp2_value.Get());
@@ -700,19 +703,19 @@ namespace
 		return handle;
 	}
 
-	bool UsesLeadRibbon()
+	bool UsesLeadSmoothing()
 	{
 		const char *asset = cyb_lead_particle.Get().Get();
-		return !cyb_lead_beam_entity.Get() && (!asset || !asset[0] || V_strcmp(asset, KZ_LEAD_PARTICLE) == 0);
+		return cyb_lead_smooth.Get() && !cyb_lead_beam_entity.Get() && (!asset || !asset[0] || V_strcmp(asset, KZ_LEAD_PARTICLE) == 0);
 	}
 
-	CEntityHandle CreateLeadSegment(const Vector &start, const Vector &end, const Color &color, const Vector &midpoint)
+	CEntityHandle CreateLeadSegment(const Vector &start, const Vector &end, const Color &color)
 	{
 		if (cyb_lead_beam_entity.Get())
 		{
 			return CreateLeadBeamSegment(start, end, color);
 		}
-		return CreateLeadParticleSegment(start, end, color, midpoint);
+		return CreateLeadParticleSegment(start, end, color);
 	}
 
 	// Снятие одного отрезка — ОБОИХ примитивов: сверка идёт по targetname, а он у частицы и у
@@ -1959,6 +1962,17 @@ u32 KZLeadService::FindNearest(const std::vector<Vertex> &path, const std::vecto
 	return bestIdx;
 }
 
+leadgeometry::Corner<Vector> KZLeadService::RenderCorner(u32 at) const
+{
+	const Vertex &v = this->path[at];
+	if (!this->smoothTurns || at == 0 || at + 1 >= this->path.size())
+	{
+		return {{v.pos, v.pos, v.pos, v.pos}};
+	}
+	const Vertex &prev = this->path[at - 1], &next = this->path[at + 1];
+	return leadgeometry::ShapeCorner(prev.pos, v.pos, next.pos, prev.onGround == v.onGround && v.onGround == next.onGround);
+}
+
 void KZLeadService::UpdateWindow()
 {
 	// Ближайшая вершина уже пересчитана вызывающим (OnPhysicsSimulatePost): её ведёт и
@@ -1991,28 +2005,32 @@ void KZLeadService::UpdateWindow()
 	{
 		configured = KZ_LEAD_MAX_SEGMENTS_CAP;
 	}
-	// Две части на ребро, но прежний лимит именно сетевых сущностей.
-	this->ribbonCorners = UsesLeadRibbon() && leadgeometry::RoundWithinBudget((u32)configured);
-	const u32 maxSegments = leadgeometry::EdgeBudget((u32)configured, UsesLeadRibbon());
-	if (to - from > maxSegments)
+	// Count actual draw segments, including the chords only where a turn needs them.
+	const auto edgeCost = [this](u32 end) { return 1u + this->RenderCorner(end).pieces; };
+	const u32 cap = (u32)configured;
+	this->smoothTurns = cap >= 4 && UsesLeadSmoothing();
+	u32 used = 0;
+	for (u32 i = from + 1; i <= to; ++i)
 	{
-		// Потолок отрезков. Смысл луча — подсказка ВПЕРЁД, поэтому хвосту позади ближайшей
-		// вершины оставляем не больше четверти бюджета: плотная петля пути (стояние,
-		// слайд) даёт на секунду назад больше вершин, чем весь потолок, и без этого
-		// резерва передний конец окна оказался бы пуст — луч выродился бы в след под
-		// ногами. Три четверти бюджета остаются впереди; режется дальний передний конец.
-		const u32 backBudget = maxSegments / KZ_LEAD_BACK_BUDGET_DIV;
-		if (this->nearest - from > backBudget)
+		used += edgeCost(i);
+	}
+	if (used > cap)
+	{
+		const u32 forwardCost = this->nearest < to ? edgeCost(this->nearest + 1) : 0;
+		const u32 backBudget = (std::min)(cap / KZ_LEAD_BACK_BUDGET_DIV, cap - forwardCost);
+		u32 first = this->nearest;
+		used = 0;
+		while (first > from && used + edgeCost(first) <= backBudget)
 		{
-			from = this->nearest - backBudget;
+			used += edgeCost(first--);
 		}
-		// Кламп по КОНЦУ пути обязателен: у финиша `from + maxSegments` уходит за последнюю
-		// вершину, и ApplyWindow читал бы path[newFrom + i + 1] за концом вектора.
-		to = (std::min)(from + maxSegments, count - 1);
-		if (from > to)
+		from = first;
+		u32 last = this->nearest;
+		while (last < to && used + edgeCost(last + 1) <= cap)
 		{
-			from = to;
+			used += edgeCost(++last);
 		}
+		to = last;
 	}
 
 	// Инвариант окна: ApplyWindow читает path[to] (и path[newFrom + i + 1] до него), поэтому
@@ -2079,23 +2097,12 @@ void KZLeadService::ApplyWindow(u32 newFrom, u32 newTo)
 		const u32 index = newFrom + i;
 		const Vertex &a = this->path[index];
 		const Vertex &b = this->path[index + 1];
-		auto cornerAt = [this](u32 at)
+		const auto start = this->RenderCorner(index), end = this->RenderCorner(index + 1);
+		std::array<CEntityHandle, 4> group {};
+		group[0] = CreateLeadSegment(start.points[start.pieces], end.points[0], SegmentColor(a.onGround));
+		for (u32 piece = 0; piece < end.pieces; ++piece)
 		{
-			const Vertex &v = this->path[at];
-			if (!this->ribbonCorners || at == 0 || at + 1 >= this->path.size())
-			{
-				return leadgeometry::Corner<Vector> {v.pos, v.pos, v.pos, false};
-			}
-			const Vertex &prev = this->path[at - 1], &next = this->path[at + 1];
-			return leadgeometry::RoundCorner(prev.pos, v.pos, next.pos, prev.onGround == v.onGround && v.onGround == next.onGround);
-		};
-		const auto start = cornerAt(index), end = cornerAt(index + 1);
-		std::array<CEntityHandle, 2> group {};
-		// CP19 в середине прямой даёт тот же прямой путь, что и старый CP0→CP1.
-		group[0] = CreateLeadSegment(start.exit, end.entry, SegmentColor(a.onGround), (start.exit + end.entry) * 0.5f);
-		if (end.rounded)
-		{
-			group[1] = CreateLeadSegment(end.entry, end.exit, SegmentColor(b.onGround), leadgeometry::Midpoint(end));
+			group[piece + 1] = CreateLeadSegment(end.points[piece], end.points[piece + 1], SegmentColor(b.onGround));
 		}
 		this->segments.push_back(group);
 	}

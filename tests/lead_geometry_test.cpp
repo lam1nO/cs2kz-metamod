@@ -38,23 +38,19 @@ int main()
 {
 	using namespace leadgeometry;
 	const Vec a {-20, 0, 0}, b {0, 0, 0}, c {0, 20, 0};
-	auto q = RoundCorner(a, b, c, true);
-	assert(near(Midpoint(q), {-1, 1, 0}));
-	assert(q.rounded && near(q.entry, {-4, 0, 0}) && near(q.exit, {0, 4, 0}));
-	// Quadratic tangent at either end is collinear with its adjoining straight.
-	assert(near((q.control - q.entry) * .25f, {1, 0, 0}));
-	assert(near((q.exit - q.control) * .25f, {0, 1, 0}));
-	auto small = RoundCorner(Vec {-1, 0, 0}, b, Vec {0, 1, 0}, true);
-	assert(near(small.entry, {-.45f, 0, 0}) && near(small.exit, {0, .45f, 0}));
-	assert(!RoundCorner(a, b, c, false).rounded);
-	assert(!RoundCorner(b, b, c, true).rounded);
-	assert(!RoundCorner(a, b, a, true).rounded);
-	assert(!RoundCorner(a, b, Vec {20, 0, 0}, true).rounded);
-	// Unequal edges still use the SAME trim on each side, maintaining tangent joins.
-	auto uneven = RoundCorner(Vec {-1, 0, 0}, b, Vec {0, 1000, 0}, true);
-	assert(near(uneven.exit, {0, .45f, 0}));
-	assert(EdgeBudget(1, true) == 1 && !RoundWithinBudget(1));
-	assert(EdgeBudget(3, true) == 1 && EdgeBudget(512, true) == 256);
-	assert(EdgeBudget(384, false) == 384);
+	const auto corner = ShapeCorner(a, b, c, true);
+	assert(corner.pieces == 3);
+	assert(near(corner.points[0], {-6, 0, 0}));
+	assert(near(corner.points[3], {0, 6, 0}));
+	assert(near(corner.points[1], {-8.0f / 3.0f, 2.0f / 3.0f, 0}));
+	assert(near(corner.points[2], {-2.0f / 3.0f, 8.0f / 3.0f, 0}));
+
+	const auto dense = ShapeCorner(Vec {-1, 0, 0}, b, Vec {0, 1, 0}, true);
+	assert(dense.pieces == 0);
+	assert(near(dense.points[0], {-.105f, .105f, 0}));
+	assert(near(ShapeCorner(a, b, c, false).points[0], b));
+	assert(near(ShapeCorner(a, b, a, true).points[0], b));
+	assert(near(ShapeCorner(b, b, c, true).points[0], b));
+	assert(near(ShapeCorner(a, b, Vec {20, 0, 0}, true).points[0], b));
 	std::cout << "lead geometry PASS\n";
 }
