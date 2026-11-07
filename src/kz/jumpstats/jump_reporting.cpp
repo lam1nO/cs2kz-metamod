@@ -141,7 +141,8 @@ void KZJumpstatsService::PrintJumpToChat(KZPlayer *target, Jump *jump, bool exte
 		edgeStats.c_str(),
 		releaseString.c_str(),
 		deviationStats.c_str(),
-		missStats.c_str()
+		missStats.c_str(),
+		jump->GetAirPath()
 	);
 	// clang-format on
 }
