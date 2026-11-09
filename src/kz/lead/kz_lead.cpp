@@ -1970,7 +1970,7 @@ leadgeometry::Corner<Vector> KZLeadService::RenderCorner(u32 at) const
 		return {{v.pos, v.pos, v.pos, v.pos}};
 	}
 	const Vertex &prev = this->path[at - 1], &next = this->path[at + 1];
-	return leadgeometry::ShapeCorner(prev.pos, v.pos, next.pos, prev.onGround == v.onGround && v.onGround == next.onGround);
+	return leadgeometry::ShapeCorner(prev.pos, v.pos, next.pos, prev.onGround == v.onGround);
 }
 
 void KZLeadService::UpdateWindow()
@@ -2102,7 +2102,8 @@ void KZLeadService::ApplyWindow(u32 newFrom, u32 newTo)
 		group[0] = CreateLeadSegment(start.points[start.pieces], end.points[0], SegmentColor(a.onGround));
 		for (u32 piece = 0; piece < end.pieces; ++piece)
 		{
-			group[piece + 1] = CreateLeadSegment(end.points[piece], end.points[piece + 1], SegmentColor(b.onGround));
+			const bool onGround = piece < end.pieces / 2 ? a.onGround : b.onGround;
+			group[piece + 1] = CreateLeadSegment(end.points[piece], end.points[piece + 1], SegmentColor(onGround));
 		}
 		this->segments.push_back(group);
 	}

@@ -19,7 +19,7 @@ namespace leadgeometry
 		Corner<V> result {{point, point, point, point}};
 		const V incoming = point - previous, outgoing = next - point;
 		const float before = incoming.Length(), after = outgoing.Length();
-		if (!sameSurface || !std::isfinite(before) || !std::isfinite(after) || before < .001f || after < .001f)
+		if (!std::isfinite(before) || !std::isfinite(after) || before < .001f || after < .001f)
 		{
 			return result;
 		}
@@ -30,7 +30,8 @@ namespace leadgeometry
 			return result;
 		}
 		// Equal trimming prevents short edges from being smoothed more on one side.
-		const float trim = (std::min)(6.0f, .42f * (std::min)(before, after));
+		// Landings need a longer visible blend, still bounded by both recorded edges.
+		const float trim = (std::min)(sameSurface ? 6.0f : 12.0f, .42f * (std::min)(before, after));
 		const V displacement = (v - u) * (.25f * trim);
 		if (displacement.Length() < .6f)
 		{

@@ -48,7 +48,13 @@ int main()
 	const auto dense = ShapeCorner(Vec {-1, 0, 0}, b, Vec {0, 1, 0}, true);
 	assert(dense.pieces == 0);
 	assert(near(dense.points[0], {-.105f, .105f, 0}));
-	assert(near(ShapeCorner(a, b, c, false).points[0], b));
+	// A landing is a visible turn even though it changes the surface and beam color.
+	const auto landing = ShapeCorner(Vec {-24, 0, 16}, b, Vec {24, 0, 0}, false);
+	assert(landing.pieces == 3);
+	assert(landing.points[1].z > 0.0f);
+	assert(landing.points[2].z > 0.0f);
+	assert(landing.points[3].z == 0.0f);
+	assert(landing.points[0].x < -6.0f);
 	assert(near(ShapeCorner(a, b, a, true).points[0], b));
 	assert(near(ShapeCorner(b, b, c, true).points[0], b));
 	assert(near(ShapeCorner(a, b, Vec {20, 0, 0}, true).points[0], b));
