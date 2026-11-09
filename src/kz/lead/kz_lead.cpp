@@ -32,8 +32,8 @@
 #include <utility>
 
 // Окно вокруг игрока: 1 с назад / 6 с вперёд по ЭФФЕКТИВНЫМ серверным тикам (64/с).
-#define KZ_LEAD_BACK_TICKS   64
-#define KZ_LEAD_AHEAD_TICKS  384
+#define KZ_LEAD_BACK_TICKS  64
+#define KZ_LEAD_AHEAD_TICKS 384
 // Пересчёт окна — раз в 32 тика (два раза в секунду): создание сущностей дороже, чем
 // точность отставания луча на полшага.
 #define KZ_LEAD_UPDATE_TICKS 32
@@ -144,10 +144,13 @@ static_function void LeadCpIndexChanged(i32 index)
 {
 	if (index != -1 && !LeadCpIndexUsable(index))
 	{
-		KZ_LOG_WARN(LogChannel::Replays, "[lead] cp_index_rejected value=%i reason=%s allowed=0..63_except_1_and_16 note=-1_disables\n", index,
-					index < 0 ? "negative"
-							  : (index == 255 ? "sentinel_free_slot"
-											  : (index >= KZ_LEAD_CP_COUNT ? "out_of_range" : (index == 1 ? "data_cp_taken" : "tint_cp_taken"))));
+		KZ_LOG_WARN(LogChannel::Replays, "[lead] cp_index_rejected value=%i reason=%s allowed=0..63_except_1_16 note=-1_disables\n", index,
+					index < 0
+						? "negative"
+						: (index == 255 ? "sentinel_free_slot"
+										: (index >= KZ_LEAD_CP_COUNT
+											   ? "out_of_range"
+											   : (index == 1 ? "data_cp_taken" : "tint_cp_taken"))));
 	}
 	LeadLookChanged();
 }
@@ -180,13 +183,16 @@ CConVar<CUtlString> cyb_lead_particle("cyb_lead_particle", FCVAR_NONE,
 									  CUtlString(KZ_LEAD_PARTICLE),
 									  [](CConVar<CUtlString> *, CSplitScreenSlot, const CUtlString *, const CUtlString *) { LeadLookChanged(); });
 
+CConVar<bool> cyb_lead_smooth("cyb_lead_smooth", FCVAR_NONE, "Round visible turns on the default lead path.", true,
+							 [](CConVar<bool> *, CSplitScreenSlot, const bool *, const bool *) { LeadLookChanged(); });
 
+CConVar<bool> cyb_lead_corner_strip("cyb_lead_corner_strip", FCVAR_NONE, "Render each turn with the lead corner strip asset.", true,
+								   [](CConVar<bool> *, CSplitScreenSlot, const bool *, const bool *) { LeadLookChanged(); });
 
-
-CConVar<i32> cyb_lead_cp1_index("cyb_lead_cp1_index", FCVAR_NONE,
-								"Extra server control point index for the lead segment: 0..63 except 1 (data_cp) and 16 (tint_cp); -1 = unused.", -1,
-								[](CConVar<i32> *, CSplitScreenSlot, const i32 *newValue, const i32 *)
-								{ LeadCpIndexChanged(newValue ? *newValue : -1); });
+CConVar<i32> cyb_lead_cp1_index(
+	"cyb_lead_cp1_index", FCVAR_NONE,
+	"Extra server control point index for the lead segment: 0..63 except 1 (data_cp) and 16 (tint_cp); -1 = unused.", -1,
+	[](CConVar<i32> *, CSplitScreenSlot, const i32 *newValue, const i32 *) { LeadCpIndexChanged(newValue ? *newValue : -1); });
 CConVar<Vector> cyb_lead_cp1_value("cyb_lead_cp1_value", FCVAR_NONE, "Value written to cyb_lead_cp1_index (x y z).", Vector(0.0f, 0.0f, 0.0f),
 								   [](CConVar<Vector> *, CSplitScreenSlot, const Vector *, const Vector *) { LeadLookChanged(); });
 CConVar<i32> cyb_lead_cp2_index("cyb_lead_cp2_index", FCVAR_NONE,
@@ -243,16 +249,13 @@ CConVar<f32> cyb_lead_beam_width("cyb_lead_beam_width", FCVAR_NONE,
 								 "rebuild, which the change callback triggers right away.",
 								 KZ_LEAD_BEAM_WIDTH_DEFAULT, [](CConVar<f32> *, CSplitScreenSlot, const f32 *, const f32 *) { LeadLookChanged(); });
 
-
-
-
-
 namespace
 {
 	// Копия CreateMeasureBeam (kz_measure.cpp): тот же примитив, свой цвет на отрезок.
 	// ДЕФОЛТНЫЙ путь (с 16.09.2026): наша частица. CBeam остался дорогой назад под
 	// cyb_lead_beam_entity 1 (см. конвар).
-	CEntityHandle CreateLeadParticleSegment(const Vector &start, const Vector &end, const Color &color)
+	CEntityHandle CreateLeadParticleSegment(const Vector &start, const Vector &end, const Color &color,
+										   const Vector *corner = nullptr)
 	{
 		CParticleSystem *line = utils::CreateEntityByName<CParticleSystem>("info_particle_system");
 		if (!line)
@@ -262,17 +265,28 @@ namespace
 		CEntityKeyValues *pKeyValues = new CEntityKeyValues();
 		// Ассет — из конвара (живой перебор на канарейке); пустая строка = дефолтный.
 		const CUtlString &asset = cyb_lead_particle.Get();
-		const char *effect = (asset.Get() && asset.Get()[0]) ? asset.Get() : KZ_LEAD_PARTICLE;
+		const char *effect = corner ? KZ_LEAD_CORNER_PARTICLE : ((asset.Get() && asset.Get()[0]) ? asset.Get() : KZ_LEAD_PARTICLE);
+		const Vector lift(0.0f, 0.0f, corner ? 2.5f : 0.0f);
 		pKeyValues->SetString("effect_name", effect);
 		pKeyValues->SetString("targetname", KZ_LEAD_TARGETNAME);
-		pKeyValues->SetVector("origin", start);
+		pKeyValues->SetVector("origin", start + lift);
 		pKeyValues->SetInt("tint_cp", 16);
 		pKeyValues->SetColor("tint_cp_color", color);
 		pKeyValues->SetInt("data_cp", 1);
-		pKeyValues->SetVector("data_cp_value", end);
+		pKeyValues->SetVector("data_cp_value", end + lift);
 		pKeyValues->SetBool("start_active", true);
 		line->m_iTeamNum(CUSTOM_PARTICLE_SYSTEM_TEAM);
 		line->DispatchSpawn(pKeyValues);
+		if (corner)
+		{
+			line->m_iTeamNum(CUSTOM_PARTICLE_SYSTEM_TEAM);
+			if (!line->SetControlPointValue(19, *corner + lift))
+			{
+				g_pKZUtils->RemoveEntity(line);
+				return {};
+			}
+			return line->GetRefEHandle();
+		}
 		// Пробные control point'ы — ПОСЛЕ спавна: SetControlPointValue пишет схему сущности
 		// (m_vServerControlPoints + NetworkStateChanged), до DispatchSpawn писать нечего.
 		// Индекс -1 (дефолт) не пишем вовсе, чтобы вид по умолчанию не менялся.
@@ -281,11 +295,16 @@ namespace
 		// Негодный индекс пропускаем МОЛЧА: отказ уже назван колбэком конвара
 		// (LeadCpIndexChanged), здесь он повторился бы на каждый отрезок.
 		const i32 cp1 = cyb_lead_cp1_index.Get();
+		const i32 cp2 = cyb_lead_cp2_index.Get();
+		// CP20.x offsets the existing asset radius. Explicit operator settings take precedence.
+		if (V_strcmp(effect, KZ_LEAD_PARTICLE) == 0 && cp1 != 20 && cp2 != 20)
+		{
+			line->SetControlPointValue(20, Vector(-0.5f, 0.0f, 0.0f));
+		}
 		if (LeadCpIndexUsable(cp1))
 		{
 			line->SetControlPointValue(cp1, cyb_lead_cp1_value.Get());
 		}
-		const i32 cp2 = cyb_lead_cp2_index.Get();
 		if (LeadCpIndexUsable(cp2) && cp2 != cp1)
 		{
 			line->SetControlPointValue(cp2, cyb_lead_cp2_value.Get());
@@ -614,10 +633,6 @@ namespace
 		return use;
 	}
 
-
-
-
-
 	// ПУТЬ ОТКАТА (cyb_lead_beam_entity 1): отрезок — штатная сущность-луч. Доказано живьём пробником
 	// kz_beam_probe на канарейке 11.09: класс CBeam существует, поля сетевые, луч виден игроку
 	// и БЕЗ заданного материала.
@@ -701,6 +716,12 @@ namespace
 		// доказанного ВИДА эта строка не уводит — она про то, кому луч уйдёт.
 		beam->m_iTeamNum(KZ_LEAD_SEGMENT_TEAM);
 		return handle;
+	}
+
+	bool UsesLeadSmoothing()
+	{
+		const char *asset = cyb_lead_particle.Get().Get();
+		return cyb_lead_smooth.Get() && !cyb_lead_beam_entity.Get() && (!asset || !asset[0] || V_strcmp(asset, KZ_LEAD_PARTICLE) == 0);
 	}
 
 	CEntityHandle CreateLeadSegment(const Vector &start, const Vector &end, const Color &color)
@@ -837,16 +858,15 @@ namespace
 				bool runTimed = false;
 				// Возврат читаем именно как bool: RunWindowFromEvents умеет вернуть false
 				// УЖЕ записав вырожденное окно (outStart >= outEnd), и брать его нельзя.
-				if (playback::RunWindowFromEvents(src.ticks.data(), count, events, numEvents, wStart, wEnd, runCourseId)
-					&& wStart < wEnd && wEnd < count)
+				if (playback::RunWindowFromEvents(src.ticks.data(), count, events, numEvents, wStart, wEnd, runCourseId) && wStart < wEnd
+					&& wEnd < count)
 				{
 					runStart = wStart;
 					runEnd = wEnd;
 					runTimed = true;
 				}
 
-				const u64 timeMs =
-					(src.header.has_run() && src.header.run().time() > 0.0f) ? (u64)(src.header.run().time() * 1000.0 + 0.5) : 0;
+				const u64 timeMs = (src.header.has_run() && src.header.run().time() > 0.0f) ? (u64)(src.header.run().time() * 1000.0 + 0.5) : 0;
 				awr::CutResult cut = playback::ComputeCutFor(src.ticks.data(), count, events, numEvents, timeMs);
 				std::vector<awr::Interval> live;
 				if (cut.ok)
@@ -1104,9 +1124,12 @@ void KZLeadService::ClearSegments(bool keepEntities)
 {
 	if (!keepEntities)
 	{
-		for (const CEntityHandle &handle : this->segments)
+		for (const auto &group : this->segments)
 		{
-			RemoveLeadSegment(handle);
+			for (const auto &handle : group)
+			{
+				RemoveLeadSegment(handle);
+			}
 		}
 	}
 	this->segments.clear();
@@ -1258,7 +1281,17 @@ void KZLeadService::StartPathRebuild()
 
 void KZLeadService::RebuildOwnedIndex()
 {
-	this->ownedSorted = this->segments;
+	this->ownedSorted.clear();
+	for (const auto &group : this->segments)
+	{
+		for (const auto &handle : group)
+		{
+			if (handle.IsValid())
+			{
+				this->ownedSorted.push_back(handle);
+			}
+		}
+	}
 	std::sort(this->ownedSorted.begin(), this->ownedSorted.end(), [](const CEntityHandle &a, const CEntityHandle &b) { return a < b; });
 }
 
@@ -1282,8 +1315,7 @@ void KZLeadService::Disable(const char *reason)
 		this->player->languageService->PrintChat(true, false, "Lead - Not Enabled");
 		return;
 	}
-	KZ_LOG_DEBUG(LogChannel::Replays, "[lead] disable reason=%s steam_id=%llu\n", reason,
-				 (unsigned long long)this->player->GetSteamId64());
+	KZ_LOG_DEBUG(LogChannel::Replays, "[lead] disable reason=%s steam_id=%llu\n", reason, (unsigned long long)this->player->GetSteamId64());
 	this->beam = false;
 	this->beamOnLoad = false;
 	this->ClearSegments(false);
@@ -1945,6 +1977,18 @@ u32 KZLeadService::FindNearest(const std::vector<Vertex> &path, const std::vecto
 	return bestIdx;
 }
 
+leadgeometry::Corner<Vector> KZLeadService::RenderCorner(u32 at) const
+{
+	const Vertex &v = this->path[at];
+	if (this->cornerPieceLimit == 0 || at == 0 || at + 1 >= this->path.size())
+	{
+		return {{v.pos}};
+	}
+	const Vertex &prev = this->path[at - 1], &next = this->path[at + 1];
+	return leadgeometry::ShapeCorner(prev.pos, v.pos, next.pos, prev.onGround == v.onGround,
+									 this->cornerPieceLimit, this->cornerStrip);
+}
+
 void KZLeadService::UpdateWindow()
 {
 	// Ближайшая вершина уже пересчитана вызывающим (OnPhysicsSimulatePost): её ведёт и
@@ -1977,26 +2021,38 @@ void KZLeadService::UpdateWindow()
 	{
 		configured = KZ_LEAD_MAX_SEGMENTS_CAP;
 	}
-	const u32 maxSegments = (u32)configured;
-	if (to - from > maxSegments)
+	// Count actual draw segments, including the chords only where a turn needs them.
+	const auto edgeCost = [this](u32 end)
 	{
-		// Потолок отрезков. Смысл луча — подсказка ВПЕРЁД, поэтому хвосту позади ближайшей
-		// вершины оставляем не больше четверти бюджета: плотная петля пути (стояние,
-		// слайд) даёт на секунду назад больше вершин, чем весь потолок, и без этого
-		// резерва передний конец окна оказался бы пуст — луч выродился бы в след под
-		// ногами. Три четверти бюджета остаются впереди; режется дальний передний конец.
-		const u32 backBudget = maxSegments / KZ_LEAD_BACK_BUDGET_DIV;
-		if (this->nearest - from > backBudget)
+		const auto pieces = this->RenderCorner(end).pieces;
+		return 1u + (this->cornerStrip ? (pieces != 0) : pieces);
+	};
+	const u32 cap = (u32)configured;
+	const bool smooth = UsesLeadSmoothing();
+	this->cornerStrip = smooth && cap >= 2 && cyb_lead_corner_strip.Get() && cyb_lead_cp1_index.Get() < 0 && cyb_lead_cp2_index.Get() < 0;
+	this->cornerPieceLimit = this->cornerStrip ? leadgeometry::StripPieces : (cap >= 4 && smooth ? (std::min)(cap - 1, leadgeometry::MaxCornerPieces) : 0);
+	u32 used = 0;
+	for (u32 i = from + 1; i <= to; ++i)
+	{
+		used += edgeCost(i);
+	}
+	if (used > cap)
+	{
+		const u32 forwardCost = this->nearest < to ? edgeCost(this->nearest + 1) : 0;
+		const u32 backBudget = (std::min)(cap / KZ_LEAD_BACK_BUDGET_DIV, cap - forwardCost);
+		u32 first = this->nearest;
+		used = 0;
+		while (first > from && used + edgeCost(first) <= backBudget)
 		{
-			from = this->nearest - backBudget;
+			used += edgeCost(first--);
 		}
-		// Кламп по КОНЦУ пути обязателен: у финиша `from + maxSegments` уходит за последнюю
-		// вершину, и ApplyWindow читал бы path[newFrom + i + 1] за концом вектора.
-		to = (std::min)(from + maxSegments, count - 1);
-		if (from > to)
+		from = first;
+		u32 last = this->nearest;
+		while (last < to && used + edgeCost(last + 1) <= cap)
 		{
-			from = to;
+			used += edgeCost(++last);
 		}
+		to = last;
 	}
 
 	// Инвариант окна: ApplyWindow читает path[to] (и path[newFrom + i + 1] до него), поэтому
@@ -2041,22 +2097,68 @@ void KZLeadService::ApplyWindow(u32 newFrom, u32 newTo)
 		{
 			for (u32 i = 0; i < drop && i < this->segments.size(); i++)
 			{
-				RemoveLeadSegment(this->segments[i]);
+				for (const auto &handle : this->segments[i])
+				{
+					RemoveLeadSegment(handle);
+				}
 			}
 			this->segments.erase(this->segments.begin(), this->segments.begin() + (std::min)((size_t)drop, this->segments.size()));
 		}
 		while (this->segments.size() > want)
 		{
-			RemoveLeadSegment(this->segments.back());
+			for (const auto &handle : this->segments.back())
+			{
+				RemoveLeadSegment(handle);
+			}
 			this->segments.pop_back();
 		}
 	}
 
 	for (u32 i = (u32)this->segments.size(); i < want; i++)
 	{
-		const Vertex &a = this->path[newFrom + i];
-		const Vertex &b = this->path[newFrom + i + 1];
-		this->segments.push_back(CreateLeadSegment(a.pos, b.pos, SegmentColor(a.onGround)));
+		const u32 index = newFrom + i;
+		const Vertex &a = this->path[index];
+		const Vertex &b = this->path[index + 1];
+		const auto start = this->RenderCorner(index), end = this->RenderCorner(index + 1);
+		std::array<CEntityHandle, leadgeometry::MaxCornerPieces + 1> group {};
+		Vector straightStart = start.points[start.pieces], straightEnd = end.points[0];
+		if (this->cornerStrip && (start.pieces || end.pieces))
+		{
+			const Vector straight = straightEnd - straightStart;
+			const float length = straight.Length();
+			if (length > .001f)
+			{
+				// Tuck each straight under its tangent join to cover the independent strip caps.
+				const Vector direction = straight * (1.0f / length);
+				if (start.pieces)
+				{
+					const float overlap = (std::min)(.15f, .25f * (start.points[start.pieces] - start.points[start.pieces - 1]).Length());
+					straightStart = straightStart - direction * overlap;
+				}
+				if (end.pieces)
+				{
+					const float overlap = (std::min)(.15f, .25f * (end.points[1] - end.points[0]).Length());
+					straightEnd = straightEnd + direction * overlap;
+				}
+			}
+		}
+		group[0] = CreateLeadSegment(straightStart, straightEnd, SegmentColor(a.onGround));
+		if (this->cornerStrip && end.pieces)
+		{
+			const Vector &entry = end.points[0], &exit = end.points[end.pieces];
+			const Color color = SegmentColor(b.onGround);
+			group[1] = CreateLeadParticleSegment(entry, exit, color, &end.points[leadgeometry::StripPieces / 2]);
+			if (!group[1].IsValid())
+			{
+				group[1] = CreateLeadSegment(entry, exit, color);
+			}
+		}
+		for (u32 piece = 0; !this->cornerStrip && piece < end.pieces; ++piece)
+		{
+			const bool onGround = piece < end.pieces / 2 ? a.onGround : b.onGround;
+			group[piece + 1] = CreateLeadSegment(end.points[piece], end.points[piece + 1], SegmentColor(onGround));
+		}
+		this->segments.push_back(group);
 	}
 
 	this->windowFrom = newFrom;
@@ -2207,8 +2309,8 @@ void KZLeadService::UpdateCompare()
 	// на экране меняется только от настоящего отрыва.
 	KZTimerService *timer = this->player->timerService;
 	f64 recordTicks = 0.0;
-	c.sampleValid = timer && timer->GetTimerRunning()
-					&& InterpolateRecordTicks(c.path, c.nearest, origin, c.kind == CybReplayDownload::Kind::AWR, recordTicks);
+	c.sampleValid =
+		timer && timer->GetTimerRunning() && InterpolateRecordTicks(c.path, c.nearest, origin, c.kind == CybReplayDownload::Kind::AWR, recordTicks);
 	if (c.sampleValid)
 	{
 		c.timeAtNearest = timer->GetTime();
@@ -2300,8 +2402,8 @@ void KZLeadService::ArmComparePath()
 			{
 				return;
 			}
-			KZ_LOG_DEBUG(LogChannel::Replays, "[lead] compare_load_failed reason=no_run_window source=beam course=%i mode=%s steam_id=%llu\n",
-						 course, mode, (unsigned long long)this->player->GetSteamId64());
+			KZ_LOG_DEBUG(LogChannel::Replays, "[lead] compare_load_failed reason=no_run_window source=beam course=%i mode=%s steam_id=%llu\n", course,
+						 mode, (unsigned long long)this->player->GetSteamId64());
 			this->LatchCompareFailure(course, mode, /* retryable */ false);
 			return;
 		}
@@ -2317,8 +2419,8 @@ void KZLeadService::ArmComparePath()
 		c.failRetriesLeft = 0;
 		// Ближайшая — на ближайшем же тике, а не через выборку.
 		c.ticksSinceNearest = KZ_LEAD_COMPARE_NEAREST_TICKS;
-		KZ_LOG_DEBUG(LogChannel::Replays, "[lead] compare_path_shared verts=%i course=%i mode=%s steam_id=%llu\n", (int)c.path.size(), course,
-					 mode, (unsigned long long)this->player->GetSteamId64());
+		KZ_LOG_DEBUG(LogChannel::Replays, "[lead] compare_path_shared verts=%i course=%i mode=%s steam_id=%llu\n", (int)c.path.size(), course, mode,
+					 (unsigned long long)this->player->GetSteamId64());
 		return;
 	}
 	// Луч/процент УЖЕ грузит тот же вид под текущий ключ — ждём его и возьмём копией

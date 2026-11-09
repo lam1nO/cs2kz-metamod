@@ -6,12 +6,9 @@
  * отрезок — сетевая сущность. Весь маршрут — это тысячи сущностей, окно — десятки (потолок
  * `cybLeadMaxSegments`, дефолт 384).
  *
- * Примитив отрезка — info_particle_system с НАШЕЙ частицей particles/gymstrike/
- * lead_segment.vpcf: решение владельца серверов 16.09.2026 после живого сравнения на
- * канарейке. У CBeam не задаётся m_nRenderMode, дефолт движка не аддитивный, и на тёмных
- * картах луч тонет в фоне; наша частица аддитивная, self-illum 1.0 и рисуется сквозь
- * геометрию. Штатная сущность-луч `beam` (CBeam, sdk/entity/cbeam.h) — прежний дефолт по
- * пробе 11.09 — оставлена дорогой назад под cyb_lead_beam_entity 1.
+ * Сервер сглаживает повороты и передаёт старой частице координаты каждого отрезка.
+ * Радиус .5, подъём 2.5 units, self-illum .1, туман и z-test карты сохраняются.
+ * Сглаживание переключается cyb_lead_smooth; CBeam — под cyb_lead_beam_entity 1.
  *
  * Видимость только владельцу держится на KZ::quiet::OnCheckTransmit, и у двух примитивов она
  * устроена ЗЕРКАЛЬНО, но с разных сторон:
@@ -27,10 +24,12 @@
 #pragma once
 
 #include "../kz.h"
+#include "lead_geometry.h"
 #include "kz/replays/cyb_replay_download.h"
 // CUSTOM_PARTICLE_SYSTEM_TEAM: значение метки «энтити создана плагином» (см. KZ_LEAD_SEGMENT_TEAM).
 #include "sdk/entity/cparticlesystem.h"
 
+#include <array>
 #include <atomic>
 #include <memory>
 #include <mutex>
@@ -51,6 +50,7 @@
 // Наша частица из аддона GYMSTRIKE-KZ (3802626932): лента RenderRopes CP0→CP1, цвет из CP16,
 // подъём 2.5 юнита, self-illum 0.1; z-буфер и туман карты соблюдает.
 #define KZ_LEAD_PARTICLE "particles/gymstrike/lead_segment.vpcf"
+#define KZ_LEAD_CORNER_PARTICLE "particles/gymstrike/lead_corner.vpcf"
 
 #define KZ_LEAD_TARGETNAME "cyb_lead_seg"
 // Энтити-класс отрезка на сущности-луче. Базовый `beam`, а НЕ `env_beam`: выбор владельца
@@ -135,7 +135,12 @@ public:
 
 	// `!lead` / `!lead pb|wr|awr`: включить, если выключен, иначе выключить.
 	void Toggle(CybReplayDownload::Kind kind);
-	bool IsBeamEnabled() const { return this->beam || this->beamOnLoad; }
+
+	bool IsBeamEnabled() const
+	{
+		return this->beam || this->beamOnLoad;
+	}
+
 	// `!lead off`, смена карты/режима, дисконнект, телепорт-петля данных. Снимает ЛУЧ; путь
 	// остаётся жить, если его держит элемент «Прогресс» худа (см. progress).
 	void Disable(const char *reason);
@@ -256,8 +261,8 @@ private:
 	// Поиск ближайшей вершины — ОБЩИЙ для луча/процента и пути сравнения. Тело прежнего
 	// UpdateNearest дословно, поля слота переданы параметрами: beamBound=true — граница прямого
 	// скана = конец окна луча (windowTo), false — режим «без луча» (накопленная длина).
-	static u32 FindNearest(const std::vector<Vertex> &path, const std::vector<f32> &cumLen, u32 nearest, bool resync, bool beamBound,
-						   u32 windowTo, const Vector &origin);
+	static u32 FindNearest(const std::vector<Vertex> &path, const std::vector<f32> &cumLen, u32 nearest, bool resync, bool beamBound, u32 windowTo,
+						   const Vector &origin);
 	// Кумулятивные длины: общий расчёт для обоих слотов, возвращает полную длину.
 	// Время записи (тики, дробные) в точке origin: проекция на отрезок у ближайшей вершины.
 	static bool InterpolateRecordTicks(const std::vector<Vertex> &path, u32 nearest, const Vector &origin, bool awr, f64 &outTicks);
@@ -265,8 +270,8 @@ private:
 
 	// === Путь сравнения (compare) ===
 	// Тиковая ветка слота: свой дроссель в 32 тика (пауза/ключ/загрузка) и быстрый в 8 (поиск
-	// ближайшей + снимок времени), своя пауза/защёлка, FindNearest в режиме «без луча». Зовётся из OnPhysicsSimulatePost ДО гейта луча/процента: дельте путь нужен и
-	// при выключенных луче и проценте.
+	// ближайшей + снимок времени), своя пауза/защёлка, FindNearest в режиме «без луча». Зовётся из OnPhysicsSimulatePost ДО гейта луча/процента:
+	// дельте путь нужен и при выключенных луче и проценте.
 	void UpdateCompare();
 	void ArmComparePath();
 	void RequestComparePath();
@@ -279,6 +284,7 @@ private:
 	// протухает по поколению слота.
 	void ReleaseCompare();
 	bool ComparePathKeyMatchesCurrent() const;
+	leadgeometry::Corner<Vector> RenderCorner(u32 at) const;
 	void ApplyWindow(u32 newFrom, u32 newTo);
 	void ClearSegments(bool keepEntities);
 	void RebuildOwnedIndex();
@@ -290,7 +296,10 @@ private:
 	std::vector<f32> cumLen;
 	f32 totalLen = 0.0f;
 	// Окно: segments[i] — отрезок path[windowFrom + i] → path[windowFrom + i + 1].
-	std::vector<CEntityHandle> segments;
+	// Прямая и закругление конца исходного ребра; пустой хендл = части нет.
+	std::vector<std::array<CEntityHandle, leadgeometry::MaxCornerPieces + 1>> segments;
+	unsigned cornerPieceLimit = 0;
+	bool cornerStrip = false;
 	// Те же хендлы, отсортированные, — для двоичного поиска в OwnsSegmentEntity (горячий путь
 	// CheckTransmit: на каждую помеченную частицу, на каждого получателя). Идиома взята у
 	// KZZonesService::showBeams по той же причине.
@@ -418,5 +427,6 @@ private:
 		// луча не копируем и его загрузку/защёлку не ждём — они про прошлую запись.
 		bool ownLoadOnly = false;
 	};
+
 	CompareSlot compare;
 };

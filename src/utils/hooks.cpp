@@ -793,6 +793,7 @@ static KHook::Return<void> BuildGameSessionManifestPost(IGameSystem *pThis, cons
 	// переключает их живьём, а незарегистрированный в манифесте ассет у клиента не
 	// прекешируется и не нарисуется вовсе.
 	pResourceManifest->AddResource(KZ_LEAD_PARTICLE);
+	pResourceManifest->AddResource(KZ_LEAD_CORNER_PARTICLE);
 	pResourceManifest->AddResource(KZ_LEAD_PARTICLE_STOCK);
 	return {KHook::Action::Ignore};
 }
