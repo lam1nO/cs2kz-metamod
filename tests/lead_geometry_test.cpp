@@ -55,6 +55,13 @@ int main()
 	assert(landing.points[2].z > 0.0f);
 	assert(landing.points[3].z == 0.0f);
 	assert(landing.points[0].x < -6.0f);
+	// The dense landing in the kz_bhop_nothing_go AWR must get a curve too.
+	const Vec landingPoint {-13369.08496f, -2479.45435f, 192.03125f};
+	const auto denseLanding = ShapeCorner(Vec {-13372.74609f, -2482.73169f, 197.80199f}, landingPoint,
+										 Vec {-13365.99707f, -2477.12573f, 192.97578f}, false);
+	assert(denseLanding.pieces == 3);
+	assert(denseLanding.points[1].z > landingPoint.z);
+	assert(denseLanding.points[2].z > landingPoint.z);
 	assert(near(ShapeCorner(a, b, a, true).points[0], b));
 	assert(near(ShapeCorner(b, b, c, true).points[0], b));
 	assert(near(ShapeCorner(a, b, Vec {20, 0, 0}, true).points[0], b));

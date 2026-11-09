@@ -31,9 +31,9 @@ namespace leadgeometry
 		}
 		// Equal trimming prevents short edges from being smoothed more on one side.
 		// Landings need a longer visible blend, still bounded by both recorded edges.
-		const float trim = (std::min)(sameSurface ? 6.0f : 12.0f, .42f * (std::min)(before, after));
+		const float trim = (std::min)(sameSurface ? 6.0f : 12.0f, (sameSurface ? .42f : .48f) * (std::min)(before, after));
 		const V displacement = (v - u) * (.25f * trim);
-		if (displacement.Length() < .6f)
+		if (sameSurface && displacement.Length() < .6f)
 		{
 			// Dense vertices only move. Never split a tiny bend into more entities.
 			result.points[0] = point + displacement;
