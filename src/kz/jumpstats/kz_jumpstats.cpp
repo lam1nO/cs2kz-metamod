@@ -1,3 +1,4 @@
+#include "kz/analytics/kz_analytics.h"
 #include <cmath>
 
 #include "kz/kz.h"
@@ -382,6 +383,7 @@ bool Strafe::CalcAngleRatioStats()
 
 void Jump::Init()
 {
+	KZ::analytics::OnJumpStart(this);
 	this->takeoffOrigin = this->player->takeoffOrigin;
 	this->adjustedTakeoffOrigin = this->player->takeoffGroundOrigin;
 	this->takeoffVelocity = this->player->takeoffVelocity;
@@ -1105,6 +1107,7 @@ void KZJumpstatsService::EndJump()
 		return;
 	}
 	jump->End();
+	KZ::analytics::OnJumpFinish(jump);
 	if (jump->GetJumpType() == JumpType_FullInvalid)
 	{
 		return;

@@ -1,3 +1,4 @@
+#include "kz/analytics/kz_analytics.h"
 #include "kz_prac.h"
 
 #include "kz/language/kz_language.h"
@@ -451,6 +452,7 @@ void KZPracService::EnterPrac()
 			// узнаёт, что ран не кончился, и НЕ убивает рекордер рана — иначе финиш получил бы
 			// нулевой UUID (коллизия PRIMARY KEY в Times, ран игрока исчезал бы молча).
 			// Ноуклип включается ниже, так что «карательная» ветка HandleNoclip тоже подавлена.
+			KZ::analytics::EnterPrac(this->player);
 			this->inPrac = true;
 			this->player->timerService->TimerStop(false, "prac");
 			// Граница prac в реплее: TimerStop в prac события паузы не даёт, а плеер
@@ -465,6 +467,7 @@ void KZPracService::EnterPrac()
 
 	// Все отказы позади: с этой точки вход состоится, снимаем «как было на карте».
 	this->SnapshotMapContexts();
+	KZ::analytics::EnterPrac(this->player);
 	this->inPrac = true;
 	this->ClearPoints();
 	// Ноуклип НЕ включаем (решение пользователя 25.07): вход в prac только замораживает ран,

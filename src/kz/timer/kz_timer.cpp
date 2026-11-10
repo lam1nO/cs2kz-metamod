@@ -1,3 +1,4 @@
+#include "kz/analytics/kz_analytics.h"
 #include "kz_timer.h"
 #include "kz/db/kz_db.h"
 #include "kz/global/kz_global.h"
@@ -387,6 +388,7 @@ bool KZTimerService::TimerStart(const KZCourseDescriptor *courseDesc, bool playS
 	}
 
 	this->validTime = true;
+	KZ::analytics::Start(this->player);
 	this->shouldAnnounceMissedTime = true;
 	this->shouldAnnounceMissedProTime = true;
 
@@ -549,6 +551,10 @@ bool KZTimerService::TimerStop(bool playSound, const char *reason)
 	{
 		return false;
 	}
+	if (strcmp(reason, "prac") != 0)
+	{
+		KZ::analytics::Stop(this->player);
+	}
 	this->timerRunning = false;
 	this->player->checkpointService->ClearTeleportFloor();
 	// Главный класс багрепортов — «таймер сбросился сам». Одна строка с причиной
@@ -610,6 +616,7 @@ void KZTimerService::InvalidateRun()
 		return;
 	}
 	this->validTime = false;
+	KZ::analytics::Stop(this->player);
 
 	FOR_EACH_VEC(eventListeners, i)
 	{
@@ -704,6 +711,7 @@ void KZTimerService::ForcePause()
 	}
 
 	this->paused = true;
+	KZ::analytics::Stop(this->player);
 	this->pausedOnLadder = this->player->GetMoveType() == MOVETYPE_LADDER;
 	this->lastDuckValue = this->player->GetMoveServices()->m_flDuckAmount;
 	this->lastStaminaValue = this->player->GetMoveServices()->m_flStamina;
@@ -1026,6 +1034,7 @@ SCMD(kz_pro, SCFL_TIMER | SCFL_PREFERENCE | SCFL_HELP)
 
 void KZTimerService::Reset()
 {
+	KZ::analytics::Reset(this->player);
 	// Reset зовётся на дисконнекте (PlayerManager::OnClientDisconnect), то есть ровно там, где
 	// слот переходит к следующему игроку: KZPlayer и его сервисы переиспользуются, а PB-кэш
 	// пережил бы смену владельца. Чистит его иначе ТОЛЬКО смена карты (ClearRecordCache), и до
@@ -1173,6 +1182,7 @@ void KZTimerService::OnPlayerJoinTeam(i32 team)
 	if (team == CS_TEAM_SPECTATOR)
 	{
 		this->paused = true;
+		KZ::analytics::Stop(this->player);
 		if (this->GetTimerRunning())
 		{
 			this->hasPausedInThisRun = true;
@@ -1217,6 +1227,10 @@ void KZTimerService::OnRoundStart()
 
 void KZTimerService::OnTeleport(const Vector *newPosition, const QAngle *newAngles, const Vector *newVelocity)
 {
+	if (newPosition || newAngles || newVelocity)
+	{
+		KZ::analytics::Teleport(this->player);
+	}
 	if (newPosition || newVelocity)
 	{
 		this->InvalidateJump();

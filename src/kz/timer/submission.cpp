@@ -1,3 +1,4 @@
+#include "kz/analytics/kz_analytics.h"
 #include "submission.h"
 #include "cyb_emitter.h"
 #include "kz/db/kz_db.h"
@@ -202,6 +203,8 @@ RunSubmission::RunSubmission(KZPlayer *player)
 		}
 		this->styleIDs |= (1ull << style.databaseID);
 	}
+
+	KZ::analytics::OnRunFinished(player, *this);
 
 	// Metadata
 	this->metadata = player->timerService->GetCurrentRunMetadata().Get();

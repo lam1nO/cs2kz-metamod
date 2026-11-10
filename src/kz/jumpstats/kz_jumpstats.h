@@ -229,6 +229,10 @@ class Jump
 public:
 	KZPlayer *player;
 	u32 serverTick {}; // When the jump ended
+	u64 analyticsGeneration {}; // Timed-run ownership at takeoff.
+	u64 analyticsContextGeneration {};
+	bool analyticsInPrac {};
+	bool analyticsDiscontinuous {};
 	Vector takeoffOrigin;
 	Vector adjustedTakeoffOrigin;
 	Vector takeoffVelocity;
