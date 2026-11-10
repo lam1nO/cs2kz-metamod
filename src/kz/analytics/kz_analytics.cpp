@@ -1,5 +1,6 @@
 #include "kz_analytics.h"
 #include "jump_analytics.h"
+#include "source_identity.h"
 #include "kz/kz.h"
 #include "kz/jumpstats/kz_jumpstats.h"
 #include "kz/mode/kz_mode.h"
@@ -13,6 +14,7 @@
 #include "utils/json.h"
 #include <chrono>
 #include <ctime>
+#include <cstdlib>
 
 CConVar<bool> kz_analytics_enabled("kz_analytics_enabled", FCVAR_NONE, "Enable opt-in jump pattern analytics events.", false);
 
@@ -109,14 +111,14 @@ namespace KZ::analytics
 			return formatted;
 		}
 
-		std::string Envelope(KZPlayer *player, const char *type, const std::string &id, const nlohmann::json &data)
+		std::string Envelope(KZPlayer *player, const char *type, const std::string &id, const std::string &serverId, const nlohmann::json &data)
 		{
 			nlohmann::json event = {{"v", 1},
 									{"id", id},
 									{"type", type},
 									{"typeV", 1},
 									{"at", Timestamp()},
-									{"serverId", KZOptionService::GetOptionStr("cybServerId", "")},
+									{"serverId", serverId},
 									{"actor", {{"steamId64", std::to_string(player->GetSteamId64())}}},
 									{"data", data}};
 			return nlohmann::json({{"events", nlohmann::json::array({event})}}).dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
@@ -129,20 +131,20 @@ namespace KZ::analytics
 			{
 				return;
 			}
-			const char *serverId = KZOptionService::GetOptionStr("cybServerId", "");
-			if (!serverId || !*serverId)
+			const std::string serverId = SourceServerId(std::getenv("CS2_INSTANCE_ID"), KZOptionService::GetOptionStr("cybServerId", ""));
+			if (serverId.empty())
 			{
 				KZ_LOG_INFO(LogChannel::Global, "[analytics] event dropped reason=missing_server_identity\n");
 				return;
 			}
 			// У аналитического события свой ключ outbox, отдельный от обычного события финиша.
 			std::string id = UUID_t().ToString();
-			std::string body = Envelope(player, type, id, data);
+			std::string body = Envelope(player, type, id, serverId, data);
 			if (body.size() > 512u * 1024u && data.contains("runId"))
 			{
 				data["jumps"] = nlohmann::json::array();
 				data["truncated"] = true;
-				body = Envelope(player, type, id, data);
+				body = Envelope(player, type, id, serverId, data);
 				KZ_LOG_INFO(LogChannel::Global, "[analytics] run evidence omitted reason=body_limit\n");
 			}
 			if (body.size() > 512u * 1024u)

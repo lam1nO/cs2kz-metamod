@@ -12,6 +12,7 @@
 #include "kz/timer/submission.h"
 #include "kz/replays/kz_replay.h"
 #include "kz/lead/kz_lead.h" // OnReplayUploaded — путь дельты к PB/AWR устарел после аплоада
+#include "kz/analytics/source_identity.h"
 
 #include "vendor/sql_mm/src/public/sql_mm.h"
 
@@ -431,6 +432,11 @@ void KZOutboxService::SendEvent(const std::string &runUuid, const std::string &b
 	HTTP::Request req(HTTP::Method::POST, url);
 	req.SetHeader("Content-Type", "application/json");
 	SetAuthHeader(req);
+	const std::string headerServerId = KZ::analytics::MovementSourceHeader(body);
+	if (KZ::analytics::ValidSourceServerId(headerServerId))
+	{
+		req.SetHeader("X-Server-Id", headerServerId);
+	}
 	req.SetBody(body);
 
 	// clang-format off
