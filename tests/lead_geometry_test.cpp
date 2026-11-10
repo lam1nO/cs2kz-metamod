@@ -58,6 +58,10 @@ int main()
 	const auto dense = ShapeCorner(Vec {-1, 0, 0}, b, Vec {0, 1, 0}, true);
 	assert(dense.pieces == 8);
 	assert(near(dense.points[0], {-.48f, 0, 0}));
+	// A same-surface trim of about 0.07 units need not spawn a particle system.
+	const Vec shallowA {-3, 0, 0}, shallowC {3, .6f, 0};
+	assert(ShapeCorner(shallowA, b, shallowC, true, MaxCornerPieces, true).pieces == 0);
+	assert(ShapeCorner(shallowA, b, shallowC, false, MaxCornerPieces, true).pieces == StripPieces);
 	// An air-only bend at the apex of the real kz_bhop_nothing_go AWR.
 	const Vec airA {-13835.76f, -2340.73f, 375.85f}, airB {-13833.99f, -2346.24f, 375.54f},
 			  airC {-13833.27f, -2352.14f, 374.45f};

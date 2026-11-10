@@ -284,7 +284,7 @@ private:
 	// протухает по поколению слота.
 	void ReleaseCompare();
 	bool ComparePathKeyMatchesCurrent() const;
-	leadgeometry::Corner<Vector> RenderCorner(u32 at) const;
+	leadgeometry::CornerSpec<Vector> AnalyzeRenderCorner(u32 at) const;
 	void ApplyWindow(u32 newFrom, u32 newTo);
 	void ClearSegments(bool keepEntities);
 	void RebuildOwnedIndex();

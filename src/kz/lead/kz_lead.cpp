@@ -1977,16 +1977,16 @@ u32 KZLeadService::FindNearest(const std::vector<Vertex> &path, const std::vecto
 	return bestIdx;
 }
 
-leadgeometry::Corner<Vector> KZLeadService::RenderCorner(u32 at) const
+leadgeometry::CornerSpec<Vector> KZLeadService::AnalyzeRenderCorner(u32 at) const
 {
-	const Vertex &v = this->path[at];
 	if (this->cornerPieceLimit == 0 || at == 0 || at + 1 >= this->path.size())
 	{
-		return {{v.pos}};
+		return {};
 	}
+	const Vertex &v = this->path[at];
 	const Vertex &prev = this->path[at - 1], &next = this->path[at + 1];
-	return leadgeometry::ShapeCorner(prev.pos, v.pos, next.pos, prev.onGround == v.onGround,
-									 this->cornerPieceLimit, this->cornerStrip);
+	return leadgeometry::AnalyzeCorner(prev.pos, v.pos, next.pos, prev.onGround == v.onGround,
+									   this->cornerPieceLimit, this->cornerStrip);
 }
 
 void KZLeadService::UpdateWindow()
@@ -2024,17 +2024,17 @@ void KZLeadService::UpdateWindow()
 	// Count actual draw segments, including the chords only where a turn needs them.
 	const auto edgeCost = [this](u32 end)
 	{
-		const auto pieces = this->RenderCorner(end).pieces;
+		const auto pieces = this->AnalyzeRenderCorner(end).pieces;
 		return 1u + (this->cornerStrip ? (pieces != 0) : pieces);
 	};
 	const u32 cap = (u32)configured;
 	const bool smooth = UsesLeadSmoothing();
 	this->cornerStrip = smooth && cap >= 2 && cyb_lead_corner_strip.Get() && cyb_lead_cp1_index.Get() < 0 && cyb_lead_cp2_index.Get() < 0;
 	this->cornerPieceLimit = this->cornerStrip ? leadgeometry::StripPieces : (cap >= 4 && smooth ? (std::min)(cap - 1, leadgeometry::MaxCornerPieces) : 0);
-	u32 used = 0;
-	for (u32 i = from + 1; i <= to; ++i)
+	u32 used = to - from;
+	for (u32 i = from + 1; this->cornerPieceLimit && used <= cap && i <= to; ++i)
 	{
-		used += edgeCost(i);
+		used += edgeCost(i) - 1;
 	}
 	if (used > cap)
 	{
@@ -2042,15 +2042,27 @@ void KZLeadService::UpdateWindow()
 		const u32 backBudget = (std::min)(cap / KZ_LEAD_BACK_BUDGET_DIV, cap - forwardCost);
 		u32 first = this->nearest;
 		used = 0;
-		while (first > from && used + edgeCost(first) <= backBudget)
+		while (first > from)
 		{
-			used += edgeCost(first--);
+			const u32 cost = edgeCost(first);
+			if (used + cost > backBudget)
+			{
+				break;
+			}
+			used += cost;
+			--first;
 		}
 		from = first;
 		u32 last = this->nearest;
-		while (last < to && used + edgeCost(last + 1) <= cap)
+		while (last < to)
 		{
-			used += edgeCost(++last);
+			const u32 cost = edgeCost(last + 1);
+			if (used + cost > cap)
+			{
+				break;
+			}
+			used += cost;
+			++last;
 		}
 		to = last;
 	}
@@ -2119,7 +2131,8 @@ void KZLeadService::ApplyWindow(u32 newFrom, u32 newTo)
 		const u32 index = newFrom + i;
 		const Vertex &a = this->path[index];
 		const Vertex &b = this->path[index + 1];
-		const auto start = this->RenderCorner(index), end = this->RenderCorner(index + 1);
+		const auto start = leadgeometry::ShapeCorner(a.pos, this->AnalyzeRenderCorner(index));
+		const auto end = leadgeometry::ShapeCorner(b.pos, this->AnalyzeRenderCorner(index + 1));
 		std::array<CEntityHandle, leadgeometry::MaxCornerPieces + 1> group {};
 		Vector straightStart = start.points[start.pieces], straightEnd = end.points[0];
 		if (this->cornerStrip && (start.pieces || end.pieces))
