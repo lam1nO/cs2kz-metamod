@@ -111,12 +111,13 @@ namespace KZ::analytics
 			return formatted;
 		}
 
-		std::string Envelope(KZPlayer *player, const char *type, const std::string &id, const std::string &serverId, const nlohmann::json &data)
+		std::string Envelope(KZPlayer *player, const char *type, const std::string &id, const std::string &serverId, const nlohmann::json &data,
+							 int typeV = 1)
 		{
 			nlohmann::json event = {{"v", 1},
 									{"id", id},
 									{"type", type},
-									{"typeV", 1},
+									{"typeV", typeV},
 									{"at", Timestamp()},
 									{"serverId", serverId},
 									{"actor", {{"steamId64", std::to_string(player->GetSteamId64())}}},
@@ -124,7 +125,7 @@ namespace KZ::analytics
 			return nlohmann::json({{"events", nlohmann::json::array({event})}}).dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 		}
 
-		void Emit(KZPlayer *player, const char *type, nlohmann::json data)
+		void Emit(KZPlayer *player, const char *type, nlohmann::json data, int typeV = 1)
 		{
 			const char *url = KZOptionService::GetOptionStr("cybEmitUrl", "");
 			if (!url || !*url)
@@ -139,12 +140,12 @@ namespace KZ::analytics
 			}
 			// У аналитического события свой ключ outbox, отдельный от обычного события финиша.
 			std::string id = UUID_t().ToString();
-			std::string body = Envelope(player, type, id, serverId, data);
+			std::string body = Envelope(player, type, id, serverId, data, typeV);
 			if (body.size() > 512u * 1024u && data.contains("runId"))
 			{
 				data["jumps"] = nlohmann::json::array();
 				data["truncated"] = true;
-				body = Envelope(player, type, id, serverId, data);
+				body = Envelope(player, type, id, serverId, data, typeV);
 				KZ_LOG_INFO(LogChannel::Global, "[analytics] run evidence omitted reason=body_limit\n");
 			}
 			if (body.size() > 512u * 1024u)
@@ -157,22 +158,25 @@ namespace KZ::analytics
 		}
 
 		template<class Jumps>
-		nlohmann::json JumpsJson(const Jumps &jumps)
+		nlohmann::json JumpsJson(const Jumps &jumps, bool includeInputFeatures = false)
 		{
 			nlohmann::json result = nlohmann::json::array();
 			for (const auto &jump : jumps)
 			{
-				result.push_back(nlohmann::json::parse(JumpJson(jump)));
+				result.push_back(nlohmann::json::parse(JumpJson(jump, includeInputFeatures)));
 			}
 			return result;
 		}
 
-		bool Capture(Jump *source, JumpRecord &out)
+		bool Capture(Jump *source, JumpRecord &out, bool &runEligible)
 		{
-			if (source->analyticsDiscontinuous || !source->IsValid() || source->strafes.Count() < 1 || source->strafes.Count() > 16)
+			if (source->analyticsDiscontinuous || !source->IsValid() || source->strafes.Count() < 1 || source->strafes.Count() > 64)
 			{
 				return false;
 			}
+			runEligible = source->strafes.Count() <= 16;
+			std::vector<InputStrafe> inputStrafes;
+			std::vector<InputAA> inputCalls;
 			out.id = UUID_t().ToString();
 			out.endTick = source->serverTick;
 			out.distance = source->GetDistance();
@@ -189,8 +193,10 @@ namespace KZ::analytics
 				auto &strafe = source->strafes[i];
 				if (strafe.collisionGain != 0 || strafe.collisionLoss != 0 || strafe.externalGain != 0 || strafe.externalLoss != 0)
 				{
-					return false;
+					// Keep legacy MMR exclusions separate from input-only detection.
+					runEligible = false;
 				}
+				inputStrafes.push_back({strafe.width, strafe.duration, strafe.arStats.available, strafe.arStats.median, strafe.arStats.average});
 				out.widthsDeg.push_back(strafe.width);
 				out.durationsMs.push_back(strafe.duration * 1000.0);
 				FOR_EACH_VEC(strafe.aaCalls, k)
@@ -204,6 +210,7 @@ namespace KZ::analytics
 					{
 						first = &call;
 					}
+					inputCalls.push_back({i, call.prevYaw, call.currentYaw, call.duration, call.buttons[0]});
 					last = &call;
 					totalDuration += call.duration;
 					out.hasTurnBind |= (call.buttons[0] & (IN_TURNLEFT | IN_TURNRIGHT)) != 0;
@@ -232,9 +239,56 @@ namespace KZ::analytics
 					elapsed = end;
 				}
 			}
+			out.inputFeatures = InputFeatures(inputStrafes, inputCalls, out.valid, out.inPrac);
 			return sample == 32 && Complete(out);
 		}
 	} // namespace
+
+	CON_COMMAND_F(kz_analytics_status, "Print the current jump analytics collector and model status.", FCVAR_NONE)
+	{
+		// Diagnostics are limited to server console/RCON and never sent to player chat.
+		if (utils::GetController(context.GetPlayerSlot()))
+		{
+			KZ_LOG_WARN(LogChannel::Global, "[analytics] cmd_denied cmd=kz_analytics_status reason=not_server slot=%d\n",
+						context.GetPlayerSlot().Get());
+			return;
+		}
+		Msg("[analytics] status modelId=%s enabled=%d\n", AHK_INPUT_MODEL_ID, kz_analytics_enabled.Get() ? 1 : 0);
+		for (int slot = 0; slot <= MAXPLAYERS; ++slot)
+		{
+			const auto &actor = actors[slot];
+			if (!actor.steamId || actor.context.empty())
+			{
+				continue;
+			}
+			size_t withFeatures = 0, positive = 0;
+			nlohmann::json lastScore = nullptr;
+			nlohmann::json recent = nlohmann::json::array();
+			for (const auto &jump : actor.state.recent)
+			{
+				nlohmann::json score = nullptr;
+				if (jump.inputFeatures)
+				{
+					++withFeatures;
+					double value = InputScore(*jump.inputFeatures);
+					score = value;
+					positive += jump.valid && !jump.inPrac && !jump.hasTurnBind && value >= AHK_INPUT_THRESHOLD;
+				}
+				lastScore = score;
+				recent.push_back({{"endTick", jump.endTick}, {"withFeatures", jump.inputFeatures.has_value()}, {"score", score}});
+			}
+			nlohmann::json status = {{"slot", slot},
+									 {"steamId64", std::to_string(actor.steamId)},
+									 {"runActive", actor.state.active},
+									 {"recentValid", actor.state.recent.size()},
+									 {"withFeatures", withFeatures},
+									 {"modelPositive", positive},
+									 {"lastScore", lastScore},
+									 {"lastAlert", actor.state.lastAlert},
+									 {"recent", recent}};
+			Msg("[analytics] actor=%s\n", status.dump().c_str());
+		}
+	}
 
 	void Reset(KZPlayer *player)
 	{
@@ -321,21 +375,27 @@ namespace KZ::analytics
 			return;
 		}
 		JumpRecord record;
-		if (!Capture(jump, record))
+		bool runEligible = false;
+		if (!Capture(jump, record, runEligible))
 		{
 			actor->state.OmitJump();
 			return;
 		}
 		// Прыжок через границу старта или сброса таймера исключается из обоих ранов.
 		bool belongsToRun = jump->analyticsGeneration != 0 && jump->analyticsGeneration == actor->generation;
-		actor->state.Add(std::move(record), belongsToRun);
+		if (!runEligible)
+		{
+			actor->state.OmitJump();
+		}
+		actor->state.Add(std::move(record), belongsToRun && runEligible);
 		double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
 		if (actor->state.ShouldAlert(now))
 		{
 			auto data = Metadata(jump->player);
-			data["detectorVersion"] = "ahk-jump-v1";
-			data["jumps"] = JumpsJson(actor->state.recent);
-			Emit(jump->player, "kz.ahk_suspected", std::move(data));
+			data["detectorVersion"] = "ahk-input-v2";
+			data["modelId"] = AHK_INPUT_MODEL_ID;
+			data["jumps"] = JumpsJson(actor->state.recent, true);
+			Emit(jump->player, "kz.ahk_suspected", std::move(data), 2);
 		}
 	}
 
