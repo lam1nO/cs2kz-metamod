@@ -1,4 +1,5 @@
 #pragma once
+#include "ahk_input.h"
 #include <array>
 #include <vector>
 #include <deque>
@@ -21,6 +22,7 @@ namespace KZ::analytics
 		std::vector<double> widthsDeg, durationsMs;
 		std::array<double, 32> yawSamples {};
 		bool hasTurnBind {}, valid {}, inPrac {};
+		std::optional<InputFeatureVector> inputFeatures;
 	};
 
 	inline double WrapYaw(double yaw)
@@ -38,7 +40,7 @@ namespace KZ::analytics
 		auto bounded = [](double n, double limit) { return std::isfinite(n) && std::abs(n) <= limit; };
 		if (j.id.empty() || j.id.size() > 96 || j.endTick < 0 || j.segment < 0 || !bounded(j.distance, 1000000) || j.distance < 0
 			|| !bounded(j.airtimeMs, 3600000) || j.airtimeMs < 0 || !bounded(j.sync, 100) || j.sync < 0 || !bounded(j.takeoffYaw, 180)
-			|| !bounded(j.landingYaw, 180) || j.widthsDeg.empty() || j.widthsDeg.size() > 16 || j.widthsDeg.size() != j.durationsMs.size())
+			|| !bounded(j.landingYaw, 180) || j.widthsDeg.empty() || j.widthsDeg.size() > 64 || j.widthsDeg.size() != j.durationsMs.size())
 		{
 			return false;
 		}
@@ -154,26 +156,20 @@ namespace KZ::analytics
 
 	inline bool Suspicious(const std::deque<JumpRecord> &window)
 	{
-		// Кластер попарно совместимых прыжков с консервативным выбором пересекающихся групп.
-		for (size_t seed = 0; seed < window.size(); ++seed)
+		std::vector<std::string> positiveIds;
+		std::vector<int> positiveTicks;
+		for (const auto &j : window)
 		{
-			if (!Informative(window[seed]))
+			if (!Complete(j) || !j.valid || j.inPrac || j.hasTurnBind || j.widthsDeg.size() < 5 || j.airtimeMs <= 0 || j.airtimeMs > 60000
+				|| !j.inputFeatures || InputScore(*j.inputFeatures) < AHK_INPUT_THRESHOLD
+				|| std::find(positiveIds.begin(), positiveIds.end(), j.id) != positiveIds.end()
+				|| std::find(positiveTicks.begin(), positiveTicks.end(), j.endTick) != positiveTicks.end())
 			{
 				continue;
 			}
-			std::vector<const JumpRecord *> cluster {&window[seed]};
-			for (size_t i = seed + 1; i < window.size(); ++i)
-			{
-				if (!Informative(window[i]))
-				{
-					continue;
-				}
-				if (std::all_of(cluster.begin(), cluster.end(), [&](const JumpRecord *j) { return Matches(*j, window[i]); }))
-				{
-					cluster.push_back(&window[i]);
-				}
-			}
-			if (cluster.size() >= 6 && Diverse(cluster))
+			positiveIds.push_back(j.id);
+			positiveTicks.push_back(j.endTick);
+			if (positiveIds.size() >= 2)
 			{
 				return true;
 			}
@@ -221,7 +217,7 @@ namespace KZ::analytics
 		void Teleport()
 		{
 			++segment;
-			recent.clear();
+			// Retry teleports separate MMR segments; valid input evidence survives.
 		}
 
 		void OmitJump()
@@ -230,7 +226,7 @@ namespace KZ::analytics
 			{
 				truncated = true;
 			}
-			recent.clear();
+			// Invalid attempts do not erase the bounded last-20-valid-jump input window.
 		}
 
 		void Add(JumpRecord j, bool captureRun = true)
@@ -238,6 +234,10 @@ namespace KZ::analytics
 			if (!Complete(j))
 			{
 				OmitJump();
+				return;
+			}
+			if (std::any_of(recent.begin(), recent.end(), [&](const JumpRecord &old) { return old.id == j.id || old.endTick == j.endTick; }))
+			{
 				return;
 			}
 			j.segment = segment;
@@ -255,7 +255,10 @@ namespace KZ::analytics
 			}
 			if (!j.valid || j.inPrac)
 			{
-				recent.clear();
+				if (j.inPrac)
+				{
+					recent.clear();
+				}
 				return;
 			}
 			recent.push_back(std::move(j));
@@ -339,12 +342,13 @@ namespace KZ::analytics
 		out << ']';
 	}
 
-	inline std::string JumpJson(const JumpRecord &j)
+	inline std::string JumpJson(const JumpRecord &j, bool includeInputFeatures = false)
 	{
 		std::ostringstream out;
 		out.imbue(std::locale::classic());
-		out << std::setprecision(9) << "{\"id\":" << JsonString(j.id) << ",\"endTick\":" << j.endTick << ",\"segment\":" << j.segment
-			<< ",\"distance\":" << j.distance << ",\"airtimeMs\":" << j.airtimeMs << ",\"sync\":" << j.sync << ",\"takeoff\":";
+		out << std::setprecision(includeInputFeatures ? 17 : 9) << "{\"id\":" << JsonString(j.id) << ",\"endTick\":" << j.endTick
+			<< ",\"segment\":" << j.segment << ",\"distance\":" << j.distance << ",\"airtimeMs\":" << j.airtimeMs << ",\"sync\":" << j.sync
+			<< ",\"takeoff\":";
 		Numbers(out, j.takeoff);
 		out << ",\"landing\":";
 		Numbers(out, j.landing);
@@ -355,7 +359,20 @@ namespace KZ::analytics
 		out << ",\"yawSamples\":";
 		Numbers(out, j.yawSamples);
 		out << ",\"hasTurnBind\":" << (j.hasTurnBind ? "true" : "false") << ",\"valid\":" << (j.valid ? "true" : "false")
-			<< ",\"inPrac\":" << (j.inPrac ? "true" : "false") << '}';
+			<< ",\"inPrac\":" << (j.inPrac ? "true" : "false");
+		if (includeInputFeatures)
+		{
+			out << ",\"inputFeatures\":";
+			if (j.inputFeatures)
+			{
+				Numbers(out, *j.inputFeatures);
+			}
+			else
+			{
+				out << "null";
+			}
+		}
+		out << '}';
 		return out.str();
 	}
 } // namespace KZ::analytics
