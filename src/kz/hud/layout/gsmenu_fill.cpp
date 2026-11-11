@@ -1,3 +1,4 @@
+#include "kz/hud/layout/indexed_hud_writer.h"
 // PB и WR в плитках сетки карт GG1 (!nominate/!maps, корень gg разметки cyber/gsmenu.xml).
 //
 // GG1 после отрисовки сетки шлёт с консоли сервера `kz_gsm_fill <slot> <first> <карта,карта,...>`
@@ -413,6 +414,8 @@ namespace
 			f.queued = false;
 			return false;
 		}
+		IndexedHudWriter<CCSCustomHudLayout> writer(*layout, KZ::gsmenu::ExtCacheOf(player),
+													[layout] { layout->NetworkStateChanged(NetworkStateChangedData(true)); });
 		if (f.applied.size() < f.tiles.size())
 		{
 			f.applied.resize(f.tiles.size());
@@ -434,12 +437,12 @@ namespace
 			auto cls = [&](const char *name, bool on, bool was)
 			{
 				// Чистая плитка (впервые после создания сущности) — значений по умолчанию не пишем:
-				// каждая запись — линейный поиск по вектору сущности.
+				// уменьшаем число сетевых изменений.
 				if (cur.set ? on == was : !on)
 				{
 					return;
 				}
-				dropped += !layout->SetHasClass(panel, name, on ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass);
+				dropped += !writer.SetHasClass(panel, name, on ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass);
 				classDirty = true;
 			};
 			auto var = [&](const char *name, const std::string &value, const std::string &was)
@@ -448,7 +451,7 @@ namespace
 				{
 					return;
 				}
-				dropped += !layout->SetDialogVariableString(panel, name, value.c_str());
+				dropped += !writer.SetDialogVariableString(panel, name, value.c_str());
 			};
 			cls("done", want.done, cur.done);
 			cls("iswr", want.iswr, cur.iswr);

@@ -1,6 +1,8 @@
 #pragma once
 #include "kz/kz.h"
 
+struct IndexedHudCache;
+
 #include <functional>
 #include <string>
 #include <vector>
@@ -128,6 +130,8 @@ namespace KZ::gsmenu
 	// Сущность внешнего владельца (GG1) игрока, если открыта: не создаётся; интерны на исходе —
 	// пересоздаётся с css_ui_reset, как в cyb_ui_batch.
 	CCSCustomHudLayout *ExtLayoutOf(KZPlayer *player);
+	// Кэш только для уже проверенных игрока и внешней сущности; сбрасывается в DestroyExt.
+	IndexedHudCache &ExtCacheOf(KZPlayer *player);
 	void ExtTick(); // общий бюджет внешних меню на кадр сервера
 
 	// PB/WR в плитки сетки GG1 (kz_gsm_fill, gsmenu_fill.cpp).

@@ -13,6 +13,7 @@
 #include "kz/hud/layout/gsmenu.h"
 #include "kz/hud/layout/layout_fallback.h"
 #include "kz/hud/layout/menu_work_queue.h"
+#include "kz/hud/layout/indexed_hud_writer.h"
 #include "filesystem.h"
 #include "kz/hud/layout/layout.h"
 #include "sdk/entity/ccscustomhudlayout.h"
@@ -76,6 +77,7 @@ namespace
 	// чтобы чужая разметка не делила диф-кэш и захват с окном форка.
 	struct ExtState
 	{
+		IndexedHudCache writerCache;
 		CHandle<CBaseEntity> entity {};
 		bool capture = false;
 		std::string layout;
@@ -627,6 +629,7 @@ static void DestroyExt(KZPlayer *player, ExtState &e)
 		g_pKZUtils->RemoveEntity(ent);
 	}
 	e.entity = nullptr;
+	e.writerCache.Reset();
 	e.capture = false;
 	e.layout.clear();
 	e.clickWindowStart = 0.0;
@@ -780,6 +783,11 @@ CCSCustomHudLayout *KZ::gsmenu::ExtLayoutOf(KZPlayer *player)
 	return (slot >= 0 && slot < MAXPLAYERS) ? ExtLayout(player, slot) : nullptr;
 }
 
+IndexedHudCache &KZ::gsmenu::ExtCacheOf(KZPlayer *player)
+{
+	return g_ext[player->GetPlayerSlot().Get()].writerCache;
+}
+
 CON_COMMAND_F(cyb_ui_open, "cyb_ui_open <slot> <layout> — разметка внешнего владельца игроку (мост форка)", FCVAR_NONE)
 {
 	i32 slot = -1;
@@ -861,6 +869,8 @@ static const char *ArgsAfterSlot(const CCommand &args)
 
 static void ApplyExtOp(KZPlayer *player, CCSCustomHudLayout *layout, const char *op, bool &classDirty)
 {
+	IndexedHudWriter<CCSCustomHudLayout> writer(*layout, KZ::gsmenu::ExtCacheOf(player),
+												[layout] { layout->NetworkStateChanged(NetworkStateChangedData(true)); });
 	// c\x1epanel\x1eclass\x1e0|1  или  v\x1epanel\x1evar\x1evalue
 	std::string fields[4];
 	i32 n = 0;
@@ -880,7 +890,7 @@ static void ApplyExtOp(KZPlayer *player, CCSCustomHudLayout *layout, const char 
 	if (fields[0] == "c")
 	{
 		const bool on = fields[3] == "1";
-		if (!layout->SetHasClass(fields[1].c_str(), fields[2].c_str(), on ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass))
+		if (!writer.SetHasClass(fields[1].c_str(), fields[2].c_str(), on ? k_eHudPanelClassStatus_HasClass : k_eHudPanelClassStatus_DoesNotHaveClass))
 		{
 			KZ_LOG_WARN(LogChannel::General, "[cyb] gsmenu_ext_class_dropped reason=intern_limit panel=%s class=%s slot=%i\n", fields[1].c_str(),
 						fields[2].c_str(), player->GetPlayerSlot().Get());
@@ -889,7 +899,7 @@ static void ApplyExtOp(KZPlayer *player, CCSCustomHudLayout *layout, const char 
 	}
 	else if (fields[0] == "v")
 	{
-		if (!layout->SetDialogVariableString(fields[1].c_str(), fields[2].c_str(), fields[3].c_str()))
+		if (!writer.SetDialogVariableString(fields[1].c_str(), fields[2].c_str(), fields[3].c_str()))
 		{
 			KZ_LOG_WARN(LogChannel::General, "[cyb] gsmenu_ext_var_dropped reason=intern_limit panel=%s var=%s slot=%i\n", fields[1].c_str(),
 						fields[2].c_str(), player->GetPlayerSlot().Get());

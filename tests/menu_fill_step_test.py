@@ -30,6 +30,8 @@ using i32 = int;
 #define V_snprintf std::snprintf
 #define KZ_LOG_WARN(...) ((void)0)
 struct KZPlayer {};
+struct IndexedHudCache {};
+struct NetworkStateChangedData { NetworkStateChangedData(bool) {} };
 enum Status { k_eHudPanelClassStatus_HasClass, k_eHudPanelClassStatus_DoesNotHaveClass };
 struct TileOut {
     bool set = false, done = false, iswr = false, nowr = false;
@@ -50,9 +52,18 @@ struct CCSCustomHudLayout {
     bool SetDialogVariableString(const char *panel, const char *, const char *) { ++writes; lastPanel = panel; return true; }
     CCSCustomHudLayout *GetGlobalLayoutState() { return this; }
     void MarkFullChanged() {}
+    void NetworkStateChanged(NetworkStateChangedData) {}
 } layout;
 bool recycle = false;
+template<class Layout> struct IndexedHudWriter {
+    Layout &layout;
+    template<class F> IndexedHudWriter(Layout &l, IndexedHudCache &, F) : layout(l) {}
+    bool SetHasClass(const char *p, const char *n, Status s) { return layout.SetHasClass(p, n, s); }
+    bool SetDialogVariableString(const char *p, const char *n, const char *v) { return layout.SetDialogVariableString(p, n, v); }
+};
 namespace KZ::gsmenu {
+    IndexedHudCache cache;
+    IndexedHudCache &ExtCacheOf(KZPlayer *) { return cache; }
     CCSCustomHudLayout *ExtLayoutOf(KZPlayer *) {
         if (recycle) g_fill[0] = SlotFill{};
         return &layout;

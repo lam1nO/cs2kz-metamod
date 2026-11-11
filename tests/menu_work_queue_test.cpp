@@ -17,10 +17,10 @@ int main()
 	}
 	auto apply = [&](int slot, const std::string &op) { got.push_back(std::to_string(slot) + op); };
 	auto noFill = [](int) { return false; };
-	// Весь сервер, а не 32 операции на каждого игрока.
-	assert(q.Run(apply, noFill, clock) == 32);
-	assert(got.size() == 32);
-	for (int i = 0; i < 16; ++i)
+	// Весь сервер, а не 128 операций на каждого игрока.
+	assert(q.Run(apply, noFill, clock) == 128);
+	assert(got.size() == 128);
+	for (int i = 0; i < 64; ++i)
 	{
 		assert(got[2 * i] == "0a" + std::to_string(i));
 		assert(got[2 * i + 1] == "1b" + std::to_string(i));
@@ -46,7 +46,7 @@ int main()
 	int fills = 0;
 	auto fill = [&](int slot)
 	{
-		if (slot != 0 || fills >= 100)
+		if (slot != 0 || fills >= 200)
 		{
 			return false;
 		}
@@ -54,8 +54,8 @@ int main()
 		++fills;
 		return true;
 	};
-	assert(q.Run(apply, fill, clock) == 32);
-	assert(fills == 31);
+	assert(q.Run(apply, fill, clock) == 128);
+	assert(fills == 127);
 	// Пустые слоты не расходуют бюджет и не вызывают бесконечного обхода.
 	q.Clear(0);
 	now = 0;

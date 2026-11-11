@@ -11,7 +11,7 @@ template<int Slots>
 class MenuWorkQueue
 {
 public:
-	static constexpr int MaxUnits = 32;
+	static constexpr int MaxUnits = 128;
 	static constexpr long long MaxMicros = 1000;
 
 	void Push(int slot, std::string op)
