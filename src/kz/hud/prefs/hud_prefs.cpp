@@ -1,3 +1,4 @@
+#include "kz/hud/layout/quickmenu_position.h"
 // Регистрация меню настроек panorama-худа и крестика в общем реестре (kz/option/menu/model.h,
 // Task 1). Раньше (Task 11) состав меню жил статическими таблицами прямо в layout/menu.cpp —
 // задача 2 переносит РОВНО тот же состав (категории, пункты, ключи префов, диапазоны,
@@ -119,6 +120,7 @@ static constexpr i32 RPMENU_RESET_SLOT = (i32)LayoutElement::Count;
 enum HudExtraResetSlot
 {
 	EXTRA_RESET_RPMENU_POS = 0,
+	EXTRA_RESET_QUICKMENU_TAB,
 	EXTRA_RESET_COUNT
 };
 static_global KZOptNode *s_extraResetNodes[EXTRA_RESET_COUNT] {};
@@ -527,5 +529,10 @@ void KZHUDService::InitMenuPrefs()
 	rpmenuPos->hiddenFromMenu = true;
 	s_extraResetNodes[EXTRA_RESET_RPMENU_POS] = rpmenuPos;
 	KZ::menu::AddPosition(rpmenuPos, "HUD - Menu Label Position", "rpmenuPosX", "rpmenuPosY", RPMENU_DEF_POS_X, RPMENU_DEF_POS_Y);
+	KZOptNode *quickMenuTab = KZ::menu::AddSub(hidden, "HUD - Menu Label Position");
+	quickMenuTab->hiddenFromMenu = true;
+	s_extraResetNodes[EXTRA_RESET_QUICKMENU_TAB] = quickMenuTab;
+	KZ::menu::AddPosition(quickMenuTab, "HUD - Menu Label Position", KZ::quickmenu::TabXKey, KZ::quickmenu::TabYKey, KZ::quickmenu::TabAutoX, 0);
+
 
 }

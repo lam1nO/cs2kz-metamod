@@ -15,6 +15,7 @@
 #include "sdk/entity/cbaseplayerweapon.h"
 #include "sdk/usercmd.h"
 #include "utils/simplecmds.h"
+#include "utils/cvarquery.h"
 #include "utils/logging.h"
 #include "utils/utils.h"
 #include "entitykeyvalues.h"
@@ -42,12 +43,21 @@ namespace
 		bool ownsAutoPaint = false;
 		bool pendingPaint = false;
 		bool shown = false;
+		i32 safeZoneQuery = 0;
+		f64 nextSafeZoneQuery = 0;
+		int rightOffsetLimit = 0;
+		i32 appliedTabX = INT_MIN;
+		i32 appliedTabY = INT_MIN;
+		i32 appliedDrawerX = INT_MIN;
+		i32 appliedDrawerUpperSpace = INT_MIN;
+		i32 appliedDrawerLowerSpace = INT_MIN;
 		f64 retryAt = 0, lastClick = -1;
 		std::string feedback;
 		std::unordered_map<std::string, std::string> vars;
 		std::unordered_map<std::string, bool> classes;
 	};
 	State states[MAXPLAYERS];
+	constexpr f64 kSafeZoneQueryInterval = 2.0;
 	constexpr u64 kToolKeys = IN_USE | IN_RELOAD | IN_LOOK_AT_WEAPON;
 	constexpr u64 kOwnedKeys = kToolKeys;
 	constexpr u64 kMovementKeys = IN_FORWARD | IN_BACK | IN_MOVELEFT | IN_MOVERIGHT | IN_JUMP | IN_DUCK | IN_SPEED | IN_JOYAUTOSPRINT | IN_TURNLEFT | IN_TURNRIGHT;
@@ -60,8 +70,7 @@ namespace
 	}
 	bool Enabled(KZPlayer *player)
 	{
-		return player && !g_KZPlugin.unloading && kz_quickmenu_enable.Get() && player->IsInGame() && player->IsAlive()
-			   && !player->IsFakeClient() && KZHUDService::IsMHUDAvailable();
+		return player && KZ::quickmenu::CanEditTab() && player->IsInGame() && player->IsAlive() && !player->IsFakeClient();
 	}
 	bool OtherUi(KZPlayer *player)
 	{
@@ -114,6 +123,8 @@ namespace
 		s.entity = layout;
 		s.vars.clear();
 		s.classes.clear();
+		s.appliedTabX = s.appliedTabY = INT_MIN;
+		s.appliedDrawerX = s.appliedDrawerUpperSpace = s.appliedDrawerLowerSpace = INT_MIN;
 		return layout;
 	}
 	void StopPaint(KZPlayer *player, State &s)
@@ -174,8 +185,19 @@ namespace
 		const bool tool = s.mode == Mode::Paint || s.mode == Mode::Measure;
 		Class(player, s, layout, "qm_tool", "hidden", !s.shown || !tool);
 		if (!s.shown) return;
+		if (s.mode == Mode::Closed)
+		{
+			const auto pos = KZ::quickmenu::GetTabPosition(player);
+			player->hudService->SetLayoutValueClass(layout, "qm_tab_pos", s.appliedTabX, pos.x, "x", true);
+			player->hudService->SetLayoutValueClass(layout, "qm_tab_pos", s.appliedTabY, pos.y, "y", true);
+		}
 		if (s.mode == Mode::Drawer)
 		{
+			const auto placement = KZ::quickmenu::ResolveDrawerPlacement(KZ::quickmenu::GetTabPosition(player));
+			Class(player, s, layout, "qm_drawer_pos", "opens-right", placement.opensRight);
+			player->hudService->SetLayoutValueClass(layout, "qm_drawer_pos", s.appliedDrawerX, placement.x, "x", true);
+			player->hudService->SetLayoutValueClass(layout, "qm_drawer_upper", s.appliedDrawerUpperSpace, placement.upperSpace, "qm-space", true);
+			player->hudService->SetLayoutValueClass(layout, "qm_drawer_lower", s.appliedDrawerLowerSpace, 100 - placement.upperSpace, "qm-space", true);
 			Var(player, s, layout, "qm_drawer", "mode", player->modeService->GetModeName());
 			struct Toggle { const char *id; bool on; } toggles[] = {
 				{"qm_lead", player->leadService->IsBeamEnabled()}, {"qm_practice", player->pracService->IsInPrac()}, {"qm_hide", player->quietService->ShouldHide()}
@@ -232,6 +254,70 @@ namespace
 	}
 }
 
+bool KZ::quickmenu::CanEditTab()
+{
+	return !g_KZPlugin.unloading && kz_quickmenu_enable.Get() && KZHUDService::IsMHUDAvailable();
+}
+
+KZ::quickmenu::TabPosition KZ::quickmenu::GetTabPosition(KZPlayer *player)
+{
+	State *s = Of(player);
+	if (!s)
+	{
+		return {};
+	}
+	const double x = player->optionService->GetPreferenceFloat(TabXKey, TabAutoX);
+	const double y = player->optionService->GetPreferenceFloat(TabYKey, 0);
+	if (x > 0 || player->hudService->IsHudEditorOpen())
+	{
+		const f64 now = g_pKZUtils->GetServerGlobals()->curtime;
+		if (now >= s->nextSafeZoneQuery || s->nextSafeZoneQuery - now > kSafeZoneQueryInterval)
+		{
+			s->nextSafeZoneQuery = now + kSafeZoneQueryInterval;
+			if (s->safeZoneQuery)
+			{
+				cvarquery::Cancel(player->GetPlayerSlot(), s->safeZoneQuery);
+				s->safeZoneQuery = 0;
+			}
+			cvarquery::Query(player->GetPlayerSlot(), "safezonex",
+				[](CPlayerSlot slot, cvarquery::Status status, const char *, const char *value)
+				{
+					State &state = states[slot.Get()];
+					state.rightOffsetLimit = status == cvarquery::Status::ValueIntact ? RightOffsetLimit(value) : 0;
+					state.safeZoneQuery = 0;
+				}, &s->safeZoneQuery);
+		}
+	}
+	return ResolveTabPosition(x, y, s->rightOffsetLimit);
+}
+
+void KZ::quickmenu::SetTabPosition(KZPlayer *player, int x, int y)
+{
+	if (State *s = Of(player); s && CanEditTab())
+	{
+		const auto pos = ClampTabPosition(x, y, s->rightOffsetLimit);
+		player->optionService->SetPreferenceFloat(TabXKey, pos.x);
+		player->optionService->SetPreferenceFloat(TabYKey, pos.y);
+	}
+}
+
+void KZ::quickmenu::NudgeTabPosition(KZPlayer *player, int dx, int dy)
+{
+	if (State *s = Of(player); s && CanEditTab())
+	{
+		const auto current = GetTabPosition(player);
+		const auto next = ClampTabPosition(current.x + dx, current.y + dy, s->rightOffsetLimit);
+		if (next.x != current.x)
+		{
+			player->optionService->SetPreferenceFloat(TabXKey, next.x);
+		}
+		if (next.y != current.y)
+		{
+			player->optionService->SetPreferenceFloat(TabYKey, next.y);
+		}
+	}
+}
+
 void KZ::quickmenu::Open(KZPlayer *player)
 {
 	State *s = Of(player);
@@ -255,6 +341,7 @@ void KZ::quickmenu::Reset(KZPlayer *player)
 {
 	State *s = Of(player);
 	if (!s) return;
+	if (s->safeZoneQuery) cvarquery::Cancel(player->GetPlayerSlot(), s->safeZoneQuery);
 	Close(player);
 	if (CBaseEntity *ent = s->entity.Get()) g_pKZUtils->RemoveEntity(ent);
 	*s = State();

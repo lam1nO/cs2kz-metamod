@@ -76,6 +76,8 @@ static_global const EditorReplicaDef EDITOR_REPLICA[(i32)LayoutElement::Count] =
 };
 // clang-format on
 
+static constexpr i32 EDITOR_QUICKMENU = (i32)LayoutElement::Count;
+
 static_assert(KZ_ARRAYSIZE(EDITOR_REPLICA) == KZ_EDITOR_ITEMS, "el{i}/et{i} разметки — по одному на LayoutElement");
 
 // Доп. цвета элемента в панели свойств: строки ep_xrow1..3 (подпись {s:px1..3}, свотч ep_xc1..3).
@@ -421,7 +423,31 @@ void KZHUDService::RenderEditor()
 	this->RenderEditorReplica(layout, false);
 
 	// has-sel — клик по сетке что-то сделает (подсветка ячейки, линия, подпись); dock-l — сторона дока.
-	this->SetMenuBoolClass(layout, "edit_root", "has-sel", this->menuApplied.editHasSel, IsEditorElement(this->editorSelected));
+	const i32 sel = this->editorSelected;
+	const bool showQuickMenu = KZ::quickmenu::CanEditTab();
+	const bool quickMenuSelected = showQuickMenu && sel == EDITOR_QUICKMENU;
+	const bool isElement = IsEditorElement(sel);
+	this->SetMenuBoolClass(layout, "edit_root", "has-sel", this->menuApplied.editHasSel, isElement || quickMenuSelected);
+	this->SetMenuBoolClass(layout, "e_quickmenu", "hidden", this->menuApplied.eQuickMenuHidden, !showQuickMenu);
+	this->SetMenuBoolClass(layout, "el_quickmenu", "hidden", this->menuApplied.elQuickMenuHidden, !showQuickMenu);
+	this->SetMenuBoolClass(layout, "e_quickmenu", "sel", this->menuApplied.eQuickMenuSelected, quickMenuSelected);
+	this->SetMenuBoolClass(layout, "el_quickmenu", "sel", this->menuApplied.elQuickMenuSelected, quickMenuSelected);
+	this->SetMenuBoolClass(layout, "edit_props", "position-only", this->menuApplied.positionOnly, quickMenuSelected);
+	if (showQuickMenu)
+	{
+		const auto pos = KZ::quickmenu::GetTabPosition(this->player);
+		const auto name = phrase("Quick - Editor Name");
+		this->SetMenuVar(layout, "el_quickmenu", "en_quickmenu", name.c_str());
+		this->SetLayoutValueClass(layout, "e_quickmenu_pos", this->menuApplied.quickMenuX, pos.x, "x", true);
+		this->SetLayoutValueClass(layout, "e_quickmenu_pos", this->menuApplied.quickMenuY, pos.y, "y", true);
+		if (quickMenuSelected)
+		{
+			char buf[48];
+			V_snprintf(buf, sizeof(buf), "%i \xC2\xB7 %s%i", 50 + pos.x, pos.y < 0 ? "\xE2\x88\x92" : "", abs(pos.y));
+			this->SetMenuVar(layout, "edit_props", "pn", name.c_str());
+			this->SetMenuVar(layout, "edit_props", "xy", buf);
+		}
+	}
 	this->SetMenuBoolClass(layout, "edit_root", "dock-l", this->menuApplied.editDockL, this->editorDockLeft);
 
 	// Список элементов: on = элемент включён (и у строки, и у её тумблера).
@@ -447,8 +473,18 @@ void KZHUDService::RenderEditor()
 	}
 
 	// Панель свойств — только при выбранном элементе.
-	const i32 sel = this->editorSelected;
-	const bool isElement = IsEditorElement(sel);
+	if (isElement || quickMenuSelected)
+	{
+		this->SetMenuBoolClass(layout, "ep_step1", "on", this->menuApplied.epStep1, this->editorStep == 1);
+		this->SetMenuBoolClass(layout, "ep_step5", "on", this->menuApplied.epStep5, this->editorStep == 5);
+		static const char *const freeRows[] = {"ep_gt_pos", "ep_prow_pos", "ep_prow_step", "ep_prow_size",
+											  "ep_gt_look", "ep_prow_font", "ep_prow_op", "ep_prow_outline"};
+		const bool attached = IsBadgeElement(sel) && prefs.badgeAttach[sel - KZ_BADGE_FIRST];
+		for (i32 k = 0; k < (i32)KZ_ARRAYSIZE(freeRows); k++)
+		{
+			this->SetMenuBoolClass(layout, freeRows[k], "hidden", this->menuApplied.epFreeRowHidden[k], attached);
+		}
+	}
 	if (isElement)
 	{
 		char buf[48];
@@ -476,8 +512,6 @@ void KZHUDService::RenderEditor()
 				this->menuApplied.exySel = sel;
 			}
 			this->SetMenuVar(layout, EDITOR_REPLICA[sel].buttonId, "exy", buf);
-			this->SetMenuBoolClass(layout, "ep_step1", "on", this->menuApplied.epStep1, this->editorStep == 1);
-			this->SetMenuBoolClass(layout, "ep_step5", "on", this->menuApplied.epStep5, this->editorStep == 5);
 			V_snprintf(buf, sizeof(buf), "%i px", el.size);
 			this->SetMenuVar(layout, "edit_props", "sz", buf);
 			const char *slug = this->player->optionService->GetPreferenceStr(def.fontKey, def.fontDefault);
@@ -540,16 +574,6 @@ void KZHUDService::RenderEditor()
 				this->SetMenuBoolClass(layout, EDITOR_SG_IDS[k], "on", this->menuApplied.epSgOn[k], current == seg->values[k]);
 			}
 		}
-		// Прицепленный бейдж: место, кегль, шрифт, прозрачность и обводка — от престрейфа, строк нет.
-		{
-			static const char *const freeRows[8] = {"ep_gt_pos",  "ep_prow_pos", "ep_prow_step", "ep_prow_size",
-													"ep_gt_look", "ep_prow_font", "ep_prow_op",  "ep_prow_outline"};
-			const bool attached = IsBadgeElement(sel) && prefs.badgeAttach[sel - KZ_BADGE_FIRST];
-			for (i32 k = 0; k < 8; k++)
-			{
-				this->SetMenuBoolClass(layout, freeRows[k], "hidden", this->menuApplied.epFreeRowHidden[k], attached);
-			}
-		}
 		this->SetMenuBoolClass(layout, "ep_srow", "hidden", this->menuApplied.epSrowHidden, !HasEditorStepper(sel));
 		this->SetMenuBoolClass(layout, "ep_grow", "hidden", this->menuApplied.epGrowHidden, seg == NULL);
 		// Заголовки пустых групп: «Цвет» — ни основного, ни дельты, ни доп. цветов (Тип рана);
@@ -562,7 +586,7 @@ void KZHUDService::RenderEditor()
 	// Цвет/шрифт встают на место панели свойств и короче её — без прятанья из-под попапа торчал бы
 	// хвост свойств (спека редактора §7: попап закрывает панель целиком).
 	const bool dockPopup = this->menuPopup == MenuPopup::Color || this->menuPopup == MenuPopup::List;
-	this->SetMenuBoolClass(layout, "edit_props", "hidden", this->menuApplied.propsHidden, !isElement || dockPopup);
+	this->SetMenuBoolClass(layout, "edit_props", "hidden", this->menuApplied.propsHidden, (!isElement && !quickMenuSelected) || dockPopup);
 
 	this->RenderMenuPopups(layout);
 	// Смена класса панели не доезжает до стилей детей без полного пересчёта (см. RenderMenu).
@@ -707,6 +731,13 @@ void KZHUDService::TickHudEditor()
 	}
 	if (CBaseEntity *ent = this->ownedMenuLayout.Get())
 	{
+		const bool showQuickMenu = KZ::quickmenu::CanEditTab();
+		const auto pos = showQuickMenu ? KZ::quickmenu::GetTabPosition(this->player) : KZ::quickmenu::TabPosition {};
+		if (showQuickMenu == this->menuApplied.eQuickMenuHidden
+			|| (showQuickMenu && (pos.x != this->menuApplied.quickMenuX || pos.y != this->menuApplied.quickMenuY)))
+		{
+			this->RenderEditor();
+		}
 		this->RenderEditorReplica((CCSCustomHudLayout *)ent, true);
 	}
 }
@@ -755,6 +786,12 @@ void KZHUDService::EditorSetPos(i32 element, i32 x, i32 y)
 
 void KZHUDService::EditorNudge(i32 dx, i32 dy)
 {
+	if (this->editorSelected == EDITOR_QUICKMENU)
+	{
+		KZ::quickmenu::NudgeTabPosition(this->player, dx, dy);
+		this->RenderEditor();
+		return;
+	}
 	if (!IsEditorElement(this->editorSelected))
 	{
 		return;
@@ -822,14 +859,15 @@ void KZHUDService::EditorToggleElement(i32 element)
 
 void KZHUDService::EditorResetSelected()
 {
-	if (!IsEditorElement(this->editorSelected))
+	const bool quickMenu = this->editorSelected == EDITOR_QUICKMENU && KZ::quickmenu::CanEditTab();
+	if (!quickMenu && !IsEditorElement(this->editorSelected))
 	{
 		return;
 	}
 	// Узел элемента в скрытой категории — тот, где лежит его пункт позиции (xKey нигде больше
 	// не регистрируется). ResetNode пишет дефолты всех пунктов узла (вкл., позиция, кегль,
 	// шрифт, обводка, прозрачность, цвета) — ровно прежняя кнопка «Сброс» страницы элемента.
-	KZOptNode *node = KZMenuFindNodeByPref(LAYOUT_ELEMENTS[this->editorSelected].xKey);
+	KZOptNode *node = KZMenuFindNodeByPref(quickMenu ? KZ::quickmenu::TabXKey : LAYOUT_ELEMENTS[this->editorSelected].xKey);
 	if (!node)
 	{
 		KZ_LOG_WARN(LogChannel::General, "[cyb] hud_editor_reset_denied reason=node_not_found element=%i slot=%i\n", this->editorSelected,
@@ -934,6 +972,21 @@ bool KZHUDService::HandleEditorClick(const char *id)
 			}
 			// Сетка — проценты от левого-верхнего угла, преф — от центра (см. шапку).
 			this->EditorSetPos(sel, x - 50, y - 50);
+		}
+		else if (this->editorSelected == EDITOR_QUICKMENU)
+		{
+			KZ::quickmenu::SetTabPosition(this->player, x - 100, y - 50);
+			this->RenderEditor();
+		}
+		return true;
+	}
+	if (!V_strcmp(id, "e_quickmenu") || !V_strcmp(id, "el_quickmenu"))
+	{
+		if (KZ::quickmenu::CanEditTab() && this->editorSelected != EDITOR_QUICKMENU)
+		{
+			this->editorSelected = EDITOR_QUICKMENU;
+			this->editorDockLeft = KZ::quickmenu::GetTabPosition(this->player).x > -35;
+			this->RenderEditor();
 		}
 		return true;
 	}

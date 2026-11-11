@@ -29,7 +29,8 @@ namespace cvarquery
 	void Shutdown();
 
 	// The callback runs once, when the client answers; a client that never answers never calls back.
-	bool Query(CPlayerSlot slot, const char *cvarName, Callback callback);
+	bool Query(CPlayerSlot slot, const char *cvarName, Callback callback, i32 *cookieOut = nullptr);
+	void Cancel(CPlayerSlot slot, i32 cookie);
 
 	void OnClientDisconnect(CPlayerSlot slot);
 

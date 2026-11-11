@@ -1310,6 +1310,13 @@ private:
 		bool etOn[KZ_EDITOR_LIST_ROWS] {};
 		bool elSel[KZ_EDITOR_LIST_ROWS] {};
 		bool eSel[KZ_EDITOR_ITEMS] {};
+		bool eQuickMenuHidden {true};
+		bool elQuickMenuHidden {true};
+		bool eQuickMenuSelected {};
+		bool elQuickMenuSelected {};
+		bool positionOnly {};
+		i32 quickMenuX {INT_MIN};
+		i32 quickMenuY {INT_MIN};
 		// Строки el10..el13 (бейджи): разметка заводит el11..13 скрытыми — снимаем один раз.
 		bool elHidden[KZ_EDITOR_LIST_ROWS] {true, true, true, true, true, true, true, true, true, true, true, true, true, true};
 		// Строки «Позиция»/«Вид» панели свойств (ep_gt_pos, ep_prow_pos/step/size, ep_gt_look,

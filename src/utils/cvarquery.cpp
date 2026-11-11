@@ -40,7 +40,7 @@ void cvarquery::Shutdown()
 	}
 }
 
-bool cvarquery::Query(CPlayerSlot slot, const char *cvarName, Callback callback)
+bool cvarquery::Query(CPlayerSlot slot, const char *cvarName, Callback callback, i32 *cookieOut)
 {
 	if (!cvarName || !callback || slot.Get() < 0 || slot.Get() >= MAXPLAYERS)
 	{
@@ -64,7 +64,19 @@ bool cvarquery::Query(CPlayerSlot slot, const char *cvarName, Callback callback)
 	delete msg;
 
 	pendingQueries[slot.Get()][cookie] = std::move(callback);
+	if (cookieOut)
+	{
+		*cookieOut = cookie;
+	}
 	return true;
+}
+
+void cvarquery::Cancel(CPlayerSlot slot, i32 cookie)
+{
+	if (slot.Get() >= 0 && slot.Get() < MAXPLAYERS)
+	{
+		pendingQueries[slot.Get()].erase(cookie);
+	}
 }
 
 void cvarquery::OnClientDisconnect(CPlayerSlot slot)

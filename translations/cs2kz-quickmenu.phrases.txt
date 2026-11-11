@@ -1,5 +1,10 @@
 "Phrases"
 {
+	"Quick - Editor Name"
+	{
+		"en"		"Quick menu"
+		"ru"		"Быстрое меню"
+	}
 	"Quick - On"
 	{
 		"en"		"On"
