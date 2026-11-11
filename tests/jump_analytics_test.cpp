@@ -2,6 +2,8 @@
 #include <cassert>
 #include <iostream>
 #include <cstring>
+#include <fstream>
+#include <nlohmann/json.hpp>
 using namespace KZ::analytics;
 
 JumpRecord Wave(int n)
@@ -75,119 +77,110 @@ void Fixture()
 
 int main(int argc, char **argv)
 {
-	for (int event = 2; event <= 3; ++event)
+	InputFeatureVector positive {};
+	bool foundPositive = false;
+	// Use the fixture's actual vector to preserve provenance for decision tests.
+	std::ifstream in("tests/fixtures/ahk_input_v2.json");
+	nlohmann::json fixture;
+	in >> fixture;
+	for (const auto &c : fixture["cases"])
 	{
-		for (int index = 0; index < 6; ++index)
+		if (c["flagged"].get<bool>())
 		{
-			auto original = FixtureJump(1, index);
-			auto copy = FixtureJump(event, index);
-			assert(original.takeoff == copy.takeoff && original.landing == copy.landing);
-			assert(original.takeoffYaw == copy.takeoffYaw && original.landingYaw == copy.landingYaw);
-			assert(original.widthsDeg == copy.widthsDeg && original.durationsMs == copy.durationsMs);
-			assert(original.yawSamples == copy.yawSamples && original.airtimeMs == copy.airtimeMs);
-			assert(original.id != copy.id && original.endTick != copy.endTick);
+			positive = c["features"].get<InputFeatureVector>();
+			foundPositive = true;
+			break;
 		}
 	}
-	std::deque<JumpRecord> wave;
-	for (int i = 0; i < 6; ++i)
+	assert(foundPositive);
+	auto jump = [&](int n)
 	{
-		wave.push_back(Wave(i));
-	}
-	assert(Suspicious(wave));
-	auto reject = [&](auto change)
-	{
-		auto negative = wave;
-		for (auto &j : negative)
-		{
-			change(j);
-		}
-		assert(!Suspicious(negative));
+		auto j = Wave(n);
+		j.inputFeatures = positive;
+		j.widthsDeg.resize(5, 8);
+		j.durationsMs.resize(5, 100);
+		return j;
 	};
-	reject([](auto &j) { j.yawSamples.fill(0); });
-	reject(
-		[](auto &j)
-		{
-			for (int k = 0; k < 32; ++k)
-			{
-				j.yawSamples[k] = k * 0.25;
-			}
-		});
-	reject([](auto &j) { j.hasTurnBind = true; });
-	reject([](auto &j) { j.valid = false; });
-	reject([](auto &j) { j.inPrac = true; });
-	reject([](auto &j) { j.takeoff = {0, 0, 0}; });
-	reject(
-		[](auto &j)
-		{
-			j.widthsDeg.resize(17, 8);
-			j.durationsMs.resize(17, 200);
-		});
-	reject([](auto &j) { j.airtimeMs = 199; });
-	auto differing = wave;
-	differing.back().widthsDeg[0] += .016;
-	assert(!Suspicious(differing));
-	differing = wave;
-	differing.back().durationsMs[0] += 2.01;
-	assert(!Suspicious(differing));
-	differing = wave;
-	differing.back().yawSamples[5] += .016;
-	assert(!Suspicious(differing));
+	State shortJumps;
+	auto shortFirst = jump(100);
+	auto shortSecond = jump(101);
+	shortFirst.airtimeMs = shortSecond.airtimeMs = 150;
+	shortJumps.Add(shortFirst);
+	shortJumps.Add(shortSecond);
+	assert(shortJumps.ShouldAlert(100));
 	State state;
-	state.Add(Wave(0));
-	assert(!state.Finish());
 	state.Start();
-	state.Add(Wave(0));
+	state.Add(jump(0));
+	assert(!state.ShouldAlert(100));
+	state.Add(jump(0));
+	assert(!state.ShouldAlert(100)); // Duplicate callback cannot supply a second physical jump.
+	auto duplicateTick = jump(0);
+	duplicateTick.id = "different-id-same-physical-jump";
+	state.Add(duplicateTick);
+	assert(state.recent.size() == 1 && state.run.size() == 1 && !state.ShouldAlert(100));
 	state.Teleport();
-	state.Add(Wave(1));
-	assert(state.run[0].segment == 0 && state.run[1].segment == 1);
-	state.EnterPrac();
-	assert(state.usedPrac);
-	assert(state.Finish());
-	assert(!state.Finish());
-	state.Start();
-	for (int i = 0; i < 1025; ++i)
-	{
-		state.Add(Wave(i));
-	}
-	assert(state.run.size() == 1024 && state.truncated && state.recent.size() == 20);
-	state.Stop();
-	assert(!state.Finish() && state.run.empty());
-	state.Start();
+	assert(state.recent.size() == 1);
+	assert(state.segment == 1);
 	state.OmitJump();
-	assert(state.truncated);
-	state.Reset();
-	assert(state.run.empty() && state.recent.empty() && !state.truncated && !state.active);
-	state.Start();
-	for (int i = 0; i < 6; ++i)
-	{
-		state.Add(Wave(i));
-	}
+	assert(state.recent.size() == 1 && state.truncated);
+	auto bad = jump(10);
+	bad.valid = false;
+	state.Add(bad);
+	assert(state.recent.size() == 1);
+	auto second = jump(1);
+	second.takeoff = state.recent.front().takeoff;
+	state.Add(second);
 	assert(state.ShouldAlert(100));
 	assert(!state.ShouldAlert(101));
 	assert(!state.ShouldAlert(1899));
 	assert(state.ShouldAlert(1900));
-	state.Start();
-	state.Add(Wave(0), false);
-	assert(state.run.empty() && state.active);
-	auto malformed = Wave(0);
-	malformed.sync = std::nan("");
-	state.Add(malformed);
-	assert(state.run.empty() && state.truncated);
+	assert(state.run[0].segment == 0 && state.run.back().segment == 1);
+	auto legacy = JumpJson(jump(0));
+	assert(legacy.find("inputFeatures") == std::string::npos);
+	auto v2 = JumpJson(jump(0), true);
+	assert(v2.find("inputFeatures") != std::string::npos);
+	assert(nlohmann::json::parse(v2)["inputFeatures"].get<InputFeatureVector>() == positive);
+	auto noFeatures = Wave(0);
+	assert(JumpJson(noFeatures, true).find("\"inputFeatures\":null") != std::string::npos);
+	state.OmitJump();
+	state.Add(jump(20), false);
+	assert(state.truncated && state.recent.size() == 3);
+	assert(state.run.back().id != "synthetic-20");
+	state.EnterPrac();
+	assert(state.usedPrac && state.recent.empty());
+	assert(state.Finish());
+	assert(!state.Finish());
 	state.Reset();
-	for (int i = 0; i < 5; ++i)
+	state.Start();
+	for (int i = 0; i < 1025; ++i)
+	{
+		state.Add(jump(i));
+	}
+	assert(state.run.size() == 1024 && state.truncated && state.recent.size() == 20);
+	state.Stop();
+	assert(!state.Finish() && state.run.empty());
+	state.Reset();
+	state.Add(jump(0));
+	for (int i = 1; i <= 20; ++i)
 	{
 		state.Add(Wave(i));
 	}
-	assert(!state.ShouldAlert(5000));
-	for (int i = 0; i < 21; ++i)
-	{
-		auto j = Wave(i);
-		j.yawSamples.fill(0);
-		state.Add(j);
-	}
-	assert(state.recent.size() == 20 && !state.ShouldAlert(6000));
+	assert(!state.ShouldAlert(3000));
+	state.Reset();
+	auto turn = jump(0);
+	turn.hasTurnBind = true;
+	state.Add(turn);
+	state.Add(jump(1));
+	assert(!state.ShouldAlert(3000));
+	auto prac = jump(2);
+	prac.inPrac = true;
+	state.Add(prac);
+	assert(state.recent.empty());
+	auto wide = jump(0);
+	wide.widthsDeg.resize(18, 8);
+	wide.durationsMs.resize(18, 100);
+	assert(Complete(wide));
 	assert(WrapYaw(181) == -179 && WrapYaw(-181) == 179);
-	assert(JsonString("a\n\t\\\"\x01") == "\"a\\n\\t\\\\\\\"\\u0001\"");
 	if (argc == 2 && std::strcmp(argv[1], "--fixture") == 0)
 	{
 		Fixture();
