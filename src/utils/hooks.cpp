@@ -25,6 +25,7 @@
 #include "kz/kz.h"
 #include "kz/beam/kz_beam.h"
 #include "kz/hud/kz_hud.h"
+#include "kz/hud/layout/gsmenu.h"
 #include "kz/invisible/kz_invisible.h"
 #include "kz/jumpstats/kz_jumpstats.h"
 #include "kz/lead/kz_lead.h"
@@ -261,6 +262,10 @@ static KHook::Return<void> GameFramePre(ISource2Server *pThis, bool simulating, 
 	KZInvisibleService::OnGameFrame();
 	KZProfileService::OnGameFrame();
 	KZ::replaysystem::OnGameFrame();
+	if (simulating)
+	{
+		KZ::gsmenu::ExtTick();
+	}
 	KZRacingService::BroadcastRaceInfo();
 	return {KHook::Action::Ignore};
 }

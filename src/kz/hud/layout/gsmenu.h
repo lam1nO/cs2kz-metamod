@@ -128,9 +128,11 @@ namespace KZ::gsmenu
 	// Сущность внешнего владельца (GG1) игрока, если открыта: не создаётся; интерны на исходе —
 	// пересоздаётся с css_ui_reset, как в cyb_ui_batch.
 	CCSCustomHudLayout *ExtLayoutOf(KZPlayer *player);
+	void ExtTick(); // общий бюджет внешних меню на кадр сервера
 
 	// PB/WR в плитки сетки GG1 (kz_gsm_fill, gsmenu_fill.cpp).
 	void FillReset(i32 slot, bool leaving); // сущность снесена; leaving — игрок ушёл (забыть и PB)
+	bool FillStep(i32 slot); // не более одной PB/WR-плитки, только из ExtTick
 	void FillRefresh(KZPlayer *player);     // режим сменился — перечитать и переписать плитки
 	void FillOnTimeSaved(u64 steamID, i32 modeID, f64 time); // время записано в БД
 } // namespace KZ::gsmenu

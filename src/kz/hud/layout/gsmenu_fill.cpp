@@ -103,6 +103,8 @@ namespace
 		std::vector<std::string> pending; // пачки до «end»
 		std::vector<std::string> tiles;   // карта плитки gt{i}, пусто — не трогать
 		bool active = false;
+		bool queued = false;
+		size_t nextTile = 0;
 		std::vector<TileOut> applied;
 		u64 pbSteam = 0;
 		i32 pbMode = -1;
@@ -400,15 +402,16 @@ namespace
 		return t;
 	}
 
-	void Apply(KZPlayer *player, i32 slot, const WrCache &w)
+	bool ApplyNext(KZPlayer *player, i32 slot, const WrCache &w)
 	{
 		// Сущность берём ДО чтения fill: пересоздание по интернам сносит fill (DestroyExt), и GG1
 		// после css_ui_reset пришлёт его заново.
 		CCSCustomHudLayout *layout = KZ::gsmenu::ExtLayoutOf(player);
 		SlotFill &f = g_fill[slot];
-		if (!layout || !f.active)
+		if (!layout || !f.active || !f.queued || f.nextTile >= f.tiles.size())
 		{
-			return;
+			f.queued = false;
+			return false;
 		}
 		if (f.applied.size() < f.tiles.size())
 		{
@@ -417,7 +420,7 @@ namespace
 		bool classDirty = false;
 		i32 dropped = 0;
 		char panel[16];
-		for (size_t i = 0; i < f.tiles.size(); i++)
+		const size_t i = f.nextTile++;
 		{
 			TileOut &cur = f.applied[i];
 			// Пустой элемент (имя карты не прошло в консоль) — плитку очистить: в ней могла быть прежняя карта.
@@ -464,6 +467,8 @@ namespace
 		{
 			KZ_LOG_WARN(LogChannel::General, "[cyb] gsm_fill_dropped reason=intern_limit ops=%i slot=%i\n", dropped, slot);
 		}
+		f.queued = f.nextTile < f.tiles.size();
+		return true;
 	}
 
 	void Refresh(i32 slot)
@@ -478,6 +483,7 @@ namespace
 			return;
 		}
 		SlotFill &f = g_fill[slot];
+		f.queued = false;
 		const i32 modeID = KZ::mode::GetModeInfo(player->modeService).databaseID;
 		const bool pbOk = f.pbValid && f.pbMode == modeID && f.pbSteam == player->GetSteamId64();
 		const f64 now = Now();
@@ -500,7 +506,8 @@ namespace
 		// Устаревший по времени WR показываем, пока идёт перезапрос; сброшенный — ждём.
 		if (pbOk && w.valid)
 		{
-			Apply(player, slot, w);
+			f.nextTile = 0;
+			f.queued = !f.tiles.empty();
 		}
 	}
 } // namespace
@@ -516,6 +523,8 @@ void KZ::gsmenu::FillReset(i32 slot, bool leaving)
 	f.tiles.clear();
 	f.applied.clear();
 	f.active = false;
+	f.queued = false;
+	f.nextTile = 0;
 	if (leaving)
 	{
 		f.pb.clear();
@@ -525,6 +534,29 @@ void KZ::gsmenu::FillReset(i32 slot, bool leaving)
 		f.pbSteam = 0;
 		f.pbGen++; // летящий ответ ушедшему — выбросить
 	}
+}
+
+bool KZ::gsmenu::FillStep(i32 slot)
+{
+	SlotFill &f = g_fill[slot];
+	if (!f.queued)
+	{
+		return false;
+	}
+	KZPlayer *player = g_pKZPlayerManager->ToPlayer(CPlayerSlot(slot));
+	if (!player || !player->IsInGame() || !player->modeService || !f.pbValid || f.pbSteam != player->GetSteamId64())
+	{
+		f.queued = false;
+		return false;
+	}
+	const i32 modeID = KZ::mode::GetModeInfo(player->modeService).databaseID;
+	auto wr = g_wr.find(modeID);
+	if (f.pbMode != modeID || wr == g_wr.end() || !wr->second.valid)
+	{
+		f.queued = false;
+		return false;
+	}
+	return ApplyNext(player, slot, wr->second);
 }
 
 void KZ::gsmenu::FillRefresh(KZPlayer *player)

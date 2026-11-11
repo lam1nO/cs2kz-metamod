@@ -12,6 +12,7 @@
 // в кадре, где класс реально сменился, слой помечается на полный пересчёт.
 #include "kz/hud/layout/gsmenu.h"
 #include "kz/hud/layout/layout_fallback.h"
+#include "kz/hud/layout/menu_work_queue.h"
 #include "filesystem.h"
 #include "kz/hud/layout/layout.h"
 #include "sdk/entity/ccscustomhudlayout.h"
@@ -22,6 +23,7 @@
 #include "cs2kz.h"
 
 #include <cctype>
+#include <chrono>
 #include <unordered_map>
 
 #include "tier0/memdbgon.h"
@@ -82,6 +84,7 @@ namespace
 	};
 
 	ExtState g_ext[MAXPLAYERS + 1];
+	MenuWorkQueue<MAXPLAYERS> g_extWork;
 
 	WindowState *StateOf(KZPlayer *player)
 	{
@@ -615,6 +618,7 @@ bool KZ::gsmenu::OnClick(KZPlayer *player, uint32 packedHandle, const char *id)
 
 static void DestroyExt(KZPlayer *player, ExtState &e)
 {
+	g_extWork.Clear(player->GetPlayerSlot().Get());
 	// Плитки сетки ушли вместе с сущностью — данные kz_gsm_fill GG1 пришлёт заново после открытия.
 	KZ::gsmenu::FillReset(player->GetPlayerSlot().Get(), false);
 	if (CBaseEntity *ent = e.entity.Get())
@@ -901,12 +905,10 @@ CON_COMMAND_F(cyb_ui_batch, "cyb_ui_batch <slot> <op>\\x1f<op>... ; op = c\\x1ep
 	{
 		return;
 	}
-	CCSCustomHudLayout *layout = ExtLayout(player, slot);
-	if (!layout)
+	if (!g_ext[slot].entity.IsValid())
 	{
 		return;
 	}
-	bool classDirty = false;
 	std::string op;
 	for (const char *p = ArgsAfterSlot(args);; p++)
 	{
@@ -914,7 +916,7 @@ CON_COMMAND_F(cyb_ui_batch, "cyb_ui_batch <slot> <op>\\x1f<op>... ; op = c\\x1ep
 		{
 			if (!op.empty())
 			{
-				ApplyExtOp(player, layout, op.c_str(), classDirty);
+				g_extWork.Push(slot, op);
 			}
 			op.clear();
 			if (*p == '\0')
@@ -925,23 +927,40 @@ CON_COMMAND_F(cyb_ui_batch, "cyb_ui_batch <slot> <op>\\x1f<op>... ; op = c\\x1ep
 		}
 		op += *p;
 	}
-	if (classDirty)
-	{
-		layout->GetGlobalLayoutState()->MarkFullChanged();
-	}
+}
+
+// Разбор команды дешёвый; сетевые векторы меняем только под общим бюджетом кадра.
+void KZ::gsmenu::ExtTick()
+{
+	g_extWork.Run(
+		[](int slot, const std::string &op)
+		{
+			KZPlayer *player = g_pKZPlayerManager->ToPlayer(CPlayerSlot(slot));
+			CCSCustomHudLayout *layout = player && player->IsInGame() ? ExtLayout(player, slot) : nullptr;
+			if (!layout)
+			{
+				g_extWork.Clear(slot);
+				return;
+			}
+			bool classDirty = false;
+			ApplyExtOp(player, layout, op.c_str(), classDirty);
+			if (classDirty)
+			{
+				layout->GetGlobalLayoutState()->MarkFullChanged();
+			}
+		},
+		[](int slot) { return KZ::gsmenu::FillStep(slot); },
+		[] { return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); });
 }
 
 CON_COMMAND_F(cyb_ui_class, "cyb_ui_class <slot> <panel> <class> <0|1>", FCVAR_NONE)
 {
 	i32 slot = -1;
 	KZPlayer *player = ExtPlayer(context, args, slot);
-	CCSCustomHudLayout *layout = player && args.ArgC() >= 5 ? ExtLayout(player, slot) : nullptr;
-	if (layout)
+	if (player && args.ArgC() >= 5 && g_ext[slot].entity.IsValid())
 	{
-		bool dirty = false;
 		std::string op = std::string("c\x1e") + args.Arg(2) + "\x1e" + args.Arg(3) + "\x1e" + args.Arg(4);
-		ApplyExtOp(player, layout, op.c_str(), dirty);
-		layout->GetGlobalLayoutState()->MarkFullChanged();
+		g_extWork.Push(slot, std::move(op));
 	}
 }
 
@@ -949,8 +968,7 @@ CON_COMMAND_F(cyb_ui_var, "cyb_ui_var <slot> <panel> <var> <значение д�
 {
 	i32 slot = -1;
 	KZPlayer *player = ExtPlayer(context, args, slot);
-	CCSCustomHudLayout *layout = player && args.ArgC() >= 4 ? ExtLayout(player, slot) : nullptr;
-	if (!layout)
+	if (!player || args.ArgC() < 4 || !g_ext[slot].entity.IsValid())
 	{
 		return;
 	}
@@ -967,7 +985,7 @@ CON_COMMAND_F(cyb_ui_var, "cyb_ui_var <slot> <panel> <var> <значение д�
 			rest++;
 		}
 	}
-	layout->SetDialogVariableString(args.Arg(2), args.Arg(3), rest);
+	g_extWork.Push(slot, std::string("v\x1e") + args.Arg(2) + "\x1e" + args.Arg(3) + "\x1e" + rest);
 }
 
 // Версия протокола — плагины проверяют её, чтобы понять, что мост есть (как у cyber-ui).
