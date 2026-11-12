@@ -31,7 +31,7 @@ namespace KZ::quickmenu
 		{
 			return 0;
 		}
-		return static_cast<int>(50 * (1 / std::max(0.5, safe) - 1));
+		return static_cast<int>(50 * (1 / (std::max)(0.5, safe) - 1));
 	}
 
 	inline TabPosition ClampTabPosition(double x, double y, int rightLimit)
