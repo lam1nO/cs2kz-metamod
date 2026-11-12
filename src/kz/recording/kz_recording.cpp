@@ -125,6 +125,13 @@ void KZRecordingService::Reset()
 		this->circularRecording->jumps.clear();
 	}
 	this->runRecorders.clear();
+	for (auto &recorder : this->jumpRecorders)
+	{
+		if (recorder.evidenceFailure)
+		{
+			recorder.evidenceFailure();
+		}
+	}
 	this->jumpRecorders.clear();
 	this->lastCmdNumReceived = 0;
 	this->currentRunUUID = UUID_t(false);

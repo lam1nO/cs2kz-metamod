@@ -154,15 +154,19 @@ namespace KZ::analytics
 		return false;
 	}
 
+	inline bool PositiveInputEvidence(const JumpRecord &j)
+	{
+		return Complete(j) && j.valid && !j.inPrac && !j.hasTurnBind && j.widthsDeg.size() >= 5 && j.airtimeMs > 0 && j.airtimeMs <= 60000
+			   && j.inputFeatures && InputScore(*j.inputFeatures) >= AHK_INPUT_THRESHOLD;
+	}
+
 	inline bool Suspicious(const std::deque<JumpRecord> &window)
 	{
 		std::vector<std::string> positiveIds;
 		std::vector<int> positiveTicks;
 		for (const auto &j : window)
 		{
-			if (!Complete(j) || !j.valid || j.inPrac || j.hasTurnBind || j.widthsDeg.size() < 5 || j.airtimeMs <= 0 || j.airtimeMs > 60000
-				|| !j.inputFeatures || InputScore(*j.inputFeatures) < AHK_INPUT_THRESHOLD
-				|| std::find(positiveIds.begin(), positiveIds.end(), j.id) != positiveIds.end()
+			if (!PositiveInputEvidence(j) || std::find(positiveIds.begin(), positiveIds.end(), j.id) != positiveIds.end()
 				|| std::find(positiveTicks.begin(), positiveTicks.end(), j.endTick) != positiveTicks.end())
 			{
 				continue;

@@ -1,5 +1,6 @@
 #include "kz_analytics.h"
 #include "jump_analytics.h"
+#include "movement_evidence.h"
 #include "source_identity.h"
 #include "kz/kz.h"
 #include "kz/jumpstats/kz_jumpstats.h"
@@ -8,11 +9,15 @@
 #include "kz/prac/kz_prac.h"
 #include "kz/option/kz_option.h"
 #include "kz/outbox/kz_outbox.h"
+#include "kz/recording/kz_recording.h"
+#include "kz/jumpstats/jumptop.h"
 #include "kz/timer/submission.h"
 #include "kz/replays/cyb_replay_common.h"
 #include "utils/utils.h"
 #include "utils/json.h"
+#include "utils/ctimer.h"
 #include <chrono>
+#include <memory>
 #include <ctime>
 #include <cstdlib>
 
@@ -32,6 +37,12 @@ namespace KZ::analytics
 		};
 
 		ActorState actors[MAXPLAYERS + 1];
+		evidence::PendingDeliveries pendingEvidence;
+
+		double EvidenceNow()
+		{
+			return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+		}
 
 		ActorState *Slot(KZPlayer *player)
 		{
@@ -362,6 +373,22 @@ namespace KZ::analytics
 		}
 	}
 
+	void InitEvidenceDelivery()
+	{
+		StartTimer<>(
+			+[]() -> f64
+			{
+				pendingEvidence.Poll(EvidenceNow());
+				return 1.0;
+			},
+			1.0, true, true);
+	}
+
+	void FlushPendingEvidence()
+	{
+		pendingEvidence.Flush();
+	}
+
 	void OnJumpFinish(Jump *jump)
 	{
 		auto *actor = Current(jump->player);
@@ -387,6 +414,10 @@ namespace KZ::analytics
 		{
 			actor->state.OmitJump();
 		}
+		// Keep the current positive identity before Add moves it. Old window positives can
+		// trigger an alert after cooldown even when the current jump is normal.
+		const int evidenceEndTick = record.endTick;
+		const bool currentPositive = PositiveInputEvidence(record);
 		actor->state.Add(std::move(record), belongsToRun && runEligible);
 		double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
 		if (actor->state.ShouldAlert(now))
@@ -395,7 +426,58 @@ namespace KZ::analytics
 			data["detectorVersion"] = "ahk-input-v2";
 			data["modelId"] = AHK_INPUT_MODEL_ID;
 			data["jumps"] = JumpsJson(actor->state.recent, true);
-			Emit(jump->player, "kz.ahk_suspected", std::move(data), 2);
+			const std::string serverId = SourceServerId(std::getenv("CS2_INSTANCE_ID"), KZOptionService::GetOptionStr("cybServerId", ""));
+			const char *url = KZOptionService::GetOptionStr("cybEmitUrl", "");
+			if (serverId.empty() || !url || !*url)
+			{
+				return;
+			}
+			const std::string id = UUID_t().ToString();
+			// Freeze player identity, map, timestamp and payload on the game thread. Callbacks
+			// survive disconnect and must never dereference a player or actor slot.
+			const std::string body = Envelope(jump->player, "kz.ahk_suspected", id, serverId, data, 2);
+			auto delivery = std::make_shared<evidence::Delivery>(
+				[id, body, evidenceEndTick](const std::string &uuid)
+				{
+					std::string finalBody = body;
+					if (!uuid.empty())
+					{
+						auto event = nlohmann::json::parse(body);
+						event["events"][0]["data"]["replay"] = {{"uuid", uuid}, {"endTick", evidenceEndTick}};
+						finalBody = event.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+					}
+					if (finalBody.size() > 512u * 1024u)
+					{
+						return;
+					}
+					KZOutboxService::EnqueueEvent(id, finalBody);
+					KZOutboxService::SendEvent(id, finalBody);
+				});
+			if (!currentPositive || jump->GetJumpType() == JumpType_FullInvalid || jump->player->pracService->IsInPrac())
+			{
+				delivery->Complete("", false);
+				return;
+			}
+			pendingEvidence.Add(delivery, EvidenceNow());
+			if (delivery->IsComplete())
+			{
+				return;
+			}
+			const u64 steamId = jump->player->GetSteamId64();
+			const std::string mapName = g_pKZUtils->GetCurrentMapName().Get();
+			jump->player->recordingService->RecordMovementEvidence(
+				jump,
+				[steamId, mapName, evidenceEndTick, delivery](const UUID_t &uuid, const std::vector<char> &buffer)
+				{
+					if (delivery->IsComplete())
+					{
+						return;
+					}
+					const std::string replayId = uuid.ToString();
+					KZ::jumptop::StoreMovementEvidence(uuid, buffer, steamId, mapName, evidenceEndTick,
+													   [replayId, delivery](bool ok) { delivery->Complete(replayId, ok); });
+				},
+				[delivery]() { delivery->Complete("", false); });
 		}
 	}
 

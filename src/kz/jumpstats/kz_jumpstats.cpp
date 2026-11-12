@@ -1107,9 +1107,9 @@ void KZJumpstatsService::EndJump()
 		return;
 	}
 	jump->End();
-	KZ::analytics::OnJumpFinish(jump);
 	if (jump->GetJumpType() == JumpType_FullInvalid)
 	{
+		KZ::analytics::OnJumpFinish(jump);
 		return;
 	}
 	// В prac прыжок не идёт ни в статистику, ни в реплеи: тики prac не записываются
@@ -1121,6 +1121,7 @@ void KZJumpstatsService::EndJump()
 		KZJumpstatsService::AnnounceJump(jump);
 		this->player->recordingService->OnJumpFinish(jump);
 	}
+	KZ::analytics::OnJumpFinish(jump);
 	this->player->anticheatService->OnJumpFinish(jump);
 	// Джамптоп — после записи прыжка (нужен UUID этого прыжка, lastJumpUUID) и после античита:
 	// детектор может забанить именно за этот прыжок, и тогда он в топ не идёт (isBanned).

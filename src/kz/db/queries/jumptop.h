@@ -173,7 +173,8 @@ constexpr char sql_jumptop_getplayerbests[] = R"(
     SELECT t.ID, t.JumpType, t.IsBlockJump, t.Block, t.Distance, t.Strafes, t.Sync, t.Pre, t.Max, t.Airtime, t.MapName, t.Dir
         FROM (
             SELECT j.*, )" JUMPTOP_DIRECTION_SQL R"( AS Dir,
-                ROW_NUMBER() OVER (PARTITION BY j.JumpType, j.IsBlockJump, )" JUMPTOP_DIRECTION_SQL R"( ORDER BY j.Block DESC, j.Distance DESC, j.ID ASC) AS rn
+                ROW_NUMBER() OVER (PARTITION BY j.JumpType, j.IsBlockJump, )" JUMPTOP_DIRECTION_SQL
+											  R"( ORDER BY j.Block DESC, j.Distance DESC, j.ID ASC) AS rn
                 FROM Jumptop j
                 WHERE j.SteamID64 = %llu AND j.Mode = %d AND j.Removed = 0
         ) t
@@ -197,4 +198,22 @@ constexpr char sqlite_jumptop_replay_insert[] = R"(
 
 constexpr char sql_jumptop_replay_fetch[] = R"(
     SELECT Data FROM JumptopReplays WHERE ReplayUUID = '%s'
+)";
+
+// AHK alert clips are independent of PB history; expiration is Unix UTC seconds.
+constexpr char mysql_movement_evidence_create[] = R"(
+ CREATE TABLE IF NOT EXISTS KzMovementEvidenceReplays (
+ ReplayUUID CHAR(36) NOT NULL PRIMARY KEY, Data MEDIUMTEXT NOT NULL,
+ SteamID64 BIGINT UNSIGNED NOT NULL, MapName VARCHAR(255) NOT NULL,
+ EndTick BIGINT NOT NULL, ExpiresAt BIGINT NOT NULL,
+ INDEX IDX_KzMovementEvidence_Expiry (ExpiresAt))
+)";
+constexpr char sqlite_movement_evidence_create[] = R"(
+ CREATE TABLE IF NOT EXISTS KzMovementEvidenceReplays (
+ ReplayUUID TEXT NOT NULL PRIMARY KEY, Data TEXT NOT NULL,
+ SteamID64 INTEGER NOT NULL, MapName TEXT NOT NULL,
+ EndTick INTEGER NOT NULL, ExpiresAt INTEGER NOT NULL)
+)";
+constexpr char sqlite_movement_evidence_index[] = R"(
+ CREATE INDEX IF NOT EXISTS IDX_KzMovementEvidence_Expiry ON KzMovementEvidenceReplays (ExpiresAt)
 )";

@@ -20,6 +20,7 @@
 #include "jumptop_rules.h"
 
 #include <vector>
+#include <functional>
 
 class KZPlayer;
 
@@ -35,6 +36,9 @@ namespace KZ::jumptop
 
 	// Готовый буфер реплея прыжка, помеченного джамптопом (KZRecordingService). Главный поток.
 	void StoreReplay(const UUID_t &uuid, const std::vector<char> &buffer);
+
+	void StoreMovementEvidence(const UUID_t &uuid, const std::vector<char> &buffer, u64 steamId, const std::string &mapName, int endTick,
+							   std::function<void(bool)> done);
 
 	using rules::IsBetter;
 	using rules::IsTrackedJumpType;

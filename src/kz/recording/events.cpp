@@ -393,10 +393,45 @@ void KZRecordingService::MarkJumpForJumptop(const UUID_t &uuid, Jump *jump)
 	}
 }
 
+void KZRecordingService::RecordMovementEvidence(Jump *jump, std::function<void(const UUID_t &, const std::vector<char> &)> success,
+												std::function<void()> failure)
+{
+	if (!fileWriter || jump->GetJumpType() == JumpType_FullInvalid || this->player->pracService->IsInPrac())
+	{
+		failure();
+		return;
+	}
+	this->EnsureCircularRecorderInitialized();
+	if (!this->circularRecording->tickData->GetReadAvailable())
+	{
+		failure();
+		return;
+	}
+	// Dedicated UUID: PB uploads and their retention remain independent.
+	this->jumpRecorders.emplace_back(jump);
+	this->jumpRecorders.back().evidenceSuccess = std::move(success);
+	this->jumpRecorders.back().evidenceFailure = std::move(failure);
+}
+
 void KZRecordingService::QueueJumpRecorderWrite(JumpRecorder &&recorder)
 {
 	if (!fileWriter)
 	{
+		if (recorder.evidenceFailure)
+		{
+			recorder.evidenceFailure();
+		}
+		return;
+	}
+	if (recorder.evidenceSuccess)
+	{
+		auto success = std::move(recorder.evidenceSuccess);
+		auto failure = std::move(recorder.evidenceFailure);
+		auto ptr = std::make_unique<JumpRecorder>(std::move(recorder));
+		this->CopyWeaponsToRecorder(ptr.get());
+		fileWriter->QueueWrite(
+			std::move(ptr), [success](const UUID_t &uuid, f32, std::vector<char> &&buffer) { success(uuid, buffer); },
+			[failure](const char *) { failure(); });
 		return;
 	}
 	bool jumptop = recorder.jumptop;

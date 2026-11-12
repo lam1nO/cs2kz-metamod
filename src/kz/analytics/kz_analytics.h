@@ -5,6 +5,8 @@ struct RunSubmission;
 
 namespace KZ::analytics
 {
+	void InitEvidenceDelivery();
+	void FlushPendingEvidence();
 	void Reset(KZPlayer *player);
 	void Start(KZPlayer *player);
 	void Stop(KZPlayer *player);

@@ -1,3 +1,4 @@
+#include "kz/analytics/kz_analytics.h"
 #include "cs2kz.h"
 
 #include "entity2/entitysystem.h"
@@ -24,7 +25,7 @@
 #include "kz/ztopwatch/kz_ztopwatch.h"
 #include "kz/tip/kz_tip.h"
 #include "kz/option/kz_option.h"
-#include "kz/option/menu/model.h" // KZ::menu::Cleanup — снос реестра настроек на выгрузке
+#include "kz/option/menu/model.h"    // KZ::menu::Cleanup — снос реестра настроек на выгрузке
 #include "kz/option/pref_registry.h" // KZ::prefs::Cleanup — кэш реестра держит указатели на его узлы
 #include "kz/hud/share/hud_share.h"  // KZ::hudshare::Cleanup — то же для белого списка обмена
 #include "kz/outbox/kz_outbox.h"
@@ -189,6 +190,7 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 	// Дисковый outbox завершённых ранов: каталоги + таймер ретраера — при загрузке,
 	// чтобы после краша/рестарта дослать write-ahead файлы, оставшиеся с прошлой жизни.
 	KZOutboxService::Init();
+	KZ::analytics::InitEvidenceDelivery();
 	// Воркер бэклога AWR: таймер поднимается только при cybAwrBackfillIntervalSec > 0,
 	// команда kz_awr_backfill работает и с выключенным автоподбором.
 	CybAwrBackfill::Init();
@@ -226,6 +228,8 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 
 bool KZPlugin::Unload(char *error, size_t maxlen)
 {
+	// Resolve deferred alert bodies on the main thread before writer/DB/outbox teardown.
+	KZ::analytics::FlushPendingEvidence();
 	this->unloading = true;
 	// Меню редактора зон — до всего остального: их колбэки держат указатели в наш DLL,
 	// и живой хэндл в cs2menus после выгрузки — вызов в выгруженный код.

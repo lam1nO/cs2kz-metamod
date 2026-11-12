@@ -19,6 +19,9 @@
 #include "utils/utils.h"
 #include "utils/json.h"
 #include "utils/tables.h"
+#include "utils/ctimer.h"
+#include <ctime>
+#include "kz/analytics/movement_evidence.h"
 
 #include "filesystem.h"
 #include "vendor/sql_mm/src/public/sql_mm.h"
@@ -362,16 +365,16 @@ namespace
 	// не видели бы друг друга — WR засчитался бы обоим. После коммита второй сервер видит
 	// чужую строку. Кэш «WR на момент захода» не используется вовсе — рекорд спрашивается у
 	// общей базы на каждом PB.
-	void AnnouncePB(CPlayerUserId userID, const std::string &name, u64 steamID64, i32 modeID, i32 jumpType, bool isBlock, i32 block,
-					f64 distance, const std::string &replayUuid, const std::string &mapName, u32 id, i32 direction)
+	void AnnouncePB(CPlayerUserId userID, const std::string &name, u64 steamID64, i32 modeID, i32 jumpType, bool isBlock, i32 block, f64 distance,
+					const std::string &replayUuid, const std::string &mapName, u32 id, i32 direction)
 	{
 		if (!KZDatabaseService::IsReady())
 		{
 			return;
 		}
 		char rank[2048];
-		V_snprintf(rank, sizeof(rank), sql_jumptop_rank, modeID, jumpType, isBlock ? 1 : 0, direction, block, block, distance, distance, id, steamID64, modeID,
-				   jumpType, isBlock ? 1 : 0, direction);
+		V_snprintf(rank, sizeof(rank), sql_jumptop_rank, modeID, jumpType, isBlock ? 1 : 0, direction, block, block, distance, distance, id,
+				   steamID64, modeID, jumpType, isBlock ? 1 : 0, direction);
 		Transaction txn;
 		txn.queries.push_back(rank);
 		// clang-format off
@@ -470,7 +473,7 @@ namespace
 
 		// %f печатает NaN/inf как «nan»/«inf» — MySQL читает это как имя колонки и отвергает
 		// запрос (Unknown column 'nan', 11.10). Такой прыжок в топ не пишем вовсе.
-		const f64 numbers[] = {distance, (f64)jump->GetSync(), (f64)jump->GetTakeoffSpeed(), (f64)jump->GetMaxSpeed(),
+		const f64 numbers[] = {distance,           (f64)jump->GetSync(),      (f64)jump->GetTakeoffSpeed(), (f64)jump->GetMaxSpeed(),
 							   (f64)jump->airtime, (f64)jump->GetMaxHeight(), (f64)jump->GetOffset()};
 		for (f64 v : numbers)
 		{
@@ -484,7 +487,8 @@ namespace
 		std::vector<char> insert(cleanDetails.size() + map.size() + 1024);
 		V_snprintf(insert.data(), (int)insert.size(), sql_jumptop_insert, steamID64, modeID, jumpType, isBlock ? 1 : 0, block, distance,
 				   jump->GetStrafeCount(), (f64)jump->GetSync(), (f64)jump->GetTakeoffSpeed(), (f64)jump->GetMaxSpeed(), (f64)jump->airtime,
-				   (f64)jump->GetMaxHeight(), (f64)jump->GetOffset(), map.c_str(), server.c_str(), replayUuid.c_str(), cleanDetails.c_str(), direction);
+				   (f64)jump->GetMaxHeight(), (f64)jump->GetOffset(), map.c_str(), server.c_str(), replayUuid.c_str(), cleanDetails.c_str(),
+				   direction);
 
 		Transaction txn;
 		txn.queries.push_back(insert.data());
@@ -592,6 +596,23 @@ static_assert(KZ::jumptop::rules::maxLadderDrop == JS_MAX_LADDERJUMP_OFFSET);
 void KZ::jumptop::Init()
 {
 	KZDatabaseService::RegisterEventListener(&databaseEventListener);
+	StartTimer<>(
+		+[]() -> f64
+		{
+			static bool pending = false;
+			if (pending || !KZDatabaseService::IsReady())
+			{
+				return 60.0;
+			}
+			pending = true;
+			Transaction txn;
+			// Bounded and indexed on both engines; no unbounded fleet-wide purge.
+			txn.queries.push_back(KZ::analytics::evidence::ExpireSQL(std::time(nullptr)));
+			KZDatabaseService::GetDatabaseConnection()->ExecuteTransaction(
+				txn, [](std::vector<ISQLQuery *>) { pending = false; }, [](std::string, int) { pending = false; });
+			return 60.0;
+		},
+		60.0, true, true);
 }
 
 void KZ::jumptop::OnJumpFinish(KZPlayer *player, Jump *jump)
@@ -649,7 +670,11 @@ void KZ::jumptop::OnJumpFinish(KZPlayer *player, Jump *jump)
 		if (it == cache->bests.end() || IsBetter(isBlock, rowBlock, distance, it->second.block, it->second.distance))
 		{
 			isPB[c] = true;
-			cache->bests[key] = {rowBlock, distance, jump->GetStrafeCount(), (f64)jump->GetSync(), (f64)jump->GetTakeoffSpeed(),
+			cache->bests[key] = {rowBlock,
+								 distance,
+								 jump->GetStrafeCount(),
+								 (f64)jump->GetSync(),
+								 (f64)jump->GetTakeoffSpeed(),
 								 g_pKZUtils->GetCurrentMapName().Get()};
 		}
 	}
@@ -689,10 +714,34 @@ void KZ::jumptop::StoreReplay(const UUID_t &uuid, const std::vector<char> &buffe
 	OfferReplayBuffer(uuidStr, buffer);
 }
 
+void KZ::jumptop::StoreMovementEvidence(const UUID_t &uuid, const std::vector<char> &buffer, u64 steamId, const std::string &mapName, int endTick,
+										std::function<void(bool)> done)
+{
+	if (!KZDatabaseService::IsReady() || !KZ::analytics::evidence::CanStore(buffer.size(), endTick))
+	{
+		done(false);
+		return;
+	}
+	auto *db = KZDatabaseService::GetDatabaseConnection();
+	const std::string encoded = macaron::Base64::Encode(std::string(buffer.begin(), buffer.end()));
+	const std::string query = "INSERT INTO KzMovementEvidenceReplays (ReplayUUID,Data,SteamID64,MapName,EndTick,ExpiresAt) VALUES ('"
+							  + uuid.ToString() + "','" + encoded + "'," + std::to_string(steamId) + ",'" + db->Escape(mapName.c_str()) + "',"
+							  + std::to_string(endTick) + "," + std::to_string(std::time(nullptr) + KZ::analytics::evidence::ttlSeconds) + ")";
+	Transaction txn;
+	txn.queries.push_back(query);
+	db->ExecuteTransaction(
+		txn, [done](std::vector<ISQLQuery *>) { done(true); },
+		[done](std::string error, int)
+		{
+			KZ_LOG_WARN(LogChannel::DB, "[analytics] replay evidence insert failed: %s\n", error.c_str());
+			done(false);
+		});
+}
+
 /*
  * Реплей прыжка: локальный файл (свой инстанс) либо base64 из базы → downloads/ → штатный плеер.
  */
-static_function void PlayJumpReplay(KZPlayer *player, const std::string &uuid)
+static_function void PlayJumpReplay(KZPlayer *player, const std::string &uuid, bool evidence = false)
 {
 	UUID_t parsed;
 	if (!UUID_t::FromString(uuid.c_str(), &parsed))
@@ -705,7 +754,7 @@ static_function void PlayJumpReplay(KZPlayer *player, const std::string &uuid)
 	V_snprintf(local, sizeof(local), KZ_REPLAY_PATH "/%s.replay", clean.c_str());
 	char downloaded[512];
 	V_snprintf(downloaded, sizeof(downloaded), KZ_REPLAY_DOWNLOADS_PATH "/%s.replay", clean.c_str());
-	if (g_pFullFileSystem->FileExists(local) || g_pFullFileSystem->FileExists(downloaded))
+	if (!evidence && (g_pFullFileSystem->FileExists(local) || g_pFullFileSystem->FileExists(downloaded)))
 	{
 		KZ::replaysystem::commands::LoadReplay(player, clean.c_str());
 		return;
@@ -719,12 +768,12 @@ static_function void PlayJumpReplay(KZPlayer *player, const std::string &uuid)
 	char query[256];
 	V_snprintf(query, sizeof(query), sql_jumptop_replay_fetch, clean.c_str());
 	Transaction txn;
-	txn.queries.push_back(query);
+	txn.queries.push_back(evidence ? KZ::analytics::evidence::FetchSQL(clean, std::time(nullptr)) : std::string(query));
 	CPlayerUserId userID = player->GetClient()->GetUserID();
 	// clang-format off
 	KZDatabaseService::GetDatabaseConnection()->ExecuteTransaction(
 		txn,
-		[userID, clean](std::vector<ISQLQuery *> queries)
+		[userID, clean, evidence](std::vector<ISQLQuery *> queries)
 		{
 			KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
 			if (!player)
@@ -737,10 +786,18 @@ static_function void PlayJumpReplay(KZPlayer *player, const std::string &uuid)
 				player->languageService->PrintChat(true, false, "Jumptop - No Replay");
 				return;
 			}
+			// Recheck after async DB latency; an already downloaded file cannot bypass TTL.
+			if (evidence && result->GetInt64(1) <= (long long)std::time(nullptr))
+			{
+				player->languageService->PrintChat(true, false, "Jumptop - No Replay");
+				return;
+			}
 			size_t len = 0;
 			const char *data = result->GetString(0, &len);
 			std::string decoded;
-			if (!data || !macaron::Base64::Decode(std::string(data, len), decoded).empty() || decoded.empty())
+			if (!data || (evidence && len > KZ::analytics::evidence::maxEncodedBytes)
+				|| !macaron::Base64::Decode(std::string(data, len), decoded).empty() || decoded.empty()
+				|| (evidence && decoded.size() > KZ::analytics::evidence::maxBytes))
 			{
 				KZ_LOG_WARN(LogChannel::DB, "[cyb] jumptop_replay_bad_data replay=%s\n", clean.c_str());
 				player->languageService->PrintChat(true, false, "Jumptop - No Replay");
@@ -882,7 +939,8 @@ static_function void PrintStoredJumpReport(KZPlayer *target, const StoredJump &s
 	}
 	if (JsonNum(d, "landingEdge") > 0.0)
 	{
-		landingEdgeStr = KZLanguageService::PrepareMessageWithLang(lang, "Jumpstat Report - Console Segment - Landing Edge", JsonNum(d, "landingEdge"));
+		landingEdgeStr =
+			KZLanguageService::PrepareMessageWithLang(lang, "Jumpstat Report - Console Segment - Landing Edge", JsonNum(d, "landingEdge"));
 	}
 	if (JsonNum(d, "block") > 0.0)
 	{
@@ -2128,6 +2186,12 @@ SCMD(kz_jumpreplay, SCFL_JUMPSTATS | SCFL_REPLAY)
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	if (!player)
 	{
+		return true;
+	}
+	UUID_t evidenceUUID;
+	if (args->ArgC() > 1 && UUID_t::FromString(args->Arg(1), &evidenceUUID))
+	{
+		PlayJumpReplay(player, evidenceUUID.ToString(), true);
 		return true;
 	}
 	i32 id = args->ArgC() > 1 ? V_StringToInt32(args->Arg(1), 0) : 0;

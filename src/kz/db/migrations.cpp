@@ -53,6 +53,7 @@ static_global const std::string mysqlMigrations[] =
 	trimString(mysql_jumptop_create),
 	trimString(mysql_jumptop_replays_create),
 	trimString(mysql_jumptop_add_direction),
+	trimString(mysql_movement_evidence_create),
 };
 
 static_global const std::string sqliteMigrations[] = 
@@ -75,6 +76,8 @@ static_global const std::string sqliteMigrations[] =
 	trimString(sqlite_jumptop_create),
 	trimString(sqlite_jumptop_replays_create),
 	trimString(sqlite_jumptop_add_direction),
+	trimString(sqlite_movement_evidence_create),
+	trimString(sqlite_movement_evidence_index),
 };
 
 // clang-format on
@@ -152,8 +155,7 @@ void KZDatabaseService::CheckMigrations(std::vector<ISQLQuery *> queries)
 		// Все три случая — НЕаддитивные миграции; выкатывать такие на общую базу можно только
 		// синхронно со всем флотом. Признак ситуации виден снаружи: строка ниже + инвариант
 		// kz_db_ready (см. docs/runbooks/fleet-invariants.md в монорепо).
-		KZ_LOG_WARN(LogChannel::DB,
-					"[cyb] db_migrations_ahead reason=plugin_older_than_db applied=%u known=%u ahead=%u tolerated=1\n", current, max,
+		KZ_LOG_WARN(LogChannel::DB, "[cyb] db_migrations_ahead reason=plugin_older_than_db applied=%u known=%u ahead=%u tolerated=1\n", current, max,
 					current - max);
 		// Дальше работаем с ИЗВЕСТНЫМ ПРЕФИКСОМ: сверяем его по CRC (цикл ниже) и считаем базу
 		// полностью настроенной (current == max → onSuccess), догонять нечего.
@@ -249,8 +251,8 @@ void KZDatabaseService::CheckMigrations(std::vector<ISQLQuery *> queries)
 	auto onTxnFailure = [onFailure, current, max](std::string error, int failIndex)
 	{
 		u32 migration = current + (u32)(failIndex / 2);
-		bool duplicateColumn = KZDatabaseService::GetDatabaseType() == DatabaseType::MySQL && failIndex >= 0 && failIndex % 2 == 0
-							   && migration < max && error.find("Duplicate column name") != std::string::npos;
+		bool duplicateColumn = KZDatabaseService::GetDatabaseType() == DatabaseType::MySQL && failIndex >= 0 && failIndex % 2 == 0 && migration < max
+							   && error.find("Duplicate column name") != std::string::npos;
 		if (!duplicateColumn || s_duplicateColumnRetries >= max)
 		{
 			KZ_LOG_WARN(LogChannel::DB, "[cyb] db_migration_failed index=%d error=%s\n", failIndex, error.c_str());
@@ -266,12 +268,10 @@ void KZDatabaseService::CheckMigrations(std::vector<ISQLQuery *> queries)
 		Transaction fix;
 		fix.queries.push_back(insert);
 		GetDatabaseConnection()->ExecuteTransaction(
-			fix, [](std::vector<ISQLQuery *>) { KZDatabaseService::RunMigrations(); },
-			[onFailure](std::string, int) { onFailure(); });
+			fix, [](std::vector<ISQLQuery *>) { KZDatabaseService::RunMigrations(); }, [onFailure](std::string, int) { onFailure(); });
 	};
 
-	GetDatabaseConnection()->ExecuteTransaction(
-		txn, [onSuccess](std::vector<ISQLQuery *> queries) { onSuccess(); }, onTxnFailure);
+	GetDatabaseConnection()->ExecuteTransaction(txn, [onSuccess](std::vector<ISQLQuery *> queries) { onSuccess(); }, onTxnFailure);
 }
 
 bool KZDatabaseService::IsReady()
