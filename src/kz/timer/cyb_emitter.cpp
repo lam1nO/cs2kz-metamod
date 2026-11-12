@@ -95,8 +95,8 @@ void CybEmitter::Emit(const RunSubmission &sub)
 	long long timeMs = (long long)(sub.time * 1000.0 + 0.5);
 
 	const std::string campaign = KZOptionService::GetOptionStr("cybEventTicketsCampaign", "");
-	const std::string ticketProof = sub.ticketEligible && CybTickets::IsCampaignId(campaign)
-		? ",\"eventTicket\":{\"campaignId\":\"" + campaign + "\",\"valid\":true}" : "";
+	const std::string ticketProof =
+		sub.ticketEligible && CybTickets::IsCampaignId(campaign) ? ",\"eventTicket\":{\"campaignId\":\"" + campaign + "\",\"valid\":true}" : "";
 
 	// Строим JSON payload
 	// Формат: { "events": [ { envelope + data } ] }
