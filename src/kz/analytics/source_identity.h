@@ -34,16 +34,16 @@ namespace KZ::analytics
 
 	inline std::string MovementSourceHeader(const std::string &body)
 	{
-		// Заголовок двух movement-типов берётся из сохранённого envelope.
+		// Заголовок проверенных KZ-типов берётся из сохранённого envelope.
 		// Это сохраняет атрибуцию при ретраях после изменения окружения процесса.
-		if (body.find("kz.ahk_suspected") == std::string::npos
-			&& body.find("kz.movement_run_finished") == std::string::npos)
+		if (body.find("kz.ahk_suspected") == std::string::npos && body.find("kz.movement_run_finished") == std::string::npos
+			&& body.find("kz.run_finished") == std::string::npos)
 		{
 			return "";
 		}
 		auto payload = nlohmann::json::parse(body, nullptr, false);
-		if (!payload.is_object() || !payload.contains("events") || !payload["events"].is_array()
-			|| payload["events"].size() != 1 || !payload["events"][0].is_object())
+		if (!payload.is_object() || !payload.contains("events") || !payload["events"].is_array() || payload["events"].size() != 1
+			|| !payload["events"][0].is_object())
 		{
 			return "";
 		}
@@ -53,7 +53,7 @@ namespace KZ::analytics
 			return "";
 		}
 		const auto &type = event["type"].get_ref<const std::string &>();
-		if (type != "kz.ahk_suspected" && type != "kz.movement_run_finished")
+		if (type != "kz.ahk_suspected" && type != "kz.movement_run_finished" && type != "kz.run_finished")
 		{
 			return "";
 		}

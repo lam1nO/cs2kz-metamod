@@ -1,4 +1,9 @@
+#include "cs2kz.h"
 #include "cyb_emitter.h"
+#include "cyb_ticket_lease.h"
+#include <charconv>
+#include <cstdlib>
+#include "kz/analytics/source_identity.h"
 #include "cyb_ticket_eligibility.h"
 
 #include "utils/utils.h"
@@ -73,7 +78,10 @@ void CybEmitter::Emit(const RunSubmission &sub)
 	if (!url || url[0] == '\0')
 		return; // эмиттер выключен
 
-	const char *serverId = KZOptionService::GetOptionStr("cybServerId", "");
+	const char *legacyServerId = KZOptionService::GetOptionStr("cybServerId", "");
+	const bool hasTicketProof = sub.ticketEligible && CybTickets::IsCampaignId(sub.ticketCampaign);
+	const std::string serverId = hasTicketProof ? KZ::analytics::SourceServerId(std::getenv("CS2_INSTANCE_ID"), legacyServerId)
+										  : (legacyServerId ? legacyServerId : "");
 
 	// Маппинг режима
 	const char *modeStr = MapMode(sub.mode.name);
@@ -94,9 +102,9 @@ void CybEmitter::Emit(const RunSubmission &sub)
 	// Время в мс (cs2kz хранит в секундах как f64)
 	long long timeMs = (long long)(sub.time * 1000.0 + 0.5);
 
-	const std::string campaign = KZOptionService::GetOptionStr("cybEventTicketsCampaign", "");
+	const std::string &campaign = sub.ticketCampaign;
 	const std::string ticketProof =
-		sub.ticketEligible && CybTickets::IsCampaignId(campaign) ? ",\"eventTicket\":{\"campaignId\":\"" + campaign + "\",\"valid\":true}" : "";
+		hasTicketProof ? ",\"eventTicket\":{\"campaignId\":\"" + campaign + "\",\"valid\":true}" : "";
 
 	// Строим JSON payload
 	// Формат: { "events": [ { envelope + data } ] }
@@ -122,7 +130,7 @@ void CybEmitter::Emit(const RunSubmission &sub)
 		"}]}",
 		eventIdStr.c_str(),
 		atBuf,
-		JsonEscape(std::string(serverId ? serverId : "")).c_str(),
+		JsonEscape(serverId).c_str(),
 		(unsigned long long)sub.player.steamid64,
 		JsonEscape(sub.map.name).c_str(),
 		(int)sub.course.number,
@@ -138,4 +146,52 @@ void CybEmitter::Emit(const RunSubmission &sub)
 	std::string bodyStr(body);
 	KZOutboxService::EnqueueEvent(eventIdStr, bodyStr);
 	KZOutboxService::SendEvent(eventIdStr, bodyStr);
+}
+
+namespace
+{
+	CybTickets::Lease eventTicketLease;
+
+	std::int64_t LeaseNow()
+	{
+		return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+	}
+} // namespace
+
+CConVar<i32> cyb_event_tickets_lease_version("cyb_event_tickets_lease_version", FCVAR_NONE, "Runtime event lease protocol version.", 1);
+
+std::string CybEmitter::CaptureTicketCampaign()
+{
+	return eventTicketLease.Capture(LeaseNow());
+}
+
+CON_COMMAND_F(cyb_event_tickets_lease, "Trusted server event lease: campaign UUID or clear, TTL seconds0..90.", FCVAR_NONE)
+{
+	if (context.GetPlayerSlot().Get() != -1)
+	{
+		return;
+	}
+	int seconds = -1;
+	if (args.ArgC() == 3)
+	{
+		const std::string value = args.Arg(2);
+		auto parsed = std::from_chars(value.data(), value.data() + value.size(), seconds);
+		if (parsed.ec != std::errc {} || parsed.ptr != value.data() + value.size())
+		{
+			seconds = -1;
+		}
+	}
+	eventTicketLease.Update(args.ArgC() == 3 ? args.Arg(1) : "invalid", static_cast<std::int64_t>(seconds) * 1000, LeaseNow(), -1);
+}
+
+CON_COMMAND_F(cyb_event_tickets_status, "Read the trusted event lease status.", FCVAR_NONE)
+{
+	if (context.GetPlayerSlot().Get() != -1)
+	{
+		return;
+	}
+	auto now = LeaseNow();
+	auto id = eventTicketLease.Capture(now);
+	Msg("[event_tickets] enabled=%d campaign=%s remaining_ms=%lld\n", id.empty() ? 0 : 1, id.empty() ? "none" : id.c_str(),
+		static_cast<long long>(eventTicketLease.Remaining(now)));
 }

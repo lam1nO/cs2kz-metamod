@@ -14,4 +14,5 @@ namespace CybEmitter
 	// Отправляет событие kz.run_finished в наш ingest.
 	// Вызов неблокирующий (HTTP::Request::Send использует Steam async HTTP).
 	void Emit(const RunSubmission &sub);
+	std::string CaptureTicketCampaign();
 } // namespace CybEmitter
