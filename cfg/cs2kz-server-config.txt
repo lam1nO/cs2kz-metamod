@@ -113,6 +113,9 @@
 	"cybEmitToken"	""
 	// Server ID reported in each event envelope (must match the token's server).
 	"cybServerId"	""
+	// Contest proof is default-off; campaign UUID must match the API configuration.
+	"cybEventTicketsEnabled"	"0"
+	"cybEventTicketsCampaign"	""
 	// AWR backlog worker: how often (seconds) the server picks ONE replay without a
 	// computed AWR time from the platform, cuts it and posts the result back.
 	// 0 disables the automatic pickup entirely; mass runs are done from RCON with
