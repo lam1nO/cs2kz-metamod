@@ -1,4 +1,5 @@
 #include "cyb_emitter.h"
+#include "cyb_ticket_eligibility.h"
 
 #include "utils/utils.h"
 #include "utils/uuid.h"
@@ -93,6 +94,10 @@ void CybEmitter::Emit(const RunSubmission &sub)
 	// Время в мс (cs2kz хранит в секундах как f64)
 	long long timeMs = (long long)(sub.time * 1000.0 + 0.5);
 
+	const std::string campaign = KZOptionService::GetOptionStr("cybEventTicketsCampaign", "");
+	const std::string ticketProof =
+		sub.ticketEligible && CybTickets::IsCampaignId(campaign) ? ",\"eventTicket\":{\"campaignId\":\"" + campaign + "\",\"valid\":true}" : "";
+
 	// Строим JSON payload
 	// Формат: { "events": [ { envelope + data } ] }
 	char body[2048];
@@ -112,7 +117,7 @@ void CybEmitter::Emit(const RunSubmission &sub)
 		"\"mode\":\"%s\","
 		"\"timeMs\":%lld,"
 		"\"teleports\":%u,"
-		"\"styles\":[]"
+		"\"styles\":[]%s"
 		"}"
 		"}]}",
 		eventIdStr.c_str(),
@@ -124,7 +129,7 @@ void CybEmitter::Emit(const RunSubmission &sub)
 		JsonEscape(sub.course.name).c_str(),
 		modeStr,
 		timeMs,
-		(unsigned)sub.teleports);
+		(unsigned)sub.teleports, ticketProof.c_str());
 
 	// Write-ahead: тело события на диск ДО первой попытки отправки — при обрыве
 	// сети до платформы ран не потеряется, ретраер outbox дошлёт его с тем же id.

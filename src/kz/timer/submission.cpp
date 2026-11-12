@@ -1,6 +1,8 @@
 #include "kz/analytics/kz_analytics.h"
 #include "submission.h"
 #include "cyb_emitter.h"
+#include "cyb_ticket_eligibility.h"
+#include "kz/prac/kz_prac.h"
 #include "kz/db/kz_db.h"
 #include "kz/anticheat/kz_anticheat.h"
 #include "kz/global/kz_global.h"
@@ -231,6 +233,9 @@ RunSubmission::RunSubmission(KZPlayer *player)
 	}
 
 	// Отправляем ран в Cyber-инджест (write-ahead + отправка внутри; не влияет на local/global submit)
+	this->ticketEligible =
+		CybTickets::Eligible(KZOptionService::GetOptionInt("cybEventTicketsEnabled", 0) == 1, this->submitEligible,
+							 player->timerService->GetValidTimer(), player->pracService->IsInPrac(), this->course.number, this->styles.size());
 	CybEmitter::Emit(*this);
 
 	// Snapshot previous global PBs for diff display
