@@ -23,6 +23,7 @@ jobs:
         run: |
           c++ -std=c++17 -Wall -Wextra -Werror tests/cyb_ticket_eligibility_test.cpp -o /tmp/ticket-test && /tmp/ticket-test
           c++ -std=c++17 -Wall -Wextra -Werror tests/cyb_ticket_lease_test.cpp -o /tmp/lease-test && /tmp/lease-test
+          c++ -std=c++17 -Wall -Wextra -Werror -I . tests/analytics_source_identity_test.cpp -o /tmp/source-test && /tmp/source-test
 
       - name: Make build directory
         run: mkdir ./build

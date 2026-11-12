@@ -2,6 +2,8 @@
 #include "cyb_emitter.h"
 #include "cyb_ticket_lease.h"
 #include <charconv>
+#include <cstdlib>
+#include "kz/analytics/source_identity.h"
 #include "cyb_ticket_eligibility.h"
 
 #include "utils/utils.h"
@@ -76,7 +78,10 @@ void CybEmitter::Emit(const RunSubmission &sub)
 	if (!url || url[0] == '\0')
 		return; // эмиттер выключен
 
-	const char *serverId = KZOptionService::GetOptionStr("cybServerId", "");
+	const char *legacyServerId = KZOptionService::GetOptionStr("cybServerId", "");
+	const bool hasTicketProof = sub.ticketEligible && CybTickets::IsCampaignId(sub.ticketCampaign);
+	const std::string serverId = hasTicketProof ? KZ::analytics::SourceServerId(std::getenv("CS2_INSTANCE_ID"), legacyServerId)
+										  : (legacyServerId ? legacyServerId : "");
 
 	// Маппинг режима
 	const char *modeStr = MapMode(sub.mode.name);
@@ -99,7 +104,7 @@ void CybEmitter::Emit(const RunSubmission &sub)
 
 	const std::string &campaign = sub.ticketCampaign;
 	const std::string ticketProof =
-		sub.ticketEligible && CybTickets::IsCampaignId(campaign) ? ",\"eventTicket\":{\"campaignId\":\"" + campaign + "\",\"valid\":true}" : "";
+		hasTicketProof ? ",\"eventTicket\":{\"campaignId\":\"" + campaign + "\",\"valid\":true}" : "";
 
 	// Строим JSON payload
 	// Формат: { "events": [ { envelope + data } ] }
@@ -125,7 +130,7 @@ void CybEmitter::Emit(const RunSubmission &sub)
 		"}]}",
 		eventIdStr.c_str(),
 		atBuf,
-		JsonEscape(std::string(serverId ? serverId : "")).c_str(),
+		JsonEscape(serverId).c_str(),
 		(unsigned long long)sub.player.steamid64,
 		JsonEscape(sub.map.name).c_str(),
 		(int)sub.course.number,
