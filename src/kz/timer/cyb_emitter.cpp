@@ -145,21 +145,48 @@ void CybEmitter::Emit(const RunSubmission &sub)
 
 namespace
 {
-    CybTickets::Lease eventTicketLease;
-    std::int64_t LeaseNow() {return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();}
-}
+	CybTickets::Lease eventTicketLease;
+
+	std::int64_t LeaseNow()
+	{
+		return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+	}
+} // namespace
+
 CConVar<i32> cyb_event_tickets_lease_version("cyb_event_tickets_lease_version", FCVAR_NONE, "Runtime event lease protocol version.", 1);
-std::string CybEmitter::CaptureTicketCampaign() {return eventTicketLease.Capture(LeaseNow());}
+
+std::string CybEmitter::CaptureTicketCampaign()
+{
+	return eventTicketLease.Capture(LeaseNow());
+}
+
 CON_COMMAND_F(cyb_event_tickets_lease, "Trusted server event lease: campaign UUID or clear, TTL seconds0..90.", FCVAR_NONE)
 {
-    if(context.GetPlayerSlot().Get()!=-1)return;
-    int seconds=-1;
-    if(args.ArgC()==3) {const std::string value=args.Arg(2);auto parsed=std::from_chars(value.data(),value.data()+value.size(),seconds);if(parsed.ec!=std::errc{}||parsed.ptr!=value.data()+value.size())seconds=-1;}
-    eventTicketLease.Update(args.ArgC()==3?args.Arg(1):"invalid",static_cast<std::int64_t>(seconds)*1000,LeaseNow(),-1);
+	if (context.GetPlayerSlot().Get() != -1)
+	{
+		return;
+	}
+	int seconds = -1;
+	if (args.ArgC() == 3)
+	{
+		const std::string value = args.Arg(2);
+		auto parsed = std::from_chars(value.data(), value.data() + value.size(), seconds);
+		if (parsed.ec != std::errc {} || parsed.ptr != value.data() + value.size())
+		{
+			seconds = -1;
+		}
+	}
+	eventTicketLease.Update(args.ArgC() == 3 ? args.Arg(1) : "invalid", static_cast<std::int64_t>(seconds) * 1000, LeaseNow(), -1);
 }
+
 CON_COMMAND_F(cyb_event_tickets_status, "Read the trusted event lease status.", FCVAR_NONE)
 {
-    if(context.GetPlayerSlot().Get()!=-1)return;
-    auto now=LeaseNow();auto id=eventTicketLease.Capture(now);
-    Msg("[event_tickets] enabled=%d campaign=%s remaining_ms=%lld\n",id.empty()?0:1,id.empty()?"none":id.c_str(),static_cast<long long>(eventTicketLease.Remaining(now)));
+	if (context.GetPlayerSlot().Get() != -1)
+	{
+		return;
+	}
+	auto now = LeaseNow();
+	auto id = eventTicketLease.Capture(now);
+	Msg("[event_tickets] enabled=%d campaign=%s remaining_ms=%lld\n", id.empty() ? 0 : 1, id.empty() ? "none" : id.c_str(),
+		static_cast<long long>(eventTicketLease.Remaining(now)));
 }
