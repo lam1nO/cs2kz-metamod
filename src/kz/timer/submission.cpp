@@ -233,8 +233,9 @@ RunSubmission::RunSubmission(KZPlayer *player)
 	}
 
 	// Отправляем ран в Cyber-инджест (write-ahead + отправка внутри; не влияет на local/global submit)
+	this->ticketCampaign = CybEmitter::CaptureTicketCampaign();
 	this->ticketEligible =
-		CybTickets::Eligible(KZOptionService::GetOptionInt("cybEventTicketsEnabled", 0) == 1, this->submitEligible,
+		CybTickets::Eligible(!this->ticketCampaign.empty(), this->submitEligible,
 							 player->timerService->GetValidTimer(), player->pracService->IsInPrac(), this->course.number, this->styles.size());
 	CybEmitter::Emit(*this);
 

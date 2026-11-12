@@ -48,6 +48,7 @@ struct RunSubmission
 	// что НЕ зависит от доступности БД в момент финиша: недоступная БД — как раз
 	// тот случай, ради которого outbox и существует.
 	bool submitEligible {};
+	std::string ticketCampaign;
 	bool ticketEligible {}; // Snapshot: valid main run, no practice/styles; independent of DB availability.
 	// У всех стилей рана есть локальные DB ID (иначе INSERT в Times не отрендерить).
 	bool stylesLocalOk {true};

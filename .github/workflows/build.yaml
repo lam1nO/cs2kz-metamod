@@ -20,7 +20,9 @@ jobs:
         run: git fetch --no-recurse-submodules --prune --unshallow --tags
 
       - name: Ticket eligibility host test
-        run: c++ -std=c++17 -Wall -Wextra -Werror tests/cyb_ticket_eligibility_test.cpp -o /tmp/ticket-test && /tmp/ticket-test
+        run: |
+          c++ -std=c++17 -Wall -Wextra -Werror tests/cyb_ticket_eligibility_test.cpp -o /tmp/ticket-test && /tmp/ticket-test
+          c++ -std=c++17 -Wall -Wextra -Werror tests/cyb_ticket_lease_test.cpp -o /tmp/lease-test && /tmp/lease-test
 
       - name: Make build directory
         run: mkdir ./build
