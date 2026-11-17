@@ -973,6 +973,15 @@ static_function void SyncNativeStageHighlights()
 		}
 		g_cybZones.nativeStageHl.push_back(hl);
 	}
+	// Пишем только при изменении: функция зовётся на каждом применении набора.
+	static_persist i32 s_lastTriggers = -1, s_lastDrawn = -1;
+	if ((i32)boxes.size() != s_lastTriggers || (i32)g_cybZones.nativeStageHl.size() != s_lastDrawn)
+	{
+		s_lastTriggers = (i32)boxes.size();
+		s_lastDrawn = (i32)g_cybZones.nativeStageHl.size();
+		KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] native_stage_highlight map=%s triggers=%d drawn=%d limit=%d\n", g_cybZones.mapName.c_str(),
+					s_lastTriggers, s_lastDrawn, KZ_ZONE_NATIVE_STAGE_HL_MAX);
+	}
 }
 
 static_function void DespawnAll()
