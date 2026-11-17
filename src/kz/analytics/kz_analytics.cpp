@@ -91,9 +91,14 @@ namespace KZ::analytics
 			u64 steamId = player->GetSteamId64();
 			if (actor->steamId != steamId || actor->context != context)
 			{
-				double lastAlert = actor->steamId == steamId ? actor->state.lastAlert : -1;
+				const bool samePlayer = actor->steamId == steamId;
+				double lastAlert = samePlayer ? actor->state.lastAlert : -1;
+				double lastEmit = samePlayer ? actor->state.lastEmit : -1;
+				double reportedMaxDistance = samePlayer ? actor->state.reportedMaxDistance : -1;
 				actor->state.Reset();
 				actor->state.lastAlert = lastAlert;
+				actor->state.lastEmit = lastEmit;
+				actor->state.reportedMaxDistance = reportedMaxDistance;
 				actor->steamId = steamId;
 				actor->context = context;
 				++actor->generation;
@@ -295,7 +300,7 @@ namespace KZ::analytics
 									 {"withFeatures", withFeatures},
 									 {"modelPositive", positive},
 									 {"lastScore", lastScore},
-									 {"lastAlert", actor.state.lastAlert},
+									 {"lastAlert", actor.state.lastAlert}, {"lastEmit", actor.state.lastEmit}, {"reportedMaxDistance", actor.state.reportedMaxDistance},
 									 {"recent", recent}};
 			Msg("[analytics] actor=%s\n", status.dump().c_str());
 		}

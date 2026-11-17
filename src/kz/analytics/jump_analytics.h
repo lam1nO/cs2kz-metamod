@@ -188,6 +188,13 @@ namespace KZ::analytics
 		bool active {}, usedPrac {}, truncated {};
 		int segment {};
 		double lastAlert = -1;
+		// Escalation inside the 30-minute cooldown: a positive jump farther than every
+		// previously reported positive by ESCALATION_MIN_GAIN, at most once per ESCALATION_SPACING.
+		double lastEmit = -1;
+		double reportedMaxDistance = -1;
+		static constexpr double ALERT_COOLDOWN = 1800;
+		static constexpr double ESCALATION_SPACING = 180;
+		static constexpr double ESCALATION_MIN_GAIN = 0.5;
 
 		void Reset()
 		{
@@ -279,14 +286,40 @@ namespace KZ::analytics
 			return finished;
 		}
 
+		double MaxPositiveDistance() const
+		{
+			double best = -1;
+			for (const auto &j : recent)
+			{
+				if (PositiveInputEvidence(j))
+				{
+					best = std::max(best, j.distance);
+				}
+			}
+			return best;
+		}
+
 		bool ShouldAlert(double now)
 		{
-			if ((lastAlert >= 0 && now - lastAlert < 1800) || !Suspicious(recent))
+			if (!Suspicious(recent))
 			{
 				return false;
 			}
-			lastAlert = now;
-			return true;
+			const double best = MaxPositiveDistance();
+			if (lastAlert < 0 || now - lastAlert >= ALERT_COOLDOWN)
+			{
+				lastAlert = now;
+				lastEmit = now;
+				reportedMaxDistance = best;
+				return true;
+			}
+			if (best > reportedMaxDistance + ESCALATION_MIN_GAIN && now - lastEmit >= ESCALATION_SPACING)
+			{
+				lastEmit = now;
+				reportedMaxDistance = best;
+				return true;
+			}
+			return false;
 		}
 	};
 

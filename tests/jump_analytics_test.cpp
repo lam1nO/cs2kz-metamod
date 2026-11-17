@@ -135,6 +135,31 @@ int main(int argc, char **argv)
 	assert(!state.ShouldAlert(1899));
 	assert(state.ShouldAlert(1900));
 	assert(state.run[0].segment == 0 && state.run.back().segment == 1);
+	// Escalation inside the cooldown: only a farther positive jump, spaced by 3 minutes.
+	State esc;
+	esc.Add(jump(30));
+	esc.Add(jump(31));
+	assert(esc.ShouldAlert(0) && esc.reportedMaxDistance == 250);
+	auto slightly = jump(32);
+	slightly.distance = 250.4;
+	esc.Add(slightly);
+	assert(!esc.ShouldAlert(200));
+	auto far = jump(33);
+	far.distance = 260;
+	esc.Add(far);
+	assert(!esc.ShouldAlert(100));
+	assert(esc.ShouldAlert(200) && esc.reportedMaxDistance == 260);
+	assert(!esc.ShouldAlert(500));
+	auto farther = jump(34);
+	farther.distance = 270;
+	esc.Add(farther);
+	assert(!esc.ShouldAlert(300));
+	assert(esc.ShouldAlert(380) && esc.reportedMaxDistance == 270);
+	auto normalFar = Wave(35);
+	normalFar.distance = 290;
+	esc.Add(normalFar);
+	assert(!esc.ShouldAlert(700)); // Distance alone without model evidence never escalates.
+	assert(esc.ShouldAlert(1800) && esc.lastAlert == 1800);
 	auto legacy = JumpJson(jump(0));
 	assert(legacy.find("inputFeatures") == std::string::npos);
 	auto v2 = JumpJson(jump(0), true);
