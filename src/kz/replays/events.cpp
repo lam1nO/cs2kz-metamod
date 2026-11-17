@@ -221,12 +221,9 @@ namespace KZ::replaysystem::events
 				{
 					f64 diff = event->data.timer.time - replay->lastSplitTime;
 					CUtlString splitTime = KZTimerService::FormatDiffTime(diff);
-					splitTime.Format(" {grey}(%s)", splitTime.Get());
+					splitTime.Format(" {grey}({default}%s{grey})", splitTime.Get());
 					time.Append(splitTime.Get());
 				}
-				// Сколько всего этапов — у курса реплея; не нашли курс — хотя бы номер текущего.
-				const KZCourseDescriptor *stageCourse = replay->courseName[0] ? KZ::course::GetCourse(replay->courseName, false) : nullptr;
-				const i32 stageTotal = stageCourse ? MAX(stageCourse->stageCount, (i32)event->data.timer.index) : (i32)event->data.timer.index;
 
 				for (KZPlayer *spec = player.specService->GetNextSpectator(NULL); spec != NULL; spec = player.specService->GetNextSpectator(spec))
 				{
@@ -271,9 +268,13 @@ namespace KZ::replaysystem::events
 				{
 					f64 diff = event->data.timer.time - replay->lastStageTime;
 					CUtlString splitTime = KZTimerService::FormatDiffTime(diff);
-					splitTime.Format(" {grey}({default}%s{grey})", splitTime.Get());
+					splitTime.Format(" {grey}(%s)", splitTime.Get());
 					time.Append(splitTime.Get());
 				}
+
+				// Сколько всего этапов — у курса реплея; не нашли курс — хотя бы номер текущего.
+				const KZCourseDescriptor *stageCourse = replay->courseName[0] ? KZ::course::GetCourse(replay->courseName, false) : nullptr;
+				const i32 stageTotal = stageCourse ? MAX(stageCourse->stageCount, (i32)event->data.timer.index) : (i32)event->data.timer.index;
 
 				for (KZPlayer *spec = player.specService->GetNextSpectator(NULL); spec != NULL; spec = player.specService->GetNextSpectator(spec))
 				{
