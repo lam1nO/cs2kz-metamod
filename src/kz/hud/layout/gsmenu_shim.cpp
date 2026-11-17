@@ -50,6 +50,9 @@ namespace
 		MenuItemAdjustFn onAdjust;
 		bool closeOnSelect = true;
 		bool capture = false;
+		// W/S отданы потребителю (SetMenuKey Up/Down = None): курсор стоит, клавиши — его.
+		// Нужно WASD-режиму редактора зон: W/S там двигают зону, а не курсор.
+		bool navFrozen = false;
 		i32 startItem = 0;
 		std::vector<Item> items;
 		// Родитель подменю — как childDef->parent в cs2menus: R ведёт к нему, даже когда подменю
@@ -444,7 +447,7 @@ public:
 			this->Render(player, *s);
 			return;
 		}
-		if (!s->captured && (pressed & (IN_FORWARD | IN_BACK)) && count > 0)
+		if (!s->captured && !m->navFrozen && (pressed & (IN_FORWARD | IN_BACK)) && count > 0)
 		{
 			const i32 dir = (pressed & IN_FORWARD) ? -1 : 1;
 			for (i32 step = 1; step <= count; step++)
@@ -661,6 +664,10 @@ public:
 
 	void SetMenuKey(MenuHandle menu, MenuNavAction action, MenuButton button) override
 	{
+		if (Menu *m = Find(menu); m && (action == MenuNavAction::Up || action == MenuNavAction::Down))
+		{
+			m->navFrozen = button == MenuButton::None;
+		}
 		real->SetMenuKey(RealOf(menu), action, button);
 	}
 

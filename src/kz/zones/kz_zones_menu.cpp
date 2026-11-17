@@ -950,7 +950,7 @@ static_function void SetNudge(KZPlayer *player, MenuHandle menu, ZoneMenuState &
 		player->GetOrigin(&state.nudgeOrigin);
 		state.nudgeHeld = 0;
 		state.nudgeRepeatAt = 0.0f;
-		g_pMenus->SetSlotStatus(slot, "W/S/A/D — сдвиг, Пробел/Ctrl — вверх/вниз, E — готово");
+		g_pMenus->SetSlotStatus(slot, "WASD/Пробел/Ctrl — сдвиг · E — стоп");
 	}
 	else
 	{
