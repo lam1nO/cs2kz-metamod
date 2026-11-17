@@ -491,18 +491,28 @@
 	}
 	"Course Stage Reached"
 	{
-		"#format"	"number:d,time_text:s,diff_text:s,diff_text_pro:s"
-		"en"		"{grey}Stage {default}#{number}{grey}: {lime}{time_text}{grey}{diff_text}{diff_text_pro}"
-		"chi"		"{grey}阶段 {default}#{number}{grey}: {lime}{time_text}{grey}{diff_text}{diff_text_pro}"
-		"pl"		"{grey}Etap {default}#{number}{grey}: {lime}{time_text}{grey}{diff_text}{diff_text_pro}"
-		"ru"		"{grey}Этап {default}#{number}{grey}: {lime}{time_text}{grey}{diff_text}{diff_text_pro}"
-		"sv"		"{grey}Fas {default}#{number}{grey}: {lime}{time_text}{grey}{diff_text}{diff_text_pro}"
-		"ua"		"{grey}Стадія {default}#{number}{grey}: {lime}{time_text}{grey}{diff_text}{diff_text_pro}"
-		"tr"		"{grey}Aşama {default}#{number}{grey}: {lime}{time_text}{grey}{diff_text}{diff_text_pro}"
-		"ko"		"{grey}스테이지 {default}#{number}{grey}: {lime}{time_text}{grey}{diff_text}{diff_text_pro}"
-		"es"		"{grey}Etapa {default}#{number}{grey}: {lime}{time_text}{grey}{diff_text}{diff_text_pro}"
-		"lv"		"{grey}Posms {default}#{number}{grey}: {lime}{time_text}{grey}{diff_text}{diff_text_pro}"
-		"de"		"{grey}Stage {default}#{number}{grey}: {lime}{time_text}{grey}{diff_text}{diff_text_pro}"
+		"#format"	"number:d,total:d,time_text:s,pb_text:s,wr_text:s"
+		"en"		"{grey}Stage {default}{number}/{total}{grey} · {lime}{time_text}{grey}{pb_text}{wr_text}"
+		"chi"		"{grey}阶段 {default}{number}/{total}{grey} · {lime}{time_text}{grey}{pb_text}{wr_text}"
+		"pl"		"{grey}Etap {default}{number}/{total}{grey} · {lime}{time_text}{grey}{pb_text}{wr_text}"
+		"ru"		"{grey}Этап {default}{number}/{total}{grey} · {lime}{time_text}{grey}{pb_text}{wr_text}"
+		"sv"		"{grey}Fas {default}{number}/{total}{grey} · {lime}{time_text}{grey}{pb_text}{wr_text}"
+		"ua"		"{grey}Стадія {default}{number}/{total}{grey} · {lime}{time_text}{grey}{pb_text}{wr_text}"
+		"tr"		"{grey}Aşama {default}{number}/{total}{grey} · {lime}{time_text}{grey}{pb_text}{wr_text}"
+		"ko"		"{grey}스테이지 {default}{number}/{total}{grey} · {lime}{time_text}{grey}{pb_text}{wr_text}"
+		"es"		"{grey}Etapa {default}{number}/{total}{grey} · {lime}{time_text}{grey}{pb_text}{wr_text}"
+		"lv"		"{grey}Posms {default}{number}/{total}{grey} · {lime}{time_text}{grey}{pb_text}{wr_text}"
+		"de"		"{grey}Stage {default}{number}/{total}{grey} · {lime}{time_text}{grey}{pb_text}{wr_text}"
+	}
+	"Stage Diff PB"
+	{
+		"#format"	"diff_time:s"
+		"en"		"{grey} · PB {diff_time}"
+	}
+	"Stage Diff WR"
+	{
+		"#format"	"diff_time:s"
+		"en"		"{grey} · WR {diff_time}"
 	}
 
 	// The spaces are intentional.

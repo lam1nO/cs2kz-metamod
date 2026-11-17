@@ -2430,43 +2430,43 @@ void KZTimerService::ShowStageText()
 		return;
 	}
 
-	CUtlString time;
-	std::string pbDiff, pbDiffPro = "";
-
-	time = utils::FormatTime(this->stageZoneTimes[this->currentStage]);
+	// Время этапа + отрезок от прошлого этапа в скобках.
+	CUtlString time = utils::FormatTime(this->stageZoneTimes[this->currentStage]);
 	if (this->currentStage > 0)
 	{
-		f64 diff = this->stageZoneTimes[this->currentStage] - this->stageZoneTimes[this->currentStage - 1];
-		CUtlString splitTime = KZTimerService::FormatDiffTime(diff);
-		splitTime.Format(" {grey}({default}%s{grey})", splitTime.Get());
+		f64 split = this->stageZoneTimes[this->currentStage] - this->stageZoneTimes[this->currentStage - 1];
+		CUtlString splitTime = KZTimerService::FormatDiffTime(split);
+		splitTime.Format(" {grey}(%s)", splitTime.Get());
 		time.Append(splitTime.Get());
 	}
 
+	// Сравнение СРАЗУ с личным рекордом и с рекордом сервера (17.11, просьба владельца): раньше
+	// бралась одна цель по предпочтению игрока. Ран без ТП сравнивается с PRO-временами (если они
+	// есть), с ТП — с общими. Нет данных — кусок просто не печатается.
 	auto modeInfo = KZ::mode::GetModeInfo(this->player->modeService->GetModeName());
 	PBDataKey key = ToPBDataKey(modeInfo.id, course->guid);
-
-	// Check if there is personal best data for this mode and course.
-	const PBData *pb = this->GetCompareTarget(key);
-	if (pb)
+	const bool pro = this->player->checkpointService->GetTeleportCount() == 0;
+	auto diffPart = [&](const PBData *target, const char *phrase) -> std::string
 	{
-		if (pb->overall.pbStageZoneTimes[this->currentStage] > 0)
+		if (!target)
 		{
-			f64 diff = this->stageZoneTimes[this->currentStage] - pb->overall.pbStageZoneTimes[this->currentStage];
-			CUtlString diffText = KZTimerService::FormatDiffTime(diff);
-			diffText.Format("{grey}%s%s{grey}", diff < 0 ? "{green}" : "{lightred}", diffText.Get());
-			pbDiff = this->player->languageService->PrepareMessage(diffTextKeys[this->currentCompareType], diffText.Get());
+			return "";
 		}
-		if (this->player->checkpointService->GetTeleportCount() == 0 && pb->pro.pbTime > 0 && pb->pro.pbStageZoneTimes[this->currentStage] > 0)
+		const auto &side = (pro && target->pro.pbTime > 0) ? target->pro : target->overall;
+		if (side.pbTime <= 0 || side.pbStageZoneTimes[this->currentStage] <= 0)
 		{
-			f64 diff = this->stageZoneTimes[this->currentStage] - pb->pro.pbStageZoneTimes[this->currentStage];
-			CUtlString diffText = KZTimerService::FormatDiffTime(diff);
-			diffText.Format("{grey}%s%s{grey}", diff < 0 ? "{green}" : "{lightred}", diffText.Get());
-			pbDiffPro = this->player->languageService->PrepareMessage(diffTextKeysPro[this->currentCompareType], diffText.Get());
+			return "";
 		}
-	}
+		f64 diff = this->stageZoneTimes[this->currentStage] - side.pbStageZoneTimes[this->currentStage];
+		CUtlString diffText = KZTimerService::FormatDiffTime(diff);
+		diffText.Format("%s%s", diff < 0 ? "{green}" : "{lightred}", diffText.Get());
+		return this->player->languageService->PrepareMessage(phrase, diffText.Get());
+	};
+	const std::string pbDiff = diffPart(this->GetCompareTargetForType(COMPARE_SPB, key), "Stage Diff PB");
+	const std::string wrDiff = diffPart(this->GetCompareTargetForType(COMPARE_SR, key), "Stage Diff WR");
 
-	this->player->languageService->PrintChat(true, false, "Course Stage Reached", this->currentStage + 1, time.Get(), pbDiff.c_str(),
-											 pbDiffPro.c_str());
+	this->player->languageService->PrintChat(true, false, "Course Stage Reached", this->currentStage + 1, course->stageCount, time.Get(), pbDiff.c_str(),
+											 wrDiff.c_str());
 }
 
 CUtlString KZTimerService::GetCurrentRunMetadata()
