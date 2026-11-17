@@ -87,8 +87,26 @@ struct ZoneMenuState
 	// Правка существующей зоны ("" = постановка новой).
 	char editZoneId[40] {};
 
-	// Индексы строк панели постановки (у бустера есть строка множителя, индексы плавают).
+	// Индексы строк экрана зоны (строки множителя/точки ТП есть не у всех типов — индексы плавают).
 	i32 idxA {}, idxB {}, idxHeight {}, idxFactor = -1, idxConfirm {};
+	i32 idxDest = -1, idxTarget {}, idxStep {}, idxNudge {}, idxSnap {}, idxKeep = -1;
+
+	// Номер стейджа правимой зоны (только для заголовка).
+	i32 stageNumber {};
+	// Точка ТП (только у teleport).
+	bool hasDest {};
+	Vector dest {};
+	f32 destYaw {};
+	bool keepSpeed {};
+	// Что двигает WASD-режим (ZmTarget), привязка прицела к сетке, сам режим.
+	i32 target {};
+	bool snap = true;
+	bool nudge {};
+	Vector nudgeOrigin {};
+	u64 nudgeHeld {};
+	f32 nudgeRepeatAt {};
+	bool nudgeDirty {};
+	f32 nudgeLastRedraw {};
 
 	// Контекст управления курсом (экран действий курса).
 	bool courseOwn {};
@@ -116,6 +134,19 @@ struct ZoneMenuState
 		this->editZoneId[0] = '\0';
 		this->idxA = this->idxB = this->idxHeight = this->idxConfirm = 0;
 		this->idxFactor = -1;
+		this->idxDest = this->idxKeep = -1;
+		this->idxTarget = this->idxStep = this->idxNudge = this->idxSnap = 0;
+		this->stageNumber = 0;
+		this->hasDest = false;
+		this->dest = Vector(0, 0, 0);
+		this->destYaw = 0.0f;
+		this->keepSpeed = false;
+		this->target = 0;
+		this->snap = true;
+		this->nudge = false;
+		this->nudgeHeld = 0;
+		this->nudgeRepeatAt = this->nudgeLastRedraw = 0.0f;
+		this->nudgeDirty = false;
 		this->courseOwn = this->courseDisabled = false;
 		this->courseNumber = 0;
 		this->lastListFilter[0] = '\0';
@@ -232,6 +263,8 @@ static_function const char *ZoneTypeRu(KzCyberZoneType type)
 			return "стейдж";
 		case KZ_CYBER_ZONE_CHECKPOINT:
 			return "чекпоинт";
+		case KZ_CYBER_ZONE_TELEPORT:
+			return "телепорт";
 		default:
 			return "зона";
 	}
@@ -639,122 +672,6 @@ static_function void EnsureCourseRegistered(KZPlayer *player, const char *descri
 	SendCourseCreate(player, "override", descriptor, courseNumber, then);
 }
 
-// --- HTTP: замена бустера (DELETE старого + POST нового одним действием) ---
-
-// submittedMap — карта на момент ПЕРВОГО вызова, протаскивается через рекурсию повтора 409:
-// перезахват CurrentMapName() внутри повтора обнулял бы сверку «карта сменилась, пока летели
-// запросы» (map-guard ниже стоит ПОСЛЕ ветки повтора, и повтор с новой картой считал бы её той же).
-static_function void DeleteZoneThenSubmit(CPlayerSlot slot, u64 steamId, std::string oldZoneId, KzCyberZone newZone, std::string courseId,
-										  i32 attempt, std::string submittedMap)
-{
-	const std::string base = ApiBaseUrl();
-	if (base.empty())
-	{
-		KZPlayer *player = PlayerBySlotIfSame(slot, steamId);
-		if (player)
-		{
-			player->PrintChat(true, false, "{grey}Зоны:{default} платформенный источник выключен.");
-		}
-		return;
-	}
-	char url[512];
-	V_snprintf(url, sizeof(url), "%s/ingest/v1/kz/zones/%s", base.c_str(), oldZoneId.c_str());
-	HTTP::Request req(HTTP::Method::DELETE_, url);
-	AuthorizeRequest(req);
-	char steamIdStr[32];
-	V_snprintf(steamIdStr, sizeof(steamIdStr), "%llu", steamId);
-	req.SetQuery("steamId64", steamIdStr);
-
-	// Пока DELETE летит, карта может смениться, а слот и steam_id останутся теми же —
-	// PlayerBySlotIfSame это не поймает. Без сверки с submittedMap (карта первого вызова)
-	// SubmitZone ниже собрал бы тело уже с НОВОЙ картой и координатами старой.
-
-	// clang-format off
-	req.Send(
-		[slot, steamId, oldZoneId, newZone, courseId, attempt, submittedMap](HTTP::Response resp)
-		{
-			KZPlayer *player = PlayerBySlotIfSame(slot, steamId);
-			std::optional<std::string> body = resp.Body();
-			if (resp.status == 409 && ParseApiReason(body) == "zone_moved" && attempt < 2)
-			{
-				KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] zone_replace_retry steam_id=%llu id=%s attempt=%d reason=zone_moved\n", steamId,
-							oldZoneId.c_str(), attempt);
-				DeleteZoneThenSubmit(slot, steamId, oldZoneId, newZone, courseId, attempt + 1, submittedMap);
-				return;
-			}
-			if (resp.status < 200 || resp.status >= 300)
-			{
-				std::string reason = ParseApiReason(body);
-				if (reason.empty())
-				{
-					reason = "http_error";
-				}
-				KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] zone_replace_rejected steam_id=%llu id=%s stage=delete reason=%s http=%u\n", steamId,
-							oldZoneId.c_str(), reason.c_str(), (unsigned)resp.status);
-				if (player)
-				{
-					player->PrintChat(true, false, "{grey}Зоны:{default} api отказал в удалении старого бустера: {darkred}%s{default}. Зона не изменена.",
-									  reason.c_str());
-				}
-				return;
-			}
-			// Карта сменилась, пока DELETE летел: локальный набор уже от новой карты, а POST ниже
-			// уехал бы с именем новой карты и координатами старой. В api старый бустер удалён —
-			// это честно логируем как оборванную замену с данными для повтора.
-			if (!KZ_STREQ(submittedMap.c_str(), KZ::zones::CurrentMapName()))
-			{
-				KZ_LOG_WARN(LogChannel::MappingAPI,
-							"[cyb] zone_replace_orphaned steam_id=%llu old_id=%s map=%s reason=map_changed mins=(%.0f %.0f %.0f) maxs=(%.0f %.0f %.0f) factor=%.2f\n",
-							steamId, oldZoneId.c_str(), submittedMap.c_str(), newZone.mins.x, newZone.mins.y, newZone.mins.z, newZone.maxs.x,
-							newZone.maxs.y, newZone.maxs.z, newZone.jumpFactor);
-				if (player)
-				{
-					player->PrintChat(true, false, "{grey}Зоны:{default} карта сменилась — старый бустер удалён, новый НЕ поставлен.");
-				}
-				return;
-			}
-			i32 revision = 0;
-			if (body.has_value())
-			{
-				KeyValues3 kv(KV3_TYPEEX_TABLE, KV3_SUBTYPE_UNSPECIFIED);
-				CUtlString error = "";
-				LoadKV3FromJSON(&kv, &error, body->c_str(), "");
-				KeyValues3 *rev = error.IsEmpty() ? kv.FindMember("revision") : nullptr;
-				if (rev)
-				{
-					revision = (i32)rev->GetDouble(0.0);
-				}
-			}
-			KZ::zones::RemoveById(oldZoneId.c_str(), revision);
-			// Старый уже удалён — если постановка нового не подтвердится (SubmitZone напишет
-			// отказ api), у игрока должны остаться данные для повтора. Честно говорим заранее,
-			// а не делаем вид, что умеем откатывать.
-			if (!player || !player->zonesService)
-			{
-				KZ_LOG_WARN(LogChannel::MappingAPI,
-							"[cyb] zone_replace_orphaned steam_id=%llu old_id=%s reason=author_left mins=(%.0f %.0f %.0f) maxs=(%.0f %.0f %.0f) factor=%.2f\n",
-							steamId, oldZoneId.c_str(), newZone.mins.x, newZone.mins.y, newZone.mins.z, newZone.maxs.x, newZone.maxs.y, newZone.maxs.z,
-							newZone.jumpFactor);
-				return;
-			}
-			player->PrintChat(true, false,
-							  "{grey}Зоны:{default} старый бустер удалён, ставлю новый. Если не подтвердится — повтори: (%.0f %.0f %.0f)-(%.0f %.0f %.0f) x%.2f",
-							  newZone.mins.x, newZone.mins.y, newZone.mins.z, newZone.maxs.x, newZone.maxs.y, newZone.maxs.z, newZone.jumpFactor);
-			player->zonesService->SubmitZone(newZone, courseId.empty() ? nullptr : courseId.c_str());
-		},
-		[slot, steamId, oldZoneId]()
-		{
-			KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] zone_replace_rejected steam_id=%llu id=%s stage=delete reason=network_error\n", steamId,
-						oldZoneId.c_str());
-			KZPlayer *player = PlayerBySlotIfSame(slot, steamId);
-			if (player)
-			{
-				player->PrintChat(true, false, "{grey}Зоны:{default} api недоступен, бустер не изменён.");
-			}
-		});
-	// clang-format on
-}
-
 // --- Экраны ---
 
 // Какой экран скелета показать после перестройки (см. OpenSkeleton).
@@ -846,20 +763,37 @@ static_function bool MainCourseExists()
 	return false;
 }
 
-// --- Панель постановки/правки точек ---
+// --- Единый экран зоны: постановка и правка (17.11) ---
+//
+// Один экран и для новой зоны, и для правки поставленной (любого типа, включая стейдж и ТП):
+//   Угол 1 / Угол 2   — E ставит по прицелу (с привязкой к сетке, если она включена);
+//   Точка ТП          — только у телепорта: E ставит туда, где игрок стоит, и с его взглядом;
+//   Двигать           — A/D выбирает, что двигает WASD-режим: угол 1, угол 2, всю зону, точку ТП;
+//   Шаг сетки         — 1/8/32/128;
+//   Двигать на WASD   — E включает режим: игрок замирает, W/S/A/D двигают выбранное по осям мира
+//                       (направление — по взгляду, прилипает к ближайшей оси), Пробел/Ctrl —
+//                       вверх/вниз; повторная E — выход. Меню на это время отдаёт W/S/A/D.
+// Правка уходит PATCH-ем (id, курс и номер стейджа не меняются), новая зона — POST.
 
-static_function std::string PointRowText(const char *label, bool has, const Vector &point)
+enum ZmTarget : i32
 {
-	char text[96];
-	if (has)
-	{
-		V_snprintf(text, sizeof(text), "%s: %.0f %.0f %.0f (E — по прицелу)", label, point.x, point.y, point.z);
-	}
-	else
-	{
-		V_snprintf(text, sizeof(text), "%s: по прицелу (E)", label);
-	}
-	return text;
+	ZM_TARGET_A = 0,
+	ZM_TARGET_B,
+	ZM_TARGET_BOX,
+	ZM_TARGET_DEST,
+};
+
+// Удержание клавиши в WASD-режиме: первый шаг сразу, повтор после паузы.
+#define KZ_ZONEMENU_NUDGE_REPEAT_DELAY 0.35f
+#define KZ_ZONEMENU_NUDGE_REPEAT_EVERY 0.07f
+// Перерисовка превью не чаще: каждый кадр пересоздавать 12 частиц незачем.
+#define KZ_ZONEMENU_NUDGE_REDRAW_EVERY 0.1f
+// Хитбокс стоящего игрока — маркер точки ТП.
+#define KZ_ZONEMENU_HULL_HALF 16.0f
+
+static_function f32 SnapToStep(f32 v, f32 step)
+{
+	return step > 0.0f ? floorf(v / step + 0.5f) * step : v;
 }
 
 // Точка по прицелу игрока. false = луч ни во что не упёрся (смотрит в небо).
@@ -878,181 +812,153 @@ static_function bool AimPoint(KZPlayer *player, Vector &out)
 	return true;
 }
 
-static_function void OnPlacementSelect(MenuHandle menu, int slot, int item)
+static_function const char *TargetName(i32 target)
 {
-	KZPlayer *player = MenuPlayer(slot);
-	if (!player)
+	switch (target)
 	{
-		return;
-	}
-	ZoneMenuState &state = s_zmState[slot];
-	const char *tag = g_pMenus->GetItemInfo(menu, item);
-	if (!tag || !tag[0])
-	{
-		return;
-	}
-
-	if (KZ_STREQ(tag, "cancel"))
-	{
-		player->zonesService->ClearPreview();
-		// Меню не закрываем (решение пользователя): постановка отменена — назад в корень.
-		OpenSkeleton(player, ZmScreen::Root);
-		return;
-	}
-	if (KZ_STREQ(tag, "a") || KZ_STREQ(tag, "b"))
-	{
-		Vector point;
-		if (!AimPoint(player, point))
-		{
-			player->PrintChat(true, false, "{grey}Зоны:{default} прицел не упирается в поверхность.");
-			return;
-		}
-		const bool isA = KZ_STREQ(tag, "a");
-		(isA ? state.a : state.b) = point;
-		(isA ? state.hasA : state.hasB) = true;
-		g_pMenus->SetItemText(menu, isA ? state.idxA : state.idxB, PointRowText(isA ? "Точка A" : "Точка B", true, point).c_str());
-		if (state.hasA && state.hasB)
-		{
-			g_pMenus->SetItemDisabled(menu, state.idxConfirm, false);
-		}
-		RedrawPreview(player, state);
-		return;
-	}
-	if (KZ_STREQ(tag, "confirm"))
-	{
-		if (!player->zonesService->EnsureAllowed() || !KZ::zones::IsReady())
-		{
-			return;
-		}
-		Vector mins, maxs;
-		if (!ValidateStateBox(player, state, mins, maxs))
-		{
-			return;
-		}
-		KzCyberZone zone {};
-		zone.type = state.type;
-		zone.jumpFactor = state.type == KZ_CYBER_ZONE_MODIFIER ? state.jumpFactor : 1.0f;
-		zone.mins = mins;
-		zone.maxs = maxs;
-		V_snprintf(zone.courseDescriptor, sizeof(zone.courseDescriptor), "%s", state.courseDescriptor);
-		RedrawPreview(player, state);
-
-		if (state.editZoneId[0] != '\0' && state.type == KZ_CYBER_ZONE_MODIFIER)
-		{
-			// Правка бустера: у него нет штатной замены на стороне api — DELETE + POST.
-			DeleteZoneThenSubmit(player->GetPlayerSlot(), player->GetSteamId64(false), state.editZoneId, zone,
-								 state.courseId[0] ? state.courseId : "", 1, KZ::zones::CurrentMapName());
-		}
-		else
-		{
-			// Постановка и правка start/end: POST того же типа и курса, api вернёт replaced[].
-			player->zonesService->SubmitZone(zone, state.courseId[0] ? state.courseId : nullptr);
-		}
-		// Меню не закрываем: назад в корень. Счётчики зон там пока прежние — ответ api ещё
-		// летит; когда набор применится, открытый корень перестроит RefreshOpenEditorMenus.
-		OpenSkeleton(player, ZmScreen::Root);
-		return;
+		case ZM_TARGET_A:
+			return "угол 1";
+		case ZM_TARGET_B:
+			return "угол 2";
+		case ZM_TARGET_BOX:
+			return "вся зона";
+		case ZM_TARGET_DEST:
+			return "точка ТП";
+		default:
+			return "?";
 	}
 }
 
-static_function void OnPlacementAdjust(MenuHandle menu, int slot, int item, f32 delta, f32 minValue, f32 maxValue)
+static_function bool IsTeleport(const ZoneMenuState &state)
 {
-	KZPlayer *player = MenuPlayer(slot);
-	if (!player)
-	{
-		return;
-	}
-	ZoneMenuState &state = s_zmState[slot];
-	const char *tag = g_pMenus->GetItemInfo(menu, item);
-	if (!tag || !tag[0])
-	{
-		return;
-	}
-	if (KZ_STREQ(tag, "height"))
-	{
-		state.height = MIN(MAX(state.height + delta, minValue), maxValue);
-		g_pMenus->SetItemText(menu, item, HeightRowText(state.height).c_str());
-		RedrawPreview(player, state);
-		return;
-	}
-	if (KZ_STREQ(tag, "factor"))
-	{
-		state.jumpFactor = MIN(MAX(state.jumpFactor + delta, minValue), maxValue);
-		g_pMenus->SetItemText(menu, item, FactorRowText(state.jumpFactor).c_str());
-		return;
-	}
+	return state.type == KZ_CYBER_ZONE_TELEPORT;
 }
 
-static_function void OpenPlacement(KZPlayer *player)
+static_function std::string CornerRowText(const char *label, bool has, const Vector &p)
 {
-	const i32 slot = player->GetPlayerSlot().Get();
-	ZoneMenuState &state = s_zmState[slot];
-	ZoneMenuHandles &handles = s_zmMenus[slot];
-	DestroyHandle(handles.placement);
-
-	char title[192];
-	if (state.courseDescriptor[0])
+	char text[96];
+	if (has)
 	{
-		V_snprintf(title, sizeof(title), "%s: %s → %s", state.editZoneId[0] ? "Правка" : "Постановка", ZoneTypeRu(state.type), state.courseLabel);
+		V_snprintf(text, sizeof(text), "%s: %.0f %.0f %.0f", label, p.x, p.y, p.z);
 	}
 	else
 	{
-		V_snprintf(title, sizeof(title), "%s: %s", state.editZoneId[0] ? "Правка" : "Постановка", ZoneTypeRu(state.type));
-	}
-	MenuHandle m = g_pMenus->CreateMenu(MenuType::Default, title, &OnPlacementSelect);
-	if (m == kInvalidMenuHandle)
-	{
-		return;
-	}
-
-	state.idxA = g_pMenus->AddItem(m, PointRowText("Точка A", state.hasA, state.a).c_str(), "a", false);
-	state.idxB = g_pMenus->AddItem(m, PointRowText("Точка B", state.hasB, state.b).c_str(), "b", false);
-	state.idxHeight = g_pMenus->AddAdjustableItem(m, HeightRowText(state.height).c_str(), "height", KZ_ZONEMENU_HEIGHT_STEP, KZ_ZONEMENU_HEIGHT_MIN,
-												  KZ_ZONEMENU_HEIGHT_MAX);
-	state.idxFactor = -1;
-	if (state.type == KZ_CYBER_ZONE_MODIFIER)
-	{
-		state.idxFactor = g_pMenus->AddAdjustableItem(m, FactorRowText(state.jumpFactor).c_str(), "factor", KZ_ZONEMENU_FACTOR_STEP,
-													  KZ_ZONEMENU_FACTOR_MIN, KZ_ZONEMENU_FACTOR_MAX);
-	}
-	state.idxConfirm = g_pMenus->AddItem(m, "✓ Подтвердить", "confirm", !(state.hasA && state.hasB));
-	g_pMenus->AddItem(m, "Отмена", "cancel", false);
-
-	g_pMenus->SetAdjustCallback(m, &OnPlacementAdjust);
-	EnableAdjustCapture(m);
-	g_pMenus->SetCloseOnSelect(m, false);
-	handles.placement = m;
-	g_pMenus->DisplayMenu(m, slot, 0);
-}
-
-// --- Подменю точки (правка зоны) ---
-
-static_function std::string CoordRowText(const char *axis, f32 value)
-{
-	char text[48];
-	if (g_menusHasAdjustCapture)
-	{
-		V_snprintf(text, sizeof(text), "%s: %.0f", axis, value);
-	}
-	else
-	{
-		V_snprintf(text, sizeof(text), "%s: %.0f (A/D ±шаг)", axis, value);
+		V_snprintf(text, sizeof(text), "%s: по прицелу (E)", label);
 	}
 	return text;
 }
 
-// Индексы строк здесь жёстко связаны с порядком AddItem/AddAdjustableItem в BuildPointMenu:
-// 0=aim, 1=X, 2=Y, 3=Z, 4=шаг, 5=save. Меняя порядок там — менять и здесь.
-static_function void RefreshPointMenuTexts(MenuHandle menu, const Vector &point, f32 step)
+static_function std::string DestRowText(const ZoneMenuState &state)
 {
-	g_pMenus->SetItemText(menu, 1, CoordRowText("X", point.x).c_str());
-	g_pMenus->SetItemText(menu, 2, CoordRowText("Y", point.y).c_str());
-	g_pMenus->SetItemText(menu, 3, CoordRowText("Z", point.z).c_str());
-	g_pMenus->SetItemText(menu, 4, StepRowText(step).c_str());
+	char text[96];
+	if (state.hasDest)
+	{
+		V_snprintf(text, sizeof(text), "Точка ТП: %.0f %.0f %.0f, взгляд %.0f°", state.dest.x, state.dest.y, state.dest.z, state.destYaw);
+	}
+	else
+	{
+		V_snprintf(text, sizeof(text), "Точка ТП: встань на место и нажми E");
+	}
+	return text;
 }
 
-// Сохранение правки: start/end — штатная замена, бустер — DELETE + POST. Возвращает в список зон.
-static_function void SaveZoneEdit(KZPlayer *player)
+static_function std::string TargetRowText(i32 target)
+{
+	char text[64];
+	V_snprintf(text, sizeof(text), g_menusHasAdjustCapture ? "Двигать: %s" : "Двигать: %s (A/D)", TargetName(target));
+	return text;
+}
+
+static_function std::string NudgeRowText(const ZoneMenuState &state)
+{
+	return state.nudge ? "■ WASD: двигаю (E — стоп)" : "Двигать на WASD (E)";
+}
+
+static_function std::string SnapRowText(const ZoneMenuState &state)
+{
+	return state.snap ? "Прицел к сетке: да" : "Прицел к сетке: нет";
+}
+
+static_function std::string KeepSpeedRowText(const ZoneMenuState &state)
+{
+	return state.keepSpeed ? "Скорость после ТП: сохранить" : "Скорость после ТП: сбросить";
+}
+
+static_function bool CanSubmit(const ZoneMenuState &state)
+{
+	return state.hasA && state.hasB && (!IsTeleport(state) || state.hasDest);
+}
+
+static_function void RefreshEditorTexts(MenuHandle menu, const ZoneMenuState &state)
+{
+	if (menu == kInvalidMenuHandle)
+	{
+		return;
+	}
+	g_pMenus->SetItemText(menu, state.idxA, CornerRowText("Угол 1", state.hasA, state.a).c_str());
+	g_pMenus->SetItemText(menu, state.idxB, CornerRowText("Угол 2", state.hasB, state.b).c_str());
+	if (state.idxDest >= 0)
+	{
+		g_pMenus->SetItemText(menu, state.idxDest, DestRowText(state).c_str());
+	}
+	g_pMenus->SetItemText(menu, state.idxHeight, HeightRowText(state.height).c_str());
+	if (state.idxFactor >= 0)
+	{
+		g_pMenus->SetItemText(menu, state.idxFactor, FactorRowText(state.jumpFactor).c_str());
+	}
+	g_pMenus->SetItemText(menu, state.idxTarget, TargetRowText(state.target).c_str());
+	g_pMenus->SetItemText(menu, state.idxStep, StepRowText(state.step).c_str());
+	g_pMenus->SetItemText(menu, state.idxNudge, NudgeRowText(state).c_str());
+	g_pMenus->SetItemText(menu, state.idxSnap, SnapRowText(state).c_str());
+	if (state.idxKeep >= 0)
+	{
+		g_pMenus->SetItemText(menu, state.idxKeep, KeepSpeedRowText(state).c_str());
+	}
+	g_pMenus->SetItemDisabled(menu, state.idxConfirm, !CanSubmit(state));
+}
+
+// Превью: при «двигать точку ТП» — хитбокс игрока в точке назначения, иначе — бокс зоны.
+static_function void RedrawEditorPreview(KZPlayer *player, ZoneMenuState &state)
+{
+	if (IsTeleport(state) && state.target == ZM_TARGET_DEST && state.hasDest)
+	{
+		const Vector mins(state.dest.x - KZ_ZONEMENU_HULL_HALF, state.dest.y - KZ_ZONEMENU_HULL_HALF, state.dest.z);
+		const Vector maxs(state.dest.x + KZ_ZONEMENU_HULL_HALF, state.dest.y + KZ_ZONEMENU_HULL_HALF, state.dest.z + KZ_ZONE_EDITOR_HEIGHT);
+		player->zonesService->DrawBox(mins, maxs, Color(0, 200, 255, 255), KZ_ZONEMENU_PREVIEW_SECONDS);
+		return;
+	}
+	RedrawPreview(player, state);
+}
+
+static_function void SetNudge(KZPlayer *player, MenuHandle menu, ZoneMenuState &state, bool on)
+{
+	const i32 slot = player->GetPlayerSlot().Get();
+	state.nudge = on;
+	if (menu != kInvalidMenuHandle)
+	{
+		// Пока режим включён, W/S/A/D принадлежат сдвигу, а не меню: курсор стоит на строке
+		// режима, и E (Select) выключает его же.
+		const MenuButton key = on ? MenuButton::None : MenuButton::Default;
+		g_pMenus->SetMenuKey(menu, MenuNavAction::Up, key);
+		g_pMenus->SetMenuKey(menu, MenuNavAction::Down, key);
+		g_pMenus->SetMenuKey(menu, MenuNavAction::AdjustDec, key);
+		g_pMenus->SetMenuKey(menu, MenuNavAction::AdjustInc, key);
+		g_pMenus->SetItemText(menu, state.idxNudge, NudgeRowText(state).c_str());
+	}
+	if (on)
+	{
+		player->GetOrigin(&state.nudgeOrigin);
+		state.nudgeHeld = 0;
+		state.nudgeRepeatAt = 0.0f;
+		g_pMenus->SetSlotStatus(slot, "W/S/A/D — сдвиг, Пробел/Ctrl — вверх/вниз, E — готово");
+	}
+	else
+	{
+		g_pMenus->SetSlotStatus(slot, "");
+	}
+}
+
+static_function void SaveEditor(KZPlayer *player)
 {
 	const i32 slot = player->GetPlayerSlot().Get();
 	ZoneMenuState &state = s_zmState[slot];
@@ -1065,28 +971,33 @@ static_function void SaveZoneEdit(KZPlayer *player)
 	{
 		return;
 	}
+	if (IsTeleport(state) && !state.hasDest)
+	{
+		player->PrintChat(true, false, "{grey}Зоны:{default} поставь точку ТП: встань на место и нажми E.");
+		return;
+	}
 	KzCyberZone zone {};
 	zone.type = state.type;
 	zone.jumpFactor = state.type == KZ_CYBER_ZONE_MODIFIER ? state.jumpFactor : 1.0f;
 	zone.mins = mins;
 	zone.maxs = maxs;
+	zone.tpDest = state.dest;
+	zone.tpYaw = state.destYaw;
+	zone.tpKeepSpeed = state.keepSpeed;
 	V_snprintf(zone.courseDescriptor, sizeof(zone.courseDescriptor), "%s", state.courseDescriptor);
 	RedrawPreview(player, state);
 
-	if (state.type == KZ_CYBER_ZONE_MODIFIER)
+	if (state.editZoneId[0] != '\0')
 	{
-		DeleteZoneThenSubmit(player->GetPlayerSlot(), player->GetSteamId64(false), state.editZoneId, zone, state.courseId[0] ? state.courseId : "", 1,
-							 KZ::zones::CurrentMapName());
+		player->zonesService->PatchZone(state.editZoneId, zone);
+		ReturnToZonesList(player);
+		return;
 	}
-	else
-	{
-		player->zonesService->SubmitZone(zone, state.courseId[0] ? state.courseId : nullptr);
-	}
-	// Меню не закрываем: назад в список зон; свежие данные доедут через RefreshOpenEditorMenus.
-	ReturnToZonesList(player);
+	player->zonesService->SubmitZone(zone, state.courseId[0] ? state.courseId : nullptr);
+	OpenSkeleton(player, ZmScreen::Root);
 }
 
-static_function void OnPointSelect(MenuHandle menu, int slot, int item)
+static_function void OnEditorSelect(MenuHandle menu, int slot, int item)
 {
 	KZPlayer *player = MenuPlayer(slot);
 	if (!player)
@@ -1094,35 +1005,105 @@ static_function void OnPointSelect(MenuHandle menu, int slot, int item)
 		return;
 	}
 	ZoneMenuState &state = s_zmState[slot];
-	ZoneMenuHandles &handles = s_zmMenus[slot];
-	const bool isA = menu == handles.pointA;
-	Vector &point = isA ? state.a : state.b;
 	const char *tag = g_pMenus->GetItemInfo(menu, item);
 	if (!tag || !tag[0])
 	{
 		return;
 	}
-	if (KZ_STREQ(tag, "aim"))
+	if (KZ_STREQ(tag, "nudge"))
 	{
-		Vector aimed;
-		if (!AimPoint(player, aimed))
+		SetNudge(player, menu, state, !state.nudge);
+		RedrawEditorPreview(player, state);
+		return;
+	}
+	if (state.nudge)
+	{
+		// Курсор заморожен на строке режима, сюда не попасть; но на всякий случай — выходим из режима.
+		SetNudge(player, menu, state, false);
+	}
+	if (KZ_STREQ(tag, "a") || KZ_STREQ(tag, "b"))
+	{
+		Vector point;
+		if (!AimPoint(player, point))
 		{
 			player->PrintChat(true, false, "{grey}Зоны:{default} прицел не упирается в поверхность.");
 			return;
 		}
-		point = aimed;
-		RefreshPointMenuTexts(menu, point, state.step);
-		RedrawPreview(player, state);
+		if (state.snap)
+		{
+			point = Vector(SnapToStep(point.x, state.step), SnapToStep(point.y, state.step), SnapToStep(point.z, state.step));
+		}
+		const bool isA = KZ_STREQ(tag, "a");
+		(isA ? state.a : state.b) = point;
+		(isA ? state.hasA : state.hasB) = true;
+		state.target = isA ? ZM_TARGET_A : ZM_TARGET_B;
+		RefreshEditorTexts(menu, state);
+		RedrawEditorPreview(player, state);
 		return;
 	}
-	if (KZ_STREQ(tag, "save"))
+	if (KZ_STREQ(tag, "dest"))
 	{
-		SaveZoneEdit(player);
+		Vector origin;
+		QAngle angles;
+		player->GetOrigin(&origin);
+		player->GetAngles(&angles);
+		state.dest = origin;
+		state.destYaw = floorf(angles.y + 0.5f);
+		if (state.destYaw > 180.0f)
+		{
+			state.destYaw -= 360.0f;
+		}
+		state.hasDest = true;
+		state.target = ZM_TARGET_DEST;
+		RefreshEditorTexts(menu, state);
+		RedrawEditorPreview(player, state);
+		return;
+	}
+	if (KZ_STREQ(tag, "snap"))
+	{
+		state.snap = !state.snap;
+		RefreshEditorTexts(menu, state);
+		return;
+	}
+	if (KZ_STREQ(tag, "keep"))
+	{
+		state.keepSpeed = !state.keepSpeed;
+		RefreshEditorTexts(menu, state);
+		return;
+	}
+	if (KZ_STREQ(tag, "preview"))
+	{
+		RedrawEditorPreview(player, state);
+		return;
+	}
+	if (KZ_STREQ(tag, "confirm"))
+	{
+		SaveEditor(player);
+		return;
+	}
+	if (KZ_STREQ(tag, "delete"))
+	{
+		player->zonesService->ClearPreview();
+		player->zonesService->DeleteZoneById(state.editZoneId);
+		ReturnToZonesList(player);
+		return;
+	}
+	if (KZ_STREQ(tag, "cancel"))
+	{
+		player->zonesService->ClearPreview();
+		if (state.editZoneId[0])
+		{
+			ReturnToZonesList(player);
+		}
+		else
+		{
+			OpenSkeleton(player, ZmScreen::Root);
+		}
 		return;
 	}
 }
 
-static_function void OnPointAdjust(MenuHandle menu, int slot, int item, f32 delta, f32 minValue, f32 maxValue)
+static_function void OnEditorAdjust(MenuHandle menu, int slot, int item, f32 delta, f32 minValue, f32 maxValue)
 {
 	KZPlayer *player = MenuPlayer(slot);
 	if (!player)
@@ -1130,17 +1111,26 @@ static_function void OnPointAdjust(MenuHandle menu, int slot, int item, f32 delt
 		return;
 	}
 	ZoneMenuState &state = s_zmState[slot];
-	ZoneMenuHandles &handles = s_zmMenus[slot];
-	const bool isA = menu == handles.pointA;
-	Vector &point = isA ? state.a : state.b;
 	const char *tag = g_pMenus->GetItemInfo(menu, item);
-	if (!tag || !tag[0])
+	if (!tag || !tag[0] || state.nudge)
 	{
 		return;
 	}
-	if (KZ_STREQ(tag, "step"))
+	if (KZ_STREQ(tag, "height"))
 	{
-		// Листаем ступени 1→8→32→128; delta задаёт направление.
+		state.height = MIN(MAX(state.height + delta, minValue), maxValue);
+	}
+	else if (KZ_STREQ(tag, "factor"))
+	{
+		state.jumpFactor = MIN(MAX(state.jumpFactor + delta, minValue), maxValue);
+	}
+	else if (KZ_STREQ(tag, "target"))
+	{
+		const i32 count = IsTeleport(state) ? 4 : 3;
+		state.target = (state.target + (delta > 0.0f ? 1 : count - 1)) % count;
+	}
+	else if (KZ_STREQ(tag, "step"))
+	{
 		i32 idx = 0;
 		for (i32 i = 0; i < (i32)KZ_ARRAYSIZE(s_stepPresets); i++)
 		{
@@ -1152,127 +1142,108 @@ static_function void OnPointAdjust(MenuHandle menu, int slot, int item, f32 delt
 		idx += delta > 0.0f ? 1 : -1;
 		idx = MIN(MAX(idx, 0), (i32)KZ_ARRAYSIZE(s_stepPresets) - 1);
 		state.step = s_stepPresets[idx];
-		// Шаг общий на обе точки — обновляем строку «Шаг» и в соседнем меню, иначе там
-		// остаётся устаревшее число до первого действия.
-		RefreshPointMenuTexts(menu, point, state.step);
-		const MenuHandle sibling = isA ? handles.pointB : handles.pointA;
-		if (sibling != kInvalidMenuHandle)
-		{
-			RefreshPointMenuTexts(sibling, isA ? state.b : state.a, state.step);
-		}
-		return;
 	}
-	// Координаты: строка создана со step=1, реальный шаг — состояние (движок фиксирует step
-	// при создании строки, а наш меняется ступенями).
-	f32 *coord = nullptr;
-	if (KZ_STREQ(tag, "x"))
-	{
-		coord = &point.x;
-	}
-	else if (KZ_STREQ(tag, "y"))
-	{
-		coord = &point.y;
-	}
-	else if (KZ_STREQ(tag, "z"))
-	{
-		coord = &point.z;
-	}
-	if (!coord)
+	else
 	{
 		return;
 	}
-	const f32 signedStep = delta > 0.0f ? state.step : -state.step;
-	*coord = MIN(MAX(*coord + signedStep, minValue), maxValue);
-	RefreshPointMenuTexts(menu, point, state.step);
-	RedrawPreview(player, state);
+	RefreshEditorTexts(menu, state);
+	RedrawEditorPreview(player, state);
 }
 
-static_function MenuHandle BuildPointMenu(const char *title, const Vector &point, f32 step)
+static_function void OpenEditor(KZPlayer *player)
 {
-	MenuHandle m = g_pMenus->CreateMenu(MenuType::Default, title, &OnPointSelect);
+	const i32 slot = player->GetPlayerSlot().Get();
+	ZoneMenuState &state = s_zmState[slot];
+	ZoneMenuHandles &handles = s_zmMenus[slot];
+	state.nudge = false;
+	DestroyHandle(handles.placement);
+
+	char what[96];
+	if (state.type == KZ_CYBER_ZONE_STAGE && state.stageNumber > 0)
+	{
+		V_snprintf(what, sizeof(what), "%s %d", ZoneTypeRu(state.type), state.stageNumber);
+	}
+	else if (state.type == KZ_CYBER_ZONE_MODIFIER && state.editZoneId[0])
+	{
+		V_snprintf(what, sizeof(what), "бустер x%.2f", state.jumpFactor);
+	}
+	else
+	{
+		V_snprintf(what, sizeof(what), "%s", ZoneTypeRu(state.type));
+	}
+	char title[192];
+	if (state.courseDescriptor[0])
+	{
+		V_snprintf(title, sizeof(title), "%s: %s → %s", state.editZoneId[0] ? "Правка" : "Новая зона", what, state.courseLabel);
+	}
+	else
+	{
+		V_snprintf(title, sizeof(title), "%s: %s", state.editZoneId[0] ? "Правка" : "Новая зона", what);
+	}
+	MenuHandle m = g_pMenus->CreateMenu(MenuType::Default, title, &OnEditorSelect);
 	if (m == kInvalidMenuHandle)
 	{
-		return m;
+		return;
 	}
-	g_pMenus->AddItem(m, "Переставить по прицелу (E)", "aim", false);
-	g_pMenus->AddAdjustableItem(m, CoordRowText("X", point.x).c_str(), "x", 1.0f, -KZ_ZONE_WORLD_LIMIT, KZ_ZONE_WORLD_LIMIT);
-	g_pMenus->AddAdjustableItem(m, CoordRowText("Y", point.y).c_str(), "y", 1.0f, -KZ_ZONE_WORLD_LIMIT, KZ_ZONE_WORLD_LIMIT);
-	g_pMenus->AddAdjustableItem(m, CoordRowText("Z", point.z).c_str(), "z", 1.0f, -KZ_ZONE_WORLD_LIMIT, KZ_ZONE_WORLD_LIMIT);
-	g_pMenus->AddAdjustableItem(m, StepRowText(step).c_str(), "step", 1.0f, s_stepPresets[0], s_stepPresets[KZ_ARRAYSIZE(s_stepPresets) - 1]);
-	g_pMenus->AddItem(m, "Сохранить", "save", false);
-	g_pMenus->SetAdjustCallback(m, &OnPointAdjust);
+
+	state.idxA = g_pMenus->AddItem(m, CornerRowText("Угол 1", state.hasA, state.a).c_str(), "a", false);
+	state.idxB = g_pMenus->AddItem(m, CornerRowText("Угол 2", state.hasB, state.b).c_str(), "b", false);
+	state.idxDest = -1;
+	if (IsTeleport(state))
+	{
+		state.idxDest = g_pMenus->AddItem(m, DestRowText(state).c_str(), "dest", false);
+	}
+	state.idxHeight = g_pMenus->AddAdjustableItem(m, HeightRowText(state.height).c_str(), "height", KZ_ZONEMENU_HEIGHT_STEP, KZ_ZONEMENU_HEIGHT_MIN,
+												  KZ_ZONEMENU_HEIGHT_MAX);
+	state.idxFactor = -1;
+	if (state.type == KZ_CYBER_ZONE_MODIFIER)
+	{
+		state.idxFactor = g_pMenus->AddAdjustableItem(m, FactorRowText(state.jumpFactor).c_str(), "factor", KZ_ZONEMENU_FACTOR_STEP,
+													  KZ_ZONEMENU_FACTOR_MIN, KZ_ZONEMENU_FACTOR_MAX);
+	}
+	state.idxTarget = g_pMenus->AddAdjustableItem(m, TargetRowText(state.target).c_str(), "target", 1.0f, 0.0f, 3.0f);
+	state.idxStep = g_pMenus->AddAdjustableItem(m, StepRowText(state.step).c_str(), "step", 1.0f, s_stepPresets[0],
+												s_stepPresets[KZ_ARRAYSIZE(s_stepPresets) - 1]);
+	state.idxNudge = g_pMenus->AddItem(m, NudgeRowText(state).c_str(), "nudge", false);
+	state.idxSnap = g_pMenus->AddItem(m, SnapRowText(state).c_str(), "snap", false);
+	state.idxKeep = -1;
+	if (IsTeleport(state))
+	{
+		state.idxKeep = g_pMenus->AddItem(m, KeepSpeedRowText(state).c_str(), "keep", false);
+	}
+	state.idxConfirm = g_pMenus->AddItem(m, state.editZoneId[0] ? "✓ Сохранить" : "✓ Поставить", "confirm", !CanSubmit(state));
+	if (state.editZoneId[0])
+	{
+		g_pMenus->AddItem(m, "Показать превью", "preview", false);
+		g_pMenus->AddItem(m, "Удалить зону", "delete", false);
+	}
+	g_pMenus->AddItem(m, "Отмена", "cancel", false);
+
+	g_pMenus->SetAdjustCallback(m, &OnEditorAdjust);
 	EnableAdjustCapture(m);
 	g_pMenus->SetCloseOnSelect(m, false);
-	return m;
-}
-
-// --- Экран правки зоны ---
-
-static_function void OnZoneEditSelect(MenuHandle menu, int slot, int item)
-{
-	KZPlayer *player = MenuPlayer(slot);
-	if (!player)
+	handles.placement = m;
+	g_pMenus->DisplayMenu(m, slot, 0);
+	if (state.hasA || state.hasB)
 	{
-		return;
-	}
-	ZoneMenuState &state = s_zmState[slot];
-	const char *tag = g_pMenus->GetItemInfo(menu, item);
-	if (!tag || !tag[0])
-	{
-		return;
-	}
-	if (KZ_STREQ(tag, "preview"))
-	{
-		RedrawPreview(player, state);
-		return;
-	}
-	if (KZ_STREQ(tag, "save"))
-	{
-		SaveZoneEdit(player);
-		return;
-	}
-	if (KZ_STREQ(tag, "delete"))
-	{
-		player->zonesService->DeleteZoneById(state.editZoneId);
-		// Меню не закрываем: назад в список зон; зона исчезнет из него, когда api подтвердит
-		// удаление (RemoveById -> ApplyLoadedZones -> RefreshOpenEditorMenus).
-		ReturnToZonesList(player);
-		return;
+		RedrawEditorPreview(player, state);
 	}
 }
 
-static_function void OnZoneEditAdjust(MenuHandle menu, int slot, int item, f32 delta, f32 minValue, f32 maxValue)
+static_function void OpenPlacement(KZPlayer *player)
 {
-	KZPlayer *player = MenuPlayer(slot);
-	if (!player)
-	{
-		return;
-	}
-	ZoneMenuState &state = s_zmState[slot];
-	const char *tag = g_pMenus->GetItemInfo(menu, item);
-	if (!tag || !KZ_STREQ(tag, "height"))
-	{
-		return;
-	}
-	state.height = MIN(MAX(state.height + delta, minValue), maxValue);
-	g_pMenus->SetItemText(menu, item, HeightRowText(state.height).c_str());
-	RedrawPreview(player, state);
+	OpenEditor(player);
 }
 
 static_function void OpenZoneEdit(KZPlayer *player, const KzCyberZone &zone)
 {
 	const i32 slot = player->GetPlayerSlot().Get();
 	ZoneMenuState &state = s_zmState[slot];
-	ZoneMenuHandles &handles = s_zmMenus[slot];
-	DestroyHandle(handles.zoneEdit);
-	DestroyHandle(handles.pointA);
-	DestroyHandle(handles.pointB);
-
-	// Правка в локальном состоянии: диагональ исходных углов не хранится, восстанавливаем
-	// A и B по полу зоны (обе точки на mins.z, высота — отдельной строкой).
 	state.ResetEdit();
 	state.type = zone.type;
 	state.jumpFactor = zone.jumpFactor > 0.0f ? zone.jumpFactor : 1.0f;
+	state.stageNumber = zone.stageNumber;
 	V_snprintf(state.editZoneId, sizeof(state.editZoneId), "%s", zone.id);
 	V_snprintf(state.courseDescriptor, sizeof(state.courseDescriptor), "%s", zone.courseDescriptor);
 	if (zone.courseDescriptor[0])
@@ -1284,62 +1255,140 @@ static_function void OpenZoneEdit(KZPlayer *player, const KzCyberZone &zone)
 			V_snprintf(state.courseId, sizeof(state.courseId), "%s", record->id);
 		}
 	}
+	// Диагональ исходных углов не хранится: оба угла — на полу зоны, высота — отдельной строкой.
 	state.a = Vector(zone.mins.x, zone.mins.y, zone.mins.z);
 	state.b = Vector(zone.maxs.x, zone.maxs.y, zone.mins.z);
 	state.hasA = state.hasB = true;
 	state.height = MAX(zone.maxs.z - zone.mins.z, (f32)KZ_ZONEMENU_HEIGHT_MIN);
+	state.target = ZM_TARGET_BOX;
+	if (zone.type == KZ_CYBER_ZONE_TELEPORT)
+	{
+		state.dest = zone.tpDest;
+		state.destYaw = zone.tpYaw;
+		state.keepSpeed = zone.tpKeepSpeed;
+		state.hasDest = true;
+	}
+	OpenEditor(player);
+}
 
-	char title[192];
-	if (zone.courseDescriptor[0])
-	{
-		V_snprintf(title, sizeof(title), "Зона: %s (%s)", ZoneTypeRu(zone.type), state.courseLabel);
-	}
-	else if (zone.type == KZ_CYBER_ZONE_MODIFIER)
-	{
-		V_snprintf(title, sizeof(title), "Зона: бустер x%.2f", zone.jumpFactor);
-	}
-	else
-	{
-		V_snprintf(title, sizeof(title), "Зона: %s", ZoneTypeRu(zone.type));
-	}
-
-	MenuHandle m = g_pMenus->CreateMenu(MenuType::Default, title, &OnZoneEditSelect);
-	if (m == kInvalidMenuHandle)
+// Такт движения игрока: WASD-режим редактора. Зовётся из KZPlayer::OnProcessMovement.
+void KZ::zones::OnEditorProcessMovement(KZPlayer *player)
+{
+	if (!player || g_pMenus == nullptr)
 	{
 		return;
 	}
-
-	const bool numbered = zone.type == KZ_CYBER_ZONE_STAGE || zone.type == KZ_CYBER_ZONE_CHECKPOINT;
-	if (!numbered)
+	const i32 slot = player->GetPlayerSlot().Get();
+	if (slot < 0 || slot >= MAXPLAYERS)
 	{
-		// Геометрия: подменю точек (R возвращает сюда — связаны AddSubMenu) и высота.
-		handles.pointA = BuildPointMenu("Точка A", state.a, state.step);
-		handles.pointB = BuildPointMenu("Точка B", state.b, state.step);
-		if (handles.pointA != kInvalidMenuHandle)
-		{
-			g_pMenus->AddSubMenu(m, "Точка A ▸", handles.pointA, "");
-		}
-		if (handles.pointB != kInvalidMenuHandle)
-		{
-			g_pMenus->AddSubMenu(m, "Точка B ▸", handles.pointB, "");
-		}
-		state.idxHeight = g_pMenus->AddAdjustableItem(m, HeightRowText(state.height).c_str(), "height", KZ_ZONEMENU_HEIGHT_STEP,
-													  KZ_ZONEMENU_HEIGHT_MIN, KZ_ZONEMENU_HEIGHT_MAX);
+		return;
 	}
-	g_pMenus->AddItem(m, "Показать превью", "preview", false);
-	if (!numbered)
+	ZoneMenuState &state = s_zmState[slot];
+	if (!state.nudge)
 	{
-		// Замена stage/checkpoint не поддержана осознанно: POST без stageNumber уводит стейдж
-		// в конец и перенумеровывает курс — молча менять номера зон правкой геометрии нельзя.
-		g_pMenus->AddItem(m, "Сохранить", "save", false);
+		return;
 	}
-	g_pMenus->AddItem(m, "Удалить", "delete", false);
+	ZoneMenuHandles &handles = s_zmMenus[slot];
+	// Меню закрыли (F, смена карты, другое меню) — режим гаснет сам, иначе игрок остался бы замороженным.
+	if (handles.placement == kInvalidMenuHandle || g_pMenus->GetActiveMenu(slot) != handles.placement || !player->IsAlive()
+		|| state.map != KZ::zones::CurrentMapName())
+	{
+		state.nudge = false;
+		g_pMenus->SetSlotStatus(slot, "");
+		if (handles.placement != kInvalidMenuHandle)
+		{
+			SetNudge(player, handles.placement, state, false);
+		}
+		return;
+	}
 
-	g_pMenus->SetAdjustCallback(m, &OnZoneEditAdjust);
-	EnableAdjustCapture(m);
-	g_pMenus->SetCloseOnSelect(m, false);
-	handles.zoneEdit = m;
-	g_pMenus->DisplayMenu(m, slot, 0);
+	// Держим игрока на месте: клавиши сейчас двигают зону, а не его.
+	Vector origin;
+	player->GetOrigin(&origin);
+	if (origin != state.nudgeOrigin)
+	{
+		player->SetOrigin(state.nudgeOrigin);
+	}
+	player->SetVelocity(Vector(0, 0, 0));
+
+	// Ось «вперёд» — по взгляду, прилипшая к ближайшей оси мира; «вправо» — повёрнутая на -90°.
+	QAngle angles;
+	player->GetAngles(&angles);
+	const f32 yaw = DEG2RAD(angles.y);
+	const f32 cx = cosf(yaw), sy = sinf(yaw);
+	Vector forward = fabsf(cx) >= fabsf(sy) ? Vector(cx > 0 ? 1.0f : -1.0f, 0, 0) : Vector(0, sy > 0 ? 1.0f : -1.0f, 0);
+	const Vector right(forward.y, -forward.x, 0);
+
+	struct
+	{
+		u64 button;
+		Vector dir;
+	} keys[] = {
+		{IN_FORWARD, forward}, {IN_BACK, -forward}, {IN_MOVERIGHT, right}, {IN_MOVELEFT, -right}, {IN_JUMP, Vector(0, 0, 1)}, {IN_DUCK, Vector(0, 0, -1)},
+	};
+	const f32 now = g_pKZUtils->GetServerGlobals()->curtime;
+	u64 held = 0;
+	Vector delta(0, 0, 0);
+	bool fresh = false;
+	for (auto &k : keys)
+	{
+		if (player->IsButtonPressed((InputBitMask_t)k.button))
+		{
+			held |= k.button;
+			if (!(state.nudgeHeld & k.button))
+			{
+				fresh = true;
+			}
+			delta += k.dir;
+		}
+	}
+	bool move = false;
+	if (held == 0)
+	{
+		state.nudgeHeld = 0;
+	}
+	else if (fresh)
+	{
+		move = true;
+		state.nudgeRepeatAt = now + KZ_ZONEMENU_NUDGE_REPEAT_DELAY;
+	}
+	else if (now >= state.nudgeRepeatAt)
+	{
+		move = true;
+		state.nudgeRepeatAt = now + KZ_ZONEMENU_NUDGE_REPEAT_EVERY;
+	}
+	state.nudgeHeld = held;
+
+	if (move)
+	{
+		const Vector d = delta * state.step;
+		switch (state.target)
+		{
+			case ZM_TARGET_A:
+				state.a += d;
+				state.hasA = true;
+				break;
+			case ZM_TARGET_B:
+				state.b += d;
+				state.hasB = true;
+				break;
+			case ZM_TARGET_BOX:
+				state.a += d;
+				state.b += d;
+				break;
+			case ZM_TARGET_DEST:
+				state.dest += d;
+				break;
+		}
+		RefreshEditorTexts(handles.placement, state);
+		state.nudgeDirty = true;
+	}
+	if (state.nudgeDirty && now - state.nudgeLastRedraw >= KZ_ZONEMENU_NUDGE_REDRAW_EVERY)
+	{
+		state.nudgeDirty = false;
+		state.nudgeLastRedraw = now;
+		RedrawEditorPreview(player, state);
+	}
 }
 
 // --- Списки зон ---
@@ -1351,6 +1400,12 @@ static_function std::string ZoneRowText(const KzCyberZone &zone)
 	if (zone.type == KZ_CYBER_ZONE_MODIFIER)
 	{
 		V_snprintf(text, sizeof(text), "бустер x%.2f (%.0f %.0f %.0f)", zone.jumpFactor, zone.mins.x, zone.mins.y, zone.mins.z);
+		return text;
+	}
+	if (zone.type == KZ_CYBER_ZONE_TELEPORT)
+	{
+		V_snprintf(text, sizeof(text), "телепорт (%.0f %.0f %.0f) → %.0f %.0f %.0f", zone.mins.x, zone.mins.y, zone.mins.z, zone.tpDest.x,
+				   zone.tpDest.y, zone.tpDest.z);
 		return text;
 	}
 	if (zone.courseDescriptor[0])
@@ -1902,7 +1957,13 @@ static_function void OnTypeSelect(MenuHandle menu, int slot, int item)
 		OpenPlacement(player);
 		return;
 	}
-	state.type = KZ_STREQ(tag, "start") ? KZ_CYBER_ZONE_START : KZ_CYBER_ZONE_END;
+	if (KZ_STREQ(tag, "teleport"))
+	{
+		state.type = KZ_CYBER_ZONE_TELEPORT;
+		OpenPlacement(player);
+		return;
+	}
+	state.type = KZ_STREQ(tag, "stage") ? KZ_CYBER_ZONE_STAGE : KZ_STREQ(tag, "start") ? KZ_CYBER_ZONE_START : KZ_CYBER_ZONE_END;
 	// Есть ли на карте курсы, среди которых реально есть что выбирать (см. CourseSelectable —
 	// синтетический «Default» форка выбором не считается). Нет — существующая автоматика
 	// платформенного курса: зона уходит без курса, EnsurePlatformCourse заведёт дефолтный.
@@ -1915,6 +1976,12 @@ static_function void OnTypeSelect(MenuHandle menu, int slot, int item)
 	}
 	if (!anySelectable)
 	{
+		if (state.type == KZ_CYBER_ZONE_STAGE)
+		{
+			// Стейдж живёт только внутри курса (api отобьёт зону без courseId).
+			player->PrintChat(true, false, "{grey}Зоны:{default} стейдж ставится в курс — сначала поставь старт и финиш.");
+			return;
+		}
 		OpenPlacement(player);
 		return;
 	}
@@ -1970,7 +2037,9 @@ static_function void OpenSkeleton(KZPlayer *player, ZmScreen show)
 	{
 		g_pMenus->AddItem(typeSel, "Старт", "start", false);
 		g_pMenus->AddItem(typeSel, "Финиш", "end", false);
+		g_pMenus->AddItem(typeSel, "Стейдж (обязательная, жёлтая)", "stage", false);
 		g_pMenus->AddItem(typeSel, "Бустер", "booster", false);
+		g_pMenus->AddItem(typeSel, "Телепорт (невидимый)", "teleport", false);
 		g_pMenus->SetCloseOnSelect(typeSel, false);
 		handles.typeSel = typeSel;
 		g_pMenus->AddSubMenu(root, "Поставить зону ▸", typeSel, "");

@@ -50,7 +50,20 @@ struct KzSpawnedZone
 	// числа рёбер здесь и в !zone show разные и разъезжаться им нельзя.
 	CEntityHandle highlight[KZ_ZONE_BOX_BOTTOM_EDGES] {};
 	bool highlighted {};
+	// Только у teleport: info_teleport_destination, куда шлёт триггер. Живёт и умирает с зоной.
+	CEntityHandle tpDest {};
 };
+
+// Родной стейдж карты (мапперский триггер) и его жёлтый контур на полу. Отдельно от spawned:
+// это не наша зона, её запись не приезжает из api и в diff не участвует.
+struct KzNativeStageHighlight
+{
+	CEntityHandle trigger;
+	CEntityHandle edges[KZ_ZONE_BOX_BOTTOM_EDGES] {};
+};
+#define KZ_ZONE_TP_DEST_PREFIX "cyb_tpdest_"
+// Потолок контуров родных стейджей: делит лимит энтити с нашими зонами.
+#define KZ_ZONE_NATIVE_STAGE_HL_MAX 32
 
 static_global struct
 {
@@ -85,6 +98,8 @@ static_global struct
 	std::vector<std::string> createdCourses;
 	// Ждём момента, когда карта будет заведена в БД, чтобы досетапить курс.
 	bool localCoursesPending;
+	// Жёлтые контуры родных стейджей карты (kz_alien_city и т.п.).
+	std::vector<KzNativeStageHighlight> nativeStageHl;
 } g_cybZones;
 
 // Завели ли МЫ курс с таким дескриптором на этой карте (определение ниже — им пользуется SpawnZone).
@@ -104,6 +119,8 @@ static_function const char *ZoneTypeName(KzCyberZoneType type)
 			return "stage";
 		case KZ_CYBER_ZONE_CHECKPOINT:
 			return "checkpoint";
+		case KZ_CYBER_ZONE_TELEPORT:
+			return "teleport";
 		default:
 			return "unknown";
 	}
@@ -156,6 +173,11 @@ bool KZ::zones::ParseZoneType(const char *raw, KzCyberZoneType &out)
 		out = KZ_CYBER_ZONE_CHECKPOINT;
 		return true;
 	}
+	if (KZ_STREQ(raw, "teleport"))
+	{
+		out = KZ_CYBER_ZONE_TELEPORT;
+		return true;
+	}
 	// "split" НЕ разбираем намеренно: api отбивает его четырёхсотым, и тащить непроверенный путь
 	// в спавн незачем. Появится в api — добавится здесь одной веткой.
 	return false;
@@ -181,7 +203,11 @@ Color KZ::zones::ZoneColor(KzCyberZoneType type)
 		case KZ_CYBER_ZONE_MODIFIER:
 			return Color(255, 255, 128, 255);
 		case KZ_CYBER_ZONE_STAGE:
-			return Color(255, 157, 0, 255);
+			// Жёлтый (решение владельца 17.11): стейдж — обязательная зона, видна всем.
+			return Color(255, 220, 0, 255);
+		case KZ_CYBER_ZONE_TELEPORT:
+			// Цвет trigger_teleport у kz_showtriggers. Игроку не рисуется — только в !zone show/редакторе.
+			return Color(255, 0, 255, 255);
 		case KZ_CYBER_ZONE_CHECKPOINT:
 			return Color(219, 255, 0, 255);
 		default:
@@ -370,7 +396,7 @@ static_function bool SpawnZone(const KzCyberZone &zone, const char **outReason =
 	// учётом; зона с разошедшимся регистром запускает таймер, но не попадает в счётчики стейджей,
 	// а те гейтят финиш. Отказ был бы полностью тихим.
 	const char *courseDescriptor = nullptr;
-	const bool needsCourse = zone.type != KZ_CYBER_ZONE_MODIFIER;
+	const bool needsCourse = zone.type != KZ_CYBER_ZONE_MODIFIER && zone.type != KZ_CYBER_ZONE_TELEPORT;
 	if (needsCourse)
 	{
 		if (zone.courseDescriptor[0])
@@ -407,9 +433,43 @@ static_function bool SpawnZone(const KzCyberZone &zone, const char **outReason =
 		}
 	}
 
+	char tpDestName[64] {};
+	CEntityHandle tpDestHandle {};
+	if (zone.type == KZ_CYBER_ZONE_TELEPORT)
+	{
+		V_snprintf(tpDestName, sizeof(tpDestName), KZ_ZONE_TP_DEST_PREFIX "%s", zone.id);
+		CBaseEntity *dest = utils::CreateEntityByName<CBaseEntity>("info_teleport_destination");
+		if (!dest)
+		{
+			KZ_LOG_ERROR(LogChannel::MappingAPI, "[cyb] zone_spawn_failed id=%s reason=create_tp_dest_failed\n", zone.id);
+			return fail("create_entity_failed");
+		}
+		CEntityKeyValues *dkv = new CEntityKeyValues();
+		dkv->SetString("targetname", tpDestName);
+		dkv->SetVector("origin", zone.tpDest);
+		dkv->SetQAngle("angles", QAngle(0.0f, zone.tpYaw, 0.0f));
+		tpDestHandle = dest->GetRefEHandle();
+		dest->DispatchSpawn(dkv);
+		if (!GameEntitySystem() || !GameEntitySystem()->GetEntityInstance(tpDestHandle))
+		{
+			KZ_LOG_ERROR(LogChannel::MappingAPI, "[cyb] zone_spawn_failed id=%s reason=tp_dest_removed_on_spawn\n", zone.id);
+			return fail("removed_on_spawn");
+		}
+	}
+	// Снос точки назначения на любом отказе ниже: без триггера она никому не нужна.
+	auto dropTpDest = [&]()
+	{
+		CEntityInstance *d = GameEntitySystem() ? GameEntitySystem()->GetEntityInstance(tpDestHandle) : nullptr;
+		if (d)
+		{
+			g_pKZUtils->RemoveEntity(d);
+		}
+	};
+
 	CBaseTrigger *trigger = utils::CreateEntityByName<CBaseTrigger>("trigger_multiple");
 	if (!trigger)
 	{
+		dropTpDest();
 		KZ_LOG_ERROR(LogChannel::MappingAPI, "[cyb] zone_spawn_failed id=%s reason=create_entity_failed\n", zone.id);
 		return fail("create_entity_failed");
 	}
@@ -424,6 +484,7 @@ static_function bool SpawnZone(const KzCyberZone &zone, const char **outReason =
 	{
 		KZ_LOG_ERROR(LogChannel::MappingAPI, "[cyb] zone_spawn_failed id=%s reason=no_collision_property\n", zone.id);
 		g_pKZUtils->RemoveEntity(trigger);
+		dropTpDest();
 		return fail("no_collision_property");
 	}
 	collision->m_vecMins(Vector(-half.x, -half.y, -half.z));
@@ -486,12 +547,27 @@ static_function bool SpawnZone(const KzCyberZone &zone, const char **outReason =
 			kv->SetFloat("timer_modifier_jump_impulse", zone.jumpFactor);
 			break;
 		}
+		case KZ_CYBER_ZONE_TELEPORT:
+		{
+			// Точку назначения Mapping API ищет по имени В МОМЕНТ КАСАНИЯ
+			// (FindFirstEntityHandleByName в trigger/mapping_api.cpp), поэтому достаточно
+			// поставить info_teleport_destination с уникальным именем рядом с триггером.
+			kv->SetInt("timer_trigger_type", KZTRIGGER_TELEPORT);
+			kv->SetString("timer_teleport_destination", tpDestName);
+			kv->SetFloat("timer_teleport_delay", 0.0f);
+			kv->SetBool("timer_teleport_use_dest_angles", true);
+			kv->SetBool("timer_teleport_reset_speed", !zone.tpKeepSpeed);
+			kv->SetBool("timer_teleport_reorient_player", false);
+			kv->SetBool("timer_teleport_relative", false);
+			break;
+		}
 		default:
 			// Недостижимо: ParseZoneType выставляет только покрытые выше значения (split он
 			// намеренно не разбирает). Освобождаем kv явно ради чистоты выхода.
 			kv->Release();
 			g_pKZUtils->RemoveEntity(trigger);
-			return fail("unknown_zone_type");
+			dropTpDest();
+		return fail("unknown_zone_type");
 	}
 
 	const CEntityHandle handle = trigger->GetRefEHandle();
@@ -501,6 +577,7 @@ static_function bool SpawnZone(const KzCyberZone &zone, const char **outReason =
 	if (!inst)
 	{
 		KZ_LOG_ERROR(LogChannel::MappingAPI, "[cyb] zone_spawn_failed id=%s reason=removed_on_spawn\n", zone.id);
+		dropTpDest();
 		return fail("removed_on_spawn");
 	}
 
@@ -514,6 +591,7 @@ static_function bool SpawnZone(const KzCyberZone &zone, const char **outReason =
 	{
 		KZ_LOG_ERROR(LogChannel::MappingAPI, "[cyb] zone_spawn_failed id=%s type=%s reason=not_registered\n", zone.id, ZoneTypeName(zone.type));
 		g_pKZUtils->RemoveEntity(inst);
+		dropTpDest();
 		return fail("not_registered");
 	}
 
@@ -542,7 +620,11 @@ static_function bool SpawnZone(const KzCyberZone &zone, const char **outReason =
 		}
 	}
 
-	g_cybZones.spawned.push_back({handle, zone});
+	KzSpawnedZone record {};
+	record.handle = handle;
+	record.zone = zone;
+	record.tpDest = tpDestHandle;
+	g_cybZones.spawned.push_back(record);
 	return true;
 }
 
@@ -672,7 +754,8 @@ static_function bool IsRefusedOverride(const std::vector<KzOverrideRefusal> &ref
 static_function bool ZoneRecordEqual(const KzCyberZone &a, const KzCyberZone &b)
 {
 	return KZ_STREQ(a.id, b.id) && a.type == b.type && a.mins == b.mins && a.maxs == b.maxs && a.jumpFactor == b.jumpFactor
-		   && a.stageNumber == b.stageNumber && KZ_STREQ(a.courseDescriptor, b.courseDescriptor);
+		   && a.stageNumber == b.stageNumber && KZ_STREQ(a.courseDescriptor, b.courseDescriptor) && a.tpDest == b.tpDest && a.tpYaw == b.tpYaw
+		   && a.tpKeepSpeed == b.tpKeepSpeed;
 }
 
 // Ключ сортировки зон под потолок отрисовки: номер курса, которому зона принадлежит.
@@ -810,6 +893,88 @@ static_function void SyncCoursesAfterApply()
 	KZ::mapapi::RecountCourseZones();
 }
 
+// Точка назначения ТП-зоны: снимаем, только если это действительно наша энтити.
+static_function void RemoveTpDest(KzSpawnedZone &spawned)
+{
+	CEntityInstance *d = GameEntitySystem() ? GameEntitySystem()->GetEntityInstance(spawned.tpDest) : nullptr;
+	if (d && d->m_pEntity && V_strncmp(d->m_pEntity->m_name.String(), KZ_ZONE_TP_DEST_PREFIX, sizeof(KZ_ZONE_TP_DEST_PREFIX) - 1) == 0)
+	{
+		g_pKZUtils->RemoveEntity(d);
+	}
+	spawned.tpDest = {};
+}
+
+static_function void RemoveNativeStageHighlights(bool keepEntities)
+{
+	for (KzNativeStageHighlight &hl : g_cybZones.nativeStageHl)
+	{
+		KZ::zones::RemoveBoxEdges(hl.edges, KZ_ZONE_BOX_BOTTOM_EDGES, KZ_ZONE_HIGHLIGHT_NAME, keepEntities);
+	}
+	g_cybZones.nativeStageHl.clear();
+}
+
+// Жёлтый контур на полу у РОДНЫХ стейджей карты. Идемпотентно: живой контур живого триггера не
+// трогаем, мёртвые снимаем, недостающие дорисовываем. Погашенные платформой стейджи
+// (переопределённый курс) уже не ZONE_STAGE и в выборку не попадают.
+static_function void SyncNativeStageHighlights()
+{
+	std::vector<KZ::mapapi::NativeZoneBox> boxes;
+	KZ::mapapi::CollectNativeZoneBoxes(KZTRIGGER_ZONE_STAGE, boxes);
+
+	std::vector<KzNativeStageHighlight> kept;
+	for (KzNativeStageHighlight &hl : g_cybZones.nativeStageHl)
+	{
+		bool wanted = false;
+		for (const KZ::mapapi::NativeZoneBox &box : boxes)
+		{
+			if (box.trigger == hl.trigger)
+			{
+				wanted = true;
+				break;
+			}
+		}
+		bool edgesAlive = true;
+		for (const CEntityHandle &e : hl.edges)
+		{
+			edgesAlive = edgesAlive && e.Get() != nullptr;
+		}
+		if (wanted && edgesAlive)
+		{
+			kept.push_back(hl);
+			continue;
+		}
+		KZ::zones::RemoveBoxEdges(hl.edges, KZ_ZONE_BOX_BOTTOM_EDGES, KZ_ZONE_HIGHLIGHT_NAME);
+	}
+	g_cybZones.nativeStageHl = kept;
+
+	for (const KZ::mapapi::NativeZoneBox &box : boxes)
+	{
+		if ((i32)g_cybZones.nativeStageHl.size() >= KZ_ZONE_NATIVE_STAGE_HL_MAX)
+		{
+			break;
+		}
+		bool have = false;
+		for (const KzNativeStageHighlight &hl : g_cybZones.nativeStageHl)
+		{
+			have = have || hl.trigger == box.trigger;
+		}
+		if (have)
+		{
+			continue;
+		}
+		KzNativeStageHighlight hl {};
+		hl.trigger = box.trigger;
+		const i32 created = KZ::zones::DrawBoxEdges(box.mins, box.maxs, KZ::zones::ZoneColor(KZ_CYBER_ZONE_STAGE), KZ_ZONE_HIGHLIGHT_NAME, false,
+													KZ_ZONE_BOX_BOTTOM_EDGES, hl.edges);
+		if (created < KZ_ZONE_BOX_BOTTOM_EDGES)
+		{
+			KZ::zones::RemoveBoxEdges(hl.edges, KZ_ZONE_BOX_BOTTOM_EDGES, KZ_ZONE_HIGHLIGHT_NAME);
+			continue;
+		}
+		g_cybZones.nativeStageHl.push_back(hl);
+	}
+}
+
 static_function void DespawnAll()
 {
 	for (KzSpawnedZone &spawned : g_cybZones.spawned)
@@ -817,6 +982,7 @@ static_function void DespawnAll()
 		// Контур снимаем ВСЕГДА, даже когда сама зона уже не жива: рёбра — отдельные энтити, и
 		// их судьба с триггером не связана. Мёртвый хендл просто занулится.
 		RemoveHighlight(spawned);
+		RemoveTpDest(spawned);
 		CEntityInstance *inst = GameEntitySystem() ? GameEntitySystem()->GetEntityInstance(spawned.handle) : nullptr;
 		if (inst && inst->m_pEntity && inst->m_pEntity->NameMatches(KZ_CYBER_ZONE_NAME))
 		{
@@ -829,6 +995,16 @@ static_function void DespawnAll()
 // Числится ли ребро постоянного слоя за какой-нибудь поставленной зоной.
 static_function bool IsKnownHighlightEdge(const CEntityHandle &handle)
 {
+	for (const KzNativeStageHighlight &hl : g_cybZones.nativeStageHl)
+	{
+		for (const CEntityHandle &e : hl.edges)
+		{
+			if (e == handle)
+			{
+				return true;
+			}
+		}
+	}
 	for (const KzSpawnedZone &spawned : g_cybZones.spawned)
 	{
 		if (!spawned.highlighted)
@@ -1034,6 +1210,20 @@ static_function void IngestZones(const char *body, const std::string &mapName)
 				skipped++;
 				continue;
 			}
+		}
+		if (zone.type == KZ_CYBER_ZONE_TELEPORT)
+		{
+			KeyValues3 *params = el->FindMember("params");
+			if (!params || !ReadVector(params, "dest", zone.tpDest))
+			{
+				KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] zone_ingest_skipped id=%s type=teleport reason=no_dest\n", zone.id);
+				skipped++;
+				continue;
+			}
+			KeyValues3 *yaw = params->FindMember("destYaw");
+			zone.tpYaw = yaw ? (f32)yaw->GetDouble(0.0) : 0.0f;
+			KeyValues3 *keep = params->FindMember("keepSpeed");
+			zone.tpKeepSpeed = keep ? keep->GetBool(false) : false;
 		}
 		// Курс зоны. Поле аддитивное: его отсутствие или null означает «зона вне курсов» —
 		// прежнее поведение первой итерации, а не ошибка.
@@ -1287,7 +1477,8 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 	for (size_t i = 0; i < g_cybZones.zones.size(); i++)
 	{
 		const KzCyberZoneType type = g_cybZones.zones[i].type;
-		if (type == KZ_CYBER_ZONE_START || type == KZ_CYBER_ZONE_END)
+		// С 17.11 и стейджи: обязательную зону игрок обязан видеть (жёлтая, решение владельца).
+		if (type == KZ_CYBER_ZONE_START || type == KZ_CYBER_ZONE_END || type == KZ_CYBER_ZONE_STAGE)
 		{
 			highlightOrder.push_back(i);
 		}
@@ -1329,7 +1520,9 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 	for (KzSpawnedZone &spawned : g_cybZones.spawned)
 	{
 		CEntityInstance *inst = GameEntitySystem() ? GameEntitySystem()->GetEntityInstance(spawned.handle) : nullptr;
-		const bool alive = inst && inst->m_pEntity && inst->m_pEntity->NameMatches(KZ_CYBER_ZONE_NAME);
+		// У ТП-зоны живой должна быть и точка назначения: без неё триггер телепортирует в никуда.
+		const bool alive = inst && inst->m_pEntity && inst->m_pEntity->NameMatches(KZ_CYBER_ZONE_NAME)
+						   && (spawned.zone.type != KZ_CYBER_ZONE_TELEPORT || spawned.tpDest.Get() != nullptr);
 		i32 match = -1;
 		if (alive)
 		{
@@ -1356,6 +1549,7 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 		// сама зона: рёбра это отдельные энтити, движковая очистка могла снести триггер и
 		// оставить их.
 		RemoveHighlight(spawned);
+		RemoveTpDest(spawned);
 		if (alive)
 		{
 			// Живую старт-зону сносим — значит кому-то сейчас сотрёт чекпоинты. Собираем ИМЕННО
@@ -1444,6 +1638,8 @@ static_function void ApplyLoadedZones(const char *reason, const char *focusZoneI
 				"native_disabled=%d restored=%d highlight=%d reason=%s\n",
 				g_cybZones.mapName.c_str(), ok, (i32)g_cybZones.zones.size(), (i32)kept.size(), respawned, g_cybZones.revision, courseSource,
 				(i32)g_cybZones.courses.size(), unknownCourses, nativeDisabled, restored, highlighted, reason);
+	// Набор мог погасить или вернуть родные стейджи (переопределение курса) — контуры следом.
+	SyncNativeStageHighlights();
 
 	// Предупреждаем ТЕХ, КОГО ЗАДЕЛО, и только их. Молчаливый сброс чекпоинтов выглядит как
 	// «сервер съел прогресс» и диагностируется потом часами.
@@ -1563,6 +1759,8 @@ void KZ::zones::OnMapLoaded()
 	g_cybZones.mapGeneration++;
 	g_cybZones.worldReady = false;
 	DespawnAll();
+	// Энтити прошлой карты уже не наши — только забываем хендлы.
+	RemoveNativeStageHighlights(true);
 	g_cybZones.zones.clear();
 	g_cybZones.courses.clear();
 	g_cybZones.revision = 0;
@@ -1634,6 +1832,9 @@ void KZ::zones::OnRoundStart()
 	// Мир доделан — теперь спавн доживает до игрока.
 	g_cybZones.worldReady = true;
 	ApplyLoadedZones("round_start");
+	// Родные стейджи карты подсвечиваем и там, где наших зон нет вовсе (ApplyLoadedZones на
+	// такой карте может выйти раньше). Триггеры карты к round_start уже зарегистрированы.
+	SyncNativeStageHighlights();
 }
 
 bool KZ::zones::IsReady()

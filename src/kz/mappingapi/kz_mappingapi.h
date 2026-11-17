@@ -1,5 +1,6 @@
 
 #pragma once
+#include <vector>
 
 #define KZ_MAPPING_INTERFACE "KZMappingInterface"
 
@@ -318,6 +319,16 @@ namespace KZ::mapapi
 	// Так применение становится идемпотентным — «восстановить всё, затем погасить по текущему
 	// набору» — вместо накопления состояния между применениями.
 	i32 RestorePlatformDisabledZones();
+
+	// Мировой AABB родного (не платформенного) триггера заданного типа — для подсветки родных
+	// стейджей. Поворот триггера не учитывается (как в utils::FindValidPositionForTrigger).
+	struct NativeZoneBox
+	{
+		CEntityHandle trigger;
+		Vector mins;
+		Vector maxs;
+	};
+	void CollectNativeZoneBoxes(KzTriggerType type, std::vector<NativeZoneBox> &out);
 
 	// Отключить/включить курс целиком. Отключённый исчезает из витрины g_sortedCourses (то есть
 	// из !courses, !main, !b*, HUD, SetupLocalCourses), но остаётся в courseDescriptors, чтобы

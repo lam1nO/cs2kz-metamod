@@ -110,6 +110,9 @@ enum KzCyberZoneType
 	// В enum есть, но НЕ разбирается ParseZoneType и не выставляется редактором: api отбивает
 	// split четырёхсотым. Заведён, чтобы номера типов не поехали, когда его включат.
 	KZ_CYBER_ZONE_SPLIT,
+	// ТП-зона: невидимая, касание телепортирует в tpDest. Чинит карты без телепорта между
+	// комнатами и закрывает сокращения (игрока возвращает назад).
+	KZ_CYBER_ZONE_TELEPORT,
 	KZ_CYBER_ZONE_TYPE_COUNT,
 };
 
@@ -138,6 +141,10 @@ struct KzCyberZone
 	// одиночные start/end на картах без курсов) — прежнее поведение первой итерации.
 	char courseDescriptor[128] {};
 	i32 stageNumber {}; // только у stage/checkpoint; нумерация приходит от api готовой
+	// Только у teleport: точка назначения (ноги игрока), взгляд и сохранять ли скорость.
+	Vector tpDest {};
+	f32 tpYaw {};
+	bool tpKeepSpeed {};
 };
 
 namespace KZ::zones
@@ -238,6 +245,7 @@ namespace KZ::zones
 
 	// База платформенного api из опции cybEmitUrl, без хвостового «/». Пустая = источник выключен.
 	std::string ApiBaseUrl();
+	std::string ZoneParamsJson(const KzCyberZone &zone);
 	// Bearer-токен cybEmitToken, если задан.
 	void AuthorizeRequest(HTTP::Request &req);
 	// Причина отказа из тела ответа api ({"reason": "..."}); пустая строка, если не разобралось.
@@ -249,6 +257,7 @@ namespace KZ::zones
 
 	// Корневое меню !zones (алиас !zone menu). Право проверяется ДО создания меню.
 	void OpenZonesMenu(KZPlayer *player);
+	void OnEditorProcessMovement(KZPlayer *player);
 	// !zone course new|delete|disable|enable ... — управление курсами командой.
 	void CourseSubcommand(KZPlayer *player, const CCommand *args);
 	// Сброс per-slot состояния меню на смене карты (координаты привязаны к геометрии карты).
@@ -342,6 +351,7 @@ public:
 	// Дескриптор курса при этом обязан лежать в zone.courseDescriptor: локальная запись
 	// собирается из pending-копии, а api в ответе поле может и не прислать.
 	void SubmitZone(const KzCyberZone &zone, const char *courseId = nullptr);
+	void PatchZone(const char *zoneId, const KzCyberZone &zone);
 	void CancelPending();
 	void ListZones();
 	void RemoveZone(i32 humanIndex);

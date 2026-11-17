@@ -1066,6 +1066,30 @@ const char *KZ::mapapi::GetCanonicalCourseDescriptor(const char *descriptorName)
 	return desc ? desc->entityTargetname : nullptr;
 }
 
+void KZ::mapapi::CollectNativeZoneBoxes(KzTriggerType type, std::vector<NativeZoneBox> &out)
+{
+	out.clear();
+	FOR_EACH_VEC(g_mappingApi.triggers, i)
+	{
+		const KzTrigger *trigger = &g_mappingApi.triggers[i];
+		if (trigger->type != type || trigger->platformSpawned)
+		{
+			continue;
+		}
+		CBaseTrigger *ent = static_cast<CBaseTrigger *>(GameEntitySystem() ? GameEntitySystem()->GetEntityInstance(trigger->entity) : nullptr);
+		if (!ent || !ent->m_pCollision() || !ent->m_CBodyComponent() || !ent->m_CBodyComponent->m_pSceneNode())
+		{
+			continue;
+		}
+		const Vector origin = ent->m_CBodyComponent->m_pSceneNode->m_vecAbsOrigin();
+		NativeZoneBox box;
+		box.trigger = trigger->entity;
+		box.mins = origin + ent->m_pCollision()->m_vecMins();
+		box.maxs = origin + ent->m_pCollision()->m_vecMaxs();
+		out.push_back(box);
+	}
+}
+
 i32 KZ::mapapi::DisableCourseZones(const char *descriptorName, KzTriggerType type)
 {
 	// ЖЁСТКИЙ ЗАПРЕТ, не оптимизация: отключать разрешено ТОЛЬКО зоны таймера.

@@ -595,23 +595,12 @@ void KZZonesService::SubmitZone(const KzCyberZone &zone, const char *courseId)
 		V_snprintf(courseField, sizeof(courseField), "\"courseId\":\"%s\",", courseId);
 	}
 
-	char body[768];
-	if (zone.type == KZ_CYBER_ZONE_MODIFIER)
-	{
-		V_snprintf(body, sizeof(body),
-				   "{\"steamId64\":\"%llu\",\"map\":\"%s\",%s\"triggerType\":\"%s\",\"mins\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},"
-				   "\"maxs\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},\"params\":{\"jumpFactor\":%.3f}}",
-				   steamId, KZ::zones::CurrentMapName(), courseField, KZ::zones::ZoneTypeToString(zone.type), zone.mins.x, zone.mins.y, zone.mins.z,
-				   zone.maxs.x, zone.maxs.y, zone.maxs.z, zone.jumpFactor);
-	}
-	else
-	{
-		V_snprintf(body, sizeof(body),
-				   "{\"steamId64\":\"%llu\",\"map\":\"%s\",%s\"triggerType\":\"%s\",\"mins\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},"
-				   "\"maxs\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f}}",
-				   steamId, KZ::zones::CurrentMapName(), courseField, KZ::zones::ZoneTypeToString(zone.type), zone.mins.x, zone.mins.y, zone.mins.z,
-				   zone.maxs.x, zone.maxs.y, zone.maxs.z);
-	}
+	char body[1024];
+	V_snprintf(body, sizeof(body),
+			   "{\"steamId64\":\"%llu\",\"map\":\"%s\",%s\"triggerType\":\"%s\",\"mins\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},"
+			   "\"maxs\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f}%s}",
+			   steamId, KZ::zones::CurrentMapName(), courseField, KZ::zones::ZoneTypeToString(zone.type), zone.mins.x, zone.mins.y, zone.mins.z,
+			   zone.maxs.x, zone.maxs.y, zone.maxs.z, KZ::zones::ZoneParamsJson(zone).c_str());
 
 	HTTP::Request req(HTTP::Method::POST, base + "/ingest/v1/kz/zones");
 	AuthorizeRequest(req);
@@ -739,6 +728,91 @@ void KZZonesService::SubmitZone(const KzCyberZone &zone, const char *courseId)
 			if (player)
 			{
 				player->PrintChat(true, false, "{grey}Зоны:{default} api недоступен, зона не сохранена.");
+			}
+		});
+	// clang-format on
+}
+
+// Хвост тела запроса с params зоны (",\"params\":{...}") или пустая строка, если у типа их нет.
+std::string KZ::zones::ZoneParamsJson(const KzCyberZone &zone)
+{
+	char out[256] = "";
+	if (zone.type == KZ_CYBER_ZONE_MODIFIER)
+	{
+		V_snprintf(out, sizeof(out), ",\"params\":{\"jumpFactor\":%.3f}", zone.jumpFactor);
+	}
+	else if (zone.type == KZ_CYBER_ZONE_TELEPORT)
+	{
+		V_snprintf(out, sizeof(out), ",\"params\":{\"dest\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},\"destYaw\":%.1f,\"keepSpeed\":%s}", zone.tpDest.x,
+				   zone.tpDest.y, zone.tpDest.z, zone.tpYaw, zone.tpKeepSpeed ? "true" : "false");
+	}
+	return out;
+}
+
+// Правка зоны на месте (PATCH): id, тип, курс и номер стейджа сохраняются — двигаются только углы и
+// параметры. После ответа перечитываем набор карты целиком: diff переставит ровно эту зону.
+void KZZonesService::PatchZone(const char *zoneId, const KzCyberZone &zone)
+{
+	const std::string base = ApiBaseUrl();
+	if (base.empty() || !zoneId || !zoneId[0])
+	{
+		this->player->PrintChat(true, false, "{grey}Зоны:{default} платформенный источник выключен.");
+		return;
+	}
+	const u64 steamId = this->player->GetSteamId64(false);
+	char body[768];
+	V_snprintf(body, sizeof(body),
+			   "{\"steamId64\":\"%llu\",\"mins\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f},\"maxs\":{\"x\":%.3f,\"y\":%.3f,\"z\":%.3f}%s}", steamId,
+			   zone.mins.x, zone.mins.y, zone.mins.z, zone.maxs.x, zone.maxs.y, zone.maxs.z, KZ::zones::ZoneParamsJson(zone).c_str());
+
+	HTTP::Request req(HTTP::Method::PATCH, base + "/ingest/v1/kz/zones/" + zoneId);
+	AuthorizeRequest(req);
+	req.SetHeader("Content-Type", "application/json");
+	req.SetBody(body);
+
+	const CPlayerSlot slot = this->player->GetPlayerSlot();
+	const std::string submittedMap = KZ::zones::CurrentMapName();
+	const std::string id = zoneId;
+	const KzCyberZoneType type = zone.type;
+	// clang-format off
+	req.Send(
+		[slot, steamId, submittedMap, id, type](HTTP::Response resp)
+		{
+			KZPlayer *player = PlayerBySlotIfSame(slot, steamId);
+			if (resp.status < 200 || resp.status >= 300)
+			{
+				std::string reason = ParseApiReason(resp.Body());
+				if (reason.empty())
+				{
+					reason = "http_" + std::to_string(resp.status);
+				}
+				KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] zone_patch_rejected steam_id=%llu id=%s reason=%s http=%u\n", steamId, id.c_str(),
+							reason.c_str(), (unsigned)resp.status);
+				if (player)
+				{
+					player->PrintChat(true, false, "{grey}Зоны:{default} правка не сохранена: {darkred}%s{default}.", reason.c_str());
+				}
+				return;
+			}
+			KZ_LOG_INFO(LogChannel::MappingAPI, "[cyb] zone_patched steam_id=%llu id=%s type=%s\n", steamId, id.c_str(),
+						KZ::zones::ZoneTypeToString(type));
+			if (!KZ_STREQ(submittedMap.c_str(), KZ::zones::CurrentMapName()))
+			{
+				return;
+			}
+			KZ::zones::RefreshFromApi("zone_patch");
+			if (player)
+			{
+				player->PrintChat(true, false, "{grey}Зоны:{default} зона {yellow}%s{default} сохранена.", KZ::zones::ZoneTypeToString(type));
+			}
+		},
+		[slot, steamId]()
+		{
+			KZ_LOG_WARN(LogChannel::MappingAPI, "[cyb] zone_patch_rejected steam_id=%llu reason=network_error\n", steamId);
+			KZPlayer *player = PlayerBySlotIfSame(slot, steamId);
+			if (player)
+			{
+				player->PrintChat(true, false, "{grey}Зоны:{default} api недоступен, правка не сохранена.");
 			}
 		});
 	// clang-format on

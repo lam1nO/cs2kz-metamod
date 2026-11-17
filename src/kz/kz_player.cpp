@@ -401,6 +401,8 @@ void KZPlayer::OnProcessMovement()
 
 	this->jumpstatsService->OnProcessMovement();
 	this->checkpointService->TpHoldPlayerStill();
+	// WASD-режим редактора зон: держит игрока и двигает точку зоны.
+	KZ::zones::OnEditorProcessMovement(this);
 }
 
 void KZPlayer::OnProcessMovementPost()
