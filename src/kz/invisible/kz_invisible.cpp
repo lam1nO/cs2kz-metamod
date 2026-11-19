@@ -33,6 +33,9 @@ static_global std::unordered_set<u64> s_invisibleSteamIds;
 // списком админов на проде непуст всегда, а вот невидимка на сервере — редкость.
 static_global i32 s_onlineInvisibleCount = 0;
 
+// 0 — прятать из TAB командой NONE (клиент открывает меню команды), 1 — флагом HLTV в наблюдателях.
+CConVar<i32> kz_invisible_mode("kz_invisible_mode", FCVAR_NONE, "Invisible hide mode: 0 team NONE, 1 HLTV flag in spectators", 0);
+
 // Пересчитать кэш-флаги всем игрокам после смены списка. Счётчик онлайн-невидимок
 // пересобирается с нуля — защита от дрейфа инкрементальной арифметики (сиротский флаг
 // отклонённого коннекта чинит декремент в OnPlayerConnect при переиспользовании слота).
@@ -318,6 +321,19 @@ void KZInvisibleService::EnforceObserverTeam()
 	{
 		return;
 	}
+	if (kz_invisible_mode.Get() == 1)
+	{
+		// Режим 1 (опыт 19.11): остаёмся в НАСТОЯЩИХ наблюдателях — клиент не открывает меню
+		// команды, — а из TAB прячемся флагом HLTV на контроллере (GOTV в табе не виден).
+		if (this->observing && controller->m_bIsHLTV())
+		{
+			return;
+		}
+		controller->m_bIsHLTV(true);
+		this->observing = true;
+		KZ_LOG_INFO(LogChannel::General, "[cyb] invisible_observer_team steam_id=%llu mode=hltv\n", this->steamId64);
+		return;
+	}
 	this->SetObserverTeam(CS_TEAM_NONE);
 	this->observing = true;
 	KZ_LOG_INFO(LogChannel::General, "[cyb] invisible_observer_team steam_id=%llu team=none\n", this->steamId64);
@@ -452,6 +468,7 @@ void KZInvisibleService::RefreshFlag()
 	else if (this->observing)
 	{
 		this->SetObserverTeam(CS_TEAM_SPECTATOR);
+		this->ClearHltvFlag();
 		this->observing = false;
 	}
 }
@@ -515,4 +532,56 @@ CON_COMMAND_F(kz_invisible_remove, "Remove a SteamID64 from the invisible player
 	}
 	RefreshAllPlayers();
 	KZ_LOG_INFO(LogChannel::General, "[cyb] invisible_remove steam_id=%llu count=%u\n", steamId, (u32)s_invisibleSteamIds.size());
+}
+
+// Снять флаг HLTV режима 1 — при выходе из наблюдения/невидимости.
+void KZInvisibleService::ClearHltvFlag()
+{
+	CCSPlayerController *controller = this->player->GetController();
+	if (controller && controller->m_bIsHLTV())
+	{
+		controller->m_bIsHLTV(false);
+		KZ_LOG_INFO(LogChannel::General, "[cyb] invisible_hltv_off steam_id=%llu\n", this->steamId64);
+	}
+}
+
+// Отладка опыта 19.11: поменять поле контроллера игрока на лету. Только консоль/RCON.
+CON_COMMAND_F(kz_invisible_dbg, "kz_invisible_dbg <steamid64> <hltv|pending|team|connected> <value>", FCVAR_NONE)
+{
+	if (DenyIfPlayer(context, "kz_invisible_dbg") || args.ArgC() < 4)
+	{
+		return;
+	}
+	u64 steamId = strtoull(args.Arg(1), nullptr, 10);
+	for (i32 i = 1; i < MAXPLAYERS + 1; i++)
+	{
+		KZPlayer *player = g_pKZPlayerManager->ToPlayer((u32)i);
+		if (!player || player->GetSteamId64(false) != steamId || !player->GetController())
+		{
+			continue;
+		}
+		CCSPlayerController *c = player->GetController();
+		int v = atoi(args.Arg(3));
+		const char *f = args.Arg(2);
+		if (!V_stricmp(f, "hltv"))
+		{
+			c->m_bIsHLTV(v != 0);
+		}
+		else if (!V_stricmp(f, "pending"))
+		{
+			c->m_iPendingTeamNum((uint8)v);
+		}
+		else if (!V_stricmp(f, "team"))
+		{
+			c->ChangeTeam(v);
+		}
+		else if (!V_stricmp(f, "connected"))
+		{
+			c->m_iConnected((PlayerConnectedState)v);
+		}
+		META_CONPRINTF("kz_invisible_dbg: hltv=%d team=%d pending=%d connected=%d\n", c->m_bIsHLTV(), c->GetTeam(), c->m_iPendingTeamNum(),
+					   (int)c->m_iConnected());
+		return;
+	}
+	META_CONPRINTF("kz_invisible_dbg: not_on_server\n");
 }

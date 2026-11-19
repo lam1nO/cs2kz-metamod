@@ -79,7 +79,10 @@ public:
 	{
 		this->observing = false;
 		this->restoreAttempts = 0;
+		this->ClearHltvFlag();
 	}
+
+	void ClearHltvFlag();
 
 	// Движковый хук смены команды. Возвращает true, если событие нужно проглотить.
 	bool OnChangeTeamPost(i32 team);
