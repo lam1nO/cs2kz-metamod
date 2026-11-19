@@ -454,6 +454,11 @@ SCMD(jointeam, SCFL_HIDDEN)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
 	int newTeam = atoi(args->Arg(1));
+	// Диагностика репорта 19.11 («у невидимки в меню команды ничего не жмётся»).
+	KZ_LOG_INFO(LogChannel::General, "[cyb] jointeam steam_id=%llu new=%d cur=%d invisible=%d observing=%d paused=%d timer=%d\n",
+				player->GetSteamId64(false), newTeam, player->GetController() ? player->GetController()->GetTeam() : -1,
+				player->invisibleService->IsInvisible(), player->invisibleService->IsObserving(), player->timerService->GetPaused(),
+				player->timerService->GetTimerRunning());
 	// Смена играющей команды живым игроком (меню выбора команды) — это CommitSuicide + Respawn +
 	// телепорт на первый валидный спаун (см. JoinTeam ниже), то есть обход запрета рестарта в
 	// prac. Уход в наблюдатели не трогаем: prac его переживает by design, а возврат приходит
