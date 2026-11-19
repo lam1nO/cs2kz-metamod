@@ -477,6 +477,7 @@ SCMD(jointeam, SCFL_HIDDEN)
 	{
 		if (!player->timerService->GetPaused() && !player->timerService->CanPause())
 		{
+			KZ_LOG_INFO(LogChannel::General, "[cyb] jointeam_denied steam_id=%llu reason=cant_pause\n", player->GetSteamId64(false));
 			// Апстрим: меню закрыли, в наблюдатели не пустили, игроку ни слова — снаружи
 			// это тоже «нажал, и ничего не произошло».
 			CloseTeamMenu(player);
@@ -558,6 +559,8 @@ void KZ::misc::JoinTeam(KZPlayer *player, int newTeam, bool restorePos, bool sav
 	// IsObserving, а не команду: только что зашедший игрок (в т.ч. невидимка) тоже сидит
 	// в NONE, но вход в наблюдатели — пауза таймера, гашение худа — ему ещё предстоит.
 	bool alreadyObserving = currentTeam == CS_TEAM_SPECTATOR || (currentTeam == CS_TEAM_NONE && player->invisibleService->IsObserving());
+	KZ_LOG_INFO(LogChannel::General, "[cyb] join_team steam_id=%llu new=%d cur=%d already_observing=%d\n", player->GetSteamId64(false), newTeam,
+				currentTeam, alreadyObserving);
 
 	if (newTeam == CS_TEAM_SPECTATOR && !alreadyObserving)
 	{
@@ -583,6 +586,8 @@ void KZ::misc::JoinTeam(KZPlayer *player, int newTeam, bool restorePos, bool sav
 			player->GetPlayerPawn()->m_pItemServices()->RemoveAllItems(false);
 		}
 		player->GetController()->ChangeTeam(CS_TEAM_SPECTATOR);
+		KZ_LOG_INFO(LogChannel::General, "[cyb] join_spec steam_id=%llu team_after=%d\n", player->GetSteamId64(false),
+					player->GetController()->GetTeam());
 		// Невидимку в CS_TEAM_NONE уводит сторож следующим кадром, а НЕ мы здесь: наш
 		// вызывающий (SpectatePlayer) сразу после этой функции читает observer pawn и
 		// ставит цель наблюдения, а вторая смена команды в том же кадре может его

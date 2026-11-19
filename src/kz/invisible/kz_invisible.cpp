@@ -368,6 +368,10 @@ void KZInvisibleService::OnGameFrame()
 		// наблюдатели (KZ::misc::JoinTeam намеренно НЕ прячет сам — см. комментарий там).
 		if (controller->GetTeam() == CS_TEAM_SPECTATOR)
 		{
+			if (!service->observing)
+			{
+				KZ_LOG_INFO(LogChannel::General, "[cyb] invisible_watch_spec steam_id=%llu in_game=%d\n", service->steamId64, player->IsInGame());
+			}
 			service->EnforceObserverTeam();
 			continue;
 		}
