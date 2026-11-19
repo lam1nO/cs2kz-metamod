@@ -301,6 +301,9 @@ namespace KZ
 		// игрока. Нужно возврату невидимки в наблюдатели: его туда выдернул не он сам, и
 		// точка форс-спавна затёрла бы место, откуда он реально уходил наблюдать.
 		void JoinTeam(KZPlayer *player, int newTeam, bool restorePos = true, bool savePos = true);
+		// Закрыть клиенту меню выбора команды (спуф entity_killed); без пешки — повтор до 3 с.
+		// delay > 0 — первая попытка через delay секунд.
+		void CloseTeamMenu(KZPlayer *player, f32 delay = 0.0f);
 		void ProcessConCommand(ConCommandRef cmd, const CCommandContext &ctx, const CCommand &args);
 		bool CheckBlockedRadioCommands(const char *cmd);
 		void OnRoundStart();

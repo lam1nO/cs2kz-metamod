@@ -429,9 +429,9 @@ static_function f64 RetryCloseTeamMenu(CPlayerUserId userID, i32 attempt)
 	return 0.0f;
 }
 
-static_function void CloseTeamMenu(KZPlayer *player)
+void KZ::misc::CloseTeamMenu(KZPlayer *player, f32 delay)
 {
-	if (TryCloseTeamMenu(player))
+	if (delay <= 0.0f && TryCloseTeamMenu(player))
 	{
 		return;
 	}
@@ -441,7 +441,13 @@ static_function void CloseTeamMenu(KZPlayer *player)
 	{
 		return;
 	}
-	StartTimer<CPlayerUserId, i32>(RetryCloseTeamMenu, client->GetUserID(), 1, KZ_TEAM_MENU_CLOSE_RETRY_INTERVAL, false, false);
+	StartTimer<CPlayerUserId, i32>(RetryCloseTeamMenu, client->GetUserID(), 1, delay > 0.0f ? delay : KZ_TEAM_MENU_CLOSE_RETRY_INTERVAL,
+								   false, false);
+}
+
+static_function void CloseTeamMenu(KZPlayer *player)
+{
+	KZ::misc::CloseTeamMenu(player);
 }
 
 SCMD(jointeam, SCFL_HIDDEN)

@@ -1,4 +1,5 @@
 #include "kz_invisible.h"
+#include "kz/kz.h"
 #include "kz/language/kz_language.h"
 #include "kz/timer/kz_timer.h"
 
@@ -320,6 +321,11 @@ void KZInvisibleService::EnforceObserverTeam()
 	this->SetObserverTeam(CS_TEAM_NONE);
 	this->observing = true;
 	KZ_LOG_INFO(LogChannel::General, "[cyb] invisible_observer_team steam_id=%llu team=none\n", this->steamId64);
+	// Клиент CS2 сам открывает меню выбора команды, когда его команда становится NONE (проверено
+	// 19.11 на канарейке). Закрываем ПОСЛЕ того, как клиент получил смену команды: закрытие до неё
+	// (в jointeam) меню не спасало, а при входе на сервер в этом меню нет даже «Отмены» — невидимка
+	// застревал. Задержка — чтобы смена команды дошла до клиента раньше спуфа.
+	KZ::misc::CloseTeamMenu(this->player, 0.25f);
 }
 
 bool KZInvisibleService::OnChangeTeamPost(i32 team)
