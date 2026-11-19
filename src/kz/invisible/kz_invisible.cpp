@@ -34,7 +34,10 @@ static_global std::unordered_set<u64> s_invisibleSteamIds;
 static_global i32 s_onlineInvisibleCount = 0;
 
 // 0 — прятать из TAB командой NONE (клиент открывает меню команды), 1 — флагом HLTV в наблюдателях.
-CConVar<i32> kz_invisible_mode("kz_invisible_mode", FCVAR_NONE, "Invisible hide mode: 0 team NONE, 1 HLTV flag in spectators", 0);
+CConVar<i32> kz_invisible_mode("kz_invisible_mode", FCVAR_NONE,
+								"Invisible hide mode: 0 team NONE, 1 HLTV flag in spectators, 2 spectators + controller not transmitted", 0);
+// Опыт 19.11: принудительно прятать индекс от всех (бот как подопытный — смотреть со стороны).
+static_global bool s_forceHideIndex[MAXPLAYERS + 1] = {};
 
 // Пересчитать кэш-флаги всем игрокам после смены списка. Счётчик онлайн-невидимок
 // пересобирается с нуля — защита от дрейфа инкрементальной арифметики (сиротский флаг
@@ -321,6 +324,17 @@ void KZInvisibleService::EnforceObserverTeam()
 	{
 		return;
 	}
+	if (kz_invisible_mode.Get() == 2)
+	{
+		// Режим 2: остаёмся в НАСТОЯЩИХ наблюдателях (клиент не открывает меню команды), а из
+		// TAB прячет CheckTransmit — контроллер невидимки не уходит остальным (FilterTransmit).
+		if (!this->observing)
+		{
+			this->observing = true;
+			KZ_LOG_INFO(LogChannel::General, "[cyb] invisible_observer_team steam_id=%llu mode=transmit\n", this->steamId64);
+		}
+		return;
+	}
 	if (kz_invisible_mode.Get() == 1)
 	{
 		// Режим 1 (опыт 19.11): остаёмся в НАСТОЯЩИХ наблюдателях — клиент не открывает меню
@@ -584,4 +598,66 @@ CON_COMMAND_F(kz_invisible_dbg, "kz_invisible_dbg <steamid64> <hltv|pending|team
 		return;
 	}
 	META_CONPRINTF("kz_invisible_dbg: not_on_server\n");
+}
+
+void KZInvisibleService::FilterTransmit(KZPlayer *target, CBitVec<16384> *edicts)
+{
+	bool modeOn = kz_invisible_mode.Get() == 2 && HasOnlineInvisibles();
+	bool anyForced = false;
+	for (i32 i = 1; i < MAXPLAYERS + 1; i++)
+	{
+		anyForced |= s_forceHideIndex[i];
+	}
+	if (!modeOn && !anyForced)
+	{
+		return;
+	}
+	for (i32 i = 1; i < MAXPLAYERS + 1; i++)
+	{
+		KZPlayer *p = g_pKZPlayerManager->ToPlayer((u32)i);
+		if (!p || p == target)
+		{
+			continue;
+		}
+		CCSPlayerController *c = p->GetController();
+		if (!c)
+		{
+			continue;
+		}
+		bool hide = s_forceHideIndex[i];
+		if (!hide && modeOn && p->invisibleService && p->invisibleService->invisible && p->invisibleService->observing
+			&& c->GetTeam() == CS_TEAM_SPECTATOR)
+		{
+			hide = !target->invisibleService || !target->invisibleService->invisible;
+		}
+		if (!hide)
+		{
+			continue;
+		}
+		// Пешку без контроллера отдавать нельзя (клиент падает, см. kz_quiet) — режем обе.
+		if (CBasePlayerPawn *pawn = p->GetPlayerPawn())
+		{
+			edicts->Clear(pawn->entindex());
+		}
+		if (CBasePlayerPawn *obs = c->GetObserverPawn())
+		{
+			edicts->Clear(obs->entindex());
+		}
+		edicts->Clear(c->entindex());
+	}
+}
+
+CON_COMMAND_F(kz_invisible_hide_index, "kz_invisible_hide_index <entindex 1-64> <0|1>: опыт — прятать игрока от всех", FCVAR_NONE)
+{
+	if (DenyIfPlayer(context, "kz_invisible_hide_index") || args.ArgC() < 3)
+	{
+		return;
+	}
+	i32 idx = atoi(args.Arg(1));
+	if (idx < 1 || idx > MAXPLAYERS)
+	{
+		return;
+	}
+	s_forceHideIndex[idx] = atoi(args.Arg(2)) != 0;
+	META_CONPRINTF("kz_invisible_hide_index: %d=%d\n", idx, s_forceHideIndex[idx]);
 }

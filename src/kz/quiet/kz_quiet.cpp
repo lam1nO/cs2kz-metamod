@@ -18,6 +18,7 @@
 #include "kz/paint/kz_paint.h"
 #include "kz/zones/kz_zones.h" // разыменовываем zonesService (белый список рёбер зон)
 #include "kz/language/kz_language.h"
+#include "kz/invisible/kz_invisible.h"
 
 #include "utils/utils.h"
 #include "utils/simplecmds.h"
@@ -70,6 +71,8 @@ void KZ::quiet::OnCheckTransmit(CCheckTransmitInfo **pInfo, int infoCount)
 			continue;
 		}
 		targetPlayer->quietService->UpdateHideState();
+		// Невидимка в наблюдателях (kz_invisible_mode 2): его контроллер получателю не уходит.
+		KZInvisibleService::FilterTransmit(targetPlayer, pTransmitInfo->m_pTransmitEdict);
 
 		EntityInstanceByClassIter_t iterParticleSystem(NULL, "info_particle_system");
 

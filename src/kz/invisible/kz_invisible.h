@@ -93,6 +93,8 @@ public:
 	static bool HasOnlineInvisibles();
 
 	static bool IsInvisible(KZPlayer *player);
+	// Режим 2: вырезать контроллеры (и пешки) спрятанных игроков из передачи получателю target.
+	static void FilterTransmit(KZPlayer *target, CBitVec<16384> *edicts);
 	// Скрывать ли subject от viewer: subject невидим, а viewer — нет (и это не сам subject).
 	static bool ShouldHideFrom(KZPlayer *subject, KZPlayer *viewer);
 	static bool IsInvisibleSteamId(u64 steamID64);
