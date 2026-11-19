@@ -1,3 +1,4 @@
+#include "utils/utils.h"
 #include "cs2kz.h"
 #include "kz/kz.h"
 #include "bot.h"
@@ -252,3 +253,31 @@ namespace KZ::replaysystem::bot
 	}
 
 } // namespace KZ::replaysystem::bot
+
+// Опыт 19.11 (невидимка): бот-подопытный в наблюдателях, чтобы проверить сокрытие из TAB глазами
+// живого клиента. Только консоль/RCON. Печатает entindex для kz_invisible_hide_index.
+CON_COMMAND_F(kz_invisible_dbg_bot, "kz_invisible_dbg_bot <team 1|2|3>: создать бота для опыта", FCVAR_NONE)
+{
+	if (utils::GetController(context.GetPlayerSlot()))
+	{
+		return;
+	}
+	i32 team = args.ArgC() >= 2 ? atoi(args.Arg(1)) : CS_TEAM_SPECTATOR;
+	BotProfile *profile = BotProfile::PersistentProfile(CS_TEAM_CT);
+	if (!profile)
+	{
+		META_CONPRINTF("kz_invisible_dbg_bot: no_profile\n");
+		return;
+	}
+	CCSPlayerController *bot = g_pKZUtils->CreateBot(profile, team == CS_TEAM_T ? CS_TEAM_T : CS_TEAM_CT);
+	if (!bot)
+	{
+		META_CONPRINTF("kz_invisible_dbg_bot: create_failed\n");
+		return;
+	}
+	if (team == CS_TEAM_SPECTATOR)
+	{
+		bot->ChangeTeam(CS_TEAM_SPECTATOR);
+	}
+	META_CONPRINTF("kz_invisible_dbg_bot: entindex=%d team=%d\n", bot->entindex(), bot->GetTeam());
+}
