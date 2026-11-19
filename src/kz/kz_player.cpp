@@ -123,6 +123,7 @@ void KZPlayer::Reset()
 	MovementPlayer::Reset();
 
 	this->lastCommandTime = 0.0f;
+	this->adminGravityScale = 1.0f;
 
 	// Reset services that should not persist across player sessions.
 	this->anticheatService->Reset();

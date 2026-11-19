@@ -166,6 +166,10 @@ public:
 
 	void PlayErrorSound();
 
+	// Гравитация, выставленная админом из админки (kz_admin_gravity). 1 — не трогали.
+	// Не 1 — забег невалиден: таймер гасится каждый тик (KZTriggerService::UpdateTriggerTouchList).
+	f32 adminGravityScale = 1.0f;
+
 private:
 	f64 lastTeleportTime {};
 	f32 lastValidYaw {};

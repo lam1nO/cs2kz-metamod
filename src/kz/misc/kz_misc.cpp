@@ -378,15 +378,16 @@ SCMD_LINK(kz_pc, kz_playercheck);
 // Через указатель берём ТОЛЬКО entindex(): m_hPawn объявлен CHandle<CCSPlayerPawn>, Get()
 // тип не проверяет, и на обсервер-пешке статический тип врёт.
 // Понял ли клиент событие, сервер не видит: не закрывшееся меню — тихий отказ.
-static_function void CloseTeamMenu(KZPlayer *player)
+// Попытки закрыть меню, пока у игрока ещё нет пешки (только что зашёл): раз в 0.1 с, до 3 с.
+#define KZ_TEAM_MENU_CLOSE_RETRY_INTERVAL 0.1f
+#define KZ_TEAM_MENU_CLOSE_RETRY_MAX      30
+
+static_function bool TryCloseTeamMenu(KZPlayer *player)
 {
 	CBasePlayerPawn *pawn = player->GetCurrentPawn();
 	if (!pawn)
 	{
-		// Бывает и ложным: у не спавнившегося игрока пешки нет вовсе, но его команда
-		// станет настоящей и меню закроется само.
-		KZ_LOG_WARN(LogChannel::General, "[cyb] team_menu_close_failed steam_id=%llu reason=no_pawn\n", player->GetSteamId64(false));
-		return;
+		return false;
 	}
 	IGameEvent *event = interfaces::pGameEventManager->CreateEvent("entity_killed");
 	if (event)
@@ -399,6 +400,48 @@ static_function void CloseTeamMenu(KZPlayer *player)
 		}
 		interfaces::pGameEventManager->FreeEvent(event);
 	}
+	return true;
+}
+
+// Повтор закрытия: пешка наблюдателя появляется через кадр-другой после ChangeTeam.
+// Без повтора невидимка, нажавший «Наблюдать» сразу после входа, оставался с открытым
+// меню навсегда: сторож уводит его в CS_TEAM_NONE, настоящей команды у него нет, и
+// клиент сам меню не закроет, а повторный клик уже ничего не меняет (репорт 19.11).
+static_function f64 RetryCloseTeamMenu(CPlayerUserId userID, i32 attempt)
+{
+	KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
+	if (!player)
+	{
+		return 0.0f;
+	}
+	if (TryCloseTeamMenu(player))
+	{
+		KZ_LOG_INFO(LogChannel::General, "[cyb] team_menu_closed steam_id=%llu attempt=%d\n", player->GetSteamId64(false), attempt);
+		return 0.0f;
+	}
+	if (attempt >= KZ_TEAM_MENU_CLOSE_RETRY_MAX)
+	{
+		KZ_LOG_WARN(LogChannel::General, "[cyb] team_menu_close_failed steam_id=%llu reason=no_pawn attempts=%d\n",
+					player->GetSteamId64(false), attempt);
+		return 0.0f;
+	}
+	StartTimer<CPlayerUserId, i32>(RetryCloseTeamMenu, userID, attempt + 1, KZ_TEAM_MENU_CLOSE_RETRY_INTERVAL, false, false);
+	return 0.0f;
+}
+
+static_function void CloseTeamMenu(KZPlayer *player)
+{
+	if (TryCloseTeamMenu(player))
+	{
+		return;
+	}
+	// У не спавнившегося игрока пешки нет вовсе — ждём, пока появится пешка наблюдателя.
+	CServerSideClient *client = player->GetClient();
+	if (!client)
+	{
+		return;
+	}
+	StartTimer<CPlayerUserId, i32>(RetryCloseTeamMenu, client->GetUserID(), 1, KZ_TEAM_MENU_CLOSE_RETRY_INTERVAL, false, false);
 }
 
 SCMD(jointeam, SCFL_HIDDEN)

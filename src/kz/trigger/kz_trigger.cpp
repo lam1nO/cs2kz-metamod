@@ -7,6 +7,7 @@
 #include "kz/style/kz_style.h"
 #include "kz/timer/kz_timer.h"
 #include "kz/noclip/kz_noclip.h"
+#include "utils/utils.h"
 #include "sdk/navphysicsinterface.h"
 
 void KZTriggerService::Reset()
@@ -190,7 +191,13 @@ void KZTriggerService::UpdateTriggerTouchList()
 	}
 	else
 	{
-		this->player->GetPlayerPawn()->SetGravityScale(1);
+		// Гравитация от админа (kz_admin_gravity) вместо 1; триггеры карты ниже её перекрывают.
+		this->player->GetPlayerPawn()->SetGravityScale(this->player->adminGravityScale);
+		if (this->player->adminGravityScale != 1.0f && this->player->timerService->GetTimerRunning())
+		{
+			// Забег с чужой гравитацией не может идти в рекорды.
+			this->player->timerService->TimerStop(true, "admin_gravity");
+		}
 	}
 
 	if (!this->player->IsAlive() || this->player->noclipService->IsNoclipping())
@@ -532,4 +539,39 @@ void KZTriggerService::UpdatePlayerPostTouch()
 		player->SetOrigin(pawn->m_CBodyComponent()->m_pSceneNode()->m_vecAbsOrigin());
 		this->player->jumpstatsService->InvalidateJumpstats("Externally modified");
 	}
+}
+
+// Гравитация игроку из админки (cyber-presence cyber_admin gravity). Только консоль/RCON.
+// Сброс — `kz_admin_gravity <steamid64> 1` или выход игрока.
+CON_COMMAND_F(kz_admin_gravity, "kz_admin_gravity <steamid64> <scale>: гравитация игроку от админа", FCVAR_NONE)
+{
+	if (utils::GetController(context.GetPlayerSlot()))
+	{
+		return;
+	}
+	if (args.ArgC() < 3)
+	{
+		META_CONPRINTF("Usage: kz_admin_gravity <steamid64> <scale>\n");
+		return;
+	}
+	u64 steamID64 = strtoull(args.Arg(1), nullptr, 10);
+	f32 scale = (f32)atof(args.Arg(2));
+	if (steamID64 == 0 || !(scale >= 0.05f && scale <= 10.0f))
+	{
+		META_CONPRINTF("kz_admin_gravity: bad_args\n");
+		return;
+	}
+	for (i32 i = 1; i < MAXPLAYERS + 1; i++)
+	{
+		KZPlayer *player = g_pKZPlayerManager->ToPlayer((u32)i);
+		if (!player || !player->IsInGame() || player->GetSteamId64(false) != steamID64)
+		{
+			continue;
+		}
+		player->adminGravityScale = scale;
+		KZ_LOG_INFO(LogChannel::General, "[cyb] admin_gravity steam_id=%llu scale=%.2f\n", steamID64, scale);
+		META_CONPRINTF("kz_admin_gravity: ok\n");
+		return;
+	}
+	META_CONPRINTF("kz_admin_gravity: not_on_server\n");
 }
