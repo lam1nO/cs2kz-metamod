@@ -33,9 +33,10 @@ static_global std::unordered_set<u64> s_invisibleSteamIds;
 // списком админов на проде непуст всегда, а вот невидимка на сервере — редкость.
 static_global i32 s_onlineInvisibleCount = 0;
 
-// 0 — прятать из TAB командой NONE (клиент открывает меню команды), 1 — флагом HLTV в наблюдателях.
+// 0 — прятать из TAB командой NONE (клиент открывает меню команды), 1 — флагом HLTV в наблюдателях,
+// 2 (по умолчанию с 20.11) — настоящие наблюдатели, контроллер не передаётся остальным.
 CConVar<i32> kz_invisible_mode("kz_invisible_mode", FCVAR_NONE,
-								"Invisible hide mode: 0 team NONE, 1 HLTV flag in spectators, 2 spectators + controller not transmitted", 0);
+								"Invisible hide mode: 0 team NONE, 1 HLTV flag in spectators, 2 spectators + controller not transmitted", 2);
 // Опыт 19.11: принудительно прятать индекс от всех (бот как подопытный — смотреть со стороны).
 static_global bool s_forceHideIndex[MAXPLAYERS + 1] = {};
 
@@ -212,11 +213,40 @@ void KZInvisibleService::OnPlayerConnect(u64 steamID64)
 	}
 }
 
+// Вход невидимки (20.11 владелец: «зашёл на сервер — и сразу невидимый наблюдатель, без выбора
+// команды»). Через паузу после active: на самом active пешки наблюдателя ещё нет, а клиент
+// ещё не открыл меню команды — закрывать нечего.
+static_function f64 AutoSpectateOnJoin(CPlayerUserId userID)
+{
+	KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
+	if (!player || !player->invisibleService || !player->invisibleService->IsInvisible() || !player->IsInGame())
+	{
+		return 0.0f;
+	}
+	CCSPlayerController *controller = player->GetController();
+	if (!controller || controller->GetTeam() != CS_TEAM_NONE)
+	{
+		return 0.0f; // уже выбрал команду сам
+	}
+	KZ::misc::JoinTeam(player, CS_TEAM_SPECTATOR, false, false);
+	KZ::misc::CloseTeamMenu(player, 0.25f);
+	KZ_LOG_INFO(LogChannel::General, "[cyb] invisible_auto_spec steam_id=%llu team_after=%d\n", player->GetSteamId64(false),
+				controller->GetTeam());
+	return 0.0f;
+}
+
 void KZInvisibleService::OnPlayerActive()
 {
 	if (this->invisible && !this->player->IsFakeClient())
 	{
 		this->player->languageService->PrintChat(true, false, "Invisible - Active");
+		if (kz_invisible_mode.Get() == 2)
+		{
+			if (CServerSideClient *client = this->player->GetClient())
+			{
+				StartTimer<CPlayerUserId>(AutoSpectateOnJoin, client->GetUserID(), 0.5f, false, false);
+			}
+		}
 	}
 }
 
@@ -625,8 +655,9 @@ void KZInvisibleService::FilterTransmit(KZPlayer *target, CBitVec<16384> *edicts
 			continue;
 		}
 		bool hide = s_forceHideIndex[i];
-		if (!hide && modeOn && p->invisibleService && p->invisibleService->invisible && p->invisibleService->observing
-			&& c->GetTeam() == CS_TEAM_SPECTATOR)
+		// Не только наблюдающего, но и только что зашедшего (команда NONE): клиент, однажды
+		// получивший контроллер, держит строку в TAB — прятать надо с первого снапшота.
+		if (!hide && modeOn && p->invisibleService && p->invisibleService->invisible && c->GetTeam() <= CS_TEAM_SPECTATOR)
 		{
 			hide = !target->invisibleService || !target->invisibleService->invisible;
 		}

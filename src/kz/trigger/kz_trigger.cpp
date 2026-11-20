@@ -192,12 +192,8 @@ void KZTriggerService::UpdateTriggerTouchList()
 	else
 	{
 		// Гравитация от админа (kz_admin_gravity) вместо 1; триггеры карты ниже её перекрывают.
+		// Таймер не трогаем (20.11 владелец): ран с гравитацией от админа — обычный ран.
 		this->player->GetPlayerPawn()->SetGravityScale(this->player->adminGravityScale);
-		if (this->player->adminGravityScale != 1.0f && this->player->timerService->GetTimerRunning())
-		{
-			// Забег с чужой гравитацией не может идти в рекорды.
-			this->player->timerService->TimerStop(true, "admin_gravity");
-		}
 	}
 
 	if (!this->player->IsAlive() || this->player->noclipService->IsNoclipping())
