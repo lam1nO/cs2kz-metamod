@@ -334,6 +334,13 @@ void KZ::quiet::OnPostEvent(INetworkMessageInternal *pEvent, const CNetMessage *
 			emitterEntIndex = msg->player() & 0x3FFF;
 			break;
 		}
+		// Невидимка в CS_TEAM_NONE (скрытие из TAB): меню выбора команды, которое сервер шлёт при
+		// уходе в NONE, ему не отдаём — иначе он застревает в меню без «Отмены» (20.11).
+		case CS_UM_VGUIMenu:
+		{
+			KZInvisibleService::FilterTeamMenu(const_cast<CNetMessage *>(pData)->ToPB<CCSUsrMsg_VGUIMenu>(), (uint64 *)clients);
+			return;
+		}
 		// Hide reload sounds.
 		case CS_UM_WeaponSound:
 		{

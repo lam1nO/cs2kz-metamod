@@ -1,6 +1,8 @@
 #pragma once
 #include "../kz.h"
 
+class CCSUsrMsg_VGUIMenu;
+
 // Режим невидимки (слежка за читерами), скоуп v3: пока невидимка наблюдает, его
 // контроллер держится в CS_TEAM_NONE вместо CS_TEAM_SPECTATOR — клиент группирует
 // скорборд по командам, и у команды NONE группы нет, поэтому строка из TAB пропадает.
@@ -93,6 +95,8 @@ public:
 	static bool HasOnlineInvisibles();
 
 	static bool IsInvisible(KZPlayer *player);
+	// Вырезать невидимок-наблюдателей из получателей меню выбора команды (CS_UM_VGUIMenu "team").
+	static void FilterTeamMenu(const CCSUsrMsg_VGUIMenu *msg, uint64 *clients);
 	// Режим 2: вырезать контроллеры (и пешки) спрятанных игроков из передачи получателю target.
 	static void FilterTransmit(KZPlayer *target, CBitVec<16384> *edicts);
 	// Скрывать ли subject от viewer: subject невидим, а viewer — нет (и это не сам subject).

@@ -7,6 +7,7 @@
 #include "utils/utils.h"
 #include "utils/ctimer.h"
 #include "utils/json.h"
+#include "cstrike15_usermessages.pb.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -34,9 +35,10 @@ static_global std::unordered_set<u64> s_invisibleSteamIds;
 static_global i32 s_onlineInvisibleCount = 0;
 
 // 0 — прятать из TAB командой NONE (клиент открывает меню команды), 1 — флагом HLTV в наблюдателях,
-// 2 (по умолчанию с 20.11) — настоящие наблюдатели, контроллер не передаётся остальным.
+// 2 — настоящие наблюдатели, контроллер не передаётся остальным. 20.11 проверено клиентом: из TAB
+// у других прячет ТОЛЬКО команда NONE (режим 0); HLTV и вырезание из передачи строку не убирают.
 CConVar<i32> kz_invisible_mode("kz_invisible_mode", FCVAR_NONE,
-								"Invisible hide mode: 0 team NONE, 1 HLTV flag in spectators, 2 spectators + controller not transmitted", 2);
+								"Invisible hide mode: 0 team NONE, 1 HLTV flag in spectators, 2 spectators + controller not transmitted", 0);
 // Опыт 19.11: принудительно прятать индекс от всех (бот как подопытный — смотреть со стороны).
 static_global bool s_forceHideIndex[MAXPLAYERS + 1] = {};
 
@@ -240,12 +242,9 @@ void KZInvisibleService::OnPlayerActive()
 	if (this->invisible && !this->player->IsFakeClient())
 	{
 		this->player->languageService->PrintChat(true, false, "Invisible - Active");
-		if (kz_invisible_mode.Get() == 2)
+		if (CServerSideClient *client = this->player->GetClient())
 		{
-			if (CServerSideClient *client = this->player->GetClient())
-			{
-				StartTimer<CPlayerUserId>(AutoSpectateOnJoin, client->GetUserID(), 0.5f, false, false);
-			}
+			StartTimer<CPlayerUserId>(AutoSpectateOnJoin, client->GetUserID(), 0.5f, false, false);
 		}
 	}
 }
@@ -691,4 +690,33 @@ CON_COMMAND_F(kz_invisible_hide_index, "kz_invisible_hide_index <entindex 1-64> 
 	}
 	s_forceHideIndex[idx] = atoi(args.Arg(2)) != 0;
 	META_CONPRINTF("kz_invisible_hide_index: %d=%d\n", idx, s_forceHideIndex[idx]);
+}
+
+void KZInvisibleService::FilterTeamMenu(const CCSUsrMsg_VGUIMenu *msg, uint64 *clients)
+{
+	if (!HasOnlineInvisibles() || !msg)
+	{
+		return;
+	}
+	for (i32 i = 1; i < MAXPLAYERS + 1; i++)
+	{
+		u64 bit = 1ull << (i - 1);
+		if ((*clients & bit) == 0)
+		{
+			continue;
+		}
+		KZPlayer *p = g_pKZPlayerManager->ToPlayer((u32)i);
+		if (!p || !p->invisibleService || !p->invisibleService->invisible)
+		{
+			continue;
+		}
+		CCSPlayerController *c = p->GetController();
+		bool hidden = c && c->GetTeam() <= CS_TEAM_SPECTATOR;
+		KZ_LOG_INFO(LogChannel::General, "[cyb] invisible_vguimenu steam_id=%llu name=%s show=%d team=%d blocked=%d\n", p->invisibleService->steamId64,
+					msg->name().c_str(), msg->show(), c ? c->GetTeam() : -1, hidden && msg->name() == "team");
+		if (hidden && msg->name() == "team")
+		{
+			*clients &= ~bit;
+		}
+	}
 }
