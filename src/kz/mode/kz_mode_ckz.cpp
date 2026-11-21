@@ -536,7 +536,7 @@ void KZClassicModeService::RemoveCrouchJumpBind()
 	bool onGround = this->player->GetPlayerPawn()->m_fFlags & FL_ONGROUND;
 	bool justJumped = !this->oldJumpPressed && this->player->IsButtonPressed(IN_JUMP);
 
-	if (onGround && !this->oldDuckPressed && justJumped)
+	if (KZ::style::ShouldRemoveCrouchJumpBind(KZ::style::HasNopre(this->player), onGround, this->oldDuckPressed, justJumped))
 	{
 		this->player->GetMoveServices()->m_nButtons().m_pButtonStates[0] &= ~IN_DUCK;
 		this->forcedUnduck = true;

@@ -7,6 +7,11 @@
 int main()
 {
 	using namespace KZ::style;
+	assert(!ShouldRemoveCrouchJumpBind(true, true, false, true));
+	assert(ShouldRemoveCrouchJumpBind(false, true, false, true));
+	assert(!ShouldRemoveCrouchJumpBind(false, true, true, true));
+	assert(!ShouldRemoveCrouchJumpBind(false, false, false, true));
+	assert(!ShouldRemoveCrouchJumpBind(false, true, false, false));
 	assert(NoprePerfSpeed(500.0f, 287.5f) == 287.5f);
 	assert(NoprePerfSpeed(260.0f, 287.5f) == 260.0f);
 	assert(NoprePerfSpeed(260.0f, -1.0f) == 260.0f);
