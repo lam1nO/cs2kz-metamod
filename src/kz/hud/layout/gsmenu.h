@@ -21,7 +21,8 @@ struct IndexedHudCache;
 #define KZ_GSMENU_TABLE_ROWS    20
 #define KZ_GSMENU_TABLE_COLS    8
 #define KZ_GSMENU_ROW_ACTIONS   3
-#define KZ_GSMENU_FILTER_GROUPS 4
+#define KZ_GSMENU_FILTER_GROUPS 5
+#define KZ_GSMENU_STYLE_OPTIONS 10
 #define KZ_GSMENU_FILTER_CHIPS  8
 #define KZ_GSMENU_LIST_ROWS     10
 // Пересоздание сущности на открытии, когда её интерн-таблица (лимит 1024) подошла к краю:
@@ -38,6 +39,7 @@ namespace KZ::gsmenu
 	{
 		std::string label;
 		bool on = false;
+		bool disabled = false;
 	};
 
 	struct Row
@@ -52,6 +54,12 @@ namespace KZ::gsmenu
 		std::string note;
 	};
 
+	struct StyleOption
+	{
+		std::string label, count;
+		bool on = false, disabled = false, separator = false;
+	};
+
 	struct Table
 	{
 		std::string title, sub;
@@ -59,6 +67,9 @@ namespace KZ::gsmenu
 		i32 tier = 0;      // 0 — без бейджа тира
 		const char *cols = "cols-maptop";
 		bool noTp = false;
+		std::string styleLabel, styleHeading, styleRunsHeading, styleDisabledReason;
+		bool styleSelected = false, styleOpen = false;
+		std::vector<StyleOption> styleOptions;
 		std::vector<Chip> filters[KZ_GSMENU_FILTER_GROUPS];
 		std::string headers[KZ_GSMENU_TABLE_COLS];
 		std::vector<Row> rows;

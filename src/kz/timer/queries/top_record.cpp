@@ -11,7 +11,18 @@
 struct TopRecordRequest : public BaseRequest
 {
 	using BaseRequest::BaseRequest;
-	static constexpr u64 trFeatures = RequestFeature::Course | RequestFeature::Map | RequestFeature::Mode;
+	static constexpr u64 trFeatures = RequestFeature::Course | RequestFeature::Map | RequestFeature::Mode | RequestFeature::Style;
+
+	bool DefaultsToActiveStyles() const override { return true; }
+
+	void Init(u64 features, const CCommand *args, bool queryLocal, bool queryGlobal) override
+	{
+		BaseRequest::Init(features, args, queryLocal, queryGlobal);
+		if (styleList.Count() > 0)
+		{
+			globalStatus = ResponseStatus::DISABLED;
+		}
+	}
 
 	struct RecordData
 	{
@@ -146,7 +157,7 @@ struct TopRecordRequest : public BaseRequest
 				}
 			};
 
-			KZDatabaseService::QueryRecords(this->mapName, this->courseName, this->localModeID, 1, 0, onQuerySuccess, onQueryFailure);
+			KZDatabaseService::QueryRecords(this->mapName, this->courseName, this->localModeID, 1, 0, onQuerySuccess, onQueryFailure, this->localStyleIDs);
 		}
 	}
 
@@ -231,7 +242,7 @@ struct TopRecordRequest : public BaseRequest
 		utils::FormatTime(srData.runTimePro, proTime, sizeof(proTime));
 
 		// Server Records on kz_map (Main) [VNL]
-		player->languageService->PrintChat(true, false, "SR Header", mapName.Get(), courseName.Get(), modeName.Get());
+		player->languageService->PrintChat(true, false, "SR Header", mapName.Get(), courseName.Get(), GetModeStyleLabel().Get());
 		if (!srData.hasRecord)
 		{
 			player->languageService->PrintChat(true, false, "No Times");

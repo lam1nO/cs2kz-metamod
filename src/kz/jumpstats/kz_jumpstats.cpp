@@ -390,7 +390,7 @@ void Jump::Init()
 	this->jumpType = this->player->jumpstatsService->DetermineJumpType();
 	this->originalJumpType = this->jumpType;
 
-	this->valid = this->GetJumpPlayer()->styleServices.Count() == 0;
+	this->valid = KZ::style::CanRankJumps(this->GetJumpPlayer());
 
 	// cyber: точка отрыва с лестницы — lastValidLadderOrigin из хука LadderMove. Если лестница не была
 	// пройдена этим хуком (movetype LADDER выставлен в обход, сразу после спавна/телепорта), там (0,0,0)
@@ -555,7 +555,7 @@ void Jump::Update()
 	this->currentMaxSpeed = MAX(this->player->currentMoveData->m_vecVelocity.Length2D(), this->currentMaxSpeed);
 	this->currentMaxHeight = MAX(this->player->currentMoveData->m_vecAbsOrigin.z - this->adjustedTakeoffOrigin.z, this->currentMaxHeight);
 
-	this->valid = this->valid && this->GetJumpPlayer()->styleServices.Count() == 0;
+	this->valid = this->valid && KZ::style::CanRankJumps(this->GetJumpPlayer());
 
 	this->RecordPose();
 	this->UpdateFailstat();

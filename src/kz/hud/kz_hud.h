@@ -1002,6 +1002,8 @@ private:
 		i32 pw2ColHidden[2] {-1, -1};
 		std::string angText {};
 		const char *runTypeClass {};
+		const char *runStyleClass {};
+		std::string runStyleText {};
 		std::string deltaText {};
 		i32 deltaHidden {-1};
 		// Статус таймера слева от времени (mhud_timer_status).

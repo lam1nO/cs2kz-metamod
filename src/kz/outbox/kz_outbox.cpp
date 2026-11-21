@@ -1,3 +1,4 @@
+#include "kz/style/style_key.h"
 #include "kz_outbox.h"
 
 #include "utils/utils.h"
@@ -148,6 +149,7 @@ static_function std::string SerializeReplayMeta(const KZOutboxService::ReplayMet
 	json.Set("course", (u64)meta.course);
 	json.Set("mode", meta.mode);
 	json.Set("type", std::string("pb"));
+	json.Set("style", meta.style);
 	json.Set("isServerRecord", meta.isServerRecord);
 	json.Set("uploadPb", meta.uploadPb);
 	json.Set("uploadPro", meta.uploadPro);
@@ -179,6 +181,7 @@ static_function bool ParseReplayMeta(const std::string &content, KZOutboxService
 	// clang-format on
 	out.course = (i32)course;
 	// Необязательные (меты сборок до pbpro их не пишут): отсутствие оставляет дефолты структуры.
+	json.Get("style", out.style);
 	json.Get("uploadPb", out.uploadPb);
 	json.Get("uploadPro", out.uploadPro);
 	return ok;
@@ -421,6 +424,22 @@ void KZOutboxService::UpdateReplayMetaUuid(const std::string &runUuid, const std
 
 void KZOutboxService::SendEvent(const std::string &runUuid, const std::string &body)
 {
+	if (!KZOptionService::GetOptionInt("cybStyledRecords", 0))
+	{
+		const auto payload = nlohmann::json::parse(body, nullptr, false);
+		if (!payload.is_object() || !payload.contains("events") || !payload["events"].is_array())
+		{
+			return;
+		}
+		for (const auto &event : payload["events"])
+		{
+			if (event.is_object() && event.contains("type") && event["type"] == "kz.run_finished" && event.contains("data")
+				&& event["data"].contains("styles") && !event["data"]["styles"].empty())
+			{
+				return;
+			}
+		}
+	}
 	std::string fileName = runUuid + ".event.json";
 	std::string url = ApiUrl("/ingest/v1/events");
 	if (url.empty())
@@ -591,6 +610,10 @@ static_function void SendReplayChain(const KZOutboxService::ReplayMeta &meta, co
 
 void KZOutboxService::SendReplay(const ReplayMeta &meta, const std::vector<char> &buffer)
 {
+	if (!meta.style.empty() && !KZOptionService::GetOptionInt("cybStyledRecords", 0))
+	{
+		return;
+	}
 	std::string fileName = meta.runUuid + ".replay.meta";
 	if (buffer.size() >= KZOutboxService::maxReplayBytes)
 	{
@@ -935,6 +958,10 @@ void KZOutboxService::RetryReplayFile(const std::string &name, const std::string
 		MoveToDead("replay", runUuid, name, "uuid_mismatch", 0);
 		return;
 	}
+	if (!meta.style.empty() && !KZOptionService::GetOptionInt("cybStyledRecords", 0))
+	{
+		return;
+	}
 	std::string url = ApiUrl("/ingest/v1/kz/records");
 	if (url.empty())
 	{
@@ -949,6 +976,10 @@ void KZOutboxService::RetryReplayFile(const std::string &name, const std::string
 	HTTP::Request req(HTTP::Method::GET, url);
 	req.SetQuery("map", meta.map);
 	req.SetQuery("steamId64", std::to_string(meta.steamId64));
+	if (!meta.style.empty())
+	{
+		req.SetQuery("style", KZ::style::EncodeStyleKey(meta.style));
+	}
 	SetAuthHeader(req);
 
 	// clang-format off

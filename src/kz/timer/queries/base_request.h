@@ -130,7 +130,7 @@ protected:
 	CUtlString modeName;
 	KZ::api::Mode apiMode;
 
-	u64 localStyleIDs;
+	u64 localStyleIDs {};
 	CUtlVector<CUtlString> styleList;
 
 public:
@@ -140,6 +140,8 @@ public:
 	void SetupMode(CUtlString modeName);
 
 	void SetupStyles(CUtlString styleNames);
+	CUtlString GetModeStyleLabel() const;
+	virtual bool DefaultsToActiveStyles() const { return false; }
 
 	virtual void PrintInstructions() {}
 

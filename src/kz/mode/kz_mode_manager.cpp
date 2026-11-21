@@ -1,5 +1,6 @@
 #include "kz_mode.h"
 #include "kz/hud/layout/gsmenu.h"
+#include "kz/style/kz_style.h"
 #include "kz_mode_vnl.h"
 
 #include "filesystem.h"
@@ -293,6 +294,10 @@ bool KZModeManager::SwitchToMode(KZPlayer *player, const char *modeName, bool si
 	player->modeService = factory(player);
 	player->timerService->TimerStop(true, "mode_change");
 	player->modeService->Init();
+	if (V_stricmp(player->modeService->GetModeShortName(), "CKZ") && KZ::style::HasNopre(player))
+	{
+		g_pKZStyleManager->RemoveStyle(player, KZ::style::NopreName, true, updatePreference);
+	}
 
 	if (!silent)
 	{

@@ -56,6 +56,7 @@ public:
 		std::string map;        // имя карты (валидировано под api: [a-z0-9_-]{1,128})
 		i32 course {};          // номер курса по конвенции cyber (0 = main, N = bonus N)
 		std::string mode;       // api-режим: ckz/vnl/kzt
+		std::string style;      // канонический ключ, пустой для обычных ранов
 		bool isServerRecord {}; // ран — локальный рекорд сервера (ранг 1) → дополнительно шлём type=wr
 		// Какие PB-строки платформы описывает этот ран. uploadPb — новый NUB(overall)-PB → type=pb;
 		// uploadPro — ран без телепортов и новый PRO-PB → type=pbpro. Pro-ран, ставший и NUB-PB,

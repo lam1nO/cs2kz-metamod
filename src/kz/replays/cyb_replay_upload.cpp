@@ -4,19 +4,26 @@
 #include "kz/option/kz_option.h"
 #include "cyb_replay_common.h"
 #include "kz_replay.h"
+#include "kz/style/style_key.h"
 
 #include <string>
 
 bool CybReplayUpload::BuildMeta(const RunSubmission &sub, bool isServerRecord, bool unconfirmedPb, KZOutboxService::ReplayMeta &out)
 {
-	// Центральные реплеи — только для бесстилевых ранов (ключ api не содержит
-	// styles). На практике этот вызов и так достижим только при styleIDs==0
-	// (см. save_time.cpp/submission.cpp), но проверяем явно как гарантию
-	// инварианта на случай будущих изменений вызывающего кода.
-	if (!sub.styles.empty())
+	if (!sub.styles.empty() && !KZOptionService::GetOptionInt("cybStyledRecords", 0))
 	{
 		return false;
 	}
+	std::vector<std::string_view> names;
+	for (const auto &style : sub.styles)
+	{
+		if (!KZ::style::IsPlatformStyle(style.name))
+		{
+			return false;
+		}
+		names.emplace_back(style.name);
+	}
+	out.style = KZ::style::StyleKey(std::move(names));
 
 	if (sub.replayBuffer.empty())
 	{

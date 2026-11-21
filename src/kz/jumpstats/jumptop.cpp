@@ -9,6 +9,7 @@
 #include "kz/db/kz_db.h"
 #include "kz/db/queries/jumptop.h"
 #include "kz/mode/kz_mode.h"
+#include "kz/style/kz_style.h"
 #include "kz/language/kz_language.h"
 #include "kz/anticheat/kz_anticheat.h"
 #include "kz/option/kz_option.h"
@@ -66,9 +67,19 @@ namespace
 	PlayerCache g_cache[MAXPLAYERS + 1];
 
 	// Направление — как стиль: свой PB на каждое (Forward/Sideways/Backwards).
-	u32 CacheKey(i32 modeID, i32 jumpType, bool isBlock, i32 direction)
+	u32 CacheKey(i32 modeID, i32 jumpType, bool isBlock, i32 direction, bool nopre)
 	{
-		return ((u32)modeID << 16) | ((u32)jumpType << 8) | ((u32)direction << 4) | (isBlock ? 1u : 0u);
+		return ((u32)modeID << 16) | ((u32)jumpType << 8) | ((u32)direction << 4) | (isBlock ? 1u : 0u) | (nopre ? 2u : 0u);
+	}
+
+	const char *JumpStyle(bool nopre)
+	{
+		return nopre ? KZ::style::NopreName : "";
+	}
+
+	bool IsCkz(i32 modeID)
+	{
+		return KZ::mode::GetModeInfo("CKZ").databaseID == modeID;
 	}
 
 	i32 ClampDirection(i32 direction)
@@ -177,6 +188,7 @@ namespace
 		d["server"] = ServerID();
 		d["replay"] = replayUuid;
 		d["mode"] = KZ::mode::GetModeInfo(player->modeService).shortModeName.Get();
+		d["style"] = JumpStyle(KZ::style::HasNopre(player));
 		d["jumpType"] = jump->GetJumpType();
 		d["direction"] = KZ::jumpstats::direction::Name(jump->GetDirection());
 		d["originalJumpType"] = jump->originalJumpType;
@@ -366,21 +378,21 @@ namespace
 	// чужую строку. Кэш «WR на момент захода» не используется вовсе — рекорд спрашивается у
 	// общей базы на каждом PB.
 	void AnnouncePB(CPlayerUserId userID, const std::string &name, u64 steamID64, i32 modeID, i32 jumpType, bool isBlock, i32 block, f64 distance,
-					const std::string &replayUuid, const std::string &mapName, u32 id, i32 direction)
+					const std::string &replayUuid, const std::string &mapName, u32 id, i32 direction, bool nopre)
 	{
 		if (!KZDatabaseService::IsReady())
 		{
 			return;
 		}
 		char rank[2048];
-		V_snprintf(rank, sizeof(rank), sql_jumptop_rank, modeID, jumpType, isBlock ? 1 : 0, direction, block, block, distance, distance, id,
-				   steamID64, modeID, jumpType, isBlock ? 1 : 0, direction);
+		V_snprintf(rank, sizeof(rank), sql_jumptop_rank, modeID, jumpType, isBlock ? 1 : 0, direction, JumpStyle(nopre), block, block, distance, distance, id,
+				   steamID64, modeID, jumpType, isBlock ? 1 : 0, direction, JumpStyle(nopre));
 		Transaction txn;
 		txn.queries.push_back(rank);
 		// clang-format off
 		KZDatabaseService::GetDatabaseConnection()->ExecuteTransaction(
 			txn,
-			[userID, name, steamID64, modeID, jumpType, isBlock, block, distance, replayUuid, mapName, id, direction](std::vector<ISQLQuery *> queries)
+			[userID, name, steamID64, modeID, jumpType, isBlock, block, distance, replayUuid, mapName, id, direction, nopre](std::vector<ISQLQuery *> queries)
 			{
 				i32 place = 0;
 				i32 total = 0;
@@ -400,7 +412,7 @@ namespace
 					QualifyReplay(replayUuid);
 				}
 
-				std::string mode = ModeShortName(modeID);
+				std::string mode = ModeShortName(modeID) + (nopre ? " · NOPRE" : "");
 				std::string typeName = TypeName(jumpType, direction, false);
 				KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
 				// Античит мог забанить за этот же прыжок, пока шёл запрос: рекорд не объявляем
@@ -460,7 +472,7 @@ namespace
 		// clang-format on
 	}
 
-	void SubmitPB(KZPlayer *player, i32 modeID, i32 jumpType, bool isBlock, i32 block, i32 direction, Jump *jump, const std::string &replayUuid,
+	void SubmitPB(KZPlayer *player, i32 modeID, i32 jumpType, bool isBlock, i32 block, i32 direction, bool nopre, Jump *jump, const std::string &replayUuid,
 				  const std::string &details)
 	{
 		ISQLConnection *db = KZDatabaseService::GetDatabaseConnection();
@@ -488,7 +500,7 @@ namespace
 		V_snprintf(insert.data(), (int)insert.size(), sql_jumptop_insert, steamID64, modeID, jumpType, isBlock ? 1 : 0, block, distance,
 				   jump->GetStrafeCount(), (f64)jump->GetSync(), (f64)jump->GetTakeoffSpeed(), (f64)jump->GetMaxSpeed(), (f64)jump->airtime,
 				   (f64)jump->GetMaxHeight(), (f64)jump->GetOffset(), map.c_str(), server.c_str(), replayUuid.c_str(), cleanDetails.c_str(),
-				   direction);
+				   direction, JumpStyle(nopre));
 
 		Transaction txn;
 		txn.queries.push_back(insert.data());
@@ -498,10 +510,10 @@ namespace
 		// clang-format off
 		db->ExecuteTransaction(
 			txn,
-			[userID, name, steamID64, modeID, jumpType, isBlock, block, distance, replayUuid, mapName, direction](std::vector<ISQLQuery *> queries)
+			[userID, name, steamID64, modeID, jumpType, isBlock, block, distance, replayUuid, mapName, direction, nopre](std::vector<ISQLQuery *> queries)
 			{
 				AnnouncePB(userID, name, steamID64, modeID, jumpType, isBlock, block, distance, replayUuid, mapName, queries[0]->GetInsertId(),
-						   direction);
+						   direction, nopre);
 			},
 			[steamID64, jumpType](std::string error, int failIndex)
 			{
@@ -556,7 +568,7 @@ namespace
 					bool isBlock = result->GetInt(2) != 0;
 					i32 block = result->GetInt(3);
 					f64 distance = ResultDouble(result, 4);
-					u32 key = CacheKey(mode, type, isBlock, ClampDirection(result->GetInt(9)));
+					u32 key = CacheKey(mode, type, isBlock, ClampDirection(result->GetInt(9)), KZ_STREQ(result->GetString(10), KZ::style::NopreName));
 					auto it = cache.bests.find(key);
 					if (it == cache.bests.end() || KZ::jumptop::IsBetter(isBlock, block, distance, it->second.block, it->second.distance))
 					{
@@ -631,8 +643,7 @@ void KZ::jumptop::OnJumpFinish(KZPlayer *player, Jump *jump)
 	{
 		return;
 	}
-	// Стили меняют физику — их прыжки в общий топ не идут (у GOKZ топ без стилей).
-	if (player->styleServices.Count() > 0 || player->anticheatService->isBanned)
+	if (!KZ::style::CanRankJumps(player) || player->anticheatService->isBanned)
 	{
 		return;
 	}
@@ -653,6 +664,7 @@ void KZ::jumptop::OnJumpFinish(KZPlayer *player, Jump *jump)
 		return;
 	}
 
+	const bool nopre = KZ::style::HasNopre(player);
 	i32 block = (i32)jump->GetBlock();
 	i32 direction = jump->GetDirection();
 	bool categories[2] = {true, block > 0};
@@ -665,7 +677,7 @@ void KZ::jumptop::OnJumpFinish(KZPlayer *player, Jump *jump)
 		}
 		bool isBlock = c == 1;
 		i32 rowBlock = isBlock ? block : 0;
-		u32 key = CacheKey(modeID, jumpType, isBlock, direction);
+		u32 key = CacheKey(modeID, jumpType, isBlock, direction, nopre);
 		auto it = cache->bests.find(key);
 		if (it == cache->bests.end() || IsBetter(isBlock, rowBlock, distance, it->second.block, it->second.distance))
 		{
@@ -694,7 +706,7 @@ void KZ::jumptop::OnJumpFinish(KZPlayer *player, Jump *jump)
 	{
 		if (isPB[c])
 		{
-			SubmitPB(player, modeID, jumpType, c == 1, c == 1 ? block : 0, direction, jump, uuidStr, details);
+			SubmitPB(player, modeID, jumpType, c == 1, c == 1 ? block : 0, direction, nopre, jump, uuidStr, details);
 		}
 	}
 }
@@ -832,7 +844,7 @@ struct StoredJump
 {
 	i32 id;
 	u64 steamID64;
-	std::string alias;
+	std::string alias, style;
 	i32 mode;
 	i32 type;
 	bool isBlock;
@@ -900,7 +912,7 @@ static_function void PrintStoredJumpReport(KZPlayer *target, const StoredJump &s
 	const char *lang = target->languageService->GetLanguage();
 	std::string typeLongName = TypeName(s.type, s.direction, false);
 	const char *typeLong = typeLongName.c_str();
-	std::string modeName = ModeShortName(s.mode);
+	std::string modeName = ModeShortName(s.mode) + (s.style.empty() ? "" : " · " + s.style);
 
 	char head[512];
 	char blockPart[32] = "";
@@ -1103,12 +1115,13 @@ static_function void PrintJumpInfo(KZPlayer *player, i32 id, bool andReplay)
 			sj.removed = r->GetInt(19) != 0;
 			sj.created = r->GetString(20) ? r->GetString(20) : "";
 			sj.direction = r->GetInt(21);
+			sj.style = r->GetString(22) ? r->GetString(22) : "";
 			PrintStoredJumpReport(player, sj);
 
 			const std::string &alias = sj.alias;
 			const std::string &replay = sj.replay;
 			std::string label = JumpLabel(player->languageService->GetLanguage(), sj.type, sj.isBlock, sj.block, sj.distance, sj.direction);
-			std::string modeName = ModeShortName(sj.mode);
+			std::string modeName = ModeShortName(sj.mode) + (sj.style.empty() ? "" : " · " + sj.style);
 			player->languageService->PrintChat(true, false, "Jumptop - Info Printed", alias.c_str(), label.c_str(), modeName.c_str(), id);
 			if (andReplay && !replay.empty())
 			{
@@ -1225,7 +1238,7 @@ namespace
 	}
 
 	void OpenRootMenu(KZPlayer *player, i32 modeID, bool isBlock, i32 direction);
-	void ShowTop(KZPlayer *player, i32 modeID, i32 jumpType, bool isBlock, i32 direction);
+	void ShowTop(KZPlayer *player, i32 modeID, i32 jumpType, bool isBlock, i32 direction, bool nopre);
 
 	void OnCardMenuSelect(MenuHandle menu, int slot, int item)
 	{
@@ -1384,7 +1397,7 @@ namespace
 		OpenCard(player, V_StringToInt32(info, 0), menu);
 	}
 
-	void ShowTop(KZPlayer *player, i32 modeID, i32 jumpType, bool isBlock, i32 direction, MenuHandle parent)
+	void ShowTop(KZPlayer *player, i32 modeID, i32 jumpType, bool isBlock, i32 direction, bool nopre, MenuHandle parent)
 	{
 		if (!KZDatabaseService::IsReady())
 		{
@@ -1392,14 +1405,14 @@ namespace
 			return;
 		}
 		char query[2048];
-		V_snprintf(query, sizeof(query), sql_jumptop_gettop, modeID, jumpType, isBlock ? 1 : 0, direction, KZ::jumptop::topCount);
+		V_snprintf(query, sizeof(query), sql_jumptop_gettop, modeID, jumpType, isBlock ? 1 : 0, direction, JumpStyle(nopre), KZ::jumptop::topCount);
 		Transaction txn;
 		txn.queries.push_back(query);
 		CPlayerUserId userID = player->GetClient()->GetUserID();
 		// clang-format off
 		KZDatabaseService::GetDatabaseConnection()->ExecuteTransaction(
 			txn,
-			[userID, modeID, jumpType, isBlock, direction, parent](std::vector<ISQLQuery *> queries)
+			[userID, modeID, jumpType, isBlock, direction, nopre, parent](std::vector<ISQLQuery *> queries)
 			{
 				KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
 				if (!player)
@@ -1407,7 +1420,7 @@ namespace
 					return;
 				}
 				const char *lang = player->languageService->GetLanguage();
-				std::string mode = ModeShortName(modeID);
+				std::string mode = ModeShortName(modeID) + (nopre ? " · NOPRE" : "");
 				std::string kind = KZLanguageService::PrepareMessageWithLang(lang, isBlock ? "Jumptop - Kind Block" : "Jumptop - Kind Distance");
 				std::string typeName = TypeName(jumpType, direction, false);
 				std::string typeShort = TypeName(jumpType, direction, true);
@@ -1505,9 +1518,9 @@ namespace
 		// clang-format on
 	}
 
-	void ShowTop(KZPlayer *player, i32 modeID, i32 jumpType, bool isBlock, i32 direction)
+	void ShowTop(KZPlayer *player, i32 modeID, i32 jumpType, bool isBlock, i32 direction, bool nopre)
 	{
-		ShowTop(player, modeID, jumpType, isBlock, direction, kInvalidMenuHandle);
+		ShowTop(player, modeID, jumpType, isBlock, direction, nopre, kInvalidMenuHandle);
 	}
 
 	// Следующий/предыдущий режим джамптопа из загруженных (dir = +1/-1).
@@ -1604,7 +1617,7 @@ namespace
 		}
 		// Вернувшись из топа по R, курсор встанет на тот же тип.
 		g_pMenus->SetStartItem(menu, item);
-		ShowTop(player, g_menuMode[slot], type, g_menuBlock[slot], g_menuDir[slot], menu);
+		ShowTop(player, g_menuMode[slot], type, g_menuBlock[slot], g_menuDir[slot], IsCkz(g_menuMode[slot]) && KZ::style::HasNopre(player), menu);
 	}
 
 	void OpenRootMenu(KZPlayer *player, i32 modeID, bool isBlock, i32 direction)
@@ -1671,7 +1684,7 @@ namespace
 	void PrintPlayerBests(KZPlayer *player, u64 steamID64, std::string alias, i32 modeID)
 	{
 		char query[1024];
-		V_snprintf(query, sizeof(query), sql_jumptop_getplayerbests, steamID64, modeID);
+		V_snprintf(query, sizeof(query), sql_jumptop_getplayerbests, steamID64, modeID, JumpStyle(IsCkz(modeID) && KZ::style::HasNopre(player)));
 		Transaction txn;
 		txn.queries.push_back(query);
 		CPlayerUserId userID = player->GetClient()->GetUserID();
@@ -1748,6 +1761,7 @@ namespace
 		i32 modeID = -1, jumpType = JumpType_LongJump, page = 0;
 		i32 direction = KZ::jumpstats::direction::Forward;
 		bool isBlock = false;
+		bool nopre = false;
 		u64 pendingQuery = 0; // ответ показываем только на последний запрос
 		std::vector<JumptopRow> rows;
 		std::vector<i32> shownIds; // строка на экране -> ID прыжка
@@ -1817,6 +1831,7 @@ namespace
 				if (shown++ == k)
 				{
 					v.modeID = dbID;
+					v.nopre = v.nopre && IsCkz(dbID);
 					QueryJumptopWindow(player);
 				}
 			}
@@ -1828,6 +1843,13 @@ namespace
 			QueryJumptopWindow(player);
 			return;
 		}
+		if (sscanf(id, "gf4_%d", &k) == 1 && (k == 0 || (k == 1 && IsCkz(v.modeID))))
+		{
+			v.nopre = k == 1;
+			QueryJumptopWindow(player);
+			return;
+		}
+
 		if (KZ_STREQ(id, "gw_prev") || KZ_STREQ(id, "gw_next"))
 		{
 			const i32 pages = ((i32)v.rows.size() + KZ_GSMENU_TABLE_ROWS - 1) / KZ_GSMENU_TABLE_ROWS;
@@ -1849,7 +1871,9 @@ namespace
 
 		KZ::gsmenu::Table t;
 		t.title = "Топ прыжков";
-		t.sub = TypeName(v.jumpType, v.direction, false) + " · " + ModeShortName(v.modeID);
+		t.sub = TypeName(v.jumpType, v.direction, false) + " · " + ModeShortName(v.modeID) + (v.nopre ? " · NOPRE" : "");
+		const bool english = V_stricmp(player->languageService->GetLanguage(), "ru") != 0;
+		t.filters[4] = {{english ? "No style" : "Без стиля", !v.nopre}, {KZ::style::NopreName, v.nopre, !IsCkz(v.modeID)}};
 		t.cols = "cols-jumptop";
 		for (i32 type = JumpType_LongJump; type <= JumpType_Jumpbug; type++)
 		{
@@ -1905,7 +1929,7 @@ namespace
 		if (!meShown)
 		{
 			PlayerCache *cache = GetCache(player);
-			auto it = cache ? cache->bests.find(CacheKey(v.modeID, v.jumpType, v.isBlock, v.direction)) : decltype(cache->bests.end()) {};
+			auto it = cache ? cache->bests.find(CacheKey(v.modeID, v.jumpType, v.isBlock, v.direction, v.nopre)) : decltype(cache->bests.end()) {};
 			if (cache && it != cache->bests.end())
 			{
 				i32 place = 0;
@@ -1969,7 +1993,7 @@ namespace
 		const u64 seq = ++g_jtQuerySeq;
 		v.pendingQuery = seq;
 		char query[2048];
-		V_snprintf(query, sizeof(query), sql_jumptop_gettop, v.modeID, v.jumpType, v.isBlock ? 1 : 0, v.direction, kJumptopWindowLimit);
+		V_snprintf(query, sizeof(query), sql_jumptop_gettop, v.modeID, v.jumpType, v.isBlock ? 1 : 0, v.direction, JumpStyle(v.nopre), kJumptopWindowLimit);
 		Transaction txn;
 		txn.queries.push_back(query);
 		CPlayerUserId userID = player->GetClient()->GetUserID();
@@ -2021,7 +2045,7 @@ namespace
 	}
 
 	// true — окно показано (иначе вызывающий идёт в прежнее cs2menus-меню).
-	bool OpenJumptopWindow(KZPlayer *player, i32 modeID, i32 jumpType, bool isBlock, i32 direction)
+	bool OpenJumptopWindow(KZPlayer *player, i32 modeID, i32 jumpType, bool isBlock, i32 direction, bool nopre)
 	{
 		if (!KZ::gsmenu::Available(player) || !player->GetClient())
 		{
@@ -2032,6 +2056,7 @@ namespace
 		v.jumpType = jumpType >= JumpType_LongJump && jumpType <= JumpType_Jumpbug ? jumpType : JumpType_LongJump;
 		v.isBlock = isBlock;
 		v.direction = ClampDirection(direction);
+		v.nopre = nopre;
 		QueryJumptopWindow(player);
 		return true;
 	}
@@ -2052,6 +2077,7 @@ SCMD(kz_jumptop, SCFL_JUMPSTATS | SCFL_RECORD | SCFL_HELP)
 	i32 modeID = KZ::mode::GetModeInfo(player->modeService).databaseID;
 	i32 jumpType = -1;
 	bool isBlock = false;
+	bool nopre = KZ::style::HasNopre(player);
 	i32 direction = KZ::jumpstats::direction::Forward;
 	for (i32 i = 1; i < args->ArgC(); i++)
 	{
@@ -2065,6 +2091,10 @@ SCMD(kz_jumptop, SCFL_JUMPSTATS | SCFL_RECORD | SCFL_HELP)
 		else if (mode >= 0)
 		{
 			modeID = mode;
+		}
+		else if (KZ_STREQI(arg, KZ::style::NopreName) || KZ_STREQI(arg, "none"))
+		{
+			nopre = KZ_STREQI(arg, KZ::style::NopreName);
 		}
 		else if (KZ_STREQI(arg, "block") || KZ_STREQI(arg, "blocks") || KZ_STREQI(arg, "блок") || KZ_STREQI(arg, "блоки"))
 		{
@@ -2090,13 +2120,14 @@ SCMD(kz_jumptop, SCFL_JUMPSTATS | SCFL_RECORD | SCFL_HELP)
 		KZ::gsmenu::Close(player, "command_toggle");
 		return true;
 	}
-	if (OpenJumptopWindow(player, modeID, jumpType, isBlock, direction))
+	nopre = nopre && IsCkz(modeID);
+	if (OpenJumptopWindow(player, modeID, jumpType, isBlock, direction, nopre))
 	{
 		return true;
 	}
 	if (jumpType >= 0)
 	{
-		ShowTop(player, modeID, jumpType, isBlock, direction);
+		ShowTop(player, modeID, jumpType, isBlock, direction, nopre);
 		return true;
 	}
 	if (g_pMenus == nullptr)

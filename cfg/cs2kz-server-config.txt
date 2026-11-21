@@ -110,6 +110,8 @@
 	// Cyber ingest: emit finished KZ runs to our leaderboard backend.
 	// Leave cybEmitUrl empty to disable.
 	"cybEmitUrl"	""
+	// Enable after the platform supports exact style categories.
+	"cybStyledRecords"	"0"
 	"cybEmitToken"	""
 	// Server ID reported in each event envelope (must match the token's server).
 	"cybServerId"	""

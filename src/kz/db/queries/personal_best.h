@@ -24,8 +24,6 @@ constexpr char sql_getpbpro[] = R"(
         LIMIT %d
 )";
 
-// The following queries should have no style!
-
 constexpr char sql_getmaprank[] = R"(
     SELECT COUNT(DISTINCT Times.SteamID64) + 1
         FROM Times 
@@ -34,7 +32,7 @@ constexpr char sql_getmaprank[] = R"(
         INNER JOIN Players ON Players.SteamID64=Times.SteamID64 
         LEFT JOIN Bans ON Bans.SteamID64=Players.SteamID64 AND (Bans.ExpiresAt IS NULL OR Bans.ExpiresAt > CURRENT_TIMESTAMP)
         WHERE Bans.ID IS NULL AND Maps.Name='%s' AND MapCourses.Name='%s' 
-        AND Times.ModeID=%d AND Times.StyleIDFlags=0 AND Times.RunTime < 
+        AND Times.ModeID=%d AND Times.StyleIDFlags=%llu AND Times.RunTime <
             (SELECT MIN(Times.RunTime) 
             FROM Times 
             INNER JOIN MapCourses ON MapCourses.ID=Times.MapCourseID 
@@ -42,7 +40,7 @@ constexpr char sql_getmaprank[] = R"(
             INNER JOIN Players ON Players.SteamID64=Times.SteamID64 
             LEFT JOIN Bans ON Bans.SteamID64=Players.SteamID64 AND (Bans.ExpiresAt IS NULL OR Bans.ExpiresAt > CURRENT_TIMESTAMP)
             WHERE Bans.ID IS NULL AND Times.SteamID64=%llu AND Maps.Name='%s'
-            AND MapCourses.Name='%s' AND Times.ModeID=%d AND Times.StyleIDFlags=0)
+            AND MapCourses.Name='%s' AND Times.ModeID=%d AND Times.StyleIDFlags=%llu)
 )";
 
 constexpr char sql_getmaprankpro[] = R"(
@@ -53,7 +51,7 @@ constexpr char sql_getmaprankpro[] = R"(
         INNER JOIN Players ON Players.SteamID64=Times.SteamID64 
         LEFT JOIN Bans ON Bans.SteamID64=Players.SteamID64 AND (Bans.ExpiresAt IS NULL OR Bans.ExpiresAt > CURRENT_TIMESTAMP)
         WHERE Bans.ID IS NULL AND Maps.Name='%s' AND MapCourses.Name='%s' 
-        AND Times.ModeID=%d AND Times.StyleIDFlags=0 AND Times.Teleports=0 
+        AND Times.ModeID=%d AND Times.StyleIDFlags=%llu AND Times.Teleports=0
         AND Times.RunTime < 
             (SELECT MIN(Times.RunTime) 
             FROM Times 
@@ -63,7 +61,7 @@ constexpr char sql_getmaprankpro[] = R"(
             LEFT JOIN Bans ON Bans.SteamID64=Players.SteamID64 AND (Bans.ExpiresAt IS NULL OR Bans.ExpiresAt > CURRENT_TIMESTAMP)
             WHERE Bans.ID IS NULL AND Times.SteamID64=%llu AND Maps.Name='%s' 
             AND MapCourses.Name='%s' AND Times.ModeID=%d 
-            AND Times.StyleIDFlags=0 AND Times.Teleports=0)
+            AND Times.StyleIDFlags=%llu AND Times.Teleports=0)
 )";
 
 constexpr char sql_getlowestmaprank[] = R"(
@@ -75,7 +73,7 @@ constexpr char sql_getlowestmaprank[] = R"(
         LEFT JOIN Bans ON Bans.SteamID64=Players.SteamID64 AND (Bans.ExpiresAt IS NULL OR Bans.ExpiresAt > CURRENT_TIMESTAMP)
         WHERE Bans.ID IS NULL AND Maps.Name='%s' 
         AND MapCourses.Name='%s' AND Times.ModeID=%d 
-        AND Times.StyleIDFlags=0 AND Times.StyleIDFlags=0
+        AND Times.StyleIDFlags=%llu
 )";
 
 constexpr char sql_getlowestmaprankpro[] = R"(
@@ -87,35 +85,35 @@ constexpr char sql_getlowestmaprankpro[] = R"(
         LEFT JOIN Bans ON Bans.SteamID64=Players.SteamID64 AND (Bans.ExpiresAt IS NULL OR Bans.ExpiresAt > CURRENT_TIMESTAMP)
         WHERE Bans.ID IS NULL AND Maps.Name='%s'
         AND MapCourses.Name='%s' AND Times.ModeID=%d 
-        AND Times.StyleIDFlags=0 AND Times.Teleports=0
+        AND Times.StyleIDFlags=%llu AND Times.Teleports=0
 )";
 
 // Caching PBs
 
 constexpr char sql_getpbs[] = R"(
-    SELECT x.RunTime, x.MapCourseID, x.ModeID, t.Metadata
+    SELECT x.RunTime, x.MapCourseID, x.ModeID, t.Metadata, x.StyleIDFlags
         FROM Times t
         INNER JOIN MapCourses mc ON mc.ID = t.MapCourseID
         INNER JOIN Maps m ON m.ID = mc.MapID
         INNER JOIN (
-            SELECT MIN(t.RunTime) AS RunTime, t.MapCourseID, t.ModeID
+            SELECT MIN(t.RunTime) AS RunTime, t.MapCourseID, t.ModeID, t.StyleIDFlags, t.SteamID64
                 FROM Times t
                 WHERE t.SteamID64=%llu
-                GROUP BY t.MapCourseID, t.ModeID
-        ) x ON x.RunTime = t.RunTime AND x.MapCourseID = t.MapCourseID AND x.ModeID = t.ModeID
+                GROUP BY t.MapCourseID, t.ModeID, t.StyleIDFlags, t.SteamID64
+        ) x ON x.RunTime = t.RunTime AND x.MapCourseID = t.MapCourseID AND x.ModeID = t.ModeID AND x.StyleIDFlags = t.StyleIDFlags AND x.SteamID64 = t.SteamID64
         WHERE m.Name = '%s'
 )";
 
 constexpr char sql_getpbspro[] = R"(
-    SELECT x.RunTime, x.MapCourseID, x.ModeID, t.Metadata
+    SELECT x.RunTime, x.MapCourseID, x.ModeID, t.Metadata, x.StyleIDFlags
         FROM Times t
         INNER JOIN MapCourses mc ON mc.ID = t.MapCourseID
         INNER JOIN Maps m ON m.ID = mc.MapID
         INNER JOIN (
-            SELECT MIN(t.RunTime) AS RunTime, t.MapCourseID, t.ModeID
+            SELECT MIN(t.RunTime) AS RunTime, t.MapCourseID, t.ModeID, t.StyleIDFlags, t.SteamID64
                 FROM Times t
                 WHERE t.SteamID64=%llu AND t.Teleports=0 
-                GROUP BY t.MapCourseID, t.ModeID
-        ) x ON x.RunTime = t.RunTime AND x.MapCourseID = t.MapCourseID AND x.ModeID = t.ModeID
-        WHERE m.Name = '%s'
+                GROUP BY t.MapCourseID, t.ModeID, t.StyleIDFlags, t.SteamID64
+        ) x ON x.RunTime = t.RunTime AND x.MapCourseID = t.MapCourseID AND x.ModeID = t.ModeID AND x.StyleIDFlags = t.StyleIDFlags AND x.SteamID64 = t.SteamID64
+        WHERE m.Name = '%s' AND t.Teleports = 0
 )";

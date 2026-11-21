@@ -1,5 +1,6 @@
 #include "cs_usercmd.pb.h"
 #include "kz_mode_ckz.h"
+#include "kz/style/kz_style.h"
 #include "utils/addresses.h"
 #include "utils/interfaces.h"
 #include "utils/gameconfig.h"
@@ -30,6 +31,8 @@ CConVarRef<f32> sv_standable_normal("sv_standable_normal");
 // Доля отложенного остатка, которую отдаём сразу: 1 — как в GO, 0 — ванильная CS2, между — линейно
 // (по реплеям 29.09: 0.5 даёт ~53 % помощи GO). Подбирается на лету через RCON.
 CConVar<float> kz_ckz_slide_go("kz_ckz_slide_go", FCVAR_NONE, "CKZ: доля отложенного воздушного прироста на склонах, отдаваемая сразу (0 = CS2, 1 = CS:GO)", 1.0f);
+
+CConVar<float> kz_nopre_bhop_cap("kz_nopre_bhop_cap", FCVAR_NONE, "CKZ NOPRE perf takeoff speed cap", KZ::style::NopreDefaultCap);
 
 static u64 g_slideFixCalls {};
 static f64 g_slideFixSum {};
@@ -243,6 +246,10 @@ void KZClassicModeService::OnStopTouchGround()
 			newSpeed = MIN(newSpeed, (BH_BASE_MULTIPLIER - timeOnGround * BH_LANDING_DECREMENT_MULTIPLIER) * log(newSpeed) - BH_NORMALIZE_FACTOR);
 			// Make sure it doesn't go lower than the ground speed.
 			newSpeed = MAX(newSpeed, SPEED_NORMAL + this->GetPrestrafeGain());
+		}
+		if (KZ::style::HasNopre(this->player))
+		{
+			newSpeed = KZ::style::NoprePerfSpeed(newSpeed, kz_nopre_bhop_cap.Get());
 		}
 		velocity.x = newSpeed * landingVelocity2D.x;
 		velocity.y = newSpeed * landingVelocity2D.y;
@@ -626,6 +633,12 @@ void KZClassicModeService::UpdateAngleHistory()
 
 void KZClassicModeService::CalcPrestrafe()
 {
+	if (KZ::style::HasNopre(this->player))
+	{
+		this->leftPreRatio = this->rightPreRatio = this->bonusSpeed = 0.0f;
+		this->angleHistory.RemoveAll();
+		return;
+	}
 	f32 totalDuration = 0;
 	f32 sumWeightedAngles = 0;
 	FOR_EACH_VEC(this->angleHistory, i)
@@ -692,6 +705,10 @@ void KZClassicModeService::CalcPrestrafe()
 
 f32 KZClassicModeService::GetPrestrafeGain()
 {
+	if (KZ::style::HasNopre(this->player))
+	{
+		return 0.0f;
+	}
 	return PS_SPEED_MAX * pow(MAX(this->leftPreRatio, this->rightPreRatio) / PS_MAX_PS_TIME, PS_RATIO_TO_SPEED);
 }
 

@@ -1,3 +1,5 @@
+#include "kz/style/kz_style.h"
+#include "kz/db/kz_db.h"
 #include "cyb_replay_download.h"
 #include "session.h"
 
@@ -73,6 +75,8 @@ namespace
 	{
 		std::string map;
 		i32 course;
+		std::string style;
+		bool styleSupported = true;
 		std::string mode; // короткое api-имя (ckz/vnl/kzt), либо пусто — режим не поддержан
 	};
 
@@ -93,6 +97,9 @@ namespace
 		key.course = KZ::course::GetCyberCourseNumber(course);
 		auto modeInfo = KZ::mode::GetModeInfo(modeOwner->modeService);
 		key.mode = CybReplayCommon::MapMode(std::string(modeInfo.shortModeName.Get(), modeInfo.shortModeName.Length()));
+		auto style = KZ::style::GetPlatformStyleKey(modeOwner);
+		key.styleSupported = style.has_value();
+		key.style = style.value_or("");
 		return key;
 	}
 
@@ -137,6 +144,10 @@ namespace
 			return deny("central_disabled");
 		}
 		outKey = BuildKey(player, followSpectated);
+		if (!outKey.styleSupported || (!outKey.style.empty() && !KZOptionService::GetOptionInt("cybStyledRecords", 0)))
+		{
+			return deny("style_unsupported");
+		}
 		if (outKey.mode.empty())
 		{
 			return deny("mode_unsupported");
@@ -164,6 +175,10 @@ namespace
 		req.SetQuery("map", key.map);
 		req.SetQuery("course", std::to_string(key.course));
 		req.SetQuery("mode", key.mode);
+		if (!key.style.empty())
+		{
+			req.SetQuery("style", KZ::style::EncodeStyleKey(key.style));
+		}
 		req.SetQuery("type", ResolveTypeArg(kind));
 		if (kind == CybReplayDownload::Kind::PB || kind == CybReplayDownload::Kind::PBPro)
 		{
@@ -195,7 +210,7 @@ namespace
 	ResolveContext MakeContext(const ResolveKey &key)
 	{
 		ResolveContext ctx;
-		ctx.logKey = "map=" + key.map + " course=" + std::to_string(key.course) + " mode=" + key.mode;
+		ctx.logKey = "map=" + key.map + " course=" + std::to_string(key.course) + " mode=" + key.mode + " style=" + key.style;
 		ctx.courseText = CybReplayCommon::CourseText(key.course);
 		ctx.mode = key.mode;
 		return ctx;
@@ -525,6 +540,20 @@ void CybReplayDownload::RequestAndPlay(KZPlayer *player, Kind kind, u64 targetSt
 		// Отказ ДО сети: центральные реплеи выключены на сервере либо режим не поддержан
 		// центральным хранилищем. Раньше игрок и лог видели тут то же «повтор не найден»,
 		// что и при промахе по ключу, — две разные проблемы под одной фразой.
+		if (KZ_STREQ(denyReason, "style_unsupported") && KZDatabaseService::IsReady())
+		{
+			using namespace KZ::replaysystem::commands;
+			if (kind == Kind::WR || kind == Kind::WRPro)
+			{
+				LoadReplayForRecord(player, kind == Kind::WRPro ? RecordType::SRPro : RecordType::SR, "", "");
+				return;
+			}
+			if ((kind == Kind::PB || kind == Kind::PBPro) && targetSteamId64 == player->specService->GetInfoSubject().steamId64)
+			{
+				LoadReplayForRecord(player, kind == Kind::PBPro ? RecordType::SPBPro : RecordType::SPB, "", "");
+				return;
+			}
+		}
 		KZ_LOG_WARN(LogChannel::Replays, "[cyb_replay] resolve_skipped type=%s reason=%s\n", ResolveTypeArg(kind), denyReason);
 		player->languageService->PrintChat(true, false,
 										   KZ_STREQ(denyReason, "mode_unsupported") ? "Replay - Mode Unsupported" : "Replay - Central Disabled");

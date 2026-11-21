@@ -3,6 +3,7 @@
 #include "kz/global/kz_global.h"
 #include "kz/anticheat/kz_anticheat.h"
 #include "kz/global/messages.h"
+#include "kz/style/nopre_rules.h"
 
 #include "utils/utils.h"
 #include "utils/simplecmds.h"
@@ -34,14 +35,16 @@ struct PBRequest : public BaseRequest
 	bool globallyBanned = false;
 	bool queryLocalRanking = true;
 
+	bool DefaultsToActiveStyles() const override { return true; }
+
 	virtual void Init(u64 features, const CCommand *args, bool queryLocal, bool queryGlobal) override
 	{
 		BaseRequest::Init(features, args, queryLocal, queryGlobal);
-		if (this->styleList.Count() > 0)
+		if (styleList.HasElement(CUtlString(KZ::style::NopreName)))
 		{
-			this->queryLocalRanking = false;
+			this->globalStatus = ResponseStatus::DISABLED;
 		}
-		else if (this->targetSteamID64)
+		if (this->targetSteamID64)
 		{
 			for (u32 i = 1; i < MAXPLAYERS + 1; i++)
 			{
@@ -290,7 +293,7 @@ struct PBRequest : public BaseRequest
 		char proTime[32];
 		utils::FormatTime(this->pbData.runTimePro, proTime, sizeof(proTime));
 
-		if (!globallyBanned)
+		if (!globallyBanned && queryLocalRanking)
 		{
 			if (!this->pbData.hasPB)
 			{
@@ -397,7 +400,7 @@ struct PBRequest : public BaseRequest
 			}
 		};
 
-		KZDatabaseService::QueryPB(targetSteamID64, this->mapName, this->courseName, this->localModeID, onQuerySuccess, onQueryFailure);
+		KZDatabaseService::QueryPB(targetSteamID64, this->mapName, this->courseName, this->localModeID, onQuerySuccess, onQueryFailure, this->localStyleIDs);
 	}
 
 	void ExecuteRanklessLocalQuery()

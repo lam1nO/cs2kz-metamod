@@ -40,11 +40,11 @@
 	"(SELECT mcx.ID AS CourseID, mcx.MapID FROM MapCourses mcx "                                                  \
 	"WHERE mcx.StageID = (SELECT MIN(mcm.StageID) FROM MapCourses mcm WHERE mcm.MapID = mcx.MapID))"
 
-// PB игрока по всем картам: [0] имя карты, [1] лучшее время любым стилем (done), [2] без стилей (pb).
+// PB игрока в обычном зачёте по всем картам: имя карты и лучшее время.
 static constexpr char sql_fill_pb[] =
-	"SELECT m.Name, x.AnyTime, x.NoStyle FROM ("
-	"SELECT t.MapCourseID AS CourseID, MIN(t.RunTime) AS AnyTime, MIN(CASE WHEN t.StyleIDFlags = 0 THEN t.RunTime END) AS NoStyle "
-	"FROM Times t WHERE t.SteamID64 = %llu AND t.ModeID = %d GROUP BY t.MapCourseID) x "
+	"SELECT m.Name, x.Best FROM ("
+	"SELECT t.MapCourseID AS CourseID, MIN(t.RunTime) AS Best "
+	"FROM Times t WHERE t.SteamID64 = %llu AND t.ModeID = %d AND t.StyleIDFlags = 0 GROUP BY t.MapCourseID) x "
 	"INNER JOIN " KZ_FILL_MAIN_COURSES " mm ON mm.CourseID = x.CourseID INNER JOIN Maps m ON m.ID = mm.MapID";
 
 // WR сервера по всем картам: минимум главного курса без стилей и без забаненных (как !maptop),
@@ -349,7 +349,7 @@ namespace
 				{
 					continue;
 				}
-				f.pb[name] = {true, result->IsNull(2) ? 0.0 : TimeCol(result, 2)};
+				f.pb[name] = {true, TimeCol(result, 1)};
 			}
 			f.pbValid = true;
 			Refresh(slot);

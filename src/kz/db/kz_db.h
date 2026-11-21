@@ -144,13 +144,14 @@ public:
 							  TransactionFailureCallbackFunc onFailure);
 	static void QueryAllPBs(u64 steamID64, CUtlString mapName, TransactionSuccessCallbackFunc onSuccess, TransactionFailureCallbackFunc onFailure);
 	static void QueryPB(u64 steamID64, CUtlString mapName, CUtlString courseName, u32 modeID, TransactionSuccessCallbackFunc onSuccess,
-						TransactionFailureCallbackFunc onFailure);
+						TransactionFailureCallbackFunc onFailure, u64 styleMask = 0);
 	static void QueryPBRankless(u64 steamID64, CUtlString mapName, CUtlString courseName, u32 modeID, u64 styleIDFlags,
 								TransactionSuccessCallbackFunc onSuccess, TransactionFailureCallbackFunc onFailure);
 
 	static void QueryAllRecords(CUtlString mapName, TransactionSuccessCallbackFunc onSuccess, TransactionFailureCallbackFunc onFailure);
 	static void QueryRecords(CUtlString mapName, CUtlString courseName, u32 modeID, u32 count, u32 offset, TransactionSuccessCallbackFunc onSuccess,
-							 TransactionFailureCallbackFunc onFailure);
+							 TransactionFailureCallbackFunc onFailure,
+								 u64 styleMask = 0, bool includeStyleCounts = false, u64 personalSteamId = 0);
 
 	// SavedRuns (Task 2): upsert снапшота незавершённого рана игрока на текущей карте/курсе.
 	// Собирает map/course/mode/styles из состояния player сам (см. save_savedrun.cpp); no-op, если

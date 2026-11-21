@@ -2,6 +2,8 @@
 #include "cyb_emitter.h"
 #include "cyb_ticket_lease.h"
 #include <charconv>
+#include "utils/json.h"
+#include "kz/style/style_key.h"
 #include <cstdlib>
 #include "kz/analytics/source_identity.h"
 #include "cyb_ticket_eligibility.h"
@@ -73,6 +75,11 @@ static std::string JsonEscape(const std::string &s)
 
 void CybEmitter::Emit(const RunSubmission &sub)
 {
+	if (!sub.styles.empty() && !KZOptionService::GetOptionInt("cybStyledRecords", 0))
+	{
+		return;
+	}
+
 	// Читаем конфиг
 	const char *url = KZOptionService::GetOptionStr("cybEmitUrl", "");
 	if (!url || url[0] == '\0')
@@ -106,6 +113,18 @@ void CybEmitter::Emit(const RunSubmission &sub)
 	const std::string ticketProof =
 		hasTicketProof ? ",\"eventTicket\":{\"campaignId\":\"" + campaign + "\",\"valid\":true}" : "";
 
+	auto styles = nlohmann::json::array();
+	for (const auto &style : sub.styles)
+	{
+		if (!KZ::style::IsPlatformStyle(style.name))
+		{
+			KZ_LOG_WARN(LogChannel::Global, "[cyb_emit] unsupported style '%s', skipping\n", style.name.c_str());
+			return;
+		}
+		styles.push_back(style.name);
+	}
+	const auto styleJson = styles.dump();
+
 	// Строим JSON payload
 	// Формат: { "events": [ { envelope + data } ] }
 	char body[2048];
@@ -125,7 +144,7 @@ void CybEmitter::Emit(const RunSubmission &sub)
 		"\"mode\":\"%s\","
 		"\"timeMs\":%lld,"
 		"\"teleports\":%u,"
-		"\"styles\":[]%s"
+		"\"styles\":%s%s"
 		"}"
 		"}]}",
 		eventIdStr.c_str(),
@@ -137,7 +156,7 @@ void CybEmitter::Emit(const RunSubmission &sub)
 		JsonEscape(sub.course.name).c_str(),
 		modeStr,
 		timeMs,
-		(unsigned)sub.teleports, ticketProof.c_str());
+		(unsigned)sub.teleports, styleJson.c_str(), ticketProof.c_str());
 
 	// Write-ahead: тело события на диск ДО первой попытки отправки — при обрыве
 	// сети до платформы ран не потеряется, ретраер outbox дошлёт его с тем же id.

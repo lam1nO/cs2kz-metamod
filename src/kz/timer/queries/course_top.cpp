@@ -7,6 +7,7 @@
 #include "utils/ctimer.h"
 #include "kz/hud/layout/gsmenu.h"
 #include "kz/mode/kz_mode.h"
+#include "kz/style/kz_style.h"
 #include "kz/hud/kz_hud.h"
 #include "utils/interfaces.h"
 
@@ -63,7 +64,24 @@ struct CourseTopRequest : public BaseRequest
 	using BaseRequest::BaseRequest;
 
 	static constexpr u64 ctopFeatures =
-		RequestFeature::Course | RequestFeature::Map | RequestFeature::Mode | RequestFeature::Offset | RequestFeature::Limit;
+		RequestFeature::Course | RequestFeature::Map | RequestFeature::Mode | RequestFeature::Offset | RequestFeature::Limit | RequestFeature::Style;
+
+	bool DefaultsToActiveStyles() const override { return true; }
+
+	void Init(u64 features, const CCommand *args, bool queryLocal, bool queryGlobal) override
+	{
+		BaseRequest::Init(features, args, queryLocal, queryGlobal);
+		if (styleList.Count() > 0)
+		{
+			globalStatus = ResponseStatus::DISABLED;
+		}
+	}
+
+	struct StyleCount
+	{
+		u64 mask, overall, pro;
+	};
+	std::vector<StyleCount> styleCounts;
 
 	struct RunStats
 	{
@@ -116,6 +134,8 @@ struct CourseTopRequest : public BaseRequest
 	{
 		CUtlVector<RunStats> overallData;
 		CUtlVector<RunStats> proData;
+		std::optional<RunStats> personal[2];
+		i32 personalPlace[2] {};
 	} srData, wrData;
 
 	virtual void PrintInstructions() override
@@ -150,6 +170,7 @@ struct CourseTopRequest : public BaseRequest
 
 			u64 uid = this->uid;
 
+			const u64 steamId = callingPlayer->GetSteamId64();
 			auto onQuerySuccess = [uid](std::vector<ISQLQuery *> queries)
 			{
 				CourseTopRequest *req = (CourseTopRequest *)CourseTopRequest::Find(uid);
@@ -176,6 +197,24 @@ struct CourseTopRequest : public BaseRequest
 						req->srData.proData.AddToTail({result->GetString(0), result->GetString(2), 0, result->GetFloat(3), (u64)result->GetInt64(1), 0, result->GetString(5)});
 					}
 				}
+				if ((result = queries[2]->GetResultSet()))
+				{
+					while (result->FetchRow())
+					{
+						req->styleCounts.push_back({(u64)result->GetInt64(0), (u64)result->GetInt64(1), (u64)result->GetInt64(2)});
+					}
+				}
+				for (size_t i = 3; i < queries.size(); ++i)
+				{
+					result = queries[i]->GetResultSet();
+					if (result && result->FetchRow())
+					{
+						req->srData.personal[i - 3] = RunStats{result->GetString(0), result->GetString(2), (u64)result->GetInt64(4),
+							result->GetFloat(3), (u64)result->GetInt64(1), 0, result->GetString(5)};
+						req->srData.personalPlace[i - 3] = result->GetInt(6);
+					}
+				}
+
 			};
 
 			auto onQueryFailure = [uid](std::string, int)
@@ -188,7 +227,7 @@ struct CourseTopRequest : public BaseRequest
 			};
 
 			KZDatabaseService::QueryRecords(this->mapName, this->courseName, this->localModeID, this->limit, this->offset, onQuerySuccess,
-											onQueryFailure);
+											onQueryFailure, this->localStyleIDs, true, steamId);
 		}
 	}
 
@@ -356,7 +395,7 @@ struct CourseTopRequest : public BaseRequest
 			headers[i] = player->languageService->PrepareMessage(columnKeysLocal[i]).c_str();
 		}
 		utils::Table<KZ_ARRAYSIZE(columnKeysLocal)> table(
-			player->languageService->PrepareMessage(COURSE_TOP_TABLE_KEY, mapName.Get(), courseName.Get(), modeName.Get()).c_str(), headers);
+			player->languageService->PrepareMessage(COURSE_TOP_TABLE_KEY, mapName.Get(), courseName.Get(), GetModeStyleLabel().Get()).c_str(), headers);
 		FOR_EACH_VEC(srData.overallData, i)
 		{
 			rank.Format("%llu", this->offset + i + 1);
@@ -379,7 +418,7 @@ struct CourseTopRequest : public BaseRequest
 			headersPro[i] = player->languageService->PrepareMessage(columnKeysLocalPro[i]).c_str();
 		}
 		utils::Table<KZ_ARRAYSIZE(columnKeysLocalPro)> tablePro(
-			player->languageService->PrepareMessage(COURSE_TOP_PRO_TABLE_KEY, mapName.Get(), courseName.Get(), modeName.Get()).c_str(), headersPro);
+			player->languageService->PrepareMessage(COURSE_TOP_PRO_TABLE_KEY, mapName.Get(), courseName.Get(), GetModeStyleLabel().Get()).c_str(), headersPro);
 		FOR_EACH_VEC(srData.proData, i)
 		{
 			rank.Format("%llu", this->offset + i + 1);
@@ -452,6 +491,10 @@ namespace
 	struct MaptopView
 	{
 		CUtlString map, course, mode;
+		std::string style;
+		bool styleOpen = false;
+		std::vector<std::string> styleChoices;
+		std::vector<CourseTopRequest::StyleCount> styleCounts;
 		i32 page = 0;
 		bool pro = true;
 		u64 pendingUid = 0;     // последний перезапрос из окна — показываем только его ответ
@@ -475,7 +518,7 @@ namespace
 	// из BaseRequest::CheckRequests, который обходит BaseRequest::instances через remove_if: новый запрос,
 	// созданный прямо там, делал push_back в тот же вектор посреди обхода — переаллокация, обход по
 	// освобождённой памяти, segv (канарейка 13.10, 0.305.0, кадр CheckRequests::$_2).
-	f64 DoRequeryMaptop(CPlayerUserId userID, CUtlString mode, CUtlString course)
+	f64 DoRequeryMaptop(CPlayerUserId userID, CUtlString mode, CUtlString course, CUtlString style)
 	{
 		KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
 		if (!player)
@@ -487,7 +530,8 @@ namespace
 		// мешают), а кавычки он НЕ снимает — с ними курс искался как "Main" и таблица была пустой.
 		CCommand args;
 		char line[256];
-		V_snprintf(line, sizeof(line), "kz_maptop map=%s course=%s mode=%s l=%llu", v.map.Get(), course.Get(), mode.Get(), kMaptopLimit);
+		V_snprintf(line, sizeof(line), "kz_maptop map=%s course=%s mode=%s l=%llu style=%s", v.map.Get(), course.Get(), mode.Get(), kMaptopLimit,
+				   style.IsEmpty() ? "none" : style.Get());
 		args.Tokenize(line);
 		CourseTopRequest *req = CourseTopRequest::Create<CourseTopRequest>(player, CourseTopRequest::ctopFeatures, v.qLocal, v.qGlobal, &args);
 		req->fromWindow = true;
@@ -497,7 +541,7 @@ namespace
 
 	// course — курс перезапроса; v.course меняет только ответ (ShowWindow), иначе отброшенный троттлингом
 	// клик по вкладке курса оставил бы окно с вкладкой нового курса над таблицей старого.
-	void RequeryMaptop(KZPlayer *player, const char *mode, const char *course, bool throttle)
+	void RequeryMaptop(KZPlayer *player, const char *mode, const char *course, const std::string &style, bool throttle)
 	{
 		MaptopView &v = g_maptop[player->GetPlayerSlot().Get()];
 		const f64 now = g_pKZUtils->GetServerGlobals()->curtime;
@@ -515,7 +559,8 @@ namespace
 		}
 		// Ответы, пришедшие до отложенного создания, уже чужие.
 		v.pendingUid = UINT64_MAX;
-		StartTimer<CPlayerUserId, CUtlString, CUtlString>(DoRequeryMaptop, player->GetClient()->GetUserID(), CUtlString(mode), CUtlString(course), 0.0, false);
+		StartTimer<CPlayerUserId, CUtlString, CUtlString, CUtlString>(DoRequeryMaptop, player->GetClient()->GetUserID(), CUtlString(mode),
+			CUtlString(course), CUtlString(style.c_str()), 0.0, false);
 	}
 
 	CUtlVector<CourseTopRequest::RunStats> &MaptopList(MaptopView &v)
@@ -527,6 +572,32 @@ namespace
 	{
 		MaptopView &v = g_maptop[player->GetPlayerSlot().Get()];
 		i32 row = -1, k = -1;
+		if (!v.global && KZ_STREQ(id, "gw_style"))
+		{
+			v.styleOpen = !v.styleOpen;
+			RenderMaptop(player);
+			return;
+		}
+		if (v.styleOpen && sscanf(id, "gw_st%d", &k) == 1 && k >= 0 && k < (i32)v.styleChoices.size())
+		{
+			const auto selected = v.styleChoices[k];
+			if (selected.find(KZ::style::NopreName) != std::string::npos && V_stricmp(KZ::mode::GetModeInfo(v.mode).shortModeName.Get(), "CKZ"))
+			{
+				return;
+			}
+			v.styleOpen = false;
+			RenderMaptop(player);
+			if (selected != v.style)
+			{
+				RequeryMaptop(player, v.mode.Get(), v.course.Get(), selected, false);
+			}
+			return;
+		}
+		if (v.styleOpen)
+		{
+			v.styleOpen = false;
+			RenderMaptop(player);
+		}
 		if (KZ_STREQ(id, "gf1_0") || KZ_STREQ(id, "gf1_1"))
 		{
 			v.pro = KZ_STREQ(id, "gf1_0");
@@ -538,7 +609,7 @@ namespace
 		{
 			if (k < (i32)v.courseNames.size() && V_stricmp(v.courseNames[k].c_str(), v.course.Get()))
 			{
-				RequeryMaptop(player, v.mode.Get(), v.courseNames[k].c_str(), true);
+				RequeryMaptop(player, v.mode.Get(), v.courseNames[k].c_str(), v.style, true);
 			}
 			return;
 		}
@@ -554,7 +625,8 @@ namespace
 				if (shown++ == k)
 				{
 					v.page = 0;
-					RequeryMaptop(player, mode, v.course.Get(), true);
+					const bool resetStyle = V_stricmp(mode, "CKZ") && v.style.find(KZ::style::NopreName) != std::string::npos;
+					RequeryMaptop(player, mode, v.course.Get(), resetStyle ? "" : v.style, true);
 					return;
 				}
 			}
@@ -655,6 +727,84 @@ namespace
 		return row;
 	}
 
+	std::string StyleLabelForMask(u64 mask)
+	{
+		std::vector<std::string_view> names;
+		const auto &infos = g_pKZStyleManager->GetStyleInfos();
+		FOR_EACH_VEC(infos, i)
+		{
+			const auto &info = infos[i];
+			if (info.databaseID >= 0 && info.databaseID < 32 && (mask & (1ull << info.databaseID)))
+			{
+				names.emplace_back(info.shortName);
+				mask &= ~(1ull << info.databaseID);
+			}
+		}
+		if (mask)
+		{
+			return {};
+		}
+		std::sort(names.begin(), names.end());
+		std::string label;
+		for (auto name : names)
+		{
+			if (!label.empty())
+			{
+				label += '+';
+			}
+			label += name;
+		}
+		return label;
+	}
+
+	void RenderStyleOptions(MaptopView &v, KZ::gsmenu::Table &t, bool english)
+	{
+		const std::string noStyle = english ? "No style" : "Без стиля";
+		t.styleLabel = v.style.empty() ? noStyle : v.style;
+		t.styleHeading = english ? "Style" : "Стиль";
+		t.styleRunsHeading = english ? "Runs" : "Ранов";
+		t.styleDisabledReason = english ? "CKZ only" : "Только в CKZ";
+		t.styleSelected = !v.style.empty();
+		t.styleOpen = v.styleOpen;
+		v.styleChoices.clear();
+		std::map<std::string, u64> counts {{"", 0}, {KZ::style::NopreName, 0}, {v.style, 0}};
+		for (const auto &option : v.styleCounts)
+		{
+			const auto count = v.pro ? option.pro : option.overall;
+			const auto name = StyleLabelForMask(option.mask);
+			if (count > 0 && (!name.empty() || option.mask == 0))
+			{
+				counts[name] = count;
+			}
+		}
+		auto add = [&](const std::string &name, bool separator)
+		{
+			const u64 count = counts.at(name);
+			const bool disabled = name.find(KZ::style::NopreName) != std::string::npos && V_stricmp(KZ::mode::GetModeInfo(v.mode).shortModeName.Get(), "CKZ");
+			t.styleOptions.push_back({name.empty() ? noStyle : name, count ? std::to_string(count) : "—", v.style == name,
+				disabled, separator});
+			v.styleChoices.push_back(name);
+			counts.erase(name);
+		};
+		add("", false);
+		add(KZ::style::NopreName, true);
+		for (const char *name : {"ABH", "LGJ", "AUD"})
+		{
+			if (counts.count(name))
+			{
+				add(name, false);
+			}
+		}
+		bool separator = true;
+		while (!counts.empty() && t.styleOptions.size() < KZ_GSMENU_STYLE_OPTIONS)
+		{
+			const bool last = t.styleOptions.size() + 1 == KZ_GSMENU_STYLE_OPTIONS;
+			const auto name = last && counts.count(v.style) ? v.style : counts.begin()->first;
+			add(name, separator);
+			separator = false;
+		}
+	}
+
 	void RenderMaptop(KZPlayer *player)
 	{
 		MaptopView &v = g_maptop[player->GetPlayerSlot().Get()];
@@ -662,8 +812,17 @@ namespace
 		v.page = 0; // топ-10 без листания (решение владельца 14.10), своя строка закреплена снизу
 
 		KZ::gsmenu::Table t;
+		const bool english = V_stricmp(player->languageService->GetLanguage(), "ru") != 0;
 		t.title = v.map.Get();
 		t.sub = std::string(v.course.Get()) + " · " + (v.global ? "мировой топ" : "топ сервера");
+		if (!v.global)
+		{
+			RenderStyleOptions(v, t, english);
+			if (!v.style.empty())
+			{
+				t.sub = std::string(v.course.Get()) + " · " + v.style + (english ? " · server top" : " · топ сервера");
+			}
+		}
 		t.cover = v.map.Get();
 		t.filters[1] = {{"PRO", v.pro}, {"NUB", !v.pro}};
 		// Курсы (Main / Bonus N) — вкладками слева в полосе режимов (не больше 8 — ёмкость разметки); список курсов есть только у карты,
@@ -725,10 +884,32 @@ namespace
 			v.meRunId = list[i].runID.Get();
 			break;
 		}
+		if (!meShown && !t.hasMe && v.data.personal[v.pro])
+		{
+			auto &record = *v.data.personal[v.pro];
+			t.hasMe = true;
+			t.me = MaptopRow(record, v.data.personalPlace[v.pro], best, me);
+			t.me.actions[0] = "▶";
+			v.meRunId = record.runID.Get();
+		}
+
 		t.empty = t.rows.empty();
 		if (t.rows.empty())
 		{
-			t.hint = v.pro ? "PRO-рекордов на этом курсе пока нет" : "Рекордов на этом курсе пока нет";
+			if (v.style.empty())
+			{
+				t.hint = v.pro ? "PRO-рекордов на этом курсе пока нет" : "Рекордов на этом курсе пока нет";
+			}
+			else if (english)
+			{
+				t.hint = (v.pro ? "No PRO runs with " : "Nobody has finished this course with ") + v.style
+					+ (v.pro ? " on this course yet" : " yet");
+			}
+			else
+			{
+				t.hint = (v.pro ? "PRO-ранов с " : "На этом курсе ещё никто не прошёл с ") + v.style
+					+ (v.pro ? " на этом курсе пока нет" : "");
+			}
 		}
 		KZ::gsmenu::ShowTable(player, t, OnMaptopClick, "maptop");
 	}
@@ -754,10 +935,18 @@ bool CourseTopRequest::ShowWindow()
 	v.course = req->courseName;
 	v.mode = req->modeName;
 	v.global = !local;
+	v.style = StyleLabelForMask(req->localStyleIDs);
+	v.styleOpen = false;
+	v.styleCounts = std::move(req->styleCounts);
 	v.data = CourseTopRequest::CourseTopData();
 	const CourseTopRequest::CourseTopData &src = local ? req->srData : req->wrData;
 	v.data.overallData = src.overallData;
 	v.data.proData = src.proData;
+	for (int i = 0; i < 2; ++i)
+	{
+		v.data.personal[i] = src.personal[i];
+		v.data.personalPlace[i] = src.personalPlace[i];
+	}
 	if (!req->fromWindow)
 	{
 		v.page = 0;
@@ -770,10 +959,10 @@ bool CourseTopRequest::ShowWindow()
 	// Команда отдала первую страницу — дозапрашиваем полный топ для листания (тихо, без консоли).
 	const bool full = req->limit >= kMaptopLimit;
 	// Дозапрос не трогает троттлинг кликов и не делается при o= (там листать от нуля незачем).
-	if (!req->fromWindow && !full && req->offset == 0 && KZ::gsmenu::IsOpenBy(player, "maptop")
+	if (!local && !req->fromWindow && !full && req->offset == 0 && KZ::gsmenu::IsOpenBy(player, "maptop")
 		&& (src.overallData.Count() >= kMaptopShow || src.proData.Count() >= kMaptopShow))
 	{
-		RequeryMaptop(player, v.mode.Get(), v.course.Get(), false);
+		RequeryMaptop(player, v.mode.Get(), v.course.Get(), v.style, false);
 	}
 	return KZ::gsmenu::IsOpen(player);
 }

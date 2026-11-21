@@ -899,6 +899,21 @@ void KZHUDService::UpdateRunTypeElement(CCSCustomHudLayout *layout, KZPlayer *so
 		// Скрытый элемент класс не трогает: прошлый rt-* под hidden никому не мешает, а снятие
 		// и возврат на каждом старте/стопе были бы лишними пересылками.
 		this->SetLayoutClass(layout, LAYOUT_ELEMENTS[(i32)LayoutElement::RunType].panelId, this->layoutExtra.runTypeClass, cls);
+		std::vector<std::string_view> styles;
+		if (V_strcmp(text, "PRAC"))
+		{
+			FOR_EACH_VEC(source->styleServices, i)
+			{
+				styles.push_back(source->styleServices[i]->GetStyleShortName());
+			}
+		}
+		const auto styleText = KZ::style::StyleKey(std::move(styles));
+		this->SetLayoutClass(layout, "mhud_runtype", this->layoutExtra.runStyleClass, styleText.empty() ? NULL : "has-style");
+		if (!styleText.empty())
+		{
+			this->SetLayoutVar(layout, "rt2_style", "runstyle", this->layoutExtra.runStyleText, styleText.c_str());
+		}
+
 		this->ApplyRunTypeParts(layout, "", this->layoutExtra, text, this->GetLayoutPrefs().elements[(i32)LayoutElement::RunType]);
 	}
 	// text = NULL: корень — Panel (точка + слово), слово пишет ApplyRunTypeParts.

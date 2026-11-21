@@ -349,6 +349,43 @@ bool KZ::gsmenu::ShowTable(KZPlayer *player, const Table &t, ClickFn onClick, co
 			{
 				Var(player, *w, layout, id, "l", t.filters[g][k].label);
 				Class(player, *w, layout, id, "on", t.filters[g][k].on);
+				ClassLazy(player, *w, layout, id, "dis", t.filters[g][k].disabled);
+			}
+		}
+	}
+
+	const bool hasStyles = !t.styleLabel.empty();
+	ClassLazy(player, *w, layout, "gw", "hasst", hasStyles);
+	ClassLazy(player, *w, layout, "gw", "stopen", t.styleOpen);
+	if (hasStyles || w->classes.count("gw_style|hidden"))
+	{
+		Class(player, *w, layout, "gw_style", "hidden", !hasStyles);
+		Class(player, *w, layout, "gw_sdr", "hidden", !t.styleOpen);
+		ClassLazy(player, *w, layout, "gw_style", "on", t.styleSelected);
+		ClassLazy(player, *w, layout, "gw_style", "open", t.styleOpen);
+		Var(player, *w, layout, "gw_style", "l", t.styleLabel);
+	}
+	if (t.styleOpen)
+	{
+		Var(player, *w, layout, "gw_sph", "style", t.styleHeading);
+		Var(player, *w, layout, "gw_sph", "runs", t.styleRunsHeading);
+		for (i32 k = 0; k < KZ_GSMENU_STYLE_OPTIONS; ++k)
+		{
+			V_snprintf(id, sizeof(id), "gw_st%i", k);
+			const bool used = k < (i32)t.styleOptions.size();
+			Class(player, *w, layout, id, "hidden", !used);
+			if (used)
+			{
+				const auto &option = t.styleOptions[k];
+				Var(player, *w, layout, id, "l", option.label);
+				Var(player, *w, layout, id, "n", option.count);
+				if (option.disabled)
+				{
+					Var(player, *w, layout, id, "why", t.styleDisabledReason);
+				}
+				ClassLazy(player, *w, layout, id, "on", option.on);
+				ClassLazy(player, *w, layout, id, "dis", option.disabled);
+				ClassLazy(player, *w, layout, id, "sep", option.separator);
 			}
 		}
 	}
@@ -452,7 +489,7 @@ bool KZ::gsmenu::ShowList(KZPlayer *player, const List &l)
 	char id[24];
 	for (i32 i = 0; i < KZ_GSMENU_LIST_ROWS; i++)
 	{
-		V_snprintf(id, sizeof(id), "gs%i", i);
+		V_snprintf(id, sizeof(id), "gw_st%i", i);
 		const bool used = i < (i32)l.rows.size();
 		Class(player, *w, layout, id, "hidden", !used);
 		if (!used)
@@ -605,7 +642,7 @@ bool KZ::gsmenu::OnClick(KZPlayer *player, uint32 packedHandle, const char *id)
 	// колбэку владельца окна.
 	i32 row = -1;
 	char tail = 0;
-	if (sscanf(id, "gr%d%c", &row, &tail) == 1)
+	if (sscanf(id, "gr%d%c", &row, &tail) == 1 && w->owner != "maptop")
 	{
 		return true;
 	}

@@ -1210,6 +1210,7 @@ namespace KZ::replaysystem::commands
 		CUtlString courseName;
 		KZ::api::Mode apiMode;
 		u32 localModeID;
+		u64 styleMask = 0;
 
 		RecordContext(CPlayerUserId uid, CUtlString map, CUtlString course, KZ::api::Mode mode, u32 modeID)
 			: playerUserID(uid), mapName(std::move(map)), courseName(std::move(course)), apiMode(mode), localModeID(modeID)
@@ -1273,7 +1274,7 @@ namespace KZ::replaysystem::commands
 			if (p) p->languageService->PrintChat(true, false, "Replay - SR Not Found");
 		};
 		// clang-format on
-		KZDatabaseService::QueryRecords(ctx.mapName, ctx.courseName, ctx.localModeID, 1, 0, onSuccess, onFailure);
+		KZDatabaseService::QueryRecords(ctx.mapName, ctx.courseName, ctx.localModeID, 1, 0, onSuccess, onFailure, ctx.styleMask);
 	}
 
 	static void LoadGPBReplay(KZPlayer *player, bool isPro, const RecordContext &ctx)
@@ -1339,7 +1340,7 @@ namespace KZ::replaysystem::commands
 			if (p) p->languageService->PrintChat(true, false, "Replay - SPB Not Found");
 		};
 		// clang-format on
-		KZDatabaseService::QueryPBRankless(steamID64, ctx.mapName, ctx.courseName, ctx.localModeID, 0, onSuccess, onFailure);
+		KZDatabaseService::QueryPBRankless(steamID64, ctx.mapName, ctx.courseName, ctx.localModeID, ctx.styleMask, onSuccess, onFailure);
 	}
 
 	static void LoadPBReplay(KZPlayer *player, bool isPro, bool isGlobalMode, const RecordContext &ctx)
@@ -1514,7 +1515,27 @@ namespace KZ::replaysystem::commands
 			return;
 		}
 
+		const auto styleMask = KZ::style::GetStyleMask(subject.player);
+		if (!styleMask)
+		{
+			player->languageService->PrintChat(true, false, "Replay - Not Found");
+			return;
+		}
 		RecordContext ctx(player->GetClient()->GetUserID(), g_pKZUtils->GetCurrentMapName(), course->GetName(), apiMode, (u32)modeInfo.databaseID);
+		ctx.styleMask = *styleMask;
+		if (ctx.styleMask)
+		{
+			if (type == RecordType::WR || type == RecordType::WRPro)
+			{
+				LoadSRReplay(player, type == RecordType::WRPro, ctx);
+				return;
+			}
+			if (type == RecordType::PB || type == RecordType::PBPro)
+			{
+				LoadSPBReplay(player, type == RecordType::PBPro, ctx);
+				return;
+			}
+		}
 
 		switch (type)
 		{

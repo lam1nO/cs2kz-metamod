@@ -4,6 +4,7 @@
 #include "../checkpoint/kz_checkpoint.h"
 #include "kz/mappingapi/kz_mappingapi.h"
 #include "utils/uuid.h"
+#include <array>
 
 #define KZ_MAX_MODE_NAME_LENGTH 128
 
@@ -197,6 +198,10 @@ private:
 
 	// PB cache per mode and per course.
 	std::unordered_map<PBDataKey, PBData> localPBCache;
+	using StyledTimes = std::unordered_map<u64, std::unordered_map<PBDataKey, std::array<f64, 2>>>;
+	StyledTimes styledPBCache;
+	static StyledTimes styledRecordCache;
+	bool GetStyledHudTime(f64 &outTime, PBDataKey key, bool pro, const StyledTimes &cache) const;
 	std::unordered_map<PBDataKey, PBData> globalPBCache;
 
 	// SR cache should be loaded upon map start, every time !wr is queried and every time a run beats the server record.

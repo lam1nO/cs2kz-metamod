@@ -1,5 +1,8 @@
 #pragma once
 #include "kz/kz.h"
+#include "nopre_rules.h"
+#include "style_key.h"
+#include <optional>
 
 #define KZ_STYLE_MANAGER_INTERFACE "KZStyleManagerInterface"
 
@@ -167,6 +170,26 @@ public:
 	}
 };
 
+namespace KZ::style
+{
+	inline bool HasNopre(const KZPlayer *player)
+	{
+		FOR_EACH_VEC(player->styleServices, i)
+		{
+			if (!V_stricmp(player->styleServices[i]->GetStyleShortName(), NopreName))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	inline bool CanRankJumps(const KZPlayer *player)
+	{
+		return player->styleServices.Count() == 0 || (player->styleServices.Count() == 1 && HasNopre(player));
+	}
+}
+
 typedef KZStyleService *(*StyleServiceFactory)(KZPlayer *player);
 
 class KZStyleManager
@@ -215,5 +238,8 @@ namespace KZ::style
 	void UpdateStyleDatabaseID(CUtlString name, i32 id);
 	KZStyleManager::StylePluginInfo GetStyleInfo(KZStyleService *style);
 	KZStyleManager::StylePluginInfo GetStyleInfo(CUtlString styleName);
+
+	std::optional<u64> GetStyleMask(const KZPlayer *player);
+	std::optional<std::string> GetPlatformStyleKey(const KZPlayer *player);
 
 }; // namespace KZ::style

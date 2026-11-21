@@ -82,10 +82,19 @@ void BaseRequest::Init(u64 features, const CCommand *args, bool queryLocal, bool
 	{
 		this->limit = atoll(kv->GetString());
 	}
-	if (this->HasFeature(RequestFeature::Style) && ((kv = params.FindMember("style")) || (kv = params.FindMember("s"))))
+	if (this->HasFeature(RequestFeature::Style))
 	{
-		this->SetupStyles(kv->GetString());
+		kv = params.FindMember("style");
+		if (!kv)
+		{
+			kv = params.FindMember("s");
+		}
+		if (kv || DefaultsToActiveStyles())
+		{
+			this->SetupStyles(kv ? kv->GetString() : "");
+		}
 	}
+
 	if (this->HasFeature(RequestFeature::Player))
 	{
 		kv = params.FindMember("player");
@@ -401,7 +410,7 @@ void BaseRequest::SetupStyles(CUtlString styleNames)
 		FOR_EACH_VEC(stylesOwner->styleServices, i)
 		{
 			KZStyleManager::StylePluginInfo info = KZ::style::GetStyleInfo(stylesOwner->styleServices[i]);
-			if (info.databaseID < 0)
+			if (info.databaseID < 0 || info.databaseID >= 32)
 			{
 				this->localStatus = ResponseStatus::DISABLED;
 			}
@@ -409,21 +418,26 @@ void BaseRequest::SetupStyles(CUtlString styleNames)
 			{
 				this->localStyleIDs |= (1ull << info.databaseID);
 			}
-			styleList.AddToTail(info.shortName);
+			if (info.shortName)
+			{
+				styleList.AddToTail(info.shortName);
+			}
 		}
 	}
 	else if (styleNames.IsEqual_FastCaseInsensitive("none"))
 	{
 		this->localStyleIDs = 0;
 	}
-	// Example: VNL,CKZ
+	// Exact combinations accept both ABH+LGJ and the legacy ABH,LGJ syntax.
 	else
 	{
-		CSplitString stylesSplit(styleNames.Get(), ",");
+		std::string names = styleNames.Get();
+		std::replace(names.begin(), names.end(), '+', ',');
+		CSplitString stylesSplit(names.c_str(), ",");
 		FOR_EACH_VEC(stylesSplit, i)
 		{
 			KZStyleManager::StylePluginInfo info = KZ::style::GetStyleInfo(stylesSplit[i]);
-			if (info.databaseID < 0)
+			if (info.databaseID < 0 || info.databaseID >= 32)
 			{
 				this->localStatus = ResponseStatus::DISABLED;
 			}
@@ -431,7 +445,32 @@ void BaseRequest::SetupStyles(CUtlString styleNames)
 			{
 				this->localStyleIDs |= (1ull << info.databaseID);
 			}
-			styleList.AddToTail(info.id != -2 ? info.shortName : stylesSplit[i]);
+			const char *name = info.id != -2 ? info.shortName : stylesSplit[i];
+			if (name && !styleList.HasElement(CUtlString(name)))
+			{
+				styleList.AddToTail(name);
+			}
 		}
 	}
-};
+	if (styleList.HasElement(CUtlString(KZ::style::NopreName)) && V_stricmp(KZ::mode::GetModeInfo(modeName).shortModeName.Get(), "CKZ"))
+	{
+		localStatus = ResponseStatus::DISABLED;
+		globalStatus = ResponseStatus::DISABLED;
+	}
+}
+
+CUtlString BaseRequest::GetModeStyleLabel() const
+{
+	std::vector<std::string_view> names;
+	FOR_EACH_VEC(styleList, i)
+	{
+		names.emplace_back(styleList[i].Get());
+	}
+	CUtlString label = modeName;
+	if (!names.empty())
+	{
+		label.Append(" · ");
+		label.Append(KZ::style::StyleKey(std::move(names)).c_str());
+	}
+	return label;
+}

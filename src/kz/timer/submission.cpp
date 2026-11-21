@@ -198,12 +198,19 @@ RunSubmission::RunSubmission(KZPlayer *player)
 	{
 		auto style = KZ::style::GetStyleInfo(player->styleServices[i]);
 		this->styles.push_back({player->styleServices[i]->GetStyleShortName(), style.md5});
-		if (style.databaseID < 0)
+		if (style.databaseID < 0 || style.databaseID >= 32)
 		{
 			this->local = false;
 			this->stylesLocalOk = false;
 		}
-		this->styleIDs |= (1ull << style.databaseID);
+		else
+		{
+			this->styleIDs |= 1ull << style.databaseID;
+		}
+		if (!V_stricmp(player->styleServices[i]->GetStyleShortName(), KZ::style::NopreName))
+		{
+			this->global = false;
+		}
 	}
 
 	KZ::analytics::OnRunFinished(player, *this);
@@ -572,17 +579,6 @@ void RunSubmission::SubmitLocal(const char *uuid)
 		sub->local = false;
 	};
 
-	// Styled runs use a bare insert (save_time.cpp skips rank queries);
-	// mark local false now so CheckAll() doesn't wait for a response that will never arrive.
-	// Rank-колбэк ниже к такой транзакции неприменим (queries[1..] нет) — квитируем и только.
-	if (this->styleIDs != 0)
-	{
-		this->local = false;
-		auto onStyledSuccess = [ackUuid](std::vector<ISQLQuery *>) { KZOutboxService::AckSql(ackUuid, "db_txn_ok"); };
-		KZDatabaseService::SaveTime(uuid, this->player.steamid64, this->course.localID, this->mode.localID, this->time, this->teleports,
-									this->styleIDs, this->metadata, onStyledSuccess, onFailure);
-		return;
-	}
 
 	auto onSuccess = [uid = this->uid, ackUuid](std::vector<ISQLQuery *> queries)
 	{
@@ -688,8 +684,7 @@ void RunSubmission::TryUploadCentralReplay()
 	// лежит (local==false с самого начала или ответ так и не пришёл) — аплоад НЕ
 	// теряется: write-ahead .replay.meta с unconfirmed_pb=true уже записан в
 	// OnReplayReady(), и ретраер outbox дошлёт его, сверив время с платформенным
-	// PB. Для styled-ранов SubmitLocal не заполняет localResponse и сбрасывает
-	// local — их этот путь, как и раньше, не затрагивает (мета для них не пишется).
+	// PB.
 	if (!local || !localResponse.received)
 	{
 		return;
@@ -882,10 +877,15 @@ void RunSubmission::AnnounceRun()
 
 	CUtlString combinedModeStyleText;
 	combinedModeStyleText.Format("{purple}%s{grey}", this->mode.name.c_str());
-	for (auto &style : this->styles)
+	if (!this->styles.empty())
 	{
-		combinedModeStyleText += " +{grey2}";
-		combinedModeStyleText.Append(style.name.c_str());
+		std::vector<std::string_view> names;
+		for (const auto &style : this->styles)
+		{
+			names.emplace_back(style.name);
+		}
+		combinedModeStyleText += " · {default}";
+		combinedModeStyleText.Append(KZ::style::StyleKey(std::move(names)).c_str());
 		combinedModeStyleText += "{grey}";
 	}
 
@@ -920,6 +920,13 @@ void RunSubmission::AnnounceLocal()
 	// под это условие тоже подходит; разводит их приоритет звуков ниже, а не гейт.
 	const bool top20 = (this->localResponse.overall.isNewPB && IsTopRank(this->localResponse.overall.rank))
 					   || (this->teleports == 0 && this->localResponse.pro.isNewPB && IsTopRank(this->localResponse.pro.rank));
+
+	std::vector<std::string_view> styleNames;
+	for (const auto &style : this->styles)
+	{
+		styleNames.emplace_back(style.name);
+	}
+	const auto modeLabel = this->mode.name + (styleNames.empty() ? "" : " · " + KZ::style::StyleKey(std::move(styleNames)));
 
 	for (u32 i = 0; i < MAXPLAYERS + 1; i++)
 	{
@@ -961,12 +968,12 @@ void RunSubmission::AnnounceLocal()
 		if (serverWR)
 		{
 			player->languageService->PrintChat(true, false, "Beat Course Info - New Server Record", this->player.name.c_str(),
-											   this->mode.name.c_str());
+											   modeLabel.c_str());
 		}
 		if (serverWRPro)
 		{
 			player->languageService->PrintChat(true, false, "Beat Course Info - New Server Record (PRO)", this->player.name.c_str(),
-											   this->mode.name.c_str());
+											   modeLabel.c_str());
 		}
 	}
 

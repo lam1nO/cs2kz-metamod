@@ -20,7 +20,6 @@ constexpr char sql_getpbpro[] = R"(
         ORDER BY Times.RunTime 
         LIMIT %d
 )";
-// The following queries should have no style!
 
 constexpr char sql_getmaprank[] = R"(
     SELECT COUNT(DISTINCT Times.SteamID64) + 1
@@ -28,13 +27,13 @@ constexpr char sql_getmaprank[] = R"(
         INNER JOIN Players ON Players.SteamID64=Times.SteamID64 
         LEFT JOIN Bans ON Bans.SteamID64=Players.SteamID64 AND (Bans.ExpiresAt IS NULL OR Bans.ExpiresAt > CURRENT_TIMESTAMP)
         WHERE Bans.ID IS NULL AND Times.MapCourseID=%d
-        AND Times.ModeID=%d AND Times.StyleIDFlags=0 AND Times.RunTime < 
+        AND Times.ModeID=%d AND Times.StyleIDFlags=%llu AND Times.RunTime <
         (SELECT MIN(Times.RunTime) 
         FROM Times 
         INNER JOIN Players ON Players.SteamID64=Times.SteamID64 
         LEFT JOIN Bans ON Bans.SteamID64=Players.SteamID64 AND (Bans.ExpiresAt IS NULL OR Bans.ExpiresAt > CURRENT_TIMESTAMP)
         WHERE Bans.ID IS NULL AND Times.SteamID64=%llu AND Times.MapCourseID=%d
-        AND Times.ModeID=%d AND Times.StyleIDFlags=0)
+        AND Times.ModeID=%d AND Times.StyleIDFlags=%llu)
 )";
 
 constexpr char sql_getmaprankpro[] = R"(
@@ -43,7 +42,7 @@ constexpr char sql_getmaprankpro[] = R"(
         INNER JOIN Players ON Players.SteamID64=Times.SteamID64 
         LEFT JOIN Bans ON Bans.SteamID64=Players.SteamID64 AND (Bans.ExpiresAt IS NULL OR Bans.ExpiresAt > CURRENT_TIMESTAMP)
         WHERE Bans.ID IS NULL AND Times.MapCourseID=%d
-        AND Times.ModeID=%d AND Times.StyleIDFlags=0 AND Times.Teleports=0 
+        AND Times.ModeID=%d AND Times.StyleIDFlags=%llu AND Times.Teleports=0
         AND Times.RunTime < 
         (SELECT MIN(Times.RunTime) 
         FROM Times 
@@ -51,7 +50,7 @@ constexpr char sql_getmaprankpro[] = R"(
         LEFT JOIN Bans ON Bans.SteamID64=Players.SteamID64 AND (Bans.ExpiresAt IS NULL OR Bans.ExpiresAt > CURRENT_TIMESTAMP)
         WHERE Bans.ID IS NULL AND Times.SteamID64=%llu 
         AND Times.MapCourseID=%d AND Times.ModeID=%d 
-        AND Times.StyleIDFlags=0 AND Times.Teleports=0)
+        AND Times.StyleIDFlags=%llu AND Times.Teleports=0)
 )";
 
 constexpr char sql_getlowestmaprank[] = R"(
@@ -60,7 +59,7 @@ constexpr char sql_getlowestmaprank[] = R"(
         INNER JOIN Players ON Players.SteamID64=Times.SteamID64 
         LEFT JOIN Bans ON Bans.SteamID64=Players.SteamID64 AND (Bans.ExpiresAt IS NULL OR Bans.ExpiresAt > CURRENT_TIMESTAMP)
         WHERE Bans.ID IS NULL AND Times.MapCourseID=%d
-        AND Times.ModeID=%d AND Times.StyleIDFlags=0
+        AND Times.ModeID=%d AND Times.StyleIDFlags=%llu
 )";
 
 constexpr char sql_getlowestmaprankpro[] = R"(
@@ -69,5 +68,5 @@ constexpr char sql_getlowestmaprankpro[] = R"(
         INNER JOIN Players ON Players.SteamID64=Times.SteamID64 
         LEFT JOIN Bans ON Bans.SteamID64=Players.SteamID64 AND (Bans.ExpiresAt IS NULL OR Bans.ExpiresAt > CURRENT_TIMESTAMP)
         WHERE Bans.ID IS NULL AND Times.MapCourseID=%d
-        AND Times.ModeID=%d AND Times.StyleIDFlags=0 AND Times.Teleports=0
+        AND Times.ModeID=%d AND Times.StyleIDFlags=%llu AND Times.Teleports=0
 )";

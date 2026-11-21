@@ -85,6 +85,7 @@ static_global class KZOptionServiceEventListener_Timer : public KZOptionServiceE
 	}
 } optionEventListener;
 
+KZTimerService::StyledTimes KZTimerService::styledRecordCache;
 std::unordered_map<PBDataKey, PBData> KZTimerService::srCache;
 std::unordered_map<PBDataKey, PBData> KZTimerService::wrCache;
 std::unordered_map<u64, f64> KZTimerService::platformWrCache;
@@ -1404,6 +1405,10 @@ const PBData *KZTimerService::GetCompareTargetForType(CompareType type, PBDataKe
 
 const PBData *KZTimerService::GetCompareTarget(PBDataKey key)
 {
+	if (this->player->styleServices.Count() > 0)
+	{
+		return nullptr;
+	}
 	switch (this->currentCompareType)
 	{
 		case COMPARE_WR:
@@ -1453,6 +1458,28 @@ static_function f64 HudRecordTime(const PBData *data, bool pro)
 	return pro ? data->pro.pbTime : data->overall.pbTime;
 }
 
+
+bool KZTimerService::GetStyledHudTime(f64 &outTime, PBDataKey key, bool pro, const StyledTimes &cache) const
+{
+	const auto mask = KZ::style::GetStyleMask(this->player);
+	if (!mask)
+	{
+		return false;
+	}
+	const auto styleIt = cache.find(*mask);
+	if (styleIt == cache.end())
+	{
+		return false;
+	}
+	const auto courseIt = styleIt->second.find(key);
+	if (courseIt == styleIt->second.end() || courseIt->second[pro] <= 0)
+	{
+		return false;
+	}
+	outTime = courseIt->second[pro];
+	return true;
+}
+
 bool KZTimerService::GetHudPBTime(f64 &outTime, const KZCourseDescriptor *course, bool pro)
 {
 	if (!course)
@@ -1464,6 +1491,10 @@ bool KZTimerService::GetHudPBTime(f64 &outTime, const KZCourseDescriptor *course
 		return false;
 	}
 	auto modeInfo = KZ::mode::GetModeInfo(this->player->modeService->GetModeName());
+	if (this->player->styleServices.Count() > 0)
+	{
+		return this->GetStyledHudTime(outTime, ToPBDataKey(modeInfo.id, course->guid), pro, styledPBCache);
+	}
 	// ЛУЧШЕЕ из двух источников, а НЕ «платформенный, иначе локальный» (правка 18.08 по
 	// багрепорту «в худе PB/WR замерли с загрузки карты, а !pb/!wr правы»).
 	// Почему так: платформенный кэш наполняется ОДИН раз, на загрузке карты (периодический
@@ -1545,6 +1576,10 @@ bool KZTimerService::GetHudWorldRecordTime(f64 &outTime, const KZCourseDescripto
 		return false;
 	}
 	auto modeInfo = KZ::mode::GetModeInfo(this->player->modeService->GetModeName());
+	if (this->player->styleServices.Count() > 0)
+	{
+		return this->GetStyledHudTime(outTime, ToPBDataKey(modeInfo.id, course->guid), pro, styledRecordCache);
+	}
 	// ЛУЧШЕЕ из двух источников — обоснование целиком в GetHudPBTime выше (та же правка 18.08).
 	// Коротко: платформенный кэш наполняется один раз на загрузке карты, локальный (srCache/
 	// wrCache через UpdateLocalRecordCache) — на каждом финише из БД; «платформенный первым»
@@ -1604,6 +1639,7 @@ bool KZTimerService::GetHudWorldRecordTime(f64 &outTime, const KZCourseDescripto
 void KZTimerService::ClearRecordCache()
 {
 	KZTimerService::srCache.clear();
+	KZTimerService::styledRecordCache.clear();
 	KZTimerService::wrCache.clear();
 	KZTimerService::platformWrCache.clear();
 	for (i32 i = 0; i < MAXPLAYERS + 1; i++)
@@ -2072,6 +2108,12 @@ void KZTimerService::UpdateLocalRecordCache()
 				{
 					continue;
 				}
+				const auto mask = (u64)result->GetInt64(4);
+				if (mask)
+				{
+					KZTimerService::styledRecordCache[mask][ToPBDataKey(modeInfo.id, course->guid)][0] = result->GetFloat(0);
+					continue;
+				}
 				KZTimerService::InsertRecordToCache(result->GetFloat(0), course, modeInfo.id, true, false, result->GetString(3));
 			}
 		}
@@ -2088,6 +2130,12 @@ void KZTimerService::UpdateLocalRecordCache()
 				const KZCourseDescriptor *course = KZ::course::GetCourseByLocalCourseID(result->GetInt(1));
 				if (!course)
 				{
+					continue;
+				}
+				const auto mask = (u64)result->GetInt64(4);
+				if (mask)
+				{
+					KZTimerService::styledRecordCache[mask][ToPBDataKey(modeInfo.id, course->guid)][1] = result->GetFloat(0);
 					continue;
 				}
 				KZTimerService::InsertRecordToCache(result->GetFloat(0), course, modeInfo.id, false, false, result->GetString(3));
@@ -2164,6 +2212,7 @@ void KZTimerService::InsertRecordToCache(f64 time, const KZCourseDescriptor *cou
 void KZTimerService::ClearPBCache()
 {
 	this->localPBCache.clear();
+	this->styledPBCache.clear();
 	this->globalPBCache.clear();
 	this->platformPbCache.clear();
 }
@@ -2537,6 +2586,12 @@ void KZTimerService::UpdateLocalPBCache()
 				{
 					continue;
 				}
+				const auto mask = (u64)result->GetInt64(4);
+				if (mask)
+				{
+					pl->timerService->styledPBCache[mask][ToPBDataKey(modeInfo.id, course->guid)][0] = result->GetFloat(0);
+					continue;
+				}
 				pl->timerService->InsertPBToCache(result->GetFloat(0), course, modeInfo.id, true, false, result->GetString(3));
 			}
 		}
@@ -2553,6 +2608,12 @@ void KZTimerService::UpdateLocalPBCache()
 				const KZCourseDescriptor *course = KZ::course::GetCourseByLocalCourseID(result->GetInt(1));
 				if (!course)
 				{
+					continue;
+				}
+				const auto mask = (u64)result->GetInt64(4);
+				if (mask)
+				{
+					pl->timerService->styledPBCache[mask][ToPBDataKey(modeInfo.id, course->guid)][1] = result->GetFloat(0);
 					continue;
 				}
 				pl->timerService->InsertPBToCache(result->GetFloat(0), course, modeInfo.id, false, false, result->GetString(3));
