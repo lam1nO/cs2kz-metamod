@@ -2098,7 +2098,7 @@ void KZTimerService::UpdateLocalRecordCache()
 		{
 			while (result->FetchRow())
 			{
-				auto modeInfo = KZ::mode::GetModeInfoFromDatabaseID(result->GetInt(2));
+				auto modeInfo = KZ::mode::GetRecordModeInfoFromDatabaseID(result->GetInt(2));
 				if (modeInfo.databaseID < 0)
 				{
 					continue;
@@ -2122,7 +2122,7 @@ void KZTimerService::UpdateLocalRecordCache()
 		{
 			while (result->FetchRow())
 			{
-				auto modeInfo = KZ::mode::GetModeInfoFromDatabaseID(result->GetInt(2));
+				auto modeInfo = KZ::mode::GetRecordModeInfoFromDatabaseID(result->GetInt(2));
 				if (modeInfo.databaseID < 0)
 				{
 					continue;
@@ -2576,7 +2576,7 @@ void KZTimerService::UpdateLocalPBCache()
 		{
 			while (result->FetchRow())
 			{
-				auto modeInfo = KZ::mode::GetModeInfoFromDatabaseID(result->GetInt(2));
+				auto modeInfo = KZ::mode::GetRecordModeInfoFromDatabaseID(result->GetInt(2));
 				if (modeInfo.databaseID < 0)
 				{
 					continue;
@@ -2600,7 +2600,7 @@ void KZTimerService::UpdateLocalPBCache()
 		{
 			while (result->FetchRow())
 			{
-				auto modeInfo = KZ::mode::GetModeInfoFromDatabaseID(result->GetInt(2));
+				auto modeInfo = KZ::mode::GetRecordModeInfoFromDatabaseID(result->GetInt(2));
 				if (modeInfo.databaseID < 0)
 				{
 					continue;

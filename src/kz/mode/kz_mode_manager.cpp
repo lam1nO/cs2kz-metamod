@@ -23,6 +23,12 @@ static_function SCMD_CALLBACK(Command_KzModeShort);
 static_global KZModeManager modeManager;
 KZModeManager *g_pKZModeManager = &modeManager;
 
+// Older servers can load Times without filtering StyleIDFlags. A storage-only
+// ID keeps NOPRE records out of their Classic PB/WR caches.
+static constexpr char nopreRecordModeName[] = "CKZ NOPRE Records";
+static constexpr char nopreRecordModeShortName[] = "CKZ_NOPRE";
+static i32 nopreRecordModeID = -1;
+
 CUtlVector<KZModeManager::ModePluginInfo> modeInfos;
 
 static_global class KZDatabaseServiceEventListener_Modes : public KZDatabaseServiceEventListener
@@ -97,6 +103,11 @@ void KZ::mode::LoadModePlugins()
 
 void KZ::mode::UpdateModeDatabaseID(CUtlString name, i32 id, CUtlString shortName)
 {
+	if (name.IsEqual_FastCaseInsensitive(nopreRecordModeName))
+	{
+		nopreRecordModeID = id;
+		return;
+	}
 	// Check if the mode already exists in the list, if yes, we update it.
 	FOR_EACH_VEC(modeInfos, i)
 	{
@@ -456,8 +467,33 @@ KZModeManager::ModePluginInfo KZ::mode::GetModeInfoFromDatabaseID(i32 id)
 	return KZModeManager::ModePluginInfo();
 }
 
+KZModeManager::ModePluginInfo KZ::mode::GetRecordModeInfoFromDatabaseID(i32 id)
+{
+	return id > 0 && id == nopreRecordModeID ? GetModeInfo("CKZ") : GetModeInfoFromDatabaseID(id);
+}
+
+i32 KZ::mode::GetNopreRecordModeID(i32 regularModeID)
+{
+	return regularModeID > 0 && regularModeID == GetModeInfo("CKZ").databaseID ? nopreRecordModeID : regularModeID;
+}
+
+i32 KZ::mode::GetRecordModeID(i32 regularModeID, u64 styleMask)
+{
+	if (styleMask)
+	{
+		const auto style = KZ::style::GetStyleInfo(KZ::style::NopreName);
+		if (style.databaseID >= 0 && style.databaseID < 32 && (styleMask & (1ull << style.databaseID)))
+		{
+			return GetNopreRecordModeID(regularModeID);
+		}
+	}
+	return regularModeID;
+}
+
 void KZDatabaseServiceEventListener_Modes::OnDatabaseSetup()
 {
+	nopreRecordModeID = -1;
+	KZDatabaseService::InsertAndUpdateModeIDs(nopreRecordModeName, nopreRecordModeShortName);
 	FOR_EACH_VEC(modeInfos, i)
 	{
 		if (modeInfos[i].databaseID == -1)

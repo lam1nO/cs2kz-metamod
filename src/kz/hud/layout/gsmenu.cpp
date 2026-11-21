@@ -489,7 +489,7 @@ bool KZ::gsmenu::ShowList(KZPlayer *player, const List &l)
 	char id[24];
 	for (i32 i = 0; i < KZ_GSMENU_LIST_ROWS; i++)
 	{
-		V_snprintf(id, sizeof(id), "gw_st%i", i);
+		V_snprintf(id, sizeof(id), "gs%i", i);
 		const bool used = i < (i32)l.rows.size();
 		Class(player, *w, layout, id, "hidden", !used);
 		if (!used)
@@ -642,7 +642,7 @@ bool KZ::gsmenu::OnClick(KZPlayer *player, uint32 packedHandle, const char *id)
 	// колбэку владельца окна.
 	i32 row = -1;
 	char tail = 0;
-	if (sscanf(id, "gr%d%c", &row, &tail) == 1 && w->owner != "maptop")
+	if (sscanf(id, "gr%d%c", &row, &tail) == 1)
 	{
 		return true;
 	}

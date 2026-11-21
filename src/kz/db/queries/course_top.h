@@ -57,7 +57,7 @@ constexpr char sql_get_course_styles[] = R"(
         FROM Times t
         INNER JOIN MapCourses mc ON mc.ID = t.MapCourseID
         INNER JOIN Maps m ON m.ID = mc.MapID
-        WHERE m.Name = '%s' AND mc.Name = '%s' AND t.ModeID = %d
+        WHERE m.Name = '%s' AND mc.Name = '%s' AND t.ModeID IN (%d, %d)
         AND NOT EXISTS (SELECT 1 FROM Bans b WHERE b.SteamID64 = t.SteamID64
             AND (b.ExpiresAt IS NULL OR b.ExpiresAt > CURRENT_TIMESTAMP))
         GROUP BY t.StyleIDFlags

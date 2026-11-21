@@ -1,4 +1,5 @@
 #include "kz_db.h"
+#include "kz/mode/kz_mode.h"
 #include "vendor/sql_mm/src/public/sql_mm.h"
 #include "queries/personal_best.h"
 
@@ -8,6 +9,7 @@ void KZDatabaseService::QueryPB(u64 steamID64, CUtlString mapName, CUtlString co
 	std::string cleanedMapName = KZDatabaseService::GetDatabaseConnection()->Escape(mapName.Get());
 	std::string cleanedCourseName = KZDatabaseService::GetDatabaseConnection()->Escape(courseName.Get());
 
+	modeID = KZ::mode::GetRecordModeID(modeID, styleMask);
 	Transaction txn;
 
 	char query[2048];
@@ -47,6 +49,7 @@ void KZDatabaseService::QueryPBRankless(u64 steamID64, CUtlString mapName, CUtlS
 
 	std::string cleanedCourseName = KZDatabaseService::GetDatabaseConnection()->Escape(courseName.Get());
 
+	modeID = KZ::mode::GetRecordModeID(modeID, styleIDFlags);
 	char query[2048];
 	Transaction txn;
 	// Get PB

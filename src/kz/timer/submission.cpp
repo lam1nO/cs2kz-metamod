@@ -207,9 +207,19 @@ RunSubmission::RunSubmission(KZPlayer *player)
 		{
 			this->styleIDs |= 1ull << style.databaseID;
 		}
-		if (!V_stricmp(player->styleServices[i]->GetStyleShortName(), KZ::style::NopreName))
+	}
+	if (KZ::style::HasNopre(player))
+	{
+		this->global = false;
+		const i32 recordModeID = KZ::mode::GetNopreRecordModeID(this->mode.localID);
+		if (recordModeID > 0)
 		{
-			this->global = false;
+			this->mode.localID = recordModeID;
+		}
+		else
+		{
+			this->mode.localID = 0;
+			this->local = false;
 		}
 	}
 

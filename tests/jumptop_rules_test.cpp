@@ -5,6 +5,11 @@ using namespace KZ::jumptop::rules;
 
 int main()
 {
+	static_assert(KZ::jumptop::rules::PublicJumpId(7, false) == 7);
+	static_assert(KZ::jumptop::rules::PublicJumpId(7, true) == -7);
+	static_assert(KZ::jumptop::rules::JumpStorageId(-7) == 7);
+	static_assert(KZ::jumptop::rules::JumpStorageId(INT32_MIN) == 0);
+
 	// Типы: LJ..JB в топе, Fall/Other/Invalid — нет.
 	for (int t = 0; t <= 6; t++) assert(IsTrackedJumpType(t));
 	assert(!IsTrackedJumpType(-1) && !IsTrackedJumpType(7) && !IsTrackedJumpType(8) && !IsTrackedJumpType(9));

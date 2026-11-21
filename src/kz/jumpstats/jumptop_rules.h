@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <limits>
 
 namespace KZ::jumptop::rules
 {
@@ -15,6 +16,22 @@ namespace KZ::jumptop::rules
 	constexpr float maxDistance = 500.0f;
 	constexpr float offsetEpsilon = 0.03125f; // JS_EPSILON
 	constexpr float maxLadderDrop = 2.0f;     // JS_MAX_LADDERJUMP_OFFSET
+
+	inline constexpr bool IsJumpId(int32_t id)
+	{
+		return id != 0 && id != std::numeric_limits<int32_t>::min();
+	}
+
+	// Positive IDs keep the legacy namespace. NOPRE PKs are positive in storage.
+	inline constexpr int32_t PublicJumpId(int32_t storageId, bool styled)
+	{
+		return styled ? -storageId : storageId;
+	}
+
+	inline constexpr int32_t JumpStorageId(int32_t publicId)
+	{
+		return IsJumpId(publicId) ? (publicId < 0 ? -publicId : publicId) : 0;
+	}
 
 	// LJ, BH, MBH, WJ, LAJ, LAH, JB.
 	inline bool IsTrackedJumpType(int32_t jumpType)

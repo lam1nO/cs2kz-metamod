@@ -572,13 +572,14 @@ namespace
 	{
 		MaptopView &v = g_maptop[player->GetPlayerSlot().Get()];
 		i32 row = -1, k = -1;
+		int end = -1;
 		if (!v.global && KZ_STREQ(id, "gw_style"))
 		{
 			v.styleOpen = !v.styleOpen;
 			RenderMaptop(player);
 			return;
 		}
-		if (v.styleOpen && sscanf(id, "gw_st%d", &k) == 1 && k >= 0 && k < (i32)v.styleChoices.size())
+		if (v.styleOpen && sscanf(id, "gw_st%d%n", &k, &end) == 1 && end >= 0 && !id[end] && k >= 0 && k < (i32)v.styleChoices.size())
 		{
 			const auto selected = v.styleChoices[k];
 			if (selected.find(KZ::style::NopreName) != std::string::npos && V_stricmp(KZ::mode::GetModeInfo(v.mode).shortModeName.Get(), "CKZ"))
@@ -638,7 +639,7 @@ namespace
 		{
 			runId = v.meRunId;
 		}
-		else if (sscanf(id, "gr%d_go", &row) == 1 && row >= 0 && row < (i32)v.runIds.size())
+		else if (sscanf(id, "gr%d_go%n", &row, &end) == 1 && end >= 0 && !id[end] && row >= 0 && row < (i32)v.runIds.size())
 		{
 			runId = v.runIds[row];
 		}

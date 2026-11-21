@@ -35,6 +35,9 @@
 #include <unordered_map>
 
 using namespace KZ::Database;
+using KZ::jumptop::rules::IsJumpId;
+using KZ::jumptop::rules::JumpStorageId;
+using KZ::jumptop::rules::PublicJumpId;
 
 extern ICS2Menus *g_pMenus;
 
@@ -75,6 +78,16 @@ namespace
 	const char *JumpStyle(bool nopre)
 	{
 		return nopre ? KZ::style::NopreName : "";
+	}
+
+	const char *JumpTable(bool styled)
+	{
+		return styled ? "JumptopStyled" : "Jumptop";
+	}
+
+	const char *JumpReplayTable(bool styled)
+	{
+		return styled ? "JumptopStyledReplays" : "JumptopReplays";
 	}
 
 	bool IsCkz(i32 modeID)
@@ -262,7 +275,7 @@ namespace
 		return d.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 	}
 
-	void InsertReplayRow(const std::string &uuidStr, const std::vector<char> &buffer)
+	void InsertReplayRow(const std::string &uuidStr, const std::vector<char> &buffer, bool styled)
 	{
 		if (!KZDatabaseService::IsReady())
 		{
@@ -271,12 +284,10 @@ namespace
 		}
 		std::string encoded = macaron::Base64::Encode(std::string(buffer.begin(), buffer.end()));
 		std::string query = IsMySQL() ? mysql_jumptop_replay_insert : sqlite_jumptop_replay_insert;
-		// Шаблон с двумя %s: base64 и UUID в кавычках не нуждаются в экранировании, а буфер в
-		// сотни КБ через V_snprintf не гоняем — собираем строку подстановкой.
-		size_t first = query.find("%s");
-		query.replace(first, 2, uuidStr);
-		size_t second = query.find("%s", first + uuidStr.size());
-		query.replace(second, 2, encoded);
+		// Имена таблиц фиксированы, UUID и base64 не требуют экранирования.
+		query.replace(query.find("%s"), 2, JumpReplayTable(styled));
+		query.replace(query.find("%s"), 2, uuidStr);
+		query.replace(query.find("%s"), 2, encoded);
 
 		Transaction txn;
 		txn.queries.push_back(query);
@@ -303,7 +314,7 @@ namespace
 	 */
 	constexpr size_t maxPendingReplays = 16;
 	std::deque<std::pair<std::string, std::vector<char>>> g_pendingReplays;
-	std::deque<std::string> g_qualifiedReplays;
+	std::deque<std::pair<std::string, bool>> g_qualifiedReplays;
 	// UUID прыжков, удалённых из админки (kz_jumptop_forget): буфер их реплея может прийти уже ПОСЛЕ
 	// удаления (рекордер останавливается через 2 с после прыжка) — тогда его не пишем. Ограничено.
 	std::deque<std::string> g_forgottenReplays;
@@ -320,7 +331,7 @@ namespace
 		return false;
 	}
 
-	void QualifyReplay(const std::string &uuid)
+	void QualifyReplay(const std::string &uuid, bool styled)
 	{
 		if (IsForgotten(uuid))
 		{
@@ -330,19 +341,19 @@ namespace
 		{
 			if (it->first == uuid)
 			{
-				InsertReplayRow(uuid, it->second);
+				InsertReplayRow(uuid, it->second, styled);
 				g_pendingReplays.erase(it);
 				return;
 			}
 		}
 		for (auto &q : g_qualifiedReplays)
 		{
-			if (q == uuid)
+			if (q.first == uuid)
 			{
 				return;
 			}
 		}
-		g_qualifiedReplays.push_back(uuid);
+		g_qualifiedReplays.emplace_back(uuid, styled);
 		while (g_qualifiedReplays.size() > maxPendingReplays)
 		{
 			g_qualifiedReplays.pop_front();
@@ -357,10 +368,10 @@ namespace
 		}
 		for (auto it = g_qualifiedReplays.begin(); it != g_qualifiedReplays.end(); ++it)
 		{
-			if (*it == uuid)
+			if (it->first == uuid)
 			{
+				InsertReplayRow(uuid, buffer, it->second);
 				g_qualifiedReplays.erase(it);
-				InsertReplayRow(uuid, buffer);
 				return;
 			}
 		}
@@ -385,8 +396,8 @@ namespace
 			return;
 		}
 		char rank[2048];
-		V_snprintf(rank, sizeof(rank), sql_jumptop_rank, modeID, jumpType, isBlock ? 1 : 0, direction, JumpStyle(nopre), block, block, distance, distance, id,
-				   steamID64, modeID, jumpType, isBlock ? 1 : 0, direction, JumpStyle(nopre));
+		V_snprintf(rank, sizeof(rank), sql_jumptop_rank, JumpTable(nopre), modeID, jumpType, isBlock ? 1 : 0, direction, block, block, distance, distance, id,
+				   steamID64, JumpTable(nopre), modeID, jumpType, isBlock ? 1 : 0, direction);
 		Transaction txn;
 		txn.queries.push_back(rank);
 		// clang-format off
@@ -402,14 +413,14 @@ namespace
 					place = result->GetInt(0) + 1;
 					total = result->GetInt(1);
 				}
-				KZ_LOG_INFO(LogChannel::DB, "[cyb] jumptop_pb id=%u steam_id=%llu mode=%d type=%d dir=%d block=%d dist=%.4f map=%s place=%d total=%d\n", id,
+				KZ_LOG_INFO(LogChannel::DB, "[cyb] jumptop_pb id=%d steam_id=%llu mode=%d type=%d dir=%d block=%d dist=%.4f map=%s place=%d total=%d\n", PublicJumpId(id, nopre),
 							steamID64, modeID, jumpType, direction, isBlock ? block : 0, distance, mapName.c_str(), place, total);
 
 				// Реплей в базу — только прыжку из топа: PB новичка обновляется каждые несколько прыжков,
 				// и хранить реплей каждого значило бы бесконечно растить общую MySQL.
 				if (place >= 1 && place <= KZ::jumptop::topCount)
 				{
-					QualifyReplay(replayUuid);
+					QualifyReplay(replayUuid, nopre);
 				}
 
 				std::string mode = ModeShortName(modeID) + (nopre ? " · NOPRE" : "");
@@ -497,10 +508,10 @@ namespace
 		}
 
 		std::vector<char> insert(cleanDetails.size() + map.size() + 1024);
-		V_snprintf(insert.data(), (int)insert.size(), sql_jumptop_insert, steamID64, modeID, jumpType, isBlock ? 1 : 0, block, distance,
+		V_snprintf(insert.data(), (int)insert.size(), sql_jumptop_insert, JumpTable(nopre), steamID64, modeID, jumpType, isBlock ? 1 : 0, block, distance,
 				   jump->GetStrafeCount(), (f64)jump->GetSync(), (f64)jump->GetTakeoffSpeed(), (f64)jump->GetMaxSpeed(), (f64)jump->airtime,
 				   (f64)jump->GetMaxHeight(), (f64)jump->GetOffset(), map.c_str(), server.c_str(), replayUuid.c_str(), cleanDetails.c_str(),
-				   direction, JumpStyle(nopre));
+				   direction);
 
 		Transaction txn;
 		txn.queries.push_back(insert.data());
@@ -538,7 +549,7 @@ namespace
 		g_cache[slot] = PlayerCache();
 
 		char query[512];
-		V_snprintf(query, sizeof(query), sql_jumptop_getpbs, steamID64);
+		V_snprintf(query, sizeof(query), sql_jumptop_getpbs, steamID64, steamID64);
 		Transaction txn;
 		txn.queries.push_back(query);
 
@@ -753,7 +764,7 @@ void KZ::jumptop::StoreMovementEvidence(const UUID_t &uuid, const std::vector<ch
 /*
  * Реплей прыжка: локальный файл (свой инстанс) либо base64 из базы → downloads/ → штатный плеер.
  */
-static_function void PlayJumpReplay(KZPlayer *player, const std::string &uuid, bool evidence = false)
+static_function void PlayJumpReplay(KZPlayer *player, const std::string &uuid, bool evidence = false, bool styled = false)
 {
 	UUID_t parsed;
 	if (!UUID_t::FromString(uuid.c_str(), &parsed))
@@ -778,7 +789,7 @@ static_function void PlayJumpReplay(KZPlayer *player, const std::string &uuid, b
 	}
 
 	char query[256];
-	V_snprintf(query, sizeof(query), sql_jumptop_replay_fetch, clean.c_str());
+	V_snprintf(query, sizeof(query), sql_jumptop_replay_fetch, JumpReplayTable(styled), clean.c_str());
 	Transaction txn;
 	txn.queries.push_back(evidence ? KZ::analytics::evidence::FetchSQL(clean, std::time(nullptr)) : std::string(query));
 	CPlayerUserId userID = player->GetClient()->GetUserID();
@@ -1079,7 +1090,7 @@ static_function void PrintJumpInfo(KZPlayer *player, i32 id, bool andReplay)
 		return;
 	}
 	char query[1024];
-	V_snprintf(query, sizeof(query), sql_jumptop_getjump, id);
+	V_snprintf(query, sizeof(query), sql_jumptop_getjump, JumpTable(id < 0), JumpStorageId(id));
 	Transaction txn;
 	txn.queries.push_back(query);
 	CPlayerUserId userID = player->GetClient()->GetUserID();
@@ -1115,7 +1126,7 @@ static_function void PrintJumpInfo(KZPlayer *player, i32 id, bool andReplay)
 			sj.removed = r->GetInt(19) != 0;
 			sj.created = r->GetString(20) ? r->GetString(20) : "";
 			sj.direction = r->GetInt(21);
-			sj.style = r->GetString(22) ? r->GetString(22) : "";
+			sj.style = JumpStyle(id < 0);
 			PrintStoredJumpReport(player, sj);
 
 			const std::string &alias = sj.alias;
@@ -1133,7 +1144,7 @@ static_function void PrintJumpInfo(KZPlayer *player, i32 id, bool andReplay)
 					player->languageService->PrintChat(true, false, "Jumptop - Replay Other Map", jumpMap.c_str());
 					return;
 				}
-				PlayJumpReplay(player, replay);
+				PlayJumpReplay(player, replay, false, id < 0);
 			}
 		},
 		[userID](std::string error, int failIndex)
@@ -1253,7 +1264,7 @@ namespace
 		{
 			PrintJumpInfo(player, V_StringToInt32(action.c_str() + 2, 0), false);
 		}
-		else if (action.rfind("r:", 0) == 0)
+		else if (action.rfind("r:", 0) == 0 || action.rfind("n:", 0) == 0)
 		{
 			// Карточка могла пережить смену карты, пока висела.
 			if (!KZ_STREQI(g_cardMap[slot].c_str(), g_pKZUtils->GetCurrentMapName().Get()))
@@ -1262,7 +1273,7 @@ namespace
 				return;
 			}
 			g_pMenus->CancelMenu(slot);
-			PlayJumpReplay(player, action.substr(2));
+			PlayJumpReplay(player, action.substr(2), false, action[0] == 'n');
 		}
 	}
 
@@ -1274,7 +1285,7 @@ namespace
 			return;
 		}
 		char query[1024];
-		V_snprintf(query, sizeof(query), sql_jumptop_getjump, id);
+		V_snprintf(query, sizeof(query), sql_jumptop_getjump, JumpTable(id < 0), JumpStorageId(id));
 		Transaction txn;
 		txn.queries.push_back(query);
 		CPlayerUserId userID = player->GetClient()->GetUserID();
@@ -1355,7 +1366,7 @@ namespace
 				else
 				{
 					std::string text = KZLanguageService::PrepareMessageWithLang(lang, "Jumptop - Card Replay");
-					std::string info = "r:" + replay;
+					std::string info = (id < 0 ? "n:" : "r:") + replay;
 					startItem = g_pMenus->AddItem(m, text.c_str(), info.c_str(), false);
 				}
 				std::string consoleText = KZLanguageService::PrepareMessageWithLang(lang, "Jumptop - Card Console");
@@ -1405,7 +1416,7 @@ namespace
 			return;
 		}
 		char query[2048];
-		V_snprintf(query, sizeof(query), sql_jumptop_gettop, modeID, jumpType, isBlock ? 1 : 0, direction, JumpStyle(nopre), KZ::jumptop::topCount);
+		V_snprintf(query, sizeof(query), sql_jumptop_gettop, JumpTable(nopre), modeID, jumpType, isBlock ? 1 : 0, direction, KZ::jumptop::topCount);
 		Transaction txn;
 		txn.queries.push_back(query);
 		CPlayerUserId userID = player->GetClient()->GetUserID();
@@ -1440,7 +1451,7 @@ namespace
 				while (r && r->FetchRow())
 				{
 					place++;
-					i32 id = r->GetInt(0);
+					i32 id = PublicJumpId(r->GetInt(0), nopre);
 					std::string alias = r->GetString(2) ? r->GetString(2) : "";
 					i32 block = r->GetInt(3);
 					f64 distance = ResultDouble(r, 4);
@@ -1684,14 +1695,15 @@ namespace
 	void PrintPlayerBests(KZPlayer *player, u64 steamID64, std::string alias, i32 modeID)
 	{
 		char query[1024];
-		V_snprintf(query, sizeof(query), sql_jumptop_getplayerbests, steamID64, modeID, JumpStyle(IsCkz(modeID) && KZ::style::HasNopre(player)));
+		const bool nopre = IsCkz(modeID) && KZ::style::HasNopre(player);
+		V_snprintf(query, sizeof(query), sql_jumptop_getplayerbests, JumpTable(nopre), steamID64, modeID);
 		Transaction txn;
 		txn.queries.push_back(query);
 		CPlayerUserId userID = player->GetClient()->GetUserID();
 		// clang-format off
 		KZDatabaseService::GetDatabaseConnection()->ExecuteTransaction(
 			txn,
-			[userID, alias, modeID](std::vector<ISQLQuery *> queries)
+			[userID, alias, modeID, nopre](std::vector<ISQLQuery *> queries)
 			{
 				KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
 				if (!player)
@@ -1699,7 +1711,7 @@ namespace
 					return;
 				}
 				const char *lang = player->languageService->GetLanguage();
-				std::string mode = ModeShortName(modeID);
+				std::string mode = ModeShortName(modeID) + (nopre ? " · NOPRE" : "");
 				ISQLResult *r = queries[0]->GetResultSet();
 				std::string line;
 				i32 count = 0;
@@ -1708,7 +1720,7 @@ namespace
 					std::string label = JumpLabel(lang, r->GetInt(1), r->GetInt(2) != 0, r->GetInt(3), ResultDouble(r, 4), r->GetInt(11));
 					const char *map = r->GetString(10) ? r->GetString(10) : "";
 					utils::PrintConsole(player->GetController(), "[jumptop #%d] %s %s | %s | strafes %d | sync %.1f%% | pre %.2f | max %.2f | air %.3f\n",
-										r->GetInt(0), label.c_str(), mode.c_str(), map, r->GetInt(5), ResultDouble(r, 6) * 100.0, ResultDouble(r, 7),
+										PublicJumpId(r->GetInt(0), nopre), label.c_str(), mode.c_str(), map, r->GetInt(5), ResultDouble(r, 6) * 100.0, ResultDouble(r, 7),
 										ResultDouble(r, 8), ResultDouble(r, 9));
 					if (!line.empty())
 					{
@@ -1806,6 +1818,7 @@ namespace
 	{
 		JumptopView &v = g_jtView[player->GetPlayerSlot().Get()];
 		i32 k = -1, row = -1;
+		int end = -1;
 		if (sscanf(id, "gf0_%d", &k) == 1 && k >= 0 && JumpType_LongJump + k <= JumpType_Jumpbug)
 		{
 			v.jumpType = JumpType_LongJump + k;
@@ -1857,7 +1870,7 @@ namespace
 			RenderJumptopWindow(player);
 			return;
 		}
-		if (sscanf(id, "gr%d_go", &row) == 1 && row >= 0 && row < (i32)v.shownIds.size())
+		if (sscanf(id, "gr%d_go%n", &row, &end) == 1 && end >= 0 && !id[end] && row >= 0 && row < (i32)v.shownIds.size())
 		{
 			KZ::gsmenu::Close(player, "jump_replay");
 			PrintJumpInfo(player, v.shownIds[row], true);
@@ -1993,7 +2006,7 @@ namespace
 		const u64 seq = ++g_jtQuerySeq;
 		v.pendingQuery = seq;
 		char query[2048];
-		V_snprintf(query, sizeof(query), sql_jumptop_gettop, v.modeID, v.jumpType, v.isBlock ? 1 : 0, v.direction, JumpStyle(v.nopre), kJumptopWindowLimit);
+		V_snprintf(query, sizeof(query), sql_jumptop_gettop, JumpTable(v.nopre), v.modeID, v.jumpType, v.isBlock ? 1 : 0, v.direction, kJumptopWindowLimit);
 		Transaction txn;
 		txn.queries.push_back(query);
 		CPlayerUserId userID = player->GetClient()->GetUserID();
@@ -2019,7 +2032,7 @@ namespace
 				while (r && r->FetchRow())
 				{
 					JumptopRow row {};
-					row.id = r->GetInt(0);
+					row.id = PublicJumpId(r->GetInt(0), v.nopre);
 					row.steamID64 = (u64)r->GetInt64(1);
 					row.alias = r->GetString(2) ? r->GetString(2) : "";
 					row.block = r->GetInt(3);
@@ -2203,7 +2216,7 @@ SCMD(kz_jumpinfo, SCFL_JUMPSTATS | SCFL_RECORD)
 		return true;
 	}
 	i32 id = args->ArgC() > 1 ? V_StringToInt32(args->Arg(1), 0) : 0;
-	if (id <= 0)
+	if (!IsJumpId(id))
 	{
 		player->languageService->PrintChat(true, false, "Jumptop - Info Usage");
 		return true;
@@ -2226,7 +2239,7 @@ SCMD(kz_jumpreplay, SCFL_JUMPSTATS | SCFL_REPLAY)
 		return true;
 	}
 	i32 id = args->ArgC() > 1 ? V_StringToInt32(args->Arg(1), 0) : 0;
-	if (id <= 0)
+	if (!IsJumpId(id))
 	{
 		player->languageService->PrintChat(true, false, "Jumptop - Info Usage");
 		return true;
@@ -2244,8 +2257,13 @@ static_function void SetJumpRemoved(i32 id, bool removed)
 		META_CONPRINTF("[jumptop] database not ready\n");
 		return;
 	}
+	if (!IsJumpId(id))
+	{
+		return;
+	}
+
 	char query[256];
-	V_snprintf(query, sizeof(query), sql_jumptop_setremoved, removed ? 1 : 0, id);
+	V_snprintf(query, sizeof(query), sql_jumptop_setremoved, JumpTable(id < 0), removed ? 1 : 0, JumpStorageId(id));
 	Transaction txn;
 	txn.queries.push_back(query);
 	// clang-format off
@@ -2334,7 +2352,7 @@ CON_COMMAND_F(kz_jumptop_forget, "Забыть удалённые прыжки: 
 		}
 		for (auto it = g_qualifiedReplays.begin(); it != g_qualifiedReplays.end();)
 		{
-			it = *it == uuid ? g_qualifiedReplays.erase(it) : it + 1;
+			it = it->first == uuid ? g_qualifiedReplays.erase(it) : it + 1;
 		}
 		char path[512];
 		V_snprintf(path, sizeof(path), KZ_REPLAY_PATH "/%s.replay", uuid.c_str());
