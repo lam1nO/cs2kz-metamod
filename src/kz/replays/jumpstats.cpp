@@ -2,6 +2,7 @@
 #include "kz/mode/kz_mode.h"
 #include "kz/language/kz_language.h"
 #include "kz/spec/kz_spec.h"
+#include "kz/style/kz_style.h"
 #include "kz/option/kz_option.h"
 #include "kz_replay.h"
 
@@ -9,7 +10,7 @@ void RpJumpStats::FromJump(RpJumpStats &stats, Jump *jump)
 {
 	// Overall stats
 	stats.overall.serverTick = jump->serverTick;
-	if (jump->IsValid() && jump->player->styleServices.Count() == 0)
+	if (jump->IsValid() && KZ::style::CanRankJumps(jump->player))
 	{
 		stats.overall.distanceTier = jump->GetDistanceTier(jump->GetJumpType());
 	}

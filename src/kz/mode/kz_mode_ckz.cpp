@@ -253,9 +253,11 @@ void KZClassicModeService::OnStopTouchGround()
 			auto *pawn = this->player->GetPlayerPawn();
 			const f32 gravity = KZ::mode::modeCvarRefs[MODECVAR_SV_GRAVITY]->GetFloat() * pawn->m_flActualGravityScale();
 			const f32 impulse = KZ::mode::modeCvarRefs[MODECVAR_SV_JUMP_IMPULSE]->GetFloat();
-			Vector baseVelocity;
+			Vector baseVelocity {};
 			this->player->GetBaseVelocity(&baseVelocity);
-			const bool standardTakeoff = this->player->jumped && !this->player->takeoffFromLadder
+			auto *movement = this->player->GetMoveServices();
+			const bool standing = movement->m_flDuckAmount() == 0.0f && !this->player->IsButtonPressed(IN_DUCK, true);
+			const bool standardTakeoff = standing && this->player->jumped && !this->player->takeoffFromLadder
 				&& !(pawn->m_fFlags() & FL_BASEVELOCITY) && baseVelocity.LengthSqr() < 0.001f;
 			velocity.z = KZ::style::NoprePerfVerticalSpeed(velocity.z, gravity, impulse, standardTakeoff);
 		}
