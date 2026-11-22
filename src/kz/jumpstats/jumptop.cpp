@@ -1218,9 +1218,9 @@ namespace
 	// Цвет тира — как у отчёта о прыжке в чате; пороги режима топа, а не режима смотрящего.
 	// Цвет не сбрасываем: значение стоит в конце строки, а сброс ({default}) дал бы жёсткий белый
 	// и съел бы подсветку курсора у остальной строки.
-	std::string TierColored(KZModeService *tiers, i32 jumpType, f64 distance, f64 pre, const char *text)
+	std::string TierColored(KZModeService *tiers, i32 jumpType, f64 distance, f64 pre, bool nopre, const char *text)
 	{
-		DistanceTier tier = tiers ? tiers->GetDistanceTier((JumpType)jumpType, (f32)distance, (f32)pre) : DistanceTier_Meh;
+		DistanceTier tier = GetJumpDistanceTier(tiers, (JumpType)jumpType, (f32)distance, (f32)pre, nopre);
 		if (tier == DistanceTier_None)
 		{
 			tier = DistanceTier_Meh;
@@ -1466,7 +1466,7 @@ namespace
 					{
 						V_snprintf(value, sizeof(value), "%.2f", distance);
 					}
-					std::string colored = TierColored(tiers, jumpType, distance, pre, value);
+					std::string colored = TierColored(tiers, jumpType, distance, pre, nopre, value);
 					char text[256];
 					V_snprintf(text, sizeof(text), "%d. %s  ·  %s", place, alias.c_str(), colored.c_str());
 					char info[16];

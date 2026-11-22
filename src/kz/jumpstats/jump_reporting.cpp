@@ -44,7 +44,7 @@ void KZJumpstatsService::PrintJumpToChat(KZPlayer *target, Jump *jump, bool exte
 	}
 	const char *language = target->languageService->GetLanguage();
 	JumpType reportType = jump->GetReportJumpType();
-	DistanceTier color = jump->GetJumpPlayer()->modeService->GetDistanceTier(reportType, jump->GetDistance(), jump->GetTakeoffSpeed());
+	DistanceTier color = jump->GetDistanceTier(reportType);
 	DistanceTier minTier = static_cast<DistanceTier>(
 		target->optionService->GetPreferenceInt("jsMinTier", KZOptionService::GetOptionInt("defaultJSMinTier", DistanceTier_Impressive)));
 	bool jsAlways = target->optionService->GetPreferenceBool("jsAlways", false);
@@ -163,7 +163,7 @@ void KZJumpstatsService::PrintJumpToConsole(KZPlayer *target, Jump *jump, bool b
 	}
 
 	JumpType reportType = jump->GetReportJumpType();
-	DistanceTier color = jump->GetJumpPlayer()->modeService->GetDistanceTier(reportType, jump->GetDistance(), jump->GetTakeoffSpeed());
+	DistanceTier color = jump->GetDistanceTier(reportType);
 	DistanceTier minTier = static_cast<DistanceTier>(
 		broadcast ? target->optionService->GetPreferenceInt("jsBroadcastMinTierConsole",
 															KZOptionService::GetOptionInt("defaultJSBroadcastMinTierConsole", DistanceTier_Ownage))
@@ -362,7 +362,7 @@ void KZJumpstatsService::BroadcastJumpToChat(KZPlayer *target, Jump *jump)
 	{
 		return;
 	}
-	DistanceTier tier = jump->GetJumpPlayer()->modeService->GetDistanceTier(jump->GetReportJumpType(), jump->GetDistance(), jump->GetTakeoffSpeed());
+	DistanceTier tier = jump->GetDistanceTier(jump->GetReportJumpType());
 	if (tier == DistanceTier_None)
 	{
 		return;
@@ -399,7 +399,7 @@ void KZJumpstatsService::PlayJumpstatSound(KZPlayer *target, Jump *jump, bool br
 	{
 		return;
 	}
-	DistanceTier tier = jump->GetJumpPlayer()->modeService->GetDistanceTier(jump->GetReportJumpType(), jump->GetDistance(), jump->GetTakeoffSpeed());
+	DistanceTier tier = jump->GetDistanceTier(jump->GetReportJumpType());
 	DistanceTier soundMinTier =
 		broadcast ? static_cast<DistanceTier>(target->optionService->GetPreferenceInt(
 						"jsBroadcastSoundMinTier", KZOptionService::GetOptionInt("defaultJSBroadcastSoundMinTier", DistanceTier_Ownage)))

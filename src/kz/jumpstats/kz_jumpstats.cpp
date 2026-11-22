@@ -531,6 +531,25 @@ void Jump::UpdateAACallPost(Vector wishdir, f32 wishspeed, f32 accel)
 	}
 }
 
+DistanceTier GetJumpDistanceTier(KZModeService *mode, JumpType type, f32 distance, f32 pre, bool nopre)
+{
+	if (nopre && type >= JumpType_LongJump && type <= JumpType_WeirdJump)
+	{
+		const f32 minimum = type == JumpType_WeirdJump ? 0.0f : 217.0f;
+		if (!(distance >= minimum && distance <= 500.0f))
+		{
+			return DistanceTier_None;
+		}
+		return static_cast<DistanceTier>(DistanceTier_Meh + KZ::style::NopreDistanceTierOffset(type == JumpType_LongJump, distance));
+	}
+	return mode ? mode->GetDistanceTier(type, distance, pre) : DistanceTier_None;
+}
+
+DistanceTier Jump::GetDistanceTier(JumpType type)
+{
+	return GetJumpDistanceTier(this->player->modeService, type, this->GetDistance(), this->GetTakeoffSpeed(), KZ::style::HasNopre(this->player));
+}
+
 i32 Jump::GetDirection()
 {
 	KZ::jumpstats::direction::Accumulator acc;

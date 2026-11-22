@@ -8,6 +8,7 @@
 #include "jump_direction.h"
 
 class KZPlayer;
+class KZModeService;
 
 enum JumpType
 {
@@ -36,6 +37,8 @@ enum DistanceTier : u8
 	DistanceTier_Wrecker,
 	DISTANCETIER_COUNT
 };
+
+DistanceTier GetJumpDistanceTier(KZModeService *mode, JumpType type, f32 distance, f32 pre, bool nopre);
 
 #define IGNORE_JUMP_TIME                (0.2f + 0.001f) // To take floating errors into account
 #define JS_EPSILON                      0.03125f
@@ -333,6 +336,7 @@ public:
 	}
 
 	JumpType GetReportJumpType();
+	DistanceTier GetDistanceTier(JumpType type);
 
 	// cyber: Forward/Sideways/Backwards (jump_direction.h) — по вызовам AirAccelerate всего полёта.
 	// Считается на лету из aaCalls, поэтому верно и для прыжка, восстановленного из реплея.

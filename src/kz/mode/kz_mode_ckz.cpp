@@ -250,6 +250,14 @@ void KZClassicModeService::OnStopTouchGround()
 		if (KZ::style::HasNopre(this->player))
 		{
 			newSpeed = KZ::style::NoprePerfSpeed(newSpeed, kz_nopre_bhop_cap.Get());
+			auto *pawn = this->player->GetPlayerPawn();
+			const f32 gravity = KZ::mode::modeCvarRefs[MODECVAR_SV_GRAVITY]->GetFloat() * pawn->m_flActualGravityScale();
+			const f32 impulse = KZ::mode::modeCvarRefs[MODECVAR_SV_JUMP_IMPULSE]->GetFloat();
+			Vector baseVelocity;
+			this->player->GetBaseVelocity(&baseVelocity);
+			const bool standardTakeoff = this->player->jumped && !this->player->takeoffFromLadder
+				&& !(pawn->m_fFlags() & FL_BASEVELOCITY) && baseVelocity.LengthSqr() < 0.001f;
+			velocity.z = KZ::style::NoprePerfVerticalSpeed(velocity.z, gravity, impulse, standardTakeoff);
 		}
 		velocity.x = newSpeed * landingVelocity2D.x;
 		velocity.y = newSpeed * landingVelocity2D.y;

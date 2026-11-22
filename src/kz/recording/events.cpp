@@ -359,7 +359,7 @@ void KZRecordingService::OnJumpFinish(Jump *jump)
 	bool worthOwnReplay = !jump->IsFailstat() && jump->IsValid() && jump->GetOffset() >= -JS_EPSILON && jump->airtime >= 0.5f
 						  && this->player->styleServices.Count() == 0;
 	if (worthOwnReplay
-		&& jump->GetJumpPlayer()->modeService->GetDistanceTier(jump->jumpType, jump->GetDistance(), jump->GetTakeoffSpeed())
+		&& jump->GetDistanceTier(jump->jumpType)
 			   >= kz_replay_recording_min_jump_tier.Get())
 	{
 		this->jumpRecorders.push_back(JumpRecorder(jump));
