@@ -23,6 +23,7 @@
 #include "goto/kz_goto.h"
 #include "style/kz_style.h"
 #include "telemetry/kz_telemetry.h"
+#include "telemetry/player_config.h"
 #include "timer/kz_timer.h"
 #include "tip/kz_tip.h"
 #include "trigger/kz_trigger.h"
@@ -209,6 +210,7 @@ void KZPlayer::OnPlayerActive()
 void KZPlayer::OnPlayerFullyConnect()
 {
 	this->anticheatService->OnPlayerFullyConnect();
+	KZ::player_config::Observe(this);
 }
 
 void KZPlayer::OnAuthorized()

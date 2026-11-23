@@ -49,6 +49,9 @@ namespace HTTP
 		// Set a header.
 		void SetHeader(std::string name, std::string value);
 
+		// Exclude this request from detailed HTTP logs.
+		void SetSensitive() { sensitive = true; }
+
 		// Set the request body.
 		void SetBody(std::string body);
 
@@ -59,6 +62,7 @@ namespace HTTP
 		const Method method;
 		std::string url {};
 		bool hasQueryParams {};
+		bool sensitive {};
 		HeaderMap headers {};
 		std::string body {};
 	};
@@ -90,8 +94,8 @@ namespace HTTP
 		InFlightRequest(const InFlightRequest &req) = delete;
 
 		InFlightRequest(HTTPRequestHandle handle, SteamAPICall_t steamCallHandle, std::string url, std::string body, ResponseCallback onResponse,
-						ErrorCallback onError)
-			: url(url), body(body), handle(handle), onResponse(onResponse), onError(onError)
+						ErrorCallback onError, bool sensitive)
+			: url(url), body(body), handle(handle), onResponse(onResponse), onError(onError), sensitive(sensitive)
 		{
 			callResult.SetGameserverFlag();
 			callResult.Set(steamCallHandle, this, &InFlightRequest::OnRequestCompleted);
@@ -117,6 +121,7 @@ namespace HTTP
 		CCallResult<InFlightRequest, HTTPRequestCompleted_t> callResult;
 		ResponseCallback onResponse;
 		ErrorCallback onError;
+		bool sensitive;
 
 		void OnRequestCompleted(HTTPRequestCompleted_t *completedRequest, bool failed);
 	};

@@ -223,6 +223,7 @@ def configure_main(sdk_target, sdk, cxx):
     os.path.join(builder.sourcePath, 'src', 'kz', 'goto', 'kz_goto.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'style', 'kz_style_manager.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'telemetry', 'kz_telemetry.cpp'),
+    os.path.join(builder.sourcePath, 'src', 'kz', 'telemetry', 'player_config.cpp'),
     
     os.path.join(builder.sourcePath, 'src', 'kz', 'timer', 'kz_timer.cpp'),
     os.path.join(builder.sourcePath, 'src', 'kz', 'timer', 'submission.cpp'),

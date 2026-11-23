@@ -122,7 +122,7 @@ namespace HTTP
 			return;
 		}
 		// Log detailed HTTP requests for debugging.
-		if (LoggingSystem_IsChannelEnabled(GetServiceChannel(LogChannel::General), LS_DETAILED))
+		if (!sensitive && LoggingSystem_IsChannelEnabled(GetServiceChannel(LogChannel::General), LS_DETAILED))
 		{
 			std::string methodStr;
 			switch (method)
@@ -157,7 +157,7 @@ namespace HTTP
 				}
 			}
 		}
-		new InFlightRequest(handle, steamCallHandle, url, body, onResponse, onError);
+		new InFlightRequest(handle, steamCallHandle, url, body, onResponse, onError, sensitive);
 	}
 
 	std::optional<std::string> Response::Header(const char *name) const
@@ -220,7 +220,14 @@ namespace HTTP
 	{
 		if (failed)
 		{
-			KZ_LOG_WARN(LogChannel::General, "[HTTP] request to `%s` failed with code %d\n", url.c_str(), completedRequest->m_eStatusCode);
+			if (!sensitive)
+			{
+				KZ_LOG_WARN(LogChannel::General, "[HTTP] request to `%s` failed with code %d\n", url.c_str(), completedRequest->m_eStatusCode);
+			}
+			if (g_pHTTP)
+			{
+				g_pHTTP->ReleaseHTTPRequest(handle);
+			}
 			if (onError)
 			{
 				onError();
@@ -230,7 +237,7 @@ namespace HTTP
 		}
 
 		Response response(completedRequest->m_eStatusCode, completedRequest->m_hRequest);
-		if (LoggingSystem_IsChannelEnabled(GetServiceChannel(LogChannel::General), LS_DETAILED))
+		if (!sensitive && LoggingSystem_IsChannelEnabled(GetServiceChannel(LogChannel::General), LS_DETAILED))
 		{
 			KZ_LOG_DEBUG(LogChannel::General, "[HTTP] Received response for request to `%s` with status code %d\n", url.c_str(), response.status);
 			if (!response.Body().has_value())
