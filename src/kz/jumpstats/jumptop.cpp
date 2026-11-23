@@ -44,6 +44,7 @@ extern ICS2Menus *g_pMenus;
 
 // Порядок режимов в меню и в разборе аргумента !jumptop <режим>.
 static_global const char *const jumptopModes[] = {"CKZ", "KZT", "VNL"};
+static_global const char *const jumpBoardModes[] = {"KZT", "CKZ", "VNL"};
 
 /*
  * Кэш личных рекордов игрока (по слоту). Грузится на OnClientSetup; пока не загружен, прыжки
@@ -1861,6 +1862,7 @@ namespace
 	void OnJumptopWindowClick(KZPlayer *player, const char *id)
 	{
 		JumptopView &v = g_jtView[player->GetPlayerSlot().Get()];
+		const bool boards = KZ::gsmenu::UsesBoardLayout();
 		i32 k = -1, row = -1;
 		int end = -1;
 		if (sscanf(id, "gf0_%d", &k) == 1 && k >= 0 && JumpType_LongJump + k <= JumpType_Jumpbug)
@@ -1872,7 +1874,7 @@ namespace
 			}
 			return;
 		}
-		if (sscanf(id, "gf1_%d", &k) == 1 && k >= 0 && k < 2 + KZ::jumpstats::direction::Count)
+		if (sscanf(id, "gf1_%d", &k) == 1 && k >= 0 && k < (boards ? 2 : 2 + KZ::jumpstats::direction::Count))
 		{
 			if (k < 2)
 			{
@@ -1896,7 +1898,7 @@ namespace
 		if (sscanf(id, "gf2_%d", &k) == 1 && k >= 0)
 		{
 			i32 shown = 0;
-			for (const char *mode : jumptopModes)
+			for (const char *mode : (boards ? jumpBoardModes : jumptopModes))
 			{
 				const i32 dbID = KZ::mode::GetModeInfo(CUtlString(mode)).databaseID;
 				if (dbID >= 0 && shown++ == k)
@@ -1910,7 +1912,7 @@ namespace
 					return;
 				}
 			}
-			if (IsCkz(v.modeID) && (k == shown || k == shown + 1) && v.nopre != (k == shown + 1))
+			if (!boards && IsCkz(v.modeID) && (k == shown || k == shown + 1) && v.nopre != (k == shown + 1))
 			{
 				v.nopre = k == shown + 1;
 				QueryJumptopWindow(player);
@@ -1918,6 +1920,24 @@ namespace
 			return;
 		}
 
+		if (boards && sscanf(id, "gf3_%d", &k) == 1 && k >= 0 && k < KZ::jumpstats::direction::Count)
+		{
+			if (v.direction != k)
+			{
+				v.direction = k;
+				QueryJumptopWindow(player);
+			}
+			return;
+		}
+		if (boards && sscanf(id, "gf4_%d", &k) == 1 && k >= 0 && k < 2)
+		{
+			if (IsCkz(v.modeID) && v.nopre != (k == 1))
+			{
+				v.nopre = k == 1;
+				QueryJumptopWindow(player);
+			}
+			return;
+		}
 		if (v.loading)
 		{
 			return;
@@ -1950,6 +1970,7 @@ namespace
 
 		KZ::gsmenu::Table t;
 		const bool english = V_stricmp(player->languageService->GetLanguage(), "ru") != 0;
+		const bool boards = KZ::gsmenu::UsesBoardLayout();
 		const bool personal = v.personal.has_value();
 		t.title = personal ? (english ? "Personal bests" : "Личные рекорды") : "Топ прыжков";
 		t.sub = personal ? v.personal->alias : TypeName(v.jumpType, v.direction, false) + " · " + ModeShortName(v.modeID) + (v.nopre ? " · NOPRE" : "");
@@ -1959,16 +1980,17 @@ namespace
 		t.cols = "cols-jumptop";
 		for (i32 type = JumpType_LongJump; type <= JumpType_Jumpbug; type++)
 		{
-			t.filters[0].push_back({jumpTypeStr[type], type == v.jumpType});
+			static const char *shortTypes[] = {"LJ", "BH", "MBH", "WJ", "LAJ", "LAH", "JB"};
+			t.filters[0].push_back({boards ? shortTypes[type - JumpType_LongJump] : jumpTypeStr[type], type == v.jumpType});
 		}
 		t.filters[1] = {{personal && english ? "Distance" : "Дистанция", !v.isBlock}, {personal && english ? "Blocks" : "Блоки", v.isBlock}};
 		// Направления находятся рядом с видом прыжка в шапке установленного аддона.
 		const char *const russianDirections[] = {"Вперёд", "Боком", "Спиной"};
 		for (i32 d = 0; d < KZ::jumpstats::direction::Count; d++)
 		{
-			t.filters[1].push_back({personal && !english ? russianDirections[d] : KZ::jumpstats::direction::Name(d), d == v.direction});
+			t.filters[boards ? 3 : 1].push_back({(boards || personal) && !english ? russianDirections[d] : KZ::jumpstats::direction::Name(d), d == v.direction});
 		}
-		for (const char *mode : jumptopModes)
+		for (const char *mode : (boards ? jumpBoardModes : jumptopModes))
 		{
 			const i32 dbID = KZ::mode::GetModeInfo(CUtlString(mode)).databaseID;
 			if (dbID >= 0)
@@ -1978,8 +2000,8 @@ namespace
 		}
 		if (IsCkz(v.modeID))
 		{
-			t.filters[2].push_back({"Normal", !v.nopre});
-			t.filters[2].push_back({KZ::style::NopreName, v.nopre});
+			t.filters[boards ? 4 : 2].push_back({"Normal", !v.nopre});
+			t.filters[boards ? 4 : 2].push_back({KZ::style::NopreName, v.nopre});
 		}
 		if (!personal)
 		{
@@ -1989,7 +2011,7 @@ namespace
 		t.headers[2] = personal && english ? (v.isBlock ? "Block" : "Distance") : (v.isBlock ? "Блок" : "Дистанция");
 		t.headers[3] = personal && english ? "Strafes" : "Стрейфы";
 		t.headers[4] = personal && english ? "Sync" : "Синхр.";
-		t.headers[5] = personal ? (english ? "Pre" : "Пре") : "Скорость";
+		t.headers[5] = (boards || personal) ? (english ? "Pre" : "Пре") : "Скорость";
 		t.headers[6] = personal && english ? "Map" : "Карта";
 
 		v.shownIds.clear();
@@ -2005,7 +2027,7 @@ namespace
 				row.cells[0] = std::to_string(i + 1);
 			}
 			row.cells[1] = r.alias;
-			row.cells[2] = JumpDistanceText(r, v.isBlock, personal);
+			row.cells[2] = JumpDistanceText(r, v.isBlock, boards || personal);
 			row.cells[3] = std::to_string(r.strafes);
 			row.cells[4] = JumpSyncText(r.sync);
 			row.cells[5] = JumpPreText(r.pre);

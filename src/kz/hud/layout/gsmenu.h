@@ -15,6 +15,7 @@ struct IndexedHudCache;
 // Валидатор CustomHud клиента пускает только Panel/Label/Button без скриптов (проверено 13.10):
 // всё состояние — классы и строковые переменные, клик — id кнопки. Захват курсора — только у
 // окон gw/gg: он отнимает движение и клавиши, поэтому боковые панели живут без него.
+#define KZ_GSMENU_BOARDS_LAYOUT "panorama/layout/custom_game/cyber/kzboards.vxml_c"
 #define KZ_GSMENU_LAYOUT "panorama/layout/custom_game/cyber/gsmenu.vxml_c"
 
 // Ёмкости разметки — контракт с tools/gen_gsmenu_xml.py аддона, менять только вместе.
@@ -139,6 +140,7 @@ namespace KZ::gsmenu
 
 	// Панорама-меню доступны (аддон с разметкой подключён, сущность создаётся).
 	bool Available(KZPlayer *player);
+	bool UsesBoardLayout();
 
 	// Буква для квадрата: первый символ UTF-8, латиница — заглавная.
 	std::string Initial(const char *name);

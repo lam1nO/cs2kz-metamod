@@ -61,6 +61,7 @@ namespace
 	{
 		CHandle<CBaseEntity> entity {};
 		bool open = false;
+		bool boardLayout = false;
 		bool capture = false;
 		i32 openRow = -1;
 		u64 actionEpoch = 0;
@@ -146,7 +147,7 @@ namespace
 		ResetCaches(w);
 	}
 
-	CCSCustomHudLayout *Ensure(KZPlayer *player, WindowState &w)
+	CCSCustomHudLayout *Ensure(KZPlayer *player, WindowState &w, bool boardLayout = false)
 	{
 		if (g_KZPlugin.unloading || !KZHUDService::IsMHUDAvailable())
 		{
@@ -157,7 +158,7 @@ namespace
 			const i32 panels = cached->m_vecPanelIds().Count();
 			const i32 classes = cached->m_vecClassNames().Count();
 			const i32 vars = cached->m_vecDialogVariableNames().Count();
-			if (panels < KZ_GSMENU_INTERN_RECYCLE && classes < KZ_GSMENU_INTERN_RECYCLE && vars < KZ_GSMENU_INTERN_RECYCLE)
+			if (w.boardLayout == boardLayout && panels < KZ_GSMENU_INTERN_RECYCLE && classes < KZ_GSMENU_INTERN_RECYCLE && vars < KZ_GSMENU_INTERN_RECYCLE)
 			{
 				return cached;
 			}
@@ -171,12 +172,13 @@ namespace
 			return nullptr;
 		}
 		CEntityKeyValues *kv = new CEntityKeyValues();
-		kv->SetString("layout", KZ_GSMENU_LAYOUT);
+		kv->SetString("layout", boardLayout ? KZ_GSMENU_BOARDS_LAYOUT : KZ_GSMENU_LAYOUT);
 		char name[32];
 		V_snprintf(name, sizeof(name), "kzgsmenu%i", player->GetPlayerSlot().Get());
 		kv->SetString("targetname", name);
 		layout->DispatchSpawn(kv);
 		w.entity = layout;
+		w.boardLayout = boardLayout;
 		ResetCaches(w);
 		KZ::gsmenu::ShimRedrawAll(); // открытые списки прослойки рисовались в прежнюю сущность
 		return layout;
@@ -271,6 +273,11 @@ namespace
 	}
 } // namespace
 
+bool KZ::gsmenu::UsesBoardLayout()
+{
+	return g_pFullFileSystem && g_pFullFileSystem->FileExists(KZ_GSMENU_BOARDS_LAYOUT, "GAME");
+}
+
 bool KZ::gsmenu::Available(KZPlayer *player)
 {
 	return player && KZHUDService::IsMHUDAvailable();
@@ -317,7 +324,7 @@ bool KZ::gsmenu::ShowTable(KZPlayer *player, const Table &t, ClickFn onClick, co
 		Destroy(player, *w);
 	}
 	const bool actionsChanged = !w->open || w->actionEpoch != t.actionEpoch || w->actionsReady != t.actionsReady;
-	CCSCustomHudLayout *layout = Ensure(player, *w);
+	CCSCustomHudLayout *layout = Ensure(player, *w, UsesBoardLayout());
 	if (!layout)
 	{
 		return false;
@@ -463,6 +470,7 @@ bool KZ::gsmenu::ShowTable(KZPlayer *player, const Table &t, ClickFn onClick, co
 		Class(player, *w, layout, "gm_go", "hidden", t.me.actions[0].empty());
 	}
 
+	ClassLazy(player, *w, layout, "gw", "boards-pagination", t.prev || t.next);
 	Class(player, *w, layout, "gw_prev", "hidden", !t.prev);
 	Class(player, *w, layout, "gw_next", "hidden", !t.next);
 	Var(player, *w, layout, "gw", "pg", t.page);
@@ -489,7 +497,7 @@ bool KZ::gsmenu::ShowList(KZPlayer *player, const List &l)
 	{
 		return false;
 	}
-	CCSCustomHudLayout *layout = Ensure(player, *w);
+	CCSCustomHudLayout *layout = Ensure(player, *w, w->entity.IsValid() && w->boardLayout);
 	if (!layout)
 	{
 		return false;

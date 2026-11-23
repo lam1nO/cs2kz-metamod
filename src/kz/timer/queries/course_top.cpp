@@ -541,7 +541,8 @@ namespace
 
 	MaptopView g_maptop[MAXPLAYERS + 1];
 
-	constexpr const char *kMaptopModes[] = {"CKZ", "KZT", "VNL", "SKZ"}; // порядок как в !jstop
+	constexpr const char *kMaptopModes[] = {"CKZ", "KZT", "VNL", "SKZ"};
+	constexpr const char *kBoardModes[] = {"KZT", "CKZ", "VNL", "SKZ"};
 
 	void RenderMaptop(KZPlayer *player);
 
@@ -626,11 +627,14 @@ namespace
 	void OnMaptopClick(KZPlayer *player, const char *id)
 	{
 		MaptopView &v = g_maptop[player->GetPlayerSlot().Get()];
+		const bool boards = KZ::gsmenu::UsesBoardLayout();
+		const char *normalButton = boards ? "gf4_0" : "gf1_2";
+		const char *stylesButton = boards ? "gf4_1" : "gf1_3";
 		i32 row = -1, k = -1;
 		int end = -1;
-		if (!v.global && (KZ_STREQ(id, "gf1_2") || KZ_STREQ(id, "gf1_3")))
+		if (!v.global && (KZ_STREQ(id, normalButton) || KZ_STREQ(id, stylesButton)))
 		{
-			const bool showStyles = KZ_STREQ(id, "gf1_3");
+			const bool showStyles = KZ_STREQ(id, stylesButton);
 			const bool isStyled = !v.style.empty();
 			if (v.pendingUid || showStyles != isStyled)
 			{
@@ -638,14 +642,14 @@ namespace
 			}
 			return;
 		}
-		if (!v.global && !v.style.empty() && KZ_STREQ(id, "gf1_4"))
+		if (!v.global && !v.style.empty() && KZ_STREQ(id, boards ? "gw_style" : "gf1_4"))
 		{
 			v.styleOpen = !v.styleOpen;
 			v.actionEpoch = ++g_maptopActionEpoch;
 			RenderMaptop(player);
 			return;
 		}
-		if (v.styleOpen && sscanf(id, "gf0_%d%n", &k, &end) == 1 && end >= 0 && !id[end]
+		if (v.styleOpen && sscanf(id, boards ? "gw_st%d%n" : "gf0_%d%n", &k, &end) == 1 && end >= 0 && !id[end]
 			&& k >= 0 && k < (i32)v.styleChoices.size())
 		{
 			const auto selected = v.styleChoices[k];
@@ -660,7 +664,7 @@ namespace
 		}
 		if (KZ_STREQ(id, "gf1_0") || KZ_STREQ(id, "gf1_1"))
 		{
-			const bool pro = KZ_STREQ(id, "gf1_0");
+			const bool pro = KZ_STREQ(id, boards ? "gf1_1" : "gf1_0");
 			if (v.pro != pro)
 			{
 				v.pro = pro;
@@ -678,10 +682,10 @@ namespace
 			}
 			return;
 		}
-		if (!v.styleOpen && sscanf(id, "gf2_%d", &k) == 1 && k >= 0)
+		if ((boards || !v.styleOpen) && sscanf(id, "gf2_%d", &k) == 1 && k >= 0)
 		{
 			i32 shown = 0;
-			for (const char *mode : kMaptopModes)
+			for (const char *mode : (boards ? kBoardModes : kMaptopModes))
 			{
 				if (KZ::mode::GetModeInfo(CUtlString(mode)).id < 0)
 				{
@@ -814,21 +818,46 @@ namespace
 		return KZ::style::StyleKey(std::move(names));
 	}
 
-	void RenderStyleOptions(MaptopView &v, KZ::gsmenu::Table &t, bool english)
+	void RenderStyleOptions(MaptopView &v, KZ::gsmenu::Table &t, bool english, bool boards)
 	{
 		const CUtlString mode = KZ::mode::GetModeInfo(v.mode).shortModeName;
 		v.styleChoices.clear();
+		const char *allStyles = english ? "All styles" : "Все стили";
+		if (boards)
+		{
+			t.styleLabel = v.style == kAllStyles ? allStyles : v.style;
+			t.styleHeading = english ? "Style" : "Стиль";
+			t.styleRunsHeading = english ? "Runs" : "Ранов";
+			t.styleSelected = v.style != kAllStyles;
+			t.styleOpen = v.styleOpen;
+		}
 		auto add = [&](const std::string &key, const std::string &label)
 		{
 			if (v.styleChoices.size() < KZ_GSMENU_FILTER_CHIPS &&
 				std::find(v.styleChoices.begin(), v.styleChoices.end(), key) == v.styleChoices.end())
 			{
 				v.styleChoices.push_back(key);
-				t.filters[0].push_back({label, v.style == key});
+				if (boards)
+				{
+					u64 count = 0;
+					for (const auto &option : v.styleCounts)
+					{
+						const auto name = StyleLabelForMask(option.mask);
+						if ((key == kAllStyles && !name.empty() && MaptopStyleAllowed(name, mode.Get())) || name == key)
+						{
+							count += v.pro ? option.pro : option.overall;
+						}
+					}
+					t.styleOptions.push_back({label, count ? std::to_string(count) : "—", v.style == key, false, false});
+				}
+				else
+				{
+					t.filters[0].push_back({label, v.style == key});
+				}
 			}
 		};
 
-		add(kAllStyles, english ? "All styles" : "Все стили");
+		add(kAllStyles, allStyles);
 		const auto &infos = g_pKZStyleManager->GetStyleInfos();
 		FOR_EACH_VEC(infos, i)
 		{
@@ -861,7 +890,12 @@ namespace
 
 		KZ::gsmenu::Table t;
 		const bool english = V_stricmp(player->languageService->GetLanguage(), "ru") != 0;
+		const bool boards = KZ::gsmenu::UsesBoardLayout();
 		t.title = v.map.Get();
+		if (boards)
+		{
+			t.title += std::string(" · ") + v.course.Get();
+		}
 		t.sub = std::string(v.course.Get()) + " · " + (v.global ? "мировой топ" : "топ сервера");
 		const bool styled = !v.global && !v.style.empty();
 		t.styledMaptop = styled;
@@ -878,21 +912,30 @@ namespace
 		}
 		t.cover = v.map.Get();
 		t.filters[1] = {{"PRO", v.pro}, {"NUB", !v.pro}};
+		if (boards)
+		{
+			std::swap(t.filters[1][0], t.filters[1][1]);
+		}
 		if (!v.global)
 		{
-			t.filters[1].push_back({"Normal", !styled});
-			t.filters[1].push_back({english ? "Styles" : "Стили", styled});
-			if (styled)
+			auto &scope = t.filters[boards ? 4 : 1];
+			scope.push_back({"Normal", !styled});
+			scope.push_back({english ? "Styles" : "Стили", styled});
+			if (styled && boards)
 			{
-				t.filters[1].push_back({english ? "Style" : "Стиль", v.styleOpen});
+				RenderStyleOptions(v, t, english, true);
+			}
+			else if (styled)
+			{
+				scope.push_back({english ? "Style" : "Стиль", v.styleOpen});
 			}
 		}
 		// Курсы (Main / Bonus N) — вкладками слева в полосе режимов (не больше 8 — ёмкость разметки); список курсов есть только у карты,
 		// что сейчас на сервере, у чужой карты (!maptop <карта>) полоса остаётся без них.
 		v.courseNames.clear();
-		if (styled && v.styleOpen)
+		if (!boards && styled && v.styleOpen)
 		{
-			RenderStyleOptions(v, t, english);
+			RenderStyleOptions(v, t, english, false);
 		}
 		else if (!V_stricmp(v.map.Get(), g_pKZUtils->GetCurrentMapName().Get()))
 		{
@@ -906,9 +949,9 @@ namespace
 		}
 		const CUtlString curShort = KZ::mode::GetModeInfo(v.mode).shortModeName;
 		t.tier = MapTier(v.map.Get(), curShort.Get());
-		for (const char *mode : kMaptopModes)
+		for (const char *mode : (boards ? kBoardModes : kMaptopModes))
 		{
-			if (!v.styleOpen && KZ::mode::GetModeInfo(CUtlString(mode)).id >= 0)
+			if ((boards || !v.styleOpen) && KZ::mode::GetModeInfo(CUtlString(mode)).id >= 0)
 			{
 				t.filters[2].push_back({mode, !V_stricmp(curShort.Get(), mode)});
 			}
