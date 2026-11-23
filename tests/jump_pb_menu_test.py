@@ -18,6 +18,9 @@ int main() {
     std::printf(sql_jumptop_getown, "JumptopStyledReplays", "JumptopStyled", 3, 0, 0, 0, 7ULL);
     std::printf("\x1e");
     std::printf(sql_jumptop_gettop, "JumptopReplays", "Jumptop", 3, 0, 0, 0, 20);
+    std::printf("\x1e%s\x1e%s\x1e%s\x1e%s\x1e%s",
+        sqlite_jumptop_personal_replay_owners, sqlite_jumptop_replay_insert,
+        sql_jumptop_replay_mark_personal, sql_jumptop_replay_prune, sql_jumptop_replay_prune_owners);
 }
 '''
 with tempfile.TemporaryDirectory(prefix="kz-jump-pb-") as tmp:
@@ -26,7 +29,9 @@ with tempfile.TemporaryDirectory(prefix="kz-jump-pb-") as tmp:
         ["c++", "-std=c++17", "-I", str(root / "src"), "-x", "c++", "-", "-o", query_bin],
         input=source, text=True, check=True,
     )
-    normal_sql, styled_sql, blocks_sql, own_sql, top_sql = subprocess.check_output([query_bin], text=True).split("\x1e")
+    normal_sql, styled_sql, blocks_sql, own_sql, top_sql, owners_sql, insert_sql, mark_sql, prune_sql, prune_owners_sql = (
+        subprocess.check_output([query_bin], text=True).split("\x1e")
+    )
 
 db = sqlite3.connect(":memory:")
 db.execute("CREATE TABLE Players (SteamID64 INTEGER PRIMARY KEY, Alias TEXT)")
@@ -70,4 +75,53 @@ db.execute("DELETE FROM JumptopStyledReplays WHERE ReplayUUID = 'styled'")
 assert db.execute(blocks_sql).fetchone()[12] == 0
 assert db.execute(own_sql).fetchone()[10:13] == ("same", "kz_victoria", 0)
 assert [(row[0], row[12]) for row in db.execute(top_sql)] == [(3, 1), (1, 1)]
-print("PASS jump PB filters, tie, block priority and exact replay storage")
+
+db.execute(owners_sql)
+
+def store_replay(jumps, uuid, *, style=0, top=False, steam_id=7):
+    replays = jumps + "Replays"
+    db.execute(insert_sql % (replays, uuid, "data", jumps, uuid, steam_id))
+    if not top:
+        db.execute(mark_sql.replace("%llu", "%d") % ("OR IGNORE", steam_id, style, uuid, replays, uuid))
+    db.execute(prune_sql.replace("%llu", "%d") % (replays, steam_id, style, jumps, steam_id, jumps, steam_id))
+    db.execute(prune_owners_sql.replace("%llu", "%d") % (steam_id, style, replays))
+
+row("Jumptop", 10, 263.3, replay="first-personal")
+row("Jumptop", 11, 263.3, block=252, replay="first-personal")
+store_replay("Jumptop", "first-personal")
+assert db.execute(normal_sql).fetchone()[10:13] == ("first-personal", "kz_victoria", 1)
+
+row("Jumptop", 12, 264.2, replay="better-distance")
+store_replay("Jumptop", "better-distance")
+assert db.execute("SELECT ReplayUUID FROM JumptopReplays WHERE ReplayUUID='first-personal'").fetchone()
+row("Jumptop", 13, 261.0, block=254, replay="better-block")
+store_replay("Jumptop", "better-block")
+store_replay("Jumptop", "first-personal")  # An out-of-order payload must not resurrect a superseded PB.
+assert set(db.execute("SELECT ReplayUUID FROM JumptopReplays")) == {
+    ("same",), ("better-distance",), ("better-block",),
+}
+assert set(db.execute("SELECT ReplayUUID FROM JumptopPersonalReplayOwners")) == {
+    ("better-distance",), ("better-block",),
+}
+
+row("JumptopStyled", 10, 266.0, replay="styled-current")
+store_replay("JumptopStyled", "styled-current", style=1)
+assert db.execute(styled_sql).fetchone()[10:13] == ("styled-current", "kz_victoria", 1)
+row("JumptopStyled", 11, 269.0, replay="styled-new-top")
+store_replay("JumptopStyled", "styled-new-top", style=1, top=True)
+row("JumptopStyled", 12, 270.0, replay="styled-new-pb")
+store_replay("JumptopStyled", "styled-new-pb", style=1)
+assert set(db.execute("SELECT ReplayUUID FROM JumptopStyledReplays")) == {
+    ("empty",), ("styled-new-top",), ("styled-new-pb",),
+}
+row("Jumptop", 14, 270.0, replay="removed", removed=1)
+store_replay("Jumptop", "removed")
+row("Jumptop", 15, 275.0, replay="sideways", direction=1)
+store_replay("Jumptop", "sideways")
+db.execute("UPDATE Jumptop SET Removed=0 WHERE ID=14")
+assert db.execute(normal_sql).fetchone()[10:13] == ("removed", "kz_victoria", 1)
+db.execute("DELETE FROM Jumptop WHERE ID=14")
+db.execute("DELETE FROM JumptopReplays WHERE ReplayUUID='removed'")
+store_replay("Jumptop", "removed", top=True)
+assert not db.execute("SELECT ReplayUUID FROM JumptopReplays WHERE ReplayUUID='removed'").fetchone()
+print("PASS filters, exact UUIDs, Normal/NOPRE PB retention, top history, supersession and soft/hard removal")

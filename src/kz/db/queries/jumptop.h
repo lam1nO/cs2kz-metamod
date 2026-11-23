@@ -173,6 +173,24 @@ constexpr char sqlite_jumptop_replays_create[] = R"(
         CONSTRAINT PK_JumptopReplays PRIMARY KEY (ReplayUUID))
 )";
 
+// Only personal replays carry a retention row. Existing top replays remain intact.
+constexpr char mysql_jumptop_personal_replay_owners[] = R"(
+    CREATE TABLE IF NOT EXISTS JumptopPersonalReplayOwners (
+        SteamID64 BIGINT UNSIGNED NOT NULL,
+        Styled TINYINT UNSIGNED NOT NULL,
+        ReplayUUID CHAR(36) NOT NULL,
+        PRIMARY KEY (SteamID64, Styled, ReplayUUID)
+    )
+)";
+constexpr char sqlite_jumptop_personal_replay_owners[] = R"(
+    CREATE TABLE IF NOT EXISTS JumptopPersonalReplayOwners (
+        SteamID64 INTEGER NOT NULL,
+        Styled INTEGER NOT NULL,
+        ReplayUUID TEXT NOT NULL,
+        PRIMARY KEY (SteamID64, Styled, ReplayUUID)
+    )
+)";
+
 // Порядок параметров: Table, SteamID64, Mode, JumpType, IsBlockJump, Block, Distance, Strafes, Sync, Pre,
 // Max, Airtime, Height, Offset, MapName, ServerID, ReplayUUID, Details (строки экранированы), Direction.
 constexpr char sql_jumptop_insert[] = R"(
@@ -295,11 +313,45 @@ constexpr char sql_jumptop_setremoved[] = R"(
 
 // Реплей: вставка (повтор — тот же UUID — безвреден) и чтение.
 constexpr char mysql_jumptop_replay_insert[] = R"(
-    INSERT IGNORE INTO %s (ReplayUUID, Data) VALUES ('%s', '%s')
+    INSERT IGNORE INTO %s (ReplayUUID, Data)
+    SELECT '%s', '%s' WHERE EXISTS (
+        SELECT 1 FROM %s WHERE ReplayUUID = '%s' AND SteamID64 = %s
+    )
 )";
 
 constexpr char sqlite_jumptop_replay_insert[] = R"(
-    INSERT OR IGNORE INTO %s (ReplayUUID, Data) VALUES ('%s', '%s')
+    INSERT OR IGNORE INTO %s (ReplayUUID, Data)
+    SELECT '%s', '%s' WHERE EXISTS (
+        SELECT 1 FROM %s WHERE ReplayUUID = '%s' AND SteamID64 = %s
+    )
+)";
+
+constexpr char sql_jumptop_replay_mark_personal[] = R"(
+    INSERT %s INTO JumptopPersonalReplayOwners (SteamID64, Styled, ReplayUUID)
+    SELECT %llu, %d, '%s' WHERE EXISTS (SELECT 1 FROM %s WHERE ReplayUUID = '%s')
+)";
+
+// Match the exact PB ordering for every category that may still use this UUID.
+constexpr char sql_jumptop_replay_prune[] = R"(
+    DELETE FROM %s WHERE ReplayUUID IN (
+        SELECT ReplayUUID FROM JumptopPersonalReplayOwners WHERE SteamID64 = %llu AND Styled = %d
+    ) AND ReplayUUID NOT IN (
+        SELECT ReplayUUID FROM (
+            SELECT j.ReplayUUID, ROW_NUMBER() OVER (
+                PARTITION BY j.Mode, j.JumpType, j.IsBlockJump, )" JUMPTOP_DIRECTION_SQL R"(
+                ORDER BY j.Block DESC, j.Distance DESC, j.ID ASC
+            ) AS rn
+            FROM %s j WHERE j.SteamID64 = %llu AND j.Removed = 0
+        ) best WHERE rn = 1
+        UNION
+        SELECT j.ReplayUUID FROM %s j WHERE j.SteamID64 = %llu AND j.Removed <> 0
+    )
+)";
+
+constexpr char sql_jumptop_replay_prune_owners[] = R"(
+    DELETE FROM JumptopPersonalReplayOwners WHERE SteamID64 = %llu AND Styled = %d AND NOT EXISTS (
+        SELECT 1 FROM %s r WHERE r.ReplayUUID = JumptopPersonalReplayOwners.ReplayUUID
+    )
 )";
 
 constexpr char sql_jumptop_replay_fetch[] = R"(

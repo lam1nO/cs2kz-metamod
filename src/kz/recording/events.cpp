@@ -7,7 +7,6 @@
 #include "kz/global/kz_global.h"
 #include "kz/option/kz_option.h"
 #include "kz/prac/kz_prac.h"
-#include "kz/jumpstats/jumptop.h"
 
 extern CConVar<i32> kz_replay_recording_min_jump_tier;
 
@@ -367,7 +366,7 @@ void KZRecordingService::OnJumpFinish(Jump *jump)
 	}
 }
 
-void KZRecordingService::MarkJumpForJumptop(const UUID_t &uuid, Jump *jump)
+void KZRecordingService::MarkJumpForJumptop(const UUID_t &uuid, Jump *jump, std::function<void(std::vector<char> &&)> store)
 {
 	JumpRecorder *target = nullptr;
 	for (auto &recorder : this->jumpRecorders)
@@ -385,7 +384,7 @@ void KZRecordingService::MarkJumpForJumptop(const UUID_t &uuid, Jump *jump)
 		target = &this->jumpRecorders.back();
 		target->uuid = uuid;
 	}
-	target->jumptop = true;
+	target->storeJumptopReplay = std::move(store);
 	// Блок в заголовке реплея (апстрим всегда пишет -1).
 	if (jump->GetBlock() > 0.0f)
 	{
@@ -434,17 +433,17 @@ void KZRecordingService::QueueJumpRecorderWrite(JumpRecorder &&recorder)
 			[failure](const char *) { failure(); });
 		return;
 	}
-	bool jumptop = recorder.jumptop;
+	auto storeJumptopReplay = std::move(recorder.storeJumptopReplay);
 	auto recorderPtr = std::make_unique<JumpRecorder>(std::move(recorder));
 	this->CopyWeaponsToRecorder(recorderPtr.get());
-	if (!jumptop)
+	if (!storeJumptopReplay)
 	{
 		fileWriter->QueueWriteToFile(std::move(recorderPtr));
 		return;
 	}
 	// clang-format off
 	fileWriter->QueueWrite(std::move(recorderPtr),
-		[](const UUID_t &uuid, f32 duration, std::vector<char> &&buffer) { KZ::jumptop::StoreReplay(uuid, buffer); },
+		[store = std::move(storeJumptopReplay)](const UUID_t &, f32, std::vector<char> &&buffer) { store(std::move(buffer)); },
 		[](const char *error) { KZ_LOG_WARN(LogChannel::Recording, "[cyb] jumptop_replay_serialize_failed error=%s\n", error); });
 	// clang-format on
 }

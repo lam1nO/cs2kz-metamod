@@ -56,6 +56,7 @@ static_global const std::string mysqlMigrations[] =
 	trimString(mysql_movement_evidence_create),
 	trimString(mysql_jumptop_styled_create),
 	trimString(mysql_jumptop_styled_replays_create),
+	trimString(mysql_jumptop_personal_replay_owners),
 };
 
 static_global const std::string sqliteMigrations[] = 
@@ -82,6 +83,7 @@ static_global const std::string sqliteMigrations[] =
 	trimString(sqlite_movement_evidence_index),
 	trimString(sqlite_jumptop_styled_create),
 	trimString(sqlite_jumptop_styled_replays_create),
+	trimString(sqlite_jumptop_personal_replay_owners),
 };
 
 // clang-format on

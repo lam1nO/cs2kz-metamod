@@ -31,6 +31,7 @@
 
 #include <cstdlib>
 #include <deque>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -277,46 +278,84 @@ namespace
 		return d.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 	}
 
-	void InsertReplayRow(const std::string &uuidStr, const std::vector<char> &buffer, bool styled)
+	struct ReplayRetention
+	{
+		u64 steamID64;
+		bool styled;
+		bool permanent = false;
+	};
+
+	void WriteReplayTransaction(const std::shared_ptr<Transaction> &txn, const std::string &uuid, size_t bytes, bool canRetry = true)
 	{
 		if (!KZDatabaseService::IsReady())
 		{
-			KZ_LOG_WARN(LogChannel::DB, "[cyb] jumptop_replay_store_failed reason=db_not_ready replay=%s\n", uuidStr.c_str());
+			KZ_LOG_WARN(LogChannel::DB, "[cyb] jumptop_replay_store_failed reason=db_not_ready replay=%s\n", uuid.c_str());
 			return;
 		}
-		std::string encoded = macaron::Base64::Encode(std::string(buffer.begin(), buffer.end()));
-		std::string query = IsMySQL() ? mysql_jumptop_replay_insert : sqlite_jumptop_replay_insert;
-		// Имена таблиц фиксированы, UUID и base64 не требуют экранирования.
-		query.replace(query.find("%s"), 2, JumpReplayTable(styled));
-		query.replace(query.find("%s"), 2, uuidStr);
-		query.replace(query.find("%s"), 2, encoded);
-
-		Transaction txn;
-		txn.queries.push_back(query);
-		size_t bytes = buffer.size();
-		// clang-format off
 		KZDatabaseService::GetDatabaseConnection()->ExecuteTransaction(
-			txn,
-			[uuidStr, bytes](std::vector<ISQLQuery *> queries)
+			*txn,
+			[uuid, bytes, statementCount = txn->queries.size()](std::vector<ISQLQuery *> queries)
 			{
-				KZ_LOG_INFO(LogChannel::DB, "[cyb] jumptop_replay_stored replay=%s bytes=%zu\n", uuidStr.c_str(), bytes);
+				if (queries.size() != statementCount)
+				{
+					KZ_LOG_ERROR(LogChannel::DB, "[cyb] jumptop_replay_store_failed reason=incomplete_result replay=%s\n", uuid.c_str());
+					return;
+				}
+				ISQLResult *result = queries.back()->GetResultSet();
+				if (result && result->FetchRow())
+				{
+					KZ_LOG_INFO(LogChannel::DB, "[cyb] jumptop_replay_stored replay=%s bytes=%zu\n", uuid.c_str(), bytes);
+				}
 			},
-			[uuidStr](std::string error, int failIndex)
+			[txn, uuid, bytes, canRetry](std::string error, int)
 			{
-				KZ_LOG_ERROR(LogChannel::DB, "[cyb] jumptop_replay_store_failed reason=db replay=%s error=%s\n", uuidStr.c_str(), error.c_str());
+				if (canRetry && (error.find("Deadlock") != std::string::npos || error.find("Lock wait timeout") != std::string::npos
+								 || error.find("database is locked") != std::string::npos))
+				{
+					WriteReplayTransaction(txn, uuid, bytes, false);
+					return;
+				}
+				KZ_LOG_ERROR(LogChannel::DB, "[cyb] jumptop_replay_store_failed reason=db replay=%s error=%s\n", uuid.c_str(), error.c_str());
 			});
-		// clang-format on
 	}
 
-	/*
-	 * Гейт реплея: в базу уходит только реплей прыжка, попавшего в топ. Вердикт (место из базы) и
-	 * буфер (рекордер останавливается через 2 с после прыжка) приходят в любом порядке — кто
-	 * второй, тот и пишет. Обе очереди ограничены: прыжок вне топа оставляет буфер, который
-	 * никто не заберёт, а вердикт без буфера бывает, если рекордер потерян (выход до записи).
-	 */
-	constexpr size_t maxPendingReplays = 16;
-	std::deque<std::pair<std::string, std::vector<char>>> g_pendingReplays;
-	std::deque<std::pair<std::string, bool>> g_qualifiedReplays;
+	void InsertReplayRow(const std::string &uuidStr, const std::vector<char> &buffer, const ReplayRetention &retention)
+	{
+		std::string encoded = macaron::Base64::Encode(std::string(buffer.begin(), buffer.end()));
+		std::string query = IsMySQL() ? mysql_jumptop_replay_insert : sqlite_jumptop_replay_insert;
+		const std::string steamID = std::to_string(retention.steamID64);
+		// Имена таблиц фиксированы, UUID и base64 не требуют экранирования.
+		query.replace(query.find("%s"), 2, JumpReplayTable(retention.styled));
+		query.replace(query.find("%s"), 2, uuidStr);
+		query.replace(query.find("%s"), 2, encoded);
+		query.replace(query.find("%s"), 2, JumpTable(retention.styled));
+		query.replace(query.find("%s"), 2, uuidStr);
+		query.replace(query.find("%s"), 2, steamID);
+
+		Transaction txn;
+		if (IsMySQL())
+		{
+			txn.queries.push_back("SELECT SteamID64 FROM Players WHERE SteamID64 = " + steamID + " FOR UPDATE");
+		}
+		txn.queries.push_back(query);
+		const char *replays = JumpReplayTable(retention.styled);
+		if (!retention.permanent)
+		{
+			char mark[512];
+			V_snprintf(mark, sizeof(mark), sql_jumptop_replay_mark_personal, IsMySQL() ? "IGNORE" : "OR IGNORE", retention.steamID64,
+					   (int)retention.styled, uuidStr.c_str(), replays, uuidStr.c_str());
+			txn.queries.push_back(mark);
+		}
+		char prune[1024];
+		V_snprintf(prune, sizeof(prune), sql_jumptop_replay_prune, replays, retention.steamID64, (int)retention.styled, JumpTable(retention.styled),
+				   retention.steamID64, JumpTable(retention.styled), retention.steamID64);
+		txn.queries.push_back(prune);
+		V_snprintf(prune, sizeof(prune), sql_jumptop_replay_prune_owners, retention.steamID64, (int)retention.styled, replays);
+		txn.queries.push_back(prune);
+		txn.queries.push_back(std::string("SELECT 1 FROM ") + replays + " WHERE ReplayUUID = '" + uuidStr + "' AND LENGTH(Data) > 0");
+		WriteReplayTransaction(std::make_shared<Transaction>(std::move(txn)), uuidStr, buffer.size());
+	}
+
 	// UUID прыжков, удалённых из админки (kz_jumptop_forget): буфер их реплея может прийти уже ПОСЛЕ
 	// удаления (рекордер останавливается через 2 с после прыжка) — тогда его не пишем. Ограничено.
 	std::deque<std::string> g_forgottenReplays;
@@ -333,56 +372,50 @@ namespace
 		return false;
 	}
 
-	void QualifyReplay(const std::string &uuid, bool styled)
+	// The recorder and both SQL submissions share this state until delivery.
+	// Results and data may arrive in either order.
+	struct ReplayQualification
 	{
-		if (IsForgotten(uuid))
-		{
-			return;
-		}
-		for (auto it = g_pendingReplays.begin(); it != g_pendingReplays.end(); ++it)
-		{
-			if (it->first == uuid)
-			{
-				InsertReplayRow(uuid, it->second, styled);
-				g_pendingReplays.erase(it);
-				return;
-			}
-		}
-		for (auto &q : g_qualifiedReplays)
-		{
-			if (q.first == uuid)
-			{
-				return;
-			}
-		}
-		g_qualifiedReplays.emplace_back(uuid, styled);
-		while (g_qualifiedReplays.size() > maxPendingReplays)
-		{
-			g_qualifiedReplays.pop_front();
-		}
-	}
+		std::string uuid;
+		ReplayRetention retention;
+		i32 remaining;
+		bool accepted = false;
+		std::optional<std::vector<char>> buffer {};
 
-	void OfferReplayBuffer(const std::string &uuid, const std::vector<char> &buffer)
-	{
-		if (IsForgotten(uuid))
+		void Resolve(bool saved, bool top = false)
 		{
-			return;
+			accepted |= saved;
+			retention.permanent |= top;
+			--remaining;
+			TryStore();
 		}
-		for (auto it = g_qualifiedReplays.begin(); it != g_qualifiedReplays.end(); ++it)
+
+		void Offer(std::vector<char> &&data)
 		{
-			if (it->first == uuid)
+			if (IsForgotten(uuid))
 			{
-				InsertReplayRow(uuid, buffer, it->second);
-				g_qualifiedReplays.erase(it);
 				return;
 			}
+			char path[512];
+			V_snprintf(path, sizeof(path), KZ_REPLAY_PATH "/%s.replay", uuid.c_str());
+			utils::WriteBufferToFile(path, data);
+			buffer.emplace(std::move(data));
+			TryStore();
 		}
-		g_pendingReplays.emplace_back(uuid, buffer);
-		while (g_pendingReplays.size() > maxPendingReplays)
+
+		void TryStore()
 		{
-			g_pendingReplays.pop_front();
+			if (remaining != 0 || !buffer)
+			{
+				return;
+			}
+			if (accepted && !IsForgotten(uuid))
+			{
+				InsertReplayRow(uuid, *buffer, retention);
+			}
+			buffer.reset();
 		}
-	}
+	};
 
 	// Вставка строки PB и сразу место в топе — одной транзакцией.
 	// Место в топе и объявление — по базе ПОСЛЕ коммита вставки. Не в той же транзакции: там
@@ -391,10 +424,11 @@ namespace
 	// чужую строку. Кэш «WR на момент захода» не используется вовсе — рекорд спрашивается у
 	// общей базы на каждом PB.
 	void AnnouncePB(CPlayerUserId userID, const std::string &name, u64 steamID64, i32 modeID, i32 jumpType, bool isBlock, i32 block, f64 distance,
-					const std::string &replayUuid, const std::string &mapName, u32 id, i32 direction, bool nopre)
+					const std::shared_ptr<ReplayQualification> &qualification, const std::string &mapName, u32 id, i32 direction, bool nopre)
 	{
 		if (!KZDatabaseService::IsReady())
 		{
+			qualification->Resolve(true);
 			return;
 		}
 		char rank[2048];
@@ -405,7 +439,7 @@ namespace
 		// clang-format off
 		KZDatabaseService::GetDatabaseConnection()->ExecuteTransaction(
 			txn,
-			[userID, name, steamID64, modeID, jumpType, isBlock, block, distance, replayUuid, mapName, id, direction, nopre](std::vector<ISQLQuery *> queries)
+			[userID, name, steamID64, modeID, jumpType, isBlock, block, distance, qualification, mapName, id, direction, nopre](std::vector<ISQLQuery *> queries)
 			{
 				i32 place = 0;
 				i32 total = 0;
@@ -418,12 +452,7 @@ namespace
 				KZ_LOG_INFO(LogChannel::DB, "[cyb] jumptop_pb id=%d steam_id=%llu mode=%d type=%d dir=%d block=%d dist=%.4f map=%s place=%d total=%d\n", PublicJumpId(id, nopre),
 							steamID64, modeID, jumpType, direction, isBlock ? block : 0, distance, mapName.c_str(), place, total);
 
-				// Реплей в базу — только прыжку из топа: PB новичка обновляется каждые несколько прыжков,
-				// и хранить реплей каждого значило бы бесконечно растить общую MySQL.
-				if (place >= 1 && place <= KZ::jumptop::topCount)
-				{
-					QualifyReplay(replayUuid, nopre);
-				}
+				qualification->Resolve(true, place >= 1 && place <= KZ::jumptop::topCount);
 
 				std::string mode = ModeShortName(modeID) + (nopre ? " · NOPRE" : "");
 				std::string typeName = TypeName(jumpType, direction, false);
@@ -477,16 +506,17 @@ namespace
 													  mode.c_str());
 				}
 			},
-			[steamID64, jumpType](std::string error, int failIndex)
+			[steamID64, jumpType, qualification](std::string error, int failIndex)
 			{
+				qualification->Resolve(true);
 				KZ_LOG_ERROR(LogChannel::DB, "[cyb] jumptop_rank_failed reason=db steam_id=%llu type=%d error=%s\n", steamID64, jumpType,
 							 error.c_str());
 			});
 		// clang-format on
 	}
 
-	void SubmitPB(KZPlayer *player, i32 modeID, i32 jumpType, bool isBlock, i32 block, i32 direction, bool nopre, Jump *jump, const std::string &replayUuid,
-				  const std::string &details)
+	void SubmitPB(KZPlayer *player, i32 modeID, i32 jumpType, bool isBlock, i32 block, i32 direction, bool nopre, Jump *jump,
+				  const std::shared_ptr<ReplayQualification> &qualification, const std::string &details)
 	{
 		ISQLConnection *db = KZDatabaseService::GetDatabaseConnection();
 		std::string mapName = g_pKZUtils->GetCurrentMapName().Get();
@@ -504,6 +534,7 @@ namespace
 		{
 			if (!std::isfinite(v))
 			{
+				qualification->Resolve(false);
 				KZ_LOG_WARN(LogChannel::DB, "[cyb] jumptop_pb_skipped reason=non_finite steam_id=%llu type=%d\n", steamID64, jumpType);
 				return;
 			}
@@ -512,7 +543,7 @@ namespace
 		std::vector<char> insert(cleanDetails.size() + map.size() + 1024);
 		V_snprintf(insert.data(), (int)insert.size(), sql_jumptop_insert, JumpTable(nopre), steamID64, modeID, jumpType, isBlock ? 1 : 0, block, distance,
 				   jump->GetStrafeCount(), (f64)jump->GetSync(), (f64)jump->GetTakeoffSpeed(), (f64)jump->GetMaxSpeed(), (f64)jump->airtime,
-				   (f64)jump->GetMaxHeight(), (f64)jump->GetOffset(), map.c_str(), server.c_str(), replayUuid.c_str(), cleanDetails.c_str(),
+				   (f64)jump->GetMaxHeight(), (f64)jump->GetOffset(), map.c_str(), server.c_str(), qualification->uuid.c_str(), cleanDetails.c_str(),
 				   direction);
 
 		Transaction txn;
@@ -523,13 +554,14 @@ namespace
 		// clang-format off
 		db->ExecuteTransaction(
 			txn,
-			[userID, name, steamID64, modeID, jumpType, isBlock, block, distance, replayUuid, mapName, direction, nopre](std::vector<ISQLQuery *> queries)
+			[userID, name, steamID64, modeID, jumpType, isBlock, block, distance, qualification, mapName, direction, nopre](std::vector<ISQLQuery *> queries)
 			{
-				AnnouncePB(userID, name, steamID64, modeID, jumpType, isBlock, block, distance, replayUuid, mapName, queries[0]->GetInsertId(),
+				AnnouncePB(userID, name, steamID64, modeID, jumpType, isBlock, block, distance, qualification, mapName, queries[0]->GetInsertId(),
 						   direction, nopre);
 			},
-			[steamID64, jumpType](std::string error, int failIndex)
+			[steamID64, jumpType, qualification](std::string error, int failIndex)
 			{
+				qualification->Resolve(false);
 				KZ_LOG_ERROR(LogChannel::DB, "[cyb] jumptop_pb_failed reason=db steam_id=%llu type=%d index=%d error=%s\n", steamID64, jumpType,
 							 failIndex, error.c_str());
 			});
@@ -708,35 +740,20 @@ void KZ::jumptop::OnJumpFinish(KZPlayer *player, Jump *jump)
 		return;
 	}
 
-	// Реплей прыжка: рекордер этого прыжка (создан KZRecordingService::OnJumpFinish только для
-	// wrecker-тира) заводим/помечаем, и по остановке его буфер уйдёт в StoreReplay.
 	UUID_t replayUuid = player->recordingService->GetLastJumpUUID();
-	player->recordingService->MarkJumpForJumptop(replayUuid, jump);
-	std::string uuidStr = replayUuid.ToString();
-	std::string details = BuildDetails(player, jump, uuidStr.c_str());
+	auto qualification = std::make_shared<ReplayQualification>(
+		ReplayQualification {replayUuid.ToString(), {player->GetSteamId64(), nopre}, isPB[0] + isPB[1]});
+	player->recordingService->MarkJumpForJumptop(replayUuid, jump,
+		[qualification](std::vector<char> &&buffer) { qualification->Offer(std::move(buffer)); });
+	std::string details = BuildDetails(player, jump, qualification->uuid.c_str());
 
 	for (i32 c = 0; c < 2; c++)
 	{
 		if (isPB[c])
 		{
-			SubmitPB(player, modeID, jumpType, c == 1, c == 1 ? block : 0, direction, nopre, jump, uuidStr, details);
+			SubmitPB(player, modeID, jumpType, c == 1, c == 1 ? block : 0, direction, nopre, jump, qualification, details);
 		}
 	}
-}
-
-void KZ::jumptop::StoreReplay(const UUID_t &uuid, const std::vector<char> &buffer)
-{
-	std::string uuidStr = uuid.ToString();
-	// Прыжок уже удалён из админки (kz_jumptop_forget пришёл раньше буфера) — ни файла, ни базы.
-	if (IsForgotten(uuidStr))
-	{
-		return;
-	}
-	// Локальная копия — чтобы !jumptop на этом же инстансе играл без похода в базу.
-	char path[512];
-	V_snprintf(path, sizeof(path), KZ_REPLAY_PATH "/%s.replay", uuidStr.c_str());
-	utils::WriteBufferToFile(path, buffer);
-	OfferReplayBuffer(uuidStr, buffer);
 }
 
 void KZ::jumptop::StoreMovementEvidence(const UUID_t &uuid, const std::vector<char> &buffer, u64 steamId, const std::string &mapName, int endTick,
@@ -2550,14 +2567,6 @@ CON_COMMAND_F(kz_jumptop_forget, "Забыть удалённые прыжки: 
 			{
 				g_forgottenReplays.pop_front();
 			}
-		}
-		for (auto it = g_pendingReplays.begin(); it != g_pendingReplays.end();)
-		{
-			it = it->first == uuid ? g_pendingReplays.erase(it) : it + 1;
-		}
-		for (auto it = g_qualifiedReplays.begin(); it != g_qualifiedReplays.end();)
-		{
-			it = it->first == uuid ? g_qualifiedReplays.erase(it) : it + 1;
 		}
 		char path[512];
 		V_snprintf(path, sizeof(path), KZ_REPLAY_PATH "/%s.replay", uuid.c_str());

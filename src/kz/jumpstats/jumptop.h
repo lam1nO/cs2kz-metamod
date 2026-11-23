@@ -34,9 +34,6 @@ namespace KZ::jumptop
 	// Зовётся из KZJumpstatsService::EndJump после записи прыжка в реплей (вне prac).
 	void OnJumpFinish(KZPlayer *player, Jump *jump);
 
-	// Готовый буфер реплея прыжка, помеченного джамптопом (KZRecordingService). Главный поток.
-	void StoreReplay(const UUID_t &uuid, const std::vector<char> &buffer);
-
 	void StoreMovementEvidence(const UUID_t &uuid, const std::vector<char> &buffer, u64 steamId, const std::string &mapName, int endTick,
 							   std::function<void(bool)> done);
 
