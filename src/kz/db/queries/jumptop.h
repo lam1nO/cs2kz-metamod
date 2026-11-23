@@ -231,6 +231,18 @@ constexpr char sql_jumptop_gettop[] = R"(
         LIMIT %d
 )";
 
+// Закреплённый PB: та же категория и порядок, что в топе, с фильтром по игроку.
+constexpr char sql_jumptop_getown[] = R"(
+    SELECT j.ID, j.SteamID64, COALESCE(p.Alias, ''), j.Block, j.Distance, j.Strafes, j.Sync, j.Pre, j.Max, j.Airtime,
+        j.ReplayUUID, j.MapName
+        FROM %s j
+        LEFT JOIN Players p ON p.SteamID64 = j.SteamID64
+        WHERE j.Mode = %d AND j.JumpType = %d AND j.IsBlockJump = %d AND )" JUMPTOP_DIRECTION_SQL R"( = %d
+            AND j.SteamID64 = %llu AND j.Removed = 0 AND )" JUMPTOP_NOT_BANNED_SQL R"(
+        ORDER BY j.Block DESC, j.Distance DESC, j.ID ASC
+        LIMIT 1
+)";
+
 // Одна строка целиком — для !jumpinfo (разбор на АХК). Последняя колонка — направление, -1 = не записано.
 // Параметры: Table, ID.
 constexpr char sql_jumptop_getjump[] = R"(

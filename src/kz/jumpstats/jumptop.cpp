@@ -1776,11 +1776,29 @@ namespace
 		bool nopre = false;
 		u64 pendingQuery = 0; // ответ показываем только на последний запрос
 		std::vector<JumptopRow> rows;
+		JumptopRow own {};
+		i32 shownOwnReplay = 0;
 		std::vector<i32> shownIds; // строка на экране -> ID прыжка
 	};
 
 	JumptopView g_jtView[MAXPLAYERS + 1];
 	u64 g_jtQuerySeq = 0;
+
+	JumptopRow ReadJumptopRow(ISQLResult *result, bool nopre)
+	{
+		JumptopRow row {};
+		row.id = PublicJumpId(result->GetInt(0), nopre);
+		row.steamID64 = (u64)result->GetInt64(1);
+		row.alias = result->GetString(2) ? result->GetString(2) : "";
+		row.block = result->GetInt(3);
+		row.distance = ResultDouble(result, 4);
+		row.strafes = result->GetInt(5);
+		row.sync = ResultDouble(result, 6);
+		row.pre = ResultDouble(result, 7);
+		row.replay = result->GetString(10) && result->GetString(10)[0];
+		row.map = result->GetString(11) ? result->GetString(11) : "";
+		return row;
+	}
 
 	void QueryJumptopWindow(KZPlayer *player);
 
@@ -1870,6 +1888,12 @@ namespace
 			RenderJumptopWindow(player);
 			return;
 		}
+		if (KZ_STREQ(id, "gm_go") && IsJumpId(v.shownOwnReplay))
+		{
+			KZ::gsmenu::Close(player, "jump_replay");
+			PrintJumpInfo(player, v.shownOwnReplay, true);
+			return;
+		}
 		if (sscanf(id, "gr%d_go%n", &row, &end) == 1 && end >= 0 && !id[end] && row >= 0 && row < (i32)v.shownIds.size())
 		{
 			KZ::gsmenu::Close(player, "jump_replay");
@@ -1938,55 +1962,25 @@ namespace
 			t.rows.push_back(row);
 			v.shownIds.push_back(r.id);
 		}
-		// Свой рекорд — из кэша PB (тот же, что решает, попадёт ли прыжок в топ).
-		if (!meShown)
+		v.shownOwnReplay = 0;
+		if (!meShown && IsJumpId(v.own.id))
 		{
-			PlayerCache *cache = GetCache(player);
-			auto it = cache ? cache->bests.find(CacheKey(v.modeID, v.jumpType, v.isBlock, v.direction, v.nopre)) : decltype(cache->bests.end()) {};
-			if (cache && it != cache->bests.end())
+			const auto it = std::find_if(v.rows.begin(), v.rows.end(), [me](const JumptopRow &row) { return row.steamID64 == me; });
+			const JumptopRow &own = it == v.rows.end() ? v.own : *it;
+			t.hasMe = true;
+			t.me.cells[0] = it == v.rows.end() ? "—" : std::to_string(it - v.rows.begin() + 1);
+			t.me.cells[1] = player->GetName();
+			t.me.cells[2] = JumpDistanceText(own, v.isBlock);
+			t.me.cells[3] = std::to_string(own.strafes);
+			t.me.cells[4] = JumpSyncText(own.sync);
+			t.me.cells[5] = JumpPreText(own.pre);
+			t.me.cells[6] = own.map.empty() ? "—" : own.map;
+			t.me.initial = KZ::gsmenu::Initial(player->GetName());
+			t.me.colour = (u32)(me % 8);
+			if (own.replay)
 			{
-				i32 place = 0;
-				for (i32 i = 0; i < (i32)v.rows.size(); i++)
-				{
-					if (v.rows[i].steamID64 == me)
-					{
-						place = i + 1;
-					}
-				}
-				const Best &best = it->second;
-				JumptopRow mine {};
-				mine.block = best.block;
-				mine.distance = best.distance;
-				t.hasMe = true;
-				t.me.cells[0] = place > 0 ? std::to_string(place) : "—";
-				t.me.cells[1] = player->GetName();
-				t.me.cells[2] = JumpDistanceText(mine, v.isBlock);
-				// Стрейфы, синк, pre, карта — из своей строки топа (если она в выборке), иначе из кэша PB.
-				if (place > 0)
-				{
-					// Вся строка — из одного прыжка: PB мог обновиться после запроса топа.
-					t.me.cells[2] = JumpDistanceText(v.rows[place - 1], v.isBlock);
-					t.me.cells[3] = std::to_string(v.rows[place - 1].strafes);
-					t.me.cells[4] = JumpSyncText(v.rows[place - 1].sync);
-					t.me.cells[5] = JumpPreText(v.rows[place - 1].pre);
-					t.me.cells[6] = v.rows[place - 1].map;
-				}
-				else if (best.strafes >= 0)
-				{
-					t.me.cells[3] = std::to_string(best.strafes);
-					t.me.cells[4] = JumpSyncText(best.sync);
-					t.me.cells[5] = JumpPreText(best.pre);
-					t.me.cells[6] = best.map;
-				}
-				for (i32 j = 3; j <= 6; j++)
-				{
-					if (t.me.cells[j].empty())
-					{
-						t.me.cells[j] = "—";
-					}
-				}
-				t.me.initial = KZ::gsmenu::Initial(player->GetName());
-				t.me.colour = (u32)(me % 8);
+				t.me.actions[0] = "▶";
+				v.shownOwnReplay = own.id;
 			}
 		}
 		if (v.rows.empty())
@@ -2005,9 +1999,14 @@ namespace
 		v.page = 0;
 		const u64 seq = ++g_jtQuerySeq;
 		v.pendingQuery = seq;
+		v.shownOwnReplay = 0;
+		v.shownIds.clear();
 		char query[2048];
 		V_snprintf(query, sizeof(query), sql_jumptop_gettop, JumpTable(v.nopre), v.modeID, v.jumpType, v.isBlock ? 1 : 0, v.direction, kJumptopWindowLimit);
 		Transaction txn;
+		txn.queries.push_back(query);
+		V_snprintf(query, sizeof(query), sql_jumptop_getown, JumpTable(v.nopre), v.modeID, v.jumpType, v.isBlock ? 1 : 0, v.direction,
+				   player->GetSteamId64());
 		txn.queries.push_back(query);
 		CPlayerUserId userID = player->GetClient()->GetUserID();
 		const bool firstOpen = !KZ::gsmenu::IsOpenBy(player, "jumptop");
@@ -2031,19 +2030,10 @@ namespace
 				ISQLResult *r = queries[0]->GetResultSet();
 				while (r && r->FetchRow())
 				{
-					JumptopRow row {};
-					row.id = PublicJumpId(r->GetInt(0), v.nopre);
-					row.steamID64 = (u64)r->GetInt64(1);
-					row.alias = r->GetString(2) ? r->GetString(2) : "";
-					row.block = r->GetInt(3);
-					row.distance = ResultDouble(r, 4);
-					row.strafes = r->GetInt(5);
-					row.sync = ResultDouble(r, 6);
-					row.pre = ResultDouble(r, 7);
-					row.replay = r->GetString(10) && r->GetString(10)[0];
-					row.map = r->GetString(11) ? r->GetString(11) : "";
-					v.rows.push_back(row);
+					v.rows.push_back(ReadJumptopRow(r, v.nopre));
 				}
+				ISQLResult *own = queries[1]->GetResultSet();
+				v.own = own && own->FetchRow() ? ReadJumptopRow(own, v.nopre) : JumptopRow {};
 				RenderJumptopWindow(p);
 			},
 			[userID](std::string error, int)
