@@ -1918,6 +1918,10 @@ namespace
 			return;
 		}
 
+		if (v.loading)
+		{
+			return;
+		}
 		if (KZ_STREQ(id, "gw_prev") || KZ_STREQ(id, "gw_next"))
 		{
 			const i32 pages = ((i32)v.rows.size() + KZ_GSMENU_TABLE_ROWS - 1) / KZ_GSMENU_TABLE_ROWS;
@@ -2065,11 +2069,10 @@ namespace
 			RenderJumptopWindow(player);
 			return;
 		}
-		v.rows.clear();
 		v.loading = true;
 		const u64 seq = ++g_jtQuerySeq;
 		v.pendingQuery = seq;
-		if (!RenderJumptopWindow(player))
+		if (!KZ::gsmenu::IsOpenBy(player, "jspb") && !RenderJumptopWindow(player))
 		{
 			PrintPlayerBests(player, v.personal->steamID64, v.personal->alias, v.modeID, v.nopre);
 			return;
@@ -2100,6 +2103,7 @@ namespace
 				{
 					return;
 				}
+				v.rows.clear();
 				ISQLResult *result = queries[0]->GetResultSet();
 				if (result && result->FetchRow())
 				{
@@ -2135,9 +2139,8 @@ namespace
 		const u64 seq = ++g_jtQuerySeq;
 		v.pendingQuery = seq;
 		v.loading = true;
-		v.rows.clear();
-		v.own = {};
-		if (!RenderJumptopWindow(player))
+		// Keep the currently visible table until the latest query can replace it.
+		if (!KZ::gsmenu::IsOpenBy(player, "jumptop") && !RenderJumptopWindow(player))
 		{
 			return false;
 		}

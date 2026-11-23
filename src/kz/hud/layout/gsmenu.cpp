@@ -311,7 +311,7 @@ bool KZ::gsmenu::ShowTable(KZPlayer *player, const Table &t, ClickFn onClick, co
 		return false;
 	}
 	const bool wasOpen = w->open;
-	if (wasOpen && w->owner != (owner ? owner : ""))
+	if (w->entity.IsValid() && !w->owner.empty() && w->owner != (owner ? owner : ""))
 	{
 		// A different command can reuse every button ID with a different meaning.
 		Destroy(player, *w);
