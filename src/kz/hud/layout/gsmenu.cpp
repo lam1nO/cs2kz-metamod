@@ -309,7 +309,7 @@ bool KZ::gsmenu::ShowTable(KZPlayer *player, const Table &t, ClickFn onClick, co
 		return false;
 	}
 	const bool wasOpen = w->open;
-	if (w->actionEpoch != t.actionEpoch)
+	if (w->actionEpoch != t.actionEpoch || (t.actionEpoch && w->owner != (owner ? owner : "")))
 	{
 		Destroy(player, *w);
 		w->actionEpoch = t.actionEpoch;
@@ -400,6 +400,7 @@ bool KZ::gsmenu::ShowTable(KZPlayer *player, const Table &t, ClickFn onClick, co
 	// Топ прыжков (v3): без шапки с обложкой, заголовок и режимы в одной строке.
 	Class(player, *w, layout, "gw", "js", t.cols && !V_strcmp(t.cols, "cols-jumptop"));
 	ClassLazy(player, *w, layout, "gw", "js-pb", t.jumpPB);
+	ClassLazy(player, *w, layout, "gw", "run-styles", t.runStyles);
 	Class(player, *w, layout, "gw_table", "no-tp", t.noTp);
 	ClassLazy(player, *w, layout, "gw", "empty", t.empty);
 	for (i32 j = 0; j < KZ_GSMENU_TABLE_COLS; j++)

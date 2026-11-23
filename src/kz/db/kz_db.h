@@ -151,7 +151,7 @@ public:
 	static void QueryAllRecords(CUtlString mapName, TransactionSuccessCallbackFunc onSuccess, TransactionFailureCallbackFunc onFailure);
 	static void QueryRecords(CUtlString mapName, CUtlString courseName, u32 modeID, u32 count, u32 offset, TransactionSuccessCallbackFunc onSuccess,
 							 TransactionFailureCallbackFunc onFailure,
-								 u64 styleMask = 0, bool includeStyleCounts = false, u64 personalSteamId = 0);
+								 u64 styleMask = 0, bool includeStyleCounts = false, u64 personalSteamId = 0, bool mixedStyles = false);
 
 	// SavedRuns (Task 2): upsert снапшота незавершённого рана игрока на текущей карте/курсе.
 	// Собирает map/course/mode/styles из состояния player сам (см. save_savedrun.cpp); no-op, если

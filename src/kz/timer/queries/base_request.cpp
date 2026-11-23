@@ -428,6 +428,11 @@ void BaseRequest::SetupStyles(CUtlString styleNames)
 	{
 		this->localStyleIDs = 0;
 	}
+	else if (AllowsMixedStyles() && styleNames.IsEqual_FastCaseInsensitive("all"))
+	{
+		mixedStyles = true;
+		globalStatus = ResponseStatus::DISABLED;
+	}
 	// Exact combinations accept both ABH+LGJ and the legacy ABH,LGJ syntax.
 	else
 	{
@@ -452,10 +457,15 @@ void BaseRequest::SetupStyles(CUtlString styleNames)
 			}
 		}
 	}
-	if (styleList.HasElement(CUtlString(KZ::style::NopreName)) && V_stricmp(KZ::mode::GetModeInfo(modeName).shortModeName.Get(), "CKZ"))
+	const CUtlString mode = KZ::mode::GetModeInfo(modeName).shortModeName;
+	FOR_EACH_VEC(styleList, i)
 	{
-		localStatus = ResponseStatus::DISABLED;
-		globalStatus = ResponseStatus::DISABLED;
+		if (!KZ::style::CanUseStyleInMode(styleList[i].Get(), mode.Get()))
+		{
+			localStatus = ResponseStatus::DISABLED;
+			globalStatus = ResponseStatus::DISABLED;
+			break;
+		}
 	}
 }
 

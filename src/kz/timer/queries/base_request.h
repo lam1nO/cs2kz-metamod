@@ -131,6 +131,7 @@ protected:
 	KZ::api::Mode apiMode;
 
 	u64 localStyleIDs {};
+	bool mixedStyles = false;
 	CUtlVector<CUtlString> styleList;
 
 public:
@@ -142,6 +143,7 @@ public:
 	void SetupStyles(CUtlString styleNames);
 	CUtlString GetModeStyleLabel() const;
 	virtual bool DefaultsToActiveStyles() const { return false; }
+	virtual bool AllowsMixedStyles() const { return false; }
 
 	virtual void PrintInstructions() {}
 

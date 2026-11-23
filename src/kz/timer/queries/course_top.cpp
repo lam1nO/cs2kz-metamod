@@ -15,7 +15,14 @@
 #include "utils/json.h"
 
 #include <fstream>
+#include <map>
 #include <sstream>
+
+namespace
+{
+	std::string StyleLabelForMask(u64 mask);
+}
+
 // clang-format off
 #define COURSE_TOP_TABLE_KEY "Course Top - Table Name (Server Overall)"
 static_global const char *columnKeysLocal[] = {
@@ -67,9 +74,14 @@ struct CourseTopRequest : public BaseRequest
 		RequestFeature::Course | RequestFeature::Map | RequestFeature::Mode | RequestFeature::Offset | RequestFeature::Limit | RequestFeature::Style;
 
 	bool DefaultsToActiveStyles() const override { return true; }
+	bool AllowsMixedStyles() const override { return true; }
+	bool requestLocal = false;
+	bool requestGlobal = false;
 
 	void Init(u64 features, const CCommand *args, bool queryLocal, bool queryGlobal) override
 	{
+		requestLocal = queryLocal;
+		requestGlobal = queryGlobal;
 		BaseRequest::Init(features, args, queryLocal, queryGlobal);
 		if (styleList.Count() > 0)
 		{
@@ -92,10 +104,18 @@ struct CourseTopRequest : public BaseRequest
 		u64 steamid64;
 		u64 points {}; // 0 for local database
 		CUtlString created; // «YYYY-MM-DD HH:MM:SS» из Times.Created (локальная БД), пусто — нет данных
+		u64 styleMask {};
 
-		CUtlString GetName()
+		CUtlString GetName(bool withStyle = false)
 		{
-			return name;
+			if (!withStyle)
+			{
+				return name;
+			}
+			CUtlString label = name;
+			label.Append(" · ");
+			label.Append(StyleLabelForMask(styleMask).c_str());
+			return label;
 		}
 
 		CUtlString GetRunID()
@@ -180,13 +200,14 @@ struct CourseTopRequest : public BaseRequest
 				}
 
 				req->localStatus = ResponseStatus::RECEIVED;
+				const int styleColumn = req->mixedStyles ? 7 : 6;
 				ISQLResult *result = queries[0]->GetResultSet();
 				if (result && result->GetRowCount() > 0)
 				{
 					while (result->FetchRow())
 					{
 						req->srData.overallData.AddToTail(
-							{result->GetString(0), result->GetString(2), (u64)result->GetInt64(4), result->GetFloat(3), (u64)result->GetInt64(1), 0, result->GetString(5)});
+							{result->GetString(0), result->GetString(2), (u64)result->GetInt64(4), result->GetFloat(3), (u64)result->GetInt64(1), 0, result->GetString(5), (u64)result->GetInt64(styleColumn)});
 					}
 				}
 
@@ -194,7 +215,7 @@ struct CourseTopRequest : public BaseRequest
 				{
 					while (result->FetchRow())
 					{
-						req->srData.proData.AddToTail({result->GetString(0), result->GetString(2), 0, result->GetFloat(3), (u64)result->GetInt64(1), 0, result->GetString(5)});
+						req->srData.proData.AddToTail({result->GetString(0), result->GetString(2), 0, result->GetFloat(3), (u64)result->GetInt64(1), 0, result->GetString(5), (u64)result->GetInt64(styleColumn)});
 					}
 				}
 				if ((result = queries[2]->GetResultSet()))
@@ -210,7 +231,7 @@ struct CourseTopRequest : public BaseRequest
 					if (result && result->FetchRow())
 					{
 						req->srData.personal[i - 3] = RunStats{result->GetString(0), result->GetString(2), (u64)result->GetInt64(4),
-							result->GetFloat(3), (u64)result->GetInt64(1), 0, result->GetString(5)};
+							result->GetFloat(3), (u64)result->GetInt64(1), 0, result->GetString(5), (u64)result->GetInt64(7)};
 						req->srData.personalPlace[i - 3] = result->GetInt(6);
 					}
 				}
@@ -227,7 +248,7 @@ struct CourseTopRequest : public BaseRequest
 			};
 
 			KZDatabaseService::QueryRecords(this->mapName, this->courseName, this->localModeID, this->limit, this->offset, onQuerySuccess,
-											onQueryFailure, this->localStyleIDs, true, steamId);
+											onQueryFailure, this->localStyleIDs, true, steamId, this->mixedStyles);
 		}
 	}
 
@@ -387,6 +408,11 @@ struct CourseTopRequest : public BaseRequest
 	{
 		KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
 		CUtlString rank;
+		CUtlString modeLabel = GetModeStyleLabel();
+		if (mixedStyles)
+		{
+			modeLabel.Append(V_stricmp(player->languageService->GetLanguage(), "ru") ? " · All styles" : " · Все стили");
+		}
 
 		// Overall table
 		CUtlString headers[KZ_ARRAYSIZE(columnKeysLocal)];
@@ -395,12 +421,12 @@ struct CourseTopRequest : public BaseRequest
 			headers[i] = player->languageService->PrepareMessage(columnKeysLocal[i]).c_str();
 		}
 		utils::Table<KZ_ARRAYSIZE(columnKeysLocal)> table(
-			player->languageService->PrepareMessage(COURSE_TOP_TABLE_KEY, mapName.Get(), courseName.Get(), GetModeStyleLabel().Get()).c_str(), headers);
+			player->languageService->PrepareMessage(COURSE_TOP_TABLE_KEY, mapName.Get(), courseName.Get(), modeLabel.Get()).c_str(), headers);
 		FOR_EACH_VEC(srData.overallData, i)
 		{
 			rank.Format("%llu", this->offset + i + 1);
 			RunStats stats = srData.overallData[i];
-			table.SetRow(i, rank, stats.GetName(), stats.GetTime(), stats.GetTeleportCount(), stats.GetSteamID64(), stats.GetRunID());
+			table.SetRow(i, rank, stats.GetName(mixedStyles), stats.GetTime(), stats.GetTeleportCount(), stats.GetSteamID64(), stats.GetRunID());
 		}
 		player->PrintConsole(false, false, table.GetSeparator("="));
 		player->PrintConsole(false, false, table.GetTitle());
@@ -418,12 +444,12 @@ struct CourseTopRequest : public BaseRequest
 			headersPro[i] = player->languageService->PrepareMessage(columnKeysLocalPro[i]).c_str();
 		}
 		utils::Table<KZ_ARRAYSIZE(columnKeysLocalPro)> tablePro(
-			player->languageService->PrepareMessage(COURSE_TOP_PRO_TABLE_KEY, mapName.Get(), courseName.Get(), GetModeStyleLabel().Get()).c_str(), headersPro);
+			player->languageService->PrepareMessage(COURSE_TOP_PRO_TABLE_KEY, mapName.Get(), courseName.Get(), modeLabel.Get()).c_str(), headersPro);
 		FOR_EACH_VEC(srData.proData, i)
 		{
 			rank.Format("%llu", this->offset + i + 1);
 			RunStats stats = srData.proData[i];
-			tablePro.SetRow(i, rank, stats.GetName(), stats.GetTime(), stats.GetSteamID64(), stats.GetRunID());
+			tablePro.SetRow(i, rank, stats.GetName(mixedStyles), stats.GetTime(), stats.GetSteamID64(), stats.GetRunID());
 		}
 		player->PrintConsole(false, false, tablePro.GetSeparator("="));
 		player->PrintConsole(false, false, tablePro.GetTitle());
@@ -487,6 +513,9 @@ namespace
 	// окно тихо дозапрашивает 100 — чтобы найти свой рекорд ниже десятки.
 	constexpr u64 kMaptopLimit = 100;
 	constexpr i32 kMaptopShow = 10;
+	constexpr char kAllStyles[] = "all";
+	u64 g_maptopActionEpoch = 0;
+	u64 g_maptopQuerySequence = 0;
 
 	struct MaptopView
 	{
@@ -498,6 +527,8 @@ namespace
 		i32 page = 0;
 		bool pro = true;
 		u64 pendingUid = 0;     // последний перезапрос из окна — показываем только его ответ
+		u64 querySequence = 0;
+		u64 actionEpoch = 0;
 		bool qLocal = true, qGlobal = true; // откуда брала данные команда (!maptop/!gmaptop/!smaptop)
 		u64 baseOffset = 0;                 // o= команды — места считаются от него
 		f64 lastRequery = -1.0; // клики по режимам не чаще 2 в секунду
@@ -518,7 +549,7 @@ namespace
 	// из BaseRequest::CheckRequests, который обходит BaseRequest::instances через remove_if: новый запрос,
 	// созданный прямо там, делал push_back в тот же вектор посреди обхода — переаллокация, обход по
 	// освобождённой памяти, segv (канарейка 13.10, 0.305.0, кадр CheckRequests::$_2).
-	f64 DoRequeryMaptop(CPlayerUserId userID, CUtlString mode, CUtlString course, CUtlString style)
+	f64 DoRequeryMaptop(CPlayerUserId userID, CUtlString mode, CUtlString course, CUtlString style, u64 sequence)
 	{
 		KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
 		if (!player)
@@ -526,6 +557,10 @@ namespace
 			return 0.0;
 		}
 		MaptopView &v = g_maptop[player->GetPlayerSlot().Get()];
+		if (v.querySequence != sequence || !KZ::gsmenu::IsOpenBy(player, "maptop"))
+		{
+			return 0.0;
+		}
 		// Без кавычек: ParseArgsToKV3 берёт значение до следующего «ключ=» (пробелы в имени курса не
 		// мешают), а кавычки он НЕ снимает — с ними курс искался как "Main" и таблица была пустой.
 		CCommand args;
@@ -559,8 +594,10 @@ namespace
 		}
 		// Ответы, пришедшие до отложенного создания, уже чужие.
 		v.pendingUid = UINT64_MAX;
-		StartTimer<CPlayerUserId, CUtlString, CUtlString, CUtlString>(DoRequeryMaptop, player->GetClient()->GetUserID(), CUtlString(mode),
-			CUtlString(course), CUtlString(style.c_str()), 0.0, false);
+		v.querySequence = ++g_maptopQuerySequence;
+		StartTimer<CPlayerUserId, CUtlString, CUtlString, CUtlString, u64>(
+			DoRequeryMaptop, player->GetClient()->GetUserID(), CUtlString(mode), CUtlString(course), CUtlString(style.c_str()), v.querySequence, 0.0,
+			false);
 	}
 
 	CUtlVector<CourseTopRequest::RunStats> &MaptopList(MaptopView &v)
@@ -568,12 +605,40 @@ namespace
 		return v.pro ? v.data.proData : v.data.overallData;
 	}
 
+	bool MaptopStyleAllowed(std::string_view key, std::string_view mode)
+	{
+		size_t start = 0;
+		for (size_t end; start < key.size(); start = end + 1)
+		{
+			end = key.find('+', start);
+			if (!KZ::style::CanUseStyleInMode(key.substr(start, end - start), mode))
+			{
+				return false;
+			}
+			if (end == std::string_view::npos)
+			{
+				break;
+			}
+		}
+		return true;
+	}
+
 	void OnMaptopClick(KZPlayer *player, const char *id)
 	{
 		MaptopView &v = g_maptop[player->GetPlayerSlot().Get()];
 		i32 row = -1, k = -1;
 		int end = -1;
-		if (!v.global && KZ_STREQ(id, "gw_style"))
+		if (!v.global && (KZ_STREQ(id, "gf3_0") || KZ_STREQ(id, "gf3_1")))
+		{
+			const bool showStyles = KZ_STREQ(id, "gf3_1");
+			const bool isStyled = !v.style.empty();
+			if (v.pendingUid || showStyles != isStyled)
+			{
+				RequeryMaptop(player, v.mode.Get(), v.course.Get(), showStyles ? kAllStyles : "", false);
+			}
+			return;
+		}
+		if (!v.global && !v.style.empty() && KZ_STREQ(id, "gw_style"))
 		{
 			v.styleOpen = !v.styleOpen;
 			RenderMaptop(player);
@@ -582,13 +647,13 @@ namespace
 		if (v.styleOpen && sscanf(id, "gw_st%d%n", &k, &end) == 1 && end >= 0 && !id[end] && k >= 0 && k < (i32)v.styleChoices.size())
 		{
 			const auto selected = v.styleChoices[k];
-			if (selected.find(KZ::style::NopreName) != std::string::npos && V_stricmp(KZ::mode::GetModeInfo(v.mode).shortModeName.Get(), "CKZ"))
+			if (!MaptopStyleAllowed(selected, KZ::mode::GetModeInfo(v.mode).shortModeName.Get()))
 			{
 				return;
 			}
 			v.styleOpen = false;
 			RenderMaptop(player);
-			if (selected != v.style)
+			if (v.pendingUid || selected != v.style)
 			{
 				RequeryMaptop(player, v.mode.Get(), v.course.Get(), selected, false);
 			}
@@ -601,7 +666,12 @@ namespace
 		}
 		if (KZ_STREQ(id, "gf1_0") || KZ_STREQ(id, "gf1_1"))
 		{
-			v.pro = KZ_STREQ(id, "gf1_0");
+			const bool pro = KZ_STREQ(id, "gf1_0");
+			if (v.pro != pro)
+			{
+				v.pro = pro;
+				v.actionEpoch = ++g_maptopActionEpoch;
+			}
 			v.page = 0;
 			RenderMaptop(player);
 			return;
@@ -626,8 +696,8 @@ namespace
 				if (shown++ == k)
 				{
 					v.page = 0;
-					const bool resetStyle = V_stricmp(mode, "CKZ") && v.style.find(KZ::style::NopreName) != std::string::npos;
-					RequeryMaptop(player, mode, v.course.Get(), resetStyle ? "" : v.style, true);
+					const bool resetStyle = !MaptopStyleAllowed(v.style, mode);
+					RequeryMaptop(player, mode, v.course.Get(), resetStyle ? kAllStyles : v.style, true);
 					return;
 				}
 			}
@@ -721,6 +791,8 @@ namespace
 			row.cells[3] = std::string("+") + utils::FormatTime(r.time - best).Get();
 		}
 		row.cells[4] = RecordDate(r.created.Get());
+		row.cells[5] = StyleLabelForMask(r.styleMask);
+		row.noGo = r.runID.IsEmpty();
 		row.initial = KZ::gsmenu::Initial(r.name.Get());
 		row.colour = (u32)(r.steamid64 % 8);
 		row.wr = rank == 1;
@@ -745,50 +817,47 @@ namespace
 		{
 			return {};
 		}
-		std::sort(names.begin(), names.end());
-		std::string label;
-		for (auto name : names)
-		{
-			if (!label.empty())
-			{
-				label += '+';
-			}
-			label += name;
-		}
-		return label;
+		return KZ::style::StyleKey(std::move(names));
 	}
 
 	void RenderStyleOptions(MaptopView &v, KZ::gsmenu::Table &t, bool english)
 	{
-		const std::string noStyle = english ? "No style" : "Без стиля";
-		t.styleLabel = v.style.empty() ? noStyle : v.style;
+		const CUtlString mode = KZ::mode::GetModeInfo(v.mode).shortModeName;
+		const char *allLabel = english ? "All styles" : "Все стили";
+		t.styleLabel = v.style == kAllStyles ? allLabel : v.style;
 		t.styleHeading = english ? "Style" : "Стиль";
 		t.styleRunsHeading = english ? "Runs" : "Ранов";
-		t.styleDisabledReason = english ? "CKZ only" : "Только в CKZ";
-		t.styleSelected = !v.style.empty();
+		t.styleSelected = v.style != kAllStyles;
 		t.styleOpen = v.styleOpen;
 		v.styleChoices.clear();
-		std::map<std::string, u64> counts {{"", 0}, {KZ::style::NopreName, 0}, {v.style, 0}};
+		std::map<std::string, u64> counts {{kAllStyles, 0}, {v.style, 0}};
+		if (KZ::style::CanUseStyleInMode(KZ::style::NopreName, mode.Get()))
+		{
+			counts[KZ::style::NopreName] = 0;
+		}
 		for (const auto &option : v.styleCounts)
 		{
 			const auto count = v.pro ? option.pro : option.overall;
 			const auto name = StyleLabelForMask(option.mask);
-			if (count > 0 && (!name.empty() || option.mask == 0))
+			if (!name.empty() && MaptopStyleAllowed(name, mode.Get()))
 			{
+				counts[kAllStyles] += count;
 				counts[name] = count;
 			}
 		}
 		auto add = [&](const std::string &name, bool separator)
 		{
 			const u64 count = counts.at(name);
-			const bool disabled = name.find(KZ::style::NopreName) != std::string::npos && V_stricmp(KZ::mode::GetModeInfo(v.mode).shortModeName.Get(), "CKZ");
-			t.styleOptions.push_back({name.empty() ? noStyle : name, count ? std::to_string(count) : "—", v.style == name,
-				disabled, separator});
+			t.styleOptions.push_back({name == kAllStyles ? allLabel : name, count ? std::to_string(count) : "—", v.style == name,
+									  false, separator});
 			v.styleChoices.push_back(name);
 			counts.erase(name);
 		};
-		add("", false);
-		add(KZ::style::NopreName, true);
+		add(kAllStyles, false);
+		if (counts.count(KZ::style::NopreName))
+		{
+			add(KZ::style::NopreName, false);
+		}
 		for (const char *name : {"ABH", "LGJ", "AUD"})
 		{
 			if (counts.count(name))
@@ -816,12 +885,17 @@ namespace
 		const bool english = V_stricmp(player->languageService->GetLanguage(), "ru") != 0;
 		t.title = v.map.Get();
 		t.sub = std::string(v.course.Get()) + " · " + (v.global ? "мировой топ" : "топ сервера");
+		const bool styled = !v.global && !v.style.empty();
+		t.runStyles = !v.global;
+		t.actionEpoch = v.actionEpoch;
 		if (!v.global)
 		{
-			RenderStyleOptions(v, t, english);
-			if (!v.style.empty())
+			t.filters[3] = {{"Normal", !styled}, {english ? "Styles" : "Стили", styled}};
+			if (styled)
 			{
-				t.sub = std::string(v.course.Get()) + " · " + v.style + (english ? " · server top" : " · топ сервера");
+				RenderStyleOptions(v, t, english);
+				t.cols = "cols-maptop-styled";
+				t.sub = std::string(v.course.Get()) + " · " + t.styleLabel + (english ? " · server top" : " · топ сервера");
 			}
 		}
 		t.cover = v.map.Get();
@@ -853,6 +927,10 @@ namespace
 		t.headers[2] = "Время";
 		t.headers[3] = "Отставание";
 		t.headers[4] = "Дата";
+		if (styled)
+		{
+			t.headers[5] = english ? "Style" : "Стиль";
+		}
 
 		v.runIds.clear();
 		v.meRunId.clear();
@@ -881,7 +959,7 @@ namespace
 			}
 			t.me.initial = row.initial;
 			t.me.colour = row.colour;
-			t.me.actions[0] = "▶"; // показать кнопку реплея своей строки (gm_go)
+			t.me.actions[0] = row.noGo ? "" : "▶";
 			v.meRunId = list[i].runID.Get();
 			break;
 		}
@@ -890,7 +968,7 @@ namespace
 			auto &record = *v.data.personal[v.pro];
 			t.hasMe = true;
 			t.me = MaptopRow(record, v.data.personalPlace[v.pro], best, me);
-			t.me.actions[0] = "▶";
+			t.me.actions[0] = t.me.noGo ? "" : "▶";
 			v.meRunId = record.runID.Get();
 		}
 
@@ -900,6 +978,10 @@ namespace
 			if (v.style.empty())
 			{
 				t.hint = v.pro ? "PRO-рекордов на этом курсе пока нет" : "Рекордов на этом курсе пока нет";
+			}
+			else if (v.style == kAllStyles)
+			{
+				t.hint = english ? "No styled runs in this category yet" : "В этом зачёте пока нет ранов со стилями";
 			}
 			else if (english)
 			{
@@ -932,11 +1014,13 @@ bool CourseTopRequest::ShowWindow()
 		return true;
 	}
 	const bool local = req->localStatus == ResponseStatus::RECEIVED;
+	v.pendingUid = 0;
 	v.map = req->mapName;
 	v.course = req->courseName;
 	v.mode = req->modeName;
 	v.global = !local;
-	v.style = StyleLabelForMask(req->localStyleIDs);
+	v.style = req->mixedStyles ? kAllStyles : StyleLabelForMask(req->localStyleIDs);
+	v.actionEpoch = ++g_maptopActionEpoch;
 	v.styleOpen = false;
 	v.styleCounts = std::move(req->styleCounts);
 	v.data = CourseTopRequest::CourseTopData();
@@ -951,9 +1035,10 @@ bool CourseTopRequest::ShowWindow()
 	if (!req->fromWindow)
 	{
 		v.page = 0;
-		v.pendingUid = 0; // окно открыто командой — ответы прежних перезапросов из окна уже чужие
-		v.qLocal = req->localStatus != ResponseStatus::DISABLED;
-		v.qGlobal = req->globalStatus != ResponseStatus::DISABLED;
+		v.lastRequery = -1.0;
+		v.querySequence = ++g_maptopQuerySequence;
+		v.qLocal = req->requestLocal;
+		v.qGlobal = req->requestGlobal;
 	}
 	v.baseOffset = req->offset; // перезапрос из окна идёт с нуля — места тоже с нуля
 	RenderMaptop(player);
