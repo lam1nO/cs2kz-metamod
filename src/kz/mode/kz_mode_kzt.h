@@ -1,4 +1,6 @@
 #pragma once
+
+#include <optional>
 #include <cmath>
 #include "version_gen.h"
 
@@ -175,6 +177,7 @@ class KZTimerModeService : public KZModeService
 	f32 jumpPressTimes[4] = {-1.0f, -1.0f, -1.0f, -1.0f};
 	i32 jumpPressIdx {};
 	// Скорость в момент касания (после SlopeFix) — источник формулы скорости отрыва.
+	std::optional<f32> autoBhopLandingTime;
 	f32 lastLandingSpeed = -1.0f;
 	f32 lastLandingSpeedTime = -1.0f; // landingTime, которому соответствует lastLandingSpeed
 	bool oldDuckPressed {};

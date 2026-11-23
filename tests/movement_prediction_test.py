@@ -32,6 +32,7 @@ STUBS = r'''
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
+#include <optional>
 #include <vector>
 using f32=float; using f64=double; using u32=uint32_t; using i32=int32_t;
 #define MAX std::max
@@ -105,6 +106,7 @@ struct PlayerCommand {BaseCmd cmd;BaseCmd*mutable_base(){return &cmd;}const Base
 struct Service {
  Player *player;bool hasValidDesiredViewAngle=true,serverAngleChange=false;u32 lastConsumedAngleChange=0;
  bool touchedSlopeLastMove=false;float lastTakeoffZ=0,landHeight=0,lastLandingSpeed=0,lastLandingSpeedTime=0;
+ std::optional<float> autoBhopLandingTime;
  QAngle lastValidDesiredViewAngle;float lastJumpReleaseTime=0;float jumpPressTimes[4]={-1,-1,-1,-1};int jumpPressIdx=0;
  explicit Service(Player*p):player(p){}
  void OnPhysicsSimulate();void OnPhysicsSimulatePost();void OnSetupMove(PlayerCommand*);
@@ -143,6 +145,15 @@ int main(){
   check(close(p.services.m_fStashGrenadeParameterWhen().GetTime(),0),"cleanup clears grenade prediction time");}
  {Player p;Service s(&p);Vector destination{1,2,3};p.services.m_bUseFrictionStashedSpeed(true);
   s.OnTeleport(&destination,nullptr,nullptr);check(!p.services.m_bUseFrictionStashedSpeed(),"teleport clears air prediction stash");}
+ if(KZT) {
+  Player p;Service s(&p);QAngle angles{0,90,0};Vector destination{1,2,3};
+  s.autoBhopLandingTime=1.0f;s.OnTeleport(nullptr,&angles,nullptr);
+  check(s.autoBhopLandingTime.has_value(),"angle update preserves AutoBhop landing");
+  s.OnTeleport(&destination,nullptr,nullptr);
+  check(!s.autoBhopLandingTime.has_value(),"position teleport clears AutoBhop landing");
+  s.autoBhopLandingTime=1.0f;s.OnTeleport(nullptr,nullptr,&p.velocity);
+  check(!s.autoBhopLandingTime.has_value(),"velocity teleport clears AutoBhop landing");
+ }
  {Player p;Service s(&p);PlayerCommand cmd;cmd.cmd.consumed=5;p.data.m_vecViewAngles.y=90;
   s.OnSetupMove(&cmd);s.InterpolateViewAngles();check(close(p.data.m_vecViewAngles.y,90),"newly consumed teleport angle is not interpolated");
   p.data.m_vecViewAngles.y=90;s.OnSetupMove(&cmd);s.InterpolateViewAngles();check(close(p.data.m_vecViewAngles.y,45),"normal turning still interpolates");

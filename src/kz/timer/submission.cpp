@@ -194,10 +194,13 @@ RunSubmission::RunSubmission(KZPlayer *player)
 	// clang-format on
 
 	// Setup styles
+	bool stylesAllowedInMode = true;
 	FOR_EACH_VEC(player->styleServices, i)
 	{
 		auto style = KZ::style::GetStyleInfo(player->styleServices[i]);
-		this->styles.push_back({player->styleServices[i]->GetStyleShortName(), style.md5});
+		const char *styleName = player->styleServices[i]->GetStyleShortName();
+		this->styles.push_back({styleName, style.md5});
+		stylesAllowedInMode &= KZ::style::CanUseStyleInMode(styleName, this->mode.name);
 		if (style.databaseID < 0 || style.databaseID >= 32)
 		{
 			this->local = false;
@@ -228,8 +231,7 @@ RunSubmission::RunSubmission(KZPlayer *player)
 	// Metadata
 	this->metadata = player->timerService->GetCurrentRunMetadata().Get();
 
-	// Cheaters and unauthenticated players do not submit
-	this->submitEligible = !player->anticheatService->isBanned && player->IsAuthenticated();
+	this->submitEligible = stylesAllowedInMode && !player->anticheatService->isBanned && player->IsAuthenticated();
 	if (!this->submitEligible)
 	{
 		this->local = false;
@@ -254,7 +256,10 @@ RunSubmission::RunSubmission(KZPlayer *player)
 	this->ticketEligible =
 		CybTickets::Eligible(!this->ticketCampaign.empty(), this->submitEligible,
 							 player->timerService->GetValidTimer(), player->pracService->IsInPrac(), this->course.number, this->styles.size());
-	CybEmitter::Emit(*this);
+	if (stylesAllowedInMode)
+	{
+		CybEmitter::Emit(*this);
+	}
 
 	// Snapshot previous global PBs for diff display
 	if (global)

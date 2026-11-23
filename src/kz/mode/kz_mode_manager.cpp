@@ -305,9 +305,13 @@ bool KZModeManager::SwitchToMode(KZPlayer *player, const char *modeName, bool si
 	player->modeService = factory(player);
 	player->timerService->TimerStop(true, "mode_change");
 	player->modeService->Init();
-	if (V_stricmp(player->modeService->GetModeShortName(), "CKZ") && KZ::style::HasNopre(player))
+	FOR_EACH_VEC_BACK(player->styleServices, i)
 	{
-		g_pKZStyleManager->RemoveStyle(player, KZ::style::NopreName, true, updatePreference);
+		const char *style = player->styleServices[i]->GetStyleShortName();
+		if (!KZ::style::CanUseStyleInMode(style, player->modeService->GetModeShortName()))
+		{
+			g_pKZStyleManager->RemoveStyle(player, style, true, updatePreference);
+		}
 	}
 
 	if (!silent)
@@ -315,7 +319,18 @@ bool KZModeManager::SwitchToMode(KZPlayer *player, const char *modeName, bool si
 		player->languageService->PrintChat(true, false, "Switched Mode", player->modeService->GetModeName());
 	}
 
-	utils::SendMultipleConVarValues(player->GetPlayerSlot(), KZ::mode::modeCvarRefs, player->modeService->GetModeConVarValues(), MODECVAR_COUNT);
+	// Keep the client in sync with style overrides that survive the mode switch.
+	CVValue_t effectiveValues[MODECVAR_COUNT];
+	for (u32 i = 0; i < MODECVAR_COUNT; ++i)
+	{
+		auto *ref = KZ::mode::modeCvarRefs[i];
+		if (ref->IsValidRef())
+		{
+			const auto *value = player->GetCvarValueFromModeStyles(static_cast<KzModeCvars>(i));
+			ref->TypeTraits()->Copy(&effectiveValues[i], *value);
+		}
+	}
+	utils::SendMultipleConVarValues(player->GetPlayerSlot(), KZ::mode::modeCvarRefs, effectiveValues, MODECVAR_COUNT);
 
 	player->SetVelocity({0, 0, 0});
 	player->jumpstatsService->InvalidateJumpstats("Externally modified");

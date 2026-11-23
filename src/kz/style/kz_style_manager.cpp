@@ -45,11 +45,6 @@ public:
 	}
 };
 
-static bool CanUseStyle(const KZPlayer *player, const char *styleName)
-{
-	return V_stricmp(styleName, KZ::style::NopreName) || !V_stricmp(player->modeService->GetModeShortName(), "CKZ");
-}
-
 static void StopForStyleChange(KZPlayer *player)
 {
 	player->timerService->TimerStop(true, "style_change");
@@ -315,7 +310,7 @@ void KZStyleManager::AddStyle(KZPlayer *player, const char *styleName, bool sile
 			break;
 		}
 	}
-	if (!info.factory || !CanUseStyle(player, info.shortName))
+	if (!info.factory || !KZ::style::CanUseStyleInMode(info.shortName, player->modeService->GetModeShortName()))
 	{
 		if (!silent)
 		{
@@ -574,7 +569,7 @@ void KZOptionServiceEventListener_Styles::OnPlayerPreferencesLoaded(KZPlayer *pl
 		CSplitString splitStyles(styles.c_str(), ",");
 		FOR_EACH_VEC(splitStyles, i)
 		{
-			styleManager.AddStyle(player, splitStyles[i]);
+			styleManager.AddStyle(player, splitStyles[i], true, false);
 		}
 	}
 }

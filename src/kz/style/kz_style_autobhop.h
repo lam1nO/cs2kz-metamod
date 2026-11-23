@@ -2,7 +2,7 @@
 #include "version_gen.h"
 
 #define STYLE_NAME       "AutoBhop"
-#define STYLE_NAME_SHORT "ABH"
+#define STYLE_NAME_SHORT KZ::style::AutoBhopName
 
 class KZAutoBhopStylePlugin : public ISmmPlugin, public IMetamodListener
 {

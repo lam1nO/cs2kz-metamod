@@ -172,16 +172,21 @@ public:
 
 namespace KZ::style
 {
-	inline bool HasNopre(const KZPlayer *player)
+	inline bool HasStyle(const KZPlayer *player, const char *styleName)
 	{
 		FOR_EACH_VEC(player->styleServices, i)
 		{
-			if (!V_stricmp(player->styleServices[i]->GetStyleShortName(), NopreName))
+			if (!V_stricmp(player->styleServices[i]->GetStyleShortName(), styleName))
 			{
 				return true;
 			}
 		}
 		return false;
+	}
+
+	inline bool HasNopre(const KZPlayer *player)
+	{
+		return HasStyle(player, NopreName);
 	}
 
 	inline bool CanRankJumps(const KZPlayer *player)

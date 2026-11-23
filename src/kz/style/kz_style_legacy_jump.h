@@ -2,7 +2,7 @@
 #include "version_gen.h"
 
 #define STYLE_NAME       "LegacyJump"
-#define STYLE_NAME_SHORT "LGJ"
+#define STYLE_NAME_SHORT KZ::style::LegacyJumpName
 
 class KZLegacyJumpStylePlugin : public ISmmPlugin, public IMetamodListener
 {

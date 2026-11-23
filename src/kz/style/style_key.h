@@ -1,5 +1,7 @@
 #pragma once
 
+#include "nopre_rules.h"
+
 #include <algorithm>
 #include <string>
 #include <string_view>
@@ -7,9 +9,22 @@
 
 namespace KZ::style
 {
+	inline constexpr char AutoBhopName[] = "ABH";
+	inline constexpr char LegacyJumpName[] = "LGJ";
+
+	// Callers pass the canonical short names from the mode and style registries.
+	inline bool CanUseStyleInMode(std::string_view style, std::string_view mode)
+	{
+		if (style == LegacyJumpName)
+		{
+			return mode == "VNL";
+		}
+		return style != NopreName || mode == "CKZ";
+	}
+
 	inline bool IsPlatformStyle(std::string_view name)
 	{
-		return name == "ABH" || name == "AUD" || name == "LGJ" || name == "NOPRE";
+		return name == AutoBhopName || name == "AUD" || name == LegacyJumpName || name == NopreName;
 	}
 
 	inline std::string StyleKey(std::vector<std::string_view> names)

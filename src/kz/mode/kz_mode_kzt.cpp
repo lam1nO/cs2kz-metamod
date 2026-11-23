@@ -1,6 +1,8 @@
 #include <cmath>
 #include "cs_usercmd.pb.h"
 #include "kz_mode_kzt.h"
+#include "kzt_perf.h"
+#include "kz/style/kz_style.h"
 #include "utils/addresses.h"
 #include "utils/interfaces.h"
 #include "utils/gameconfig.h"
@@ -227,6 +229,7 @@ void KZTimerModeService::Reset()
 		this->jumpPressTimes[i] = -1.0f;
 	}
 	this->jumpPressIdx = 0;
+	this->autoBhopLandingTime.reset();
 	this->lastLandingSpeed = -1.0f;
 	this->lastLandingSpeedTime = -1.0f;
 }
@@ -327,6 +330,8 @@ bool KZTimerModeService::FindGroundZ(const Vector &origin, f32 &groundZ)
 
 void KZTimerModeService::OnStopTouchGround()
 {
+	const auto autoBhopLandingTime = this->autoBhopLandingTime;
+	this->autoBhopLandingTime.reset();
 	if (this->player->GetMoveType() != MOVETYPE_WALK)
 	{
 		// Лестница/ноклип: высоту следующего приземления не от чего считать, фаза полёта — новая.
@@ -400,18 +405,27 @@ void KZTimerModeService::OnStopTouchGround()
 	// как предсказал клиент — «землит» не возвращается), но классифицируется промахом
 	// и идёт в общую формулу скорости — осознанный отход от GOKZ (у них HitPerf
 	// структурный и включал буферные прессы), решение пользователя 2026-07-19.
-	bool perf = this->player->jumped && pressTime > 0.0f && pressDt > perfLowerNow
+	bool strictPerf = this->player->jumped && pressTime > 0.0f && pressDt > perfLowerNow
 				&& pressDt <= kz_kzt_perf_window.Get() && !this->player->possibleLadderHop && !this->player->takeoffFromLadder;
 	// Версия «как GOKZ»: перф структурный, буферный пре-клик тоже перф. Меняет НЕ только
 	// высоту — тем же флагом гейтятся перф-модель скорости (ноль трения, кап 380), HUD и
 	// старт таймера. Дефолт 0 = строгое правило v2 (решение пользователя 2026-07-19).
 	// Строгий вердикт v2 — в леджер отдельным полем, чтобы под включённым cvar было
 	// видно расхождение классификаций.
-	bool strictPerf = perf;
-	if (kz_kzt_perf_structural.GetBool())
-	{
-		perf = this->player->jumped && structuralPerf && !this->player->possibleLadderHop && !this->player->takeoffFromLadder;
-	}
+	const bool structuralJump = this->player->jumped && structuralPerf && !this->player->possibleLadderHop;
+	// AutoBhop can reuse a jump held through landing without a fresh subtick press.
+	const bool autobhop = autoBhopLandingTime.has_value() && KZ::style::HasStyle(this->player, KZ::style::AutoBhopName);
+	const KZ::mode::KztAutoBhopContact autoContact {
+		this->player->landingTime,
+		curtime,
+		pressTime,
+		autobhop && *autoBhopLandingTime == this->player->landingTime,
+		autobhop && this->player->IsButtonPressed(IN_JUMP, true),
+		this->player->walkMoved,
+		velocity.z > 0.0f,
+	};
+	const bool perf =
+		KZ::mode::ResolveKztPerf(strictPerf, structuralJump, kz_kzt_perf_structural.GetBool(), autobhop, autoContact, ENGINE_FIXED_TICK_INTERVAL);
 	this->player->inPerf = perf;
 
 	f32 preC = velocity.Length2D();
@@ -682,6 +696,11 @@ void KZTimerModeService::OnStopTouchGround()
 
 void KZTimerModeService::OnStartTouchGround()
 {
+	this->autoBhopLandingTime.reset();
+	if (this->player->IsButtonPressed(IN_JUMP, true) && KZ::style::HasStyle(this->player, KZ::style::AutoBhopName))
+	{
+		this->autoBhopLandingTime = this->player->landingTime;
+	}
 	this->touchedSlopeLastMove = false;
 	// Прыжок в том же окне 1/128 после приземления — новая фаза полёта, порция ей положена.
 	this->lastAAWindow = -1;
@@ -2033,6 +2052,7 @@ void KZTimerModeService::OnTeleport(const Vector *newPosition, const QAngle *new
 	if (newPosition || newVelocity)
 	{
 		// Касание склона и высота прошлого отрыва к новому месту отношения не имеют.
+		this->autoBhopLandingTime.reset();
 		this->touchedSlopeLastMove = false;
 		this->lastTakeoffZ = NAN;
 		this->landHeight = NAN;
