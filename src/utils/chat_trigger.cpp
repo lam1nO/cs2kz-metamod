@@ -37,13 +37,30 @@ namespace chattrigger
 
 	bool Rewrite(const char *text, IsKnownFn isKnown, void *ctx, char *out, size_t outSize)
 	{
-		if (!text || !text[0] || text[0] == '!' || text[0] == '/')
+		if (!text || !text[0] || text[0] == '/')
 		{
 			return false;
 		}
-		if (strchr(text, '"'))
+		const bool nominateAlias = text[0] == '!' && LowerAscii(text[1]) == 'n' && (text[2] == '\0' || text[2] == ' ');
+		if ((text[0] == '!' && !nominateAlias) || strchr(text, '"'))
 		{
 			return false;
+		}
+		if (nominateAlias)
+		{
+			if (!isKnown("nominate", FORM_DOT, ctx))
+			{
+				return false;
+			}
+			constexpr char aliasTarget[] = "!nominate";
+			const size_t suffixSize = strlen(text + 2) + 1;
+			if (sizeof(aliasTarget) - 1 + suffixSize > outSize)
+			{
+				return false;
+			}
+			memcpy(out, aliasTarget, sizeof(aliasTarget) - 1);
+			memcpy(out + sizeof(aliasTarget) - 1, text + 2, suffixSize);
+			return true;
 		}
 		const Form form = text[0] == '.' ? FORM_DOT : FORM_BARE;
 		const char *body = form == FORM_DOT ? text + 1 : text;

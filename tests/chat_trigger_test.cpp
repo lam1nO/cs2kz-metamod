@@ -6,7 +6,7 @@
 #include <strings.h>
 using namespace chattrigger;
 
-// Известны: maptop, tp, nc, r, ws (css_ws), rtv (только как ConCommand — для точки).
+// rtv и nominate известны как внешние ConCommand.
 static bool Known(const char *word, Form form, void *)
 {
 	const char *always[] = {"maptop", "tp", "nc", "r", "ws", "kzt"};
@@ -17,7 +17,7 @@ static bool Known(const char *word, Form form, void *)
 			return true;
 		}
 	}
-	return form == FORM_DOT && !strcasecmp(word, "rtv");
+	return form == FORM_DOT && (!strcasecmp(word, "rtv") || !strcasecmp(word, "nominate"));
 }
 
 static const char *R(const char *text)
@@ -38,6 +38,22 @@ int main()
 	// «!» и «/» не трогаем — они и так работают.
 	assert(!R("!maptop"));
 	assert(!R("/maptop"));
+	const char *alias = R("!n");
+	assert(alias && !strcmp(alias, "!nominate"));
+	alias = R("!N Kz_Kiwit");
+	assert(alias && !strcmp(alias, "!nominate Kz_Kiwit"));
+	assert(!R("!"));
+	assert(!R("!nextmap"));
+	assert(!R("!nominate kz_kiwit"));
+	assert(!R("n"));
+	assert(!R("!n \"kz_kiwit\""));
+	{
+		char exact[sizeof("!nominate")];
+		const auto unknown = [](const char *, Form, void *) { return false; };
+		assert(!Rewrite("!n", unknown, nullptr, exact, sizeof(exact)));
+		assert(!Rewrite("!n", Known, nullptr, exact, sizeof(exact) - 1));
+		assert(Rewrite("!n", Known, nullptr, exact, sizeof(exact)) && !strcmp(exact, "!nominate"));
+	}
 	// Обычный чат.
 	assert(!R("привет"));
 	assert(!R("gg wp"));
