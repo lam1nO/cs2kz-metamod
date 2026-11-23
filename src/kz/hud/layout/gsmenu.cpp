@@ -398,9 +398,9 @@ bool KZ::gsmenu::ShowTable(KZPlayer *player, const Table &t, ClickFn onClick, co
 
 	Swap(player, *w, layout, "gw_table", t.cols);
 	// Топ прыжков (v3): без шапки с обложкой, заголовок и режимы в одной строке.
-	Class(player, *w, layout, "gw", "js", t.cols && !V_strcmp(t.cols, "cols-jumptop"));
+	Class(player, *w, layout, "gw", "js", !t.styledMaptop && t.cols && !V_strcmp(t.cols, "cols-jumptop"));
 	ClassLazy(player, *w, layout, "gw", "js-pb", t.jumpPB);
-	ClassLazy(player, *w, layout, "gw", "run-styles", t.runStyles);
+	ClassLazy(player, *w, layout, "gw_table", "cols-maptop-styled", t.styledMaptop);
 	Class(player, *w, layout, "gw_table", "no-tp", t.noTp);
 	ClassLazy(player, *w, layout, "gw", "empty", t.empty);
 	for (i32 j = 0; j < KZ_GSMENU_TABLE_COLS; j++)

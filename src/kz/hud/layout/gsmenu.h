@@ -68,7 +68,7 @@ namespace KZ::gsmenu
 		const char *cols = "cols-maptop";
 		bool noTp = false;
 		bool jumpPB = false;
-		bool runStyles = false;
+		bool styledMaptop = false;
 		// Rebind indexed buttons to a new input entity when their action identities change.
 		u64 actionEpoch = 0;
 		std::string styleLabel, styleHeading, styleRunsHeading, styleDisabledReason;

@@ -628,9 +628,9 @@ namespace
 		MaptopView &v = g_maptop[player->GetPlayerSlot().Get()];
 		i32 row = -1, k = -1;
 		int end = -1;
-		if (!v.global && (KZ_STREQ(id, "gf3_0") || KZ_STREQ(id, "gf3_1")))
+		if (!v.global && (KZ_STREQ(id, "gf1_2") || KZ_STREQ(id, "gf1_3")))
 		{
-			const bool showStyles = KZ_STREQ(id, "gf3_1");
+			const bool showStyles = KZ_STREQ(id, "gf1_3");
 			const bool isStyled = !v.style.empty();
 			if (v.pendingUid || showStyles != isStyled)
 			{
@@ -886,20 +886,25 @@ namespace
 		t.title = v.map.Get();
 		t.sub = std::string(v.course.Get()) + " · " + (v.global ? "мировой топ" : "топ сервера");
 		const bool styled = !v.global && !v.style.empty();
-		t.runStyles = !v.global;
+		t.styledMaptop = styled;
 		t.actionEpoch = v.actionEpoch;
 		if (!v.global)
 		{
-			t.filters[3] = {{"Normal", !styled}, {english ? "Styles" : "Стили", styled}};
 			if (styled)
 			{
 				RenderStyleOptions(v, t, english);
-				t.cols = "cols-maptop-styled";
+				// Use columns already exposed by the installed Workshop layout.
+				t.cols = "cols-jumptop";
 				t.sub = std::string(v.course.Get()) + " · " + t.styleLabel + (english ? " · server top" : " · топ сервера");
 			}
 		}
 		t.cover = v.map.Get();
 		t.filters[1] = {{"PRO", v.pro}, {"NUB", !v.pro}};
+		if (!v.global)
+		{
+			t.filters[1].push_back({"Normal", !styled});
+			t.filters[1].push_back({english ? "Styles" : "Стили", styled});
+		}
 		// Курсы (Main / Bonus N) — вкладками слева в полосе режимов (не больше 8 — ёмкость разметки); список курсов есть только у карты,
 		// что сейчас на сервере, у чужой карты (!maptop <карта>) полоса остаётся без них.
 		v.courseNames.clear();

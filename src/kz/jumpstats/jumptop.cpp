@@ -1984,8 +1984,8 @@ namespace
 			if (!personal)
 			{
 				row.cells[0] = std::to_string(i + 1);
-				row.cells[1] = r.alias;
 			}
+			row.cells[1] = r.alias;
 			row.cells[2] = JumpDistanceText(r, v.isBlock, personal);
 			row.cells[3] = std::to_string(r.strafes);
 			row.cells[4] = JumpSyncText(r.sync);
