@@ -215,10 +215,12 @@ constexpr char sql_jumptop_rank[] = R"(
 // Топ: лучшая строка каждого игрока (окно по игроку), без снятых и забаненных. MySQL 8 и
 // SQLite >= 3.25 умеют ROW_NUMBER. Для дистанционного топа Block у всех строк 0, поэтому
 // одна сортировка годится обоим видам.
-// Параметры: Table, Mode, JumpType, IsBlockJump, Direction, Limit.
+// Параметры: Replays table, jumps table, mode, type, block, direction, limit.
 constexpr char sql_jumptop_gettop[] = R"(
     SELECT t.ID, t.SteamID64, COALESCE(p.Alias, ''), t.Block, t.Distance, t.Strafes, t.Sync, t.Pre, t.Max, t.Airtime, t.ReplayUUID,
-        t.MapName
+        t.MapName, EXISTS (
+            SELECT 1 FROM %s r WHERE r.ReplayUUID = t.ReplayUUID AND LENGTH(r.Data) > 0
+        )
         FROM (
             SELECT j.*, ROW_NUMBER() OVER (PARTITION BY j.SteamID64 ORDER BY j.Block DESC, j.Distance DESC, j.ID ASC) AS rn
                 FROM %s j
@@ -234,7 +236,9 @@ constexpr char sql_jumptop_gettop[] = R"(
 // Закреплённый PB: та же категория и порядок, что в топе, с фильтром по игроку.
 constexpr char sql_jumptop_getown[] = R"(
     SELECT j.ID, j.SteamID64, COALESCE(p.Alias, ''), j.Block, j.Distance, j.Strafes, j.Sync, j.Pre, j.Max, j.Airtime,
-        j.ReplayUUID, j.MapName
+        j.ReplayUUID, j.MapName, EXISTS (
+            SELECT 1 FROM %s r WHERE r.ReplayUUID = j.ReplayUUID AND LENGTH(r.Data) > 0
+        )
         FROM %s j
         LEFT JOIN Players p ON p.SteamID64 = j.SteamID64
         WHERE j.Mode = %d AND j.JumpType = %d AND j.IsBlockJump = %d AND )" JUMPTOP_DIRECTION_SQL R"( = %d

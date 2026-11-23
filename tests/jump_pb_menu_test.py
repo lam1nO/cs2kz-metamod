@@ -14,6 +14,10 @@ int main() {
     std::printf(sql_jumptop_getpersonal, "JumptopStyledReplays", "JumptopStyled", 3, 0, 0, 0, 7ULL);
     std::printf("\x1e");
     std::printf(sql_jumptop_getpersonal, "JumptopStyledReplays", "JumptopStyled", 3, 0, 1, 2, 7ULL);
+    std::printf("\x1e");
+    std::printf(sql_jumptop_getown, "JumptopStyledReplays", "JumptopStyled", 3, 0, 0, 0, 7ULL);
+    std::printf("\x1e");
+    std::printf(sql_jumptop_gettop, "JumptopReplays", "Jumptop", 3, 0, 0, 0, 20);
 }
 '''
 with tempfile.TemporaryDirectory(prefix="kz-jump-pb-") as tmp:
@@ -22,11 +26,12 @@ with tempfile.TemporaryDirectory(prefix="kz-jump-pb-") as tmp:
         ["c++", "-std=c++17", "-I", str(root / "src"), "-x", "c++", "-", "-o", query_bin],
         input=source, text=True, check=True,
     )
-    normal_sql, styled_sql, blocks_sql = subprocess.check_output([query_bin], text=True).split("\x1e")
+    normal_sql, styled_sql, blocks_sql, own_sql, top_sql = subprocess.check_output([query_bin], text=True).split("\x1e")
 
 db = sqlite3.connect(":memory:")
 db.execute("CREATE TABLE Players (SteamID64 INTEGER PRIMARY KEY, Alias TEXT)")
 db.execute("INSERT INTO Players VALUES (7, 'nova'), (8, 'stonewave')")
+db.execute("CREATE TABLE Bans (SteamID64 INTEGER, ExpiresAt TEXT)")
 for table in ("Jumptop", "JumptopStyled"):
     db.execute(f"""CREATE TABLE {table} (
         ID INTEGER PRIMARY KEY, SteamID64 INTEGER, Mode INTEGER, JumpType INTEGER, IsBlockJump INTEGER,
@@ -63,4 +68,6 @@ assert len(blocks) == 1 and blocks[0][0:5] == (3, 7, "nova", 255, 259.00)
 assert blocks[0][10:13] == ("styled", "kz_victoria", 1)
 db.execute("DELETE FROM JumptopStyledReplays WHERE ReplayUUID = 'styled'")
 assert db.execute(blocks_sql).fetchone()[12] == 0
+assert db.execute(own_sql).fetchone()[10:13] == ("same", "kz_victoria", 0)
+assert [(row[0], row[12]) for row in db.execute(top_sql)] == [(3, 1), (1, 1)]
 print("PASS jump PB filters, tie, block priority and exact replay storage")
