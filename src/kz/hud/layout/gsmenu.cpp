@@ -64,6 +64,8 @@ namespace
 		bool capture = false;
 		i32 openRow = -1;
 		u64 actionEpoch = 0;
+		i32 actionSnapshotTick = 0;
+		bool actionsReady = true;
 		KZ::gsmenu::ClickFn onClick;
 		std::unordered_map<std::string, bool> classes;
 		std::unordered_map<std::string, std::string> vars;
@@ -309,15 +311,22 @@ bool KZ::gsmenu::ShowTable(KZPlayer *player, const Table &t, ClickFn onClick, co
 		return false;
 	}
 	const bool wasOpen = w->open;
-	if (w->actionEpoch != t.actionEpoch || (t.actionEpoch && w->owner != (owner ? owner : "")))
+	if (wasOpen && w->owner != (owner ? owner : ""))
 	{
+		// A different command can reuse every button ID with a different meaning.
 		Destroy(player, *w);
-		w->actionEpoch = t.actionEpoch;
 	}
+	const bool actionsChanged = !w->open || w->actionEpoch != t.actionEpoch || w->actionsReady != t.actionsReady;
 	CCSCustomHudLayout *layout = Ensure(player, *w);
 	if (!layout)
 	{
 		return false;
+	}
+	if (actionsChanged || !w->open)
+	{
+		w->actionEpoch = t.actionEpoch;
+		w->actionsReady = t.actionsReady;
+		w->actionSnapshotTick = g_pKZUtils->GetServerGlobals()->tickcount + 1;
 	}
 	w->onClick = std::move(onClick);
 	w->owner = owner ? owner : "";
@@ -645,6 +654,20 @@ bool KZ::gsmenu::OnClick(KZPlayer *player, uint32 packedHandle, const char *id)
 	{
 		Close(player, "close_button");
 		return true;
+	}
+	// Fixed filter buttons keep their meaning during a refresh. Reused result and
+	// picker slots are actionable once the client's snapshot contains their new binding.
+	const bool resultAction = !strncmp(id, "gr", 2) || KZ_STREQ(id, "gm_go");
+	const bool indexedAction = resultAction || !strncmp(id, "gw_st", 5)
+		|| (w->owner == "maptop" && !strncmp(id, "gf0_", 4))
+		|| ((w->owner == "jumptop" || w->owner == "jspb") && !strncmp(id, "gf2_", 4));
+	if (indexedAction)
+	{
+		const auto *client = player->GetClient();
+		if ((resultAction && !w->actionsReady) || !client || client->m_nDeltaTick < w->actionSnapshotTick)
+		{
+			return true;
+		}
 	}
 	// Клик по самой строке gr{i} ничего не делает (действие — кнопка ▶ gr{i}_go); остальное —
 	// колбэку владельца окна.

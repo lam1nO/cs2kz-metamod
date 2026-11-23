@@ -1865,13 +1865,31 @@ namespace
 		int end = -1;
 		if (sscanf(id, "gf0_%d", &k) == 1 && k >= 0 && JumpType_LongJump + k <= JumpType_Jumpbug)
 		{
-			v.jumpType = JumpType_LongJump + k;
-			QueryJumptopWindow(player);
+			if (v.jumpType != JumpType_LongJump + k)
+			{
+				v.jumpType = JumpType_LongJump + k;
+				QueryJumptopWindow(player);
+			}
 			return;
 		}
-		if (sscanf(id, "gf1_%d", &k) == 1 && (k == 0 || k == 1))
+		if (sscanf(id, "gf1_%d", &k) == 1 && k >= 0 && k < 2 + KZ::jumpstats::direction::Count)
 		{
-			v.isBlock = k == 1;
+			if (k < 2)
+			{
+				if (v.isBlock == (k == 1))
+				{
+					return;
+				}
+				v.isBlock = k == 1;
+			}
+			else
+			{
+				if (v.direction == k - 2)
+				{
+					return;
+				}
+				v.direction = k - 2;
+			}
 			QueryJumptopWindow(player);
 			return;
 		}
@@ -1881,29 +1899,22 @@ namespace
 			for (const char *mode : jumptopModes)
 			{
 				const i32 dbID = KZ::mode::GetModeInfo(CUtlString(mode)).databaseID;
-				if (dbID < 0)
+				if (dbID >= 0 && shown++ == k)
 				{
-					continue;
-				}
-				if (shown++ == k)
-				{
-					v.modeID = dbID;
-					v.nopre = v.nopre && IsCkz(dbID);
-					QueryJumptopWindow(player);
+					if (v.modeID != dbID)
+					{
+						v.modeID = dbID;
+						v.nopre = v.nopre && IsCkz(dbID);
+						QueryJumptopWindow(player);
+					}
+					return;
 				}
 			}
-			return;
-		}
-		if (sscanf(id, "gf3_%d", &k) == 1 && k >= 0 && k < KZ::jumpstats::direction::Count)
-		{
-			v.direction = k;
-			QueryJumptopWindow(player);
-			return;
-		}
-		if (sscanf(id, "gf4_%d", &k) == 1 && (k == 0 || (k == 1 && IsCkz(v.modeID))))
-		{
-			v.nopre = k == 1;
-			QueryJumptopWindow(player);
+			if (IsCkz(v.modeID) && (k == shown || k == shown + 1) && v.nopre != (k == shown + 1))
+			{
+				v.nopre = k == shown + 1;
+				QueryJumptopWindow(player);
+			}
 			return;
 		}
 
@@ -1940,19 +1951,18 @@ namespace
 		t.sub = personal ? v.personal->alias : TypeName(v.jumpType, v.direction, false) + " · " + ModeShortName(v.modeID) + (v.nopre ? " · NOPRE" : "");
 		t.jumpPB = personal;
 		t.actionEpoch = v.pendingQuery;
-		t.filters[4] = {{"Normal", !v.nopre},
-						{KZ::style::NopreName, v.nopre, !IsCkz(v.modeID)}};
+		t.actionsReady = !v.loading;
 		t.cols = "cols-jumptop";
 		for (i32 type = JumpType_LongJump; type <= JumpType_Jumpbug; type++)
 		{
 			t.filters[0].push_back({jumpTypeStr[type], type == v.jumpType});
 		}
 		t.filters[1] = {{personal && english ? "Distance" : "Дистанция", !v.isBlock}, {personal && english ? "Blocks" : "Блоки", v.isBlock}};
-		// Направление — как стиль: свой топ на каждое. Старый аддон без gf3 просто не покажет выбор.
+		// Направления находятся рядом с видом прыжка в шапке установленного аддона.
 		const char *const russianDirections[] = {"Вперёд", "Боком", "Спиной"};
 		for (i32 d = 0; d < KZ::jumpstats::direction::Count; d++)
 		{
-			t.filters[3].push_back({personal && !english ? russianDirections[d] : KZ::jumpstats::direction::Name(d), d == v.direction});
+			t.filters[1].push_back({personal && !english ? russianDirections[d] : KZ::jumpstats::direction::Name(d), d == v.direction});
 		}
 		for (const char *mode : jumptopModes)
 		{
@@ -1961,6 +1971,11 @@ namespace
 			{
 				t.filters[2].push_back({mode, dbID == v.modeID});
 			}
+		}
+		if (IsCkz(v.modeID))
+		{
+			t.filters[2].push_back({"Normal", !v.nopre});
+			t.filters[2].push_back({KZ::style::NopreName, v.nopre});
 		}
 		if (!personal)
 		{

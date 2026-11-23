@@ -638,31 +638,25 @@ namespace
 			}
 			return;
 		}
-		if (!v.global && !v.style.empty() && KZ_STREQ(id, "gw_style"))
+		if (!v.global && !v.style.empty() && KZ_STREQ(id, "gf1_4"))
 		{
 			v.styleOpen = !v.styleOpen;
+			v.actionEpoch = ++g_maptopActionEpoch;
 			RenderMaptop(player);
 			return;
 		}
-		if (v.styleOpen && sscanf(id, "gw_st%d%n", &k, &end) == 1 && end >= 0 && !id[end] && k >= 0 && k < (i32)v.styleChoices.size())
+		if (v.styleOpen && sscanf(id, "gf0_%d%n", &k, &end) == 1 && end >= 0 && !id[end]
+			&& k >= 0 && k < (i32)v.styleChoices.size())
 		{
 			const auto selected = v.styleChoices[k];
-			if (!MaptopStyleAllowed(selected, KZ::mode::GetModeInfo(v.mode).shortModeName.Get()))
-			{
-				return;
-			}
 			v.styleOpen = false;
+			v.actionEpoch = ++g_maptopActionEpoch;
 			RenderMaptop(player);
 			if (v.pendingUid || selected != v.style)
 			{
 				RequeryMaptop(player, v.mode.Get(), v.course.Get(), selected, false);
 			}
 			return;
-		}
-		if (v.styleOpen)
-		{
-			v.styleOpen = false;
-			RenderMaptop(player);
 		}
 		if (KZ_STREQ(id, "gf1_0") || KZ_STREQ(id, "gf1_1"))
 		{
@@ -684,7 +678,7 @@ namespace
 			}
 			return;
 		}
-		if (sscanf(id, "gf2_%d", &k) == 1 && k >= 0)
+		if (!v.styleOpen && sscanf(id, "gf2_%d", &k) == 1 && k >= 0)
 		{
 			i32 shown = 0;
 			for (const char *mode : kMaptopModes)
@@ -823,55 +817,39 @@ namespace
 	void RenderStyleOptions(MaptopView &v, KZ::gsmenu::Table &t, bool english)
 	{
 		const CUtlString mode = KZ::mode::GetModeInfo(v.mode).shortModeName;
-		const char *allLabel = english ? "All styles" : "Все стили";
-		t.styleLabel = v.style == kAllStyles ? allLabel : v.style;
-		t.styleHeading = english ? "Style" : "Стиль";
-		t.styleRunsHeading = english ? "Runs" : "Ранов";
-		t.styleSelected = v.style != kAllStyles;
-		t.styleOpen = v.styleOpen;
 		v.styleChoices.clear();
-		std::map<std::string, u64> counts {{kAllStyles, 0}, {v.style, 0}};
-		if (KZ::style::CanUseStyleInMode(KZ::style::NopreName, mode.Get()))
+		auto add = [&](const std::string &key, const std::string &label)
 		{
-			counts[KZ::style::NopreName] = 0;
+			if (v.styleChoices.size() < KZ_GSMENU_FILTER_CHIPS &&
+				std::find(v.styleChoices.begin(), v.styleChoices.end(), key) == v.styleChoices.end())
+			{
+				v.styleChoices.push_back(key);
+				t.filters[0].push_back({label, v.style == key});
+			}
+		};
+
+		add(kAllStyles, english ? "All styles" : "Все стили");
+		const auto &infos = g_pKZStyleManager->GetStyleInfos();
+		FOR_EACH_VEC(infos, i)
+		{
+			const auto &info = infos[i];
+			const char *name = info.shortName;
+			if (info.id >= 0 && name && name[0] && KZ::style::CanUseStyleInMode(name, mode.Get()))
+			{
+				add(name, name);
+			}
+		}
+		if (v.style != kAllStyles)
+		{
+			add(v.style, v.style);
 		}
 		for (const auto &option : v.styleCounts)
 		{
-			const auto count = v.pro ? option.pro : option.overall;
 			const auto name = StyleLabelForMask(option.mask);
 			if (!name.empty() && MaptopStyleAllowed(name, mode.Get()))
 			{
-				counts[kAllStyles] += count;
-				counts[name] = count;
+				add(name, name);
 			}
-		}
-		auto add = [&](const std::string &name, bool separator)
-		{
-			const u64 count = counts.at(name);
-			t.styleOptions.push_back({name == kAllStyles ? allLabel : name, count ? std::to_string(count) : "—", v.style == name,
-									  false, separator});
-			v.styleChoices.push_back(name);
-			counts.erase(name);
-		};
-		add(kAllStyles, false);
-		if (counts.count(KZ::style::NopreName))
-		{
-			add(KZ::style::NopreName, false);
-		}
-		for (const char *name : {"ABH", "LGJ", "AUD"})
-		{
-			if (counts.count(name))
-			{
-				add(name, false);
-			}
-		}
-		bool separator = true;
-		while (!counts.empty() && t.styleOptions.size() < KZ_GSMENU_STYLE_OPTIONS)
-		{
-			const bool last = t.styleOptions.size() + 1 == KZ_GSMENU_STYLE_OPTIONS;
-			const auto name = last && counts.count(v.style) ? v.style : counts.begin()->first;
-			add(name, separator);
-			separator = false;
 		}
 	}
 
@@ -892,10 +870,10 @@ namespace
 		{
 			if (styled)
 			{
-				RenderStyleOptions(v, t, english);
 				// Use columns already exposed by the installed Workshop layout.
 				t.cols = "cols-jumptop";
-				t.sub = std::string(v.course.Get()) + " · " + t.styleLabel + (english ? " · server top" : " · топ сервера");
+				const std::string label = v.style == kAllStyles ? (english ? "All styles" : "Все стили") : v.style;
+				t.sub = std::string(v.course.Get()) + " · " + label + (english ? " · server top" : " · топ сервера");
 			}
 		}
 		t.cover = v.map.Get();
@@ -904,11 +882,19 @@ namespace
 		{
 			t.filters[1].push_back({"Normal", !styled});
 			t.filters[1].push_back({english ? "Styles" : "Стили", styled});
+			if (styled)
+			{
+				t.filters[1].push_back({english ? "Style" : "Стиль", v.styleOpen});
+			}
 		}
 		// Курсы (Main / Bonus N) — вкладками слева в полосе режимов (не больше 8 — ёмкость разметки); список курсов есть только у карты,
 		// что сейчас на сервере, у чужой карты (!maptop <карта>) полоса остаётся без них.
 		v.courseNames.clear();
-		if (!V_stricmp(v.map.Get(), g_pKZUtils->GetCurrentMapName().Get()))
+		if (styled && v.styleOpen)
+		{
+			RenderStyleOptions(v, t, english);
+		}
+		else if (!V_stricmp(v.map.Get(), g_pKZUtils->GetCurrentMapName().Get()))
 		{
 			KZ::course::CourseTab tabs[KZ_GSMENU_FILTER_CHIPS];
 			const i32 n = KZ::course::GetCourseTabs(tabs, KZ_GSMENU_FILTER_CHIPS);
@@ -922,7 +908,7 @@ namespace
 		t.tier = MapTier(v.map.Get(), curShort.Get());
 		for (const char *mode : kMaptopModes)
 		{
-			if (KZ::mode::GetModeInfo(CUtlString(mode)).id >= 0)
+			if (!v.styleOpen && KZ::mode::GetModeInfo(CUtlString(mode)).id >= 0)
 			{
 				t.filters[2].push_back({mode, !V_stricmp(curShort.Get(), mode)});
 			}

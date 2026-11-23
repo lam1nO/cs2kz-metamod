@@ -121,10 +121,16 @@ namespace
 	void StylesGetChoices(KZPlayer *player, i64 tag, std::vector<KZChoice> &out)
 	{
 		i64 id = 0;
+		const char *mode = player->modeService ? player->modeService->GetModeShortName() : "";
 		const auto &infos = g_pKZStyleManager->GetStyleInfos();
 		FOR_EACH_VEC(infos, i)
 		{
 			if (infos[i].id < 0)
+			{
+				continue;
+			}
+			const i64 choice = id++;
+			if (!infos[i].shortName || !KZ::style::CanUseStyleInMode(infos[i].shortName, mode))
 			{
 				continue;
 			}
@@ -137,8 +143,7 @@ namespace
 					break;
 				}
 			}
-			out.push_back({std::string(infos[i].longName), id, nullptr, active});
-			id++;
+			out.push_back({std::string(infos[i].longName), choice, nullptr, active});
 		}
 	}
 

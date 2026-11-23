@@ -69,8 +69,9 @@ namespace KZ::gsmenu
 		bool noTp = false;
 		bool jumpPB = false;
 		bool styledMaptop = false;
-		// Rebind indexed buttons to a new input entity when their action identities change.
+		// Hold indexed actions until the client acknowledges their current identities.
 		u64 actionEpoch = 0;
+		bool actionsReady = true;
 		std::string styleLabel, styleHeading, styleRunsHeading, styleDisabledReason;
 		bool styleSelected = false, styleOpen = false;
 		std::vector<StyleOption> styleOptions;
