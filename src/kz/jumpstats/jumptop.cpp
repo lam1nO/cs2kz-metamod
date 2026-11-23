@@ -1984,11 +1984,9 @@ namespace
 			t.filters[0].push_back({boards ? shortTypes[type - JumpType_LongJump] : jumpTypeStr[type], type == v.jumpType});
 		}
 		t.filters[1] = {{personal && english ? "Distance" : "Дистанция", !v.isBlock}, {personal && english ? "Blocks" : "Блоки", v.isBlock}};
-		// Направления находятся рядом с видом прыжка в шапке установленного аддона.
-		const char *const russianDirections[] = {"Вперёд", "Боком", "Спиной"};
 		for (i32 d = 0; d < KZ::jumpstats::direction::Count; d++)
 		{
-			t.filters[boards ? 3 : 1].push_back({(boards || personal) && !english ? russianDirections[d] : KZ::jumpstats::direction::Name(d), d == v.direction});
+			t.filters[boards ? 3 : 1].push_back({KZ::jumpstats::direction::Name(d), d == v.direction});
 		}
 		for (const char *mode : (boards ? jumpBoardModes : jumptopModes))
 		{
