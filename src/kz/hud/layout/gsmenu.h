@@ -67,6 +67,9 @@ namespace KZ::gsmenu
 		i32 tier = 0;      // 0 — без бейджа тира
 		const char *cols = "cols-maptop";
 		bool noTp = false;
+		bool jumpPB = false;
+		// Rebind indexed buttons to a new input entity when their action identities change.
+		u64 actionEpoch = 0;
 		std::string styleLabel, styleHeading, styleRunsHeading, styleDisabledReason;
 		bool styleSelected = false, styleOpen = false;
 		std::vector<StyleOption> styleOptions;

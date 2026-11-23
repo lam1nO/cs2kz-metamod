@@ -243,6 +243,21 @@ constexpr char sql_jumptop_getown[] = R"(
         LIMIT 1
 )";
 
+// Один PB в выбранном зачёте. Номер реплея проверяется в таблице того же зачёта.
+// Параметры: Replays table, jumps table, mode, type, block, direction, SteamID64.
+constexpr char sql_jumptop_getpersonal[] = R"(
+    SELECT j.ID, j.SteamID64, COALESCE(p.Alias, ''), j.Block, j.Distance, j.Strafes, j.Sync, j.Pre, j.Max, j.Airtime,
+        j.ReplayUUID, j.MapName, EXISTS (
+            SELECT 1 FROM %s r WHERE r.ReplayUUID = j.ReplayUUID AND LENGTH(r.Data) > 0
+        )
+        FROM %s j
+        LEFT JOIN Players p ON p.SteamID64 = j.SteamID64
+        WHERE j.Mode = %d AND j.JumpType = %d AND j.IsBlockJump = %d AND )" JUMPTOP_DIRECTION_SQL R"( = %d
+            AND j.SteamID64 = %llu AND j.Removed = 0
+        ORDER BY j.Block DESC, j.Distance DESC, j.ID ASC
+        LIMIT 1
+)";
+
 // Одна строка целиком — для !jumpinfo (разбор на АХК). Последняя колонка — направление, -1 = не записано.
 // Параметры: Table, ID.
 constexpr char sql_jumptop_getjump[] = R"(

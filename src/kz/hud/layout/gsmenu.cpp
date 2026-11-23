@@ -63,6 +63,7 @@ namespace
 		bool open = false;
 		bool capture = false;
 		i32 openRow = -1;
+		u64 actionEpoch = 0;
 		KZ::gsmenu::ClickFn onClick;
 		std::unordered_map<std::string, bool> classes;
 		std::unordered_map<std::string, std::string> vars;
@@ -307,12 +308,17 @@ bool KZ::gsmenu::ShowTable(KZPlayer *player, const Table &t, ClickFn onClick, co
 	{
 		return false;
 	}
+	const bool wasOpen = w->open;
+	if (w->actionEpoch != t.actionEpoch)
+	{
+		Destroy(player, *w);
+		w->actionEpoch = t.actionEpoch;
+	}
 	CCSCustomHudLayout *layout = Ensure(player, *w);
 	if (!layout)
 	{
 		return false;
 	}
-	const bool wasOpen = w->open;
 	w->onClick = std::move(onClick);
 	w->owner = owner ? owner : "";
 	// Боковой список (меню cs2menus) живёт рядом и не трогается: это другой корень разметки.
@@ -393,6 +399,7 @@ bool KZ::gsmenu::ShowTable(KZPlayer *player, const Table &t, ClickFn onClick, co
 	Swap(player, *w, layout, "gw_table", t.cols);
 	// Топ прыжков (v3): без шапки с обложкой, заголовок и режимы в одной строке.
 	Class(player, *w, layout, "gw", "js", t.cols && !V_strcmp(t.cols, "cols-jumptop"));
+	ClassLazy(player, *w, layout, "gw", "js-pb", t.jumpPB);
 	Class(player, *w, layout, "gw_table", "no-tp", t.noTp);
 	ClassLazy(player, *w, layout, "gw", "empty", t.empty);
 	for (i32 j = 0; j < KZ_GSMENU_TABLE_COLS; j++)

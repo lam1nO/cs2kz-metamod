@@ -31,6 +31,7 @@
 
 #include <cstdlib>
 #include <deque>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
@@ -764,6 +765,14 @@ void KZ::jumptop::StoreMovementEvidence(const UUID_t &uuid, const std::vector<ch
 /*
  * Реплей прыжка: локальный файл (свой инстанс) либо base64 из базы → downloads/ → штатный плеер.
  */
+static bool HasLocalJumpReplay(const std::string &uuid)
+{
+	char local[512], downloaded[512];
+	V_snprintf(local, sizeof(local), KZ_REPLAY_PATH "/%s.replay", uuid.c_str());
+	V_snprintf(downloaded, sizeof(downloaded), KZ_REPLAY_DOWNLOADS_PATH "/%s.replay", uuid.c_str());
+	return g_pFullFileSystem->FileExists(local) || g_pFullFileSystem->FileExists(downloaded);
+}
+
 static_function void PlayJumpReplay(KZPlayer *player, const std::string &uuid, bool evidence = false, bool styled = false)
 {
 	UUID_t parsed;
@@ -773,11 +782,7 @@ static_function void PlayJumpReplay(KZPlayer *player, const std::string &uuid, b
 		return;
 	}
 	std::string clean = parsed.ToString();
-	char local[512];
-	V_snprintf(local, sizeof(local), KZ_REPLAY_PATH "/%s.replay", clean.c_str());
-	char downloaded[512];
-	V_snprintf(downloaded, sizeof(downloaded), KZ_REPLAY_DOWNLOADS_PATH "/%s.replay", clean.c_str());
-	if (!evidence && (g_pFullFileSystem->FileExists(local) || g_pFullFileSystem->FileExists(downloaded)))
+	if (!evidence && HasLocalJumpReplay(clean))
 	{
 		KZ::replaysystem::commands::LoadReplay(player, clean.c_str());
 		return;
@@ -1692,10 +1697,14 @@ namespace
 		return -1;
 	}
 
-	void PrintPlayerBests(KZPlayer *player, u64 steamID64, std::string alias, i32 modeID)
+	void PrintPlayerBests(KZPlayer *player, u64 steamID64, std::string alias, i32 modeID, bool nopre)
 	{
+		if (!KZDatabaseService::IsReady())
+		{
+			player->languageService->PrintChat(true, false, "Jumptop - Database Unavailable");
+			return;
+		}
 		char query[1024];
-		const bool nopre = IsCkz(modeID) && KZ::style::HasNopre(player);
 		V_snprintf(query, sizeof(query), sql_jumptop_getplayerbests, JumpTable(nopre), steamID64, modeID);
 		Transaction txn;
 		txn.queries.push_back(query);
@@ -1768,12 +1777,20 @@ namespace
 		bool replay;
 	};
 
+	struct PersonalJumpTarget
+	{
+		u64 steamID64 {};
+		std::string alias;
+		bool loading = true;
+	};
+
 	struct JumptopView
 	{
 		i32 modeID = -1, jumpType = JumpType_LongJump, page = 0;
 		i32 direction = KZ::jumpstats::direction::Forward;
 		bool isBlock = false;
 		bool nopre = false;
+		std::optional<PersonalJumpTarget> personal;
 		u64 pendingQuery = 0; // ответ показываем только на последний запрос
 		std::vector<JumptopRow> rows;
 		JumptopRow own {};
@@ -1783,6 +1800,11 @@ namespace
 
 	JumptopView g_jtView[MAXPLAYERS + 1];
 	u64 g_jtQuerySeq = 0;
+
+	const char *JumpWindowOwner(const JumptopView &view)
+	{
+		return view.personal ? "jspb" : "jumptop";
+	}
 
 	JumptopRow ReadJumptopRow(ISQLResult *result, bool nopre)
 	{
@@ -1802,7 +1824,7 @@ namespace
 
 	void QueryJumptopWindow(KZPlayer *player);
 
-	std::string JumpDistanceText(const JumptopRow &r, bool isBlock)
+	std::string JumpDistanceText(const JumptopRow &r, bool isBlock, bool personal = false)
 	{
 		char buf[48];
 		if (isBlock)
@@ -1811,7 +1833,7 @@ namespace
 		}
 		else
 		{
-			V_snprintf(buf, sizeof(buf), "%.3f", r.distance);
+			V_snprintf(buf, sizeof(buf), personal ? "%.4f" : "%.3f", r.distance);
 		}
 		return buf;
 	}
@@ -1830,7 +1852,7 @@ namespace
 		return buf;
 	}
 
-	void RenderJumptopWindow(KZPlayer *player);
+	bool RenderJumptopWindow(KZPlayer *player);
 
 	void OnJumptopWindowClick(KZPlayer *player, const char *id)
 	{
@@ -1894,33 +1916,39 @@ namespace
 			PrintJumpInfo(player, v.shownOwnReplay, true);
 			return;
 		}
-		if (sscanf(id, "gr%d_go%n", &row, &end) == 1 && end >= 0 && !id[end] && row >= 0 && row < (i32)v.shownIds.size())
+		if (sscanf(id, "gr%d_go%n", &row, &end) == 1 && end >= 0 && !id[end] && row >= 0 && row < (i32)v.shownIds.size()
+			&& IsJumpId(v.shownIds[row]))
 		{
 			KZ::gsmenu::Close(player, "jump_replay");
 			PrintJumpInfo(player, v.shownIds[row], true);
 		}
 	}
 
-	void RenderJumptopWindow(KZPlayer *player)
+	bool RenderJumptopWindow(KZPlayer *player)
 	{
 		JumptopView &v = g_jtView[player->GetPlayerSlot().Get()];
 		v.page = 0; // топ-20 без листания (решение владельца 14.10), свой рекорд — строкой снизу
 
 		KZ::gsmenu::Table t;
-		t.title = "Топ прыжков";
-		t.sub = TypeName(v.jumpType, v.direction, false) + " · " + ModeShortName(v.modeID) + (v.nopre ? " · NOPRE" : "");
 		const bool english = V_stricmp(player->languageService->GetLanguage(), "ru") != 0;
-		t.filters[4] = {{english ? "No style" : "Без стиля", !v.nopre}, {KZ::style::NopreName, v.nopre, !IsCkz(v.modeID)}};
+		const bool personal = v.personal.has_value();
+		t.title = personal ? (english ? "Personal bests" : "Личные рекорды") : "Топ прыжков";
+		t.sub = personal ? v.personal->alias : TypeName(v.jumpType, v.direction, false) + " · " + ModeShortName(v.modeID) + (v.nopre ? " · NOPRE" : "");
+		t.jumpPB = personal;
+		t.actionEpoch = personal ? v.pendingQuery : 0;
+		t.filters[4] = {{personal ? "Normal" : (english ? "No style" : "Без стиля"), !v.nopre},
+						{KZ::style::NopreName, v.nopre, !IsCkz(v.modeID)}};
 		t.cols = "cols-jumptop";
 		for (i32 type = JumpType_LongJump; type <= JumpType_Jumpbug; type++)
 		{
 			t.filters[0].push_back({jumpTypeStr[type], type == v.jumpType});
 		}
-		t.filters[1] = {{"Дистанция", !v.isBlock}, {"Блоки", v.isBlock}};
+		t.filters[1] = {{personal && english ? "Distance" : "Дистанция", !v.isBlock}, {personal && english ? "Blocks" : "Блоки", v.isBlock}};
 		// Направление — как стиль: свой топ на каждое. Старый аддон без gf3 просто не покажет выбор.
+		const char *const russianDirections[] = {"Вперёд", "Боком", "Спиной"};
 		for (i32 d = 0; d < KZ::jumpstats::direction::Count; d++)
 		{
-			t.filters[3].push_back({KZ::jumpstats::direction::Name(d), d == v.direction});
+			t.filters[3].push_back({personal && !english ? russianDirections[d] : KZ::jumpstats::direction::Name(d), d == v.direction});
 		}
 		for (const char *mode : jumptopModes)
 		{
@@ -1930,13 +1958,16 @@ namespace
 				t.filters[2].push_back({mode, dbID == v.modeID});
 			}
 		}
-		t.headers[0] = "Место";
-		t.headers[1] = "Игрок";
-		t.headers[2] = v.isBlock ? "Блок" : "Дистанция";
-		t.headers[3] = "Стрейфы";
-		t.headers[4] = "Синхр.";
-		t.headers[5] = "Скорость";
-		t.headers[6] = "Карта";
+		if (!personal)
+		{
+			t.headers[0] = "Место";
+			t.headers[1] = "Игрок";
+		}
+		t.headers[2] = personal && english ? (v.isBlock ? "Block" : "Distance") : (v.isBlock ? "Блок" : "Дистанция");
+		t.headers[3] = personal && english ? "Strafes" : "Стрейфы";
+		t.headers[4] = personal && english ? "Sync" : "Синхр.";
+		t.headers[5] = personal ? (english ? "Pre" : "Пре") : "Скорость";
+		t.headers[6] = personal && english ? "Map" : "Карта";
 
 		v.shownIds.clear();
 		const u64 me = player->GetSteamId64();
@@ -1946,24 +1977,27 @@ namespace
 		{
 			const JumptopRow &r = v.rows[i];
 			KZ::gsmenu::Row row;
-			row.cells[0] = std::to_string(i + 1);
-			row.cells[1] = r.alias;
-			row.cells[2] = JumpDistanceText(r, v.isBlock);
+			if (!personal)
+			{
+				row.cells[0] = std::to_string(i + 1);
+				row.cells[1] = r.alias;
+			}
+			row.cells[2] = JumpDistanceText(r, v.isBlock, personal);
 			row.cells[3] = std::to_string(r.strafes);
 			row.cells[4] = JumpSyncText(r.sync);
 			row.cells[5] = JumpPreText(r.pre);
 			row.cells[6] = r.map;
 			row.initial = KZ::gsmenu::Initial(r.alias.c_str());
 			row.colour = (u32)(r.steamID64 % 8);
-			row.wr = i == 0;
-			row.me = r.steamID64 == me;
+			row.wr = !personal && i == 0;
+			row.me = !personal && r.steamID64 == me;
 			row.noGo = !r.replay;
 			meShown |= row.me;
 			t.rows.push_back(row);
-			v.shownIds.push_back(r.id);
+			v.shownIds.push_back(r.replay ? r.id : 0);
 		}
 		v.shownOwnReplay = 0;
-		if (!meShown && IsJumpId(v.own.id))
+		if (!personal && !meShown && IsJumpId(v.own.id))
 		{
 			const auto it = std::find_if(v.rows.begin(), v.rows.end(), [me](const JumptopRow &row) { return row.steamID64 == me; });
 			const JumptopRow &own = it == v.rows.end() ? v.own : *it;
@@ -1988,14 +2022,91 @@ namespace
 			// [cyb] класс empty: плашка в теле окна вместо заголовков и клавиш (как у !maptop) —
 			// с направлениями пустые топы (Sideways/Backwards редких типов) попадаются часто.
 			t.empty = true;
-			t.hint = "В этом топе пока пусто";
+			t.hint = personal ? (v.personal->loading ? (english ? "Loading…" : "Загрузка…")
+													: (english ? "No personal best in this category" : "В этом зачёте пока нет личного рекорда"))
+							  : "В этом топе пока пусто";
 		}
-		KZ::gsmenu::ShowTable(player, t, OnJumptopWindowClick, "jumptop");
+		return KZ::gsmenu::ShowTable(player, t, OnJumptopWindowClick, JumpWindowOwner(v));
+	}
+
+	void QueryPersonalJumpWindow(KZPlayer *player)
+	{
+		JumptopView &v = g_jtView[player->GetPlayerSlot().Get()];
+		if (!v.personal->steamID64)
+		{
+			RenderJumptopWindow(player);
+			return;
+		}
+		v.rows.clear();
+		v.personal->loading = true;
+		const u64 seq = ++g_jtQuerySeq;
+		v.pendingQuery = seq;
+		if (!RenderJumptopWindow(player))
+		{
+			PrintPlayerBests(player, v.personal->steamID64, v.personal->alias, v.modeID, v.nopre);
+			return;
+		}
+		if (!KZDatabaseService::IsReady())
+		{
+			KZ::gsmenu::Close(player, "jump_pb_db_unavailable");
+			player->languageService->PrintChat(true, false, "Jumptop - Database Unavailable");
+			return;
+		}
+		char query[2048];
+		V_snprintf(query, sizeof(query), sql_jumptop_getpersonal, JumpReplayTable(v.nopre), JumpTable(v.nopre), v.modeID, v.jumpType,
+				   v.isBlock ? 1 : 0, v.direction, v.personal->steamID64);
+		Transaction txn;
+		txn.queries.push_back(query);
+		const CPlayerUserId userID = player->GetClient()->GetUserID();
+		KZDatabaseService::GetDatabaseConnection()->ExecuteTransaction(
+			txn,
+			[userID, seq](std::vector<ISQLQuery *> queries)
+			{
+				KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
+				if (!player || !KZ::gsmenu::IsOpenBy(player, "jspb"))
+				{
+					return;
+				}
+				JumptopView &v = g_jtView[player->GetPlayerSlot().Get()];
+				if (!v.personal || v.pendingQuery != seq)
+				{
+					return;
+				}
+				ISQLResult *result = queries[0]->GetResultSet();
+				if (result && result->FetchRow())
+				{
+					JumptopRow row = ReadJumptopRow(result, v.nopre);
+					UUID_t uuid;
+					row.replay = row.replay && UUID_t::FromString(result->GetString(10), &uuid)
+						&& (result->GetInt(12) != 0 || HasLocalJumpReplay(uuid.ToString()));
+					v.rows.push_back(std::move(row));
+				}
+				v.personal->loading = false;
+				if (!RenderJumptopWindow(player))
+				{
+					PrintPlayerBests(player, v.personal->steamID64, v.personal->alias, v.modeID, v.nopre);
+				}
+			},
+			[userID, seq](std::string error, int)
+			{
+				KZ_LOG_ERROR(LogChannel::DB, "[cyb] jump_pb_window_failed error=%s\n", error.c_str());
+				KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
+				if (player && KZ::gsmenu::IsOpenBy(player, "jspb") && g_jtView[player->GetPlayerSlot().Get()].pendingQuery == seq)
+				{
+					KZ::gsmenu::Close(player, "jump_pb_query_failed");
+					player->languageService->PrintChat(true, false, "Jumptop - Database Unavailable");
+				}
+			});
 	}
 
 	void QueryJumptopWindow(KZPlayer *player)
 	{
 		JumptopView &v = g_jtView[player->GetPlayerSlot().Get()];
+		if (v.personal)
+		{
+			QueryPersonalJumpWindow(player);
+			return;
+		}
 		v.page = 0;
 		const u64 seq = ++g_jtQuerySeq;
 		v.pendingQuery = seq;
@@ -2055,6 +2166,7 @@ namespace
 			return false;
 		}
 		JumptopView &v = g_jtView[player->GetPlayerSlot().Get()];
+		v = {};
 		v.modeID = modeID;
 		v.jumpType = jumpType >= JumpType_LongJump && jumpType <= JumpType_Jumpbug ? jumpType : JumpType_LongJump;
 		v.isBlock = isBlock;
@@ -2149,49 +2261,92 @@ SCMD_LINK(kz_jt, kz_jumptop);
 SCMD(kz_jspb, SCFL_JUMPSTATS | SCFL_RECORD | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
-	if (!player)
+	if (!player || !player->GetClient())
 	{
 		return true;
 	}
-	if (!KZDatabaseService::IsReady())
+	const i32 modeID = KZ::mode::GetModeInfo(player->modeService).databaseID;
+	if (!KZDatabaseService::IsReady() || modeID < 0)
 	{
 		player->languageService->PrintChat(true, false, "Jumptop - Database Unavailable");
 		return true;
 	}
-	i32 modeID = KZ::mode::GetModeInfo(player->modeService).databaseID;
-	const char *query = args->ArgC() > 1 ? args->ArgS() : "";
-	if (!query[0])
+
+	const bool nopre = IsCkz(modeID) && KZ::style::HasNopre(player);
+	std::string query = args->ArgC() > 1 ? args->ArgS() : "";
+	u64 seq = 0;
+	if (KZ::gsmenu::Available(player))
 	{
-		PrintPlayerBests(player, player->GetSteamId64(), player->GetName(), modeID);
+		JumptopView &v = g_jtView[player->GetPlayerSlot().Get()];
+		v = {};
+		v.modeID = modeID;
+		v.nopre = nopre;
+		v.personal = PersonalJumpTarget {query.empty() ? player->GetSteamId64() : 0, query.empty() ? player->GetName() : query, true};
+		v.pendingQuery = ++g_jtQuerySeq;
+		if (RenderJumptopWindow(player))
+		{
+			seq = v.pendingQuery;
+			if (query.empty())
+			{
+				QueryPersonalJumpWindow(player);
+				return true;
+			}
+		}
+	}
+	if (query.empty())
+	{
+		PrintPlayerBests(player, player->GetSteamId64(), player->GetName(), modeID, nopre);
 		return true;
 	}
-	CPlayerUserId userID = player->GetClient()->GetUserID();
-	// clang-format off
-	KZDatabaseService::FindPlayerByAlias(query,
-		[userID, modeID](std::vector<ISQLQuery *> queries)
+
+	const CPlayerUserId userID = player->GetClient()->GetUserID();
+	KZDatabaseService::FindPlayerByAlias(
+		query.c_str(),
+		[userID, modeID, nopre, seq](std::vector<ISQLQuery *> queries)
 		{
 			KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
 			if (!player)
 			{
 				return;
 			}
-			ISQLResult *r = queries[0]->GetResultSet();
-			if (!r || !r->FetchRow())
+			JumptopView &v = g_jtView[player->GetPlayerSlot().Get()];
+			if (seq && (!v.personal || !KZ::gsmenu::IsOpenBy(player, "jspb") || v.pendingQuery != seq))
 			{
+				return;
+			}
+			ISQLResult *result = queries[0]->GetResultSet();
+			if (!result || !result->FetchRow())
+			{
+				if (seq)
+				{
+					KZ::gsmenu::Close(player, "jump_pb_player_not_found");
+				}
 				player->languageService->PrintChat(true, false, "Jumptop - Player Not Found");
 				return;
 			}
-			PrintPlayerBests(player, (u64)r->GetInt64(0), r->GetString(1) ? r->GetString(1) : "", modeID);
+			const auto steamID = (u64)result->GetInt64(0);
+			const char *alias = result->GetString(1) ? result->GetString(1) : "";
+			if (!seq)
+			{
+				PrintPlayerBests(player, steamID, alias, modeID, nopre);
+				return;
+			}
+			v.personal->steamID64 = steamID;
+			v.personal->alias = alias;
+			QueryPersonalJumpWindow(player);
 		},
-		[userID](std::string error, int failIndex)
+		[userID, seq](std::string, int)
 		{
 			KZPlayer *player = g_pKZPlayerManager->ToPlayer(userID);
-			if (player)
+			if (player && (!seq || (KZ::gsmenu::IsOpenBy(player, "jspb") && g_jtView[player->GetPlayerSlot().Get()].pendingQuery == seq)))
 			{
+				if (seq)
+				{
+					KZ::gsmenu::Close(player, "jump_pb_lookup_failed");
+				}
 				player->languageService->PrintChat(true, false, "Jumptop - Database Unavailable");
 			}
 		});
-	// clang-format on
 	return true;
 }
 
