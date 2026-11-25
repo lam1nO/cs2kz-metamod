@@ -1,5 +1,6 @@
 #pragma once
 #include "../kz.h"
+#include "cyb_rank_summary.h"
 
 class KZProfileService : public KZBaseService
 {
@@ -18,9 +19,8 @@ public:
 	virtual void Reset() override
 	{
 		clanTag[0] = '\0';
-		desiredMode[0] = '\0';
 		timeToNextRatingRefresh = 0.0f;
-		currentPoints = -1;
+		this->ResetRating();
 		clantagOverrideApplied = false;
 		personalTag[0] = '\0';
 		personalTagChatColor[0] = '\0';
@@ -30,12 +30,21 @@ public:
 	}
 
 	char clanTag[32] {};
-	// api-режим ("kzt"/"ckz"/"vnl") на момент последнего запроса очков: ответ,
-	// прилетевший после смены режима, отбрасывается сравнением с ним.
-	char desiredMode[8] {};
+	void ResetRating()
+	{
+		rating.reset();
+		ratingRequestId = 0;
+		postFinishRatingRefresh = 0.0f;
+	}
 	f32 timeToNextRatingRefresh = 0.0f;
-	// Платформенные NUB-очки текущего режима; -1 = не загружено (тэг без звания).
-	i32 currentPoints = -1;
+
+private:
+	// Сводка текущего режима и идентификатор запроса для отсечения устаревших ответов.
+	std::optional<CybRankSummary::Rating> rating;
+	u64 ratingRequestId = 0;
+	f32 postFinishRatingRefresh = 0.0f;
+
+public:
 	// Персональный тег уже проставлен в этой жизни игрока. Нужен, потому что штатно тег
 	// перерисовывается только по ответу платформы об очках, а он у такого игрока не
 	// обязателен (сеть легла, включены стили — запрос очков вообще не уходит).
@@ -68,7 +77,7 @@ public:
 	// отложенным повтором после транзиентного отказа. Лишние вызовы гасит personalTagRequested.
 	void RequestPersonalTag();
 	bool CanDisplayRank();
-	// Индекс звания 0..22 по текущим очкам и шкале режима; -1 = звание недоступно.
+	// Индекс звания 0..22 из платформенной сводки; -1 = звание недоступно.
 	i32 GetCurrentRankIndex();
 	// Финиш рана: платформа пересчитает очки после инджеста — подтянуть с малым лагом.
 	void OnRunFinished();

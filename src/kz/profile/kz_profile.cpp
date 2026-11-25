@@ -13,10 +13,8 @@
 #include "sdk/recipientfilters.h"
 #include "public/networksystem/inetworkmessages.h"
 
-// Лестница из 23 званий по платформенным NUB-очкам. Значения — из брифа
-// «Константы званий» (калибровка 2026-07-30); копия для api/web —
-// packages/contracts/src/kz/ranks.ts, синхронизация версией профиля.
-#define KZ_RANK_COUNT 23
+// Имена нужны для подсказки о следующей ступени. Текущее звание приходит из сводки сайта.
+static constexpr auto KZ_RANK_COUNT = CybRankSummary::RankCount;
 
 // clang-format off
 static_global const char *rankNames[KZ_RANK_COUNT] = {
@@ -40,50 +38,14 @@ static_global const char *rankColors[KZ_RANK_COUNT] = {
 	"{lightred}", "{lightred}", "{red}",     "{gold}",
 };
 
-// Пороги «с этого значения». KZT и CKZ — общая шкала; VNL сжата под малый пул карт.
-static_global const i32 rankThresholdsKztCkz[KZ_RANK_COUNT] = {
-	0,     1,     250,   500,   1000,  1500,  2000,  3000,  4000,  5000,  6500,  8000,
-	10000, 12500, 15000, 17500, 20000, 25000, 30000, 35000, 42500, 50000, 60000,
-};
-
-static_global const i32 rankThresholdsVnl[KZ_RANK_COUNT] = {
-	0,    1,    100,  200,  300,  450,  600,  800,  1000, 1250, 1500, 1750,
-	2000, 2400, 2800, 3200, 3600, 4000, 4400, 4800, 5200, 5600, 6000,
-};
-
 // clang-format on
-
-// Шкала порогов по api-режиму; nullptr — режим без званий.
-static_function const i32 *GetRankThresholds(const char *apiMode)
-{
-	if (KZ_STREQ(apiMode, "vnl"))
-	{
-		return rankThresholdsVnl;
-	}
-	if (KZ_STREQ(apiMode, "kzt") || KZ_STREQ(apiMode, "ckz"))
-	{
-		return rankThresholdsKztCkz;
-	}
-	return nullptr;
-}
-
-static_function i32 GetRankIndexForPoints(const i32 *thresholds, i32 points)
-{
-	i32 rank = 0;
-	for (i32 i = KZ_RANK_COUNT - 1; i >= 0; i--)
-	{
-		if (points >= thresholds[i])
-		{
-			rank = i;
-			break;
-		}
-	}
-	return rank;
-}
 
 #define RATING_REFRESH_PERIOD 120.0f // seconds
 // Грейс после финиша рана: платформа должна успеть принять и посчитать ран.
 #define RATING_RUN_FINISH_DELAY 5.0f // seconds
+// Сводка сайта кэшируется на 30 секунд. Повтор после окна кэша нужен, если
+// быстрый запрос после финиша получил сводку, сохранённую до пересчёта очков.
+#define RATING_RUN_FINISH_CACHE_DELAY 35.0f // seconds
 // Ретрай после раннего выхода «не сейчас» (нет аутентификации/режима/стили):
 // без сдвига таймера OnPhysicsSimulatePost долбил бы RequestRating каждый тик
 // (реплей-боты не аутентифицированы никогда).
@@ -278,8 +240,7 @@ void KZProfileService::OnCheckTransmit()
 	}
 }
 
-// Источник очков — НАША платформа (тот же корень, что PB/WR-кэш худа и эмиттер
-// ранов), а не cs2kz.org: гейт KZGlobalService::IsAvailable из апстрима снят.
+// Сайт и игра получают звание из одной сводки режима.
 void KZProfileService::RequestRating()
 {
 	// Бэкофф ставится ДО ранних выходов: любой выход «не сейчас» = ретрай через
@@ -321,67 +282,39 @@ void KZProfileService::RequestRating()
 	{
 		apiURL.pop_back();
 	}
-	V_strncpy(this->desiredMode, apiMode, sizeof(this->desiredMode));
-	std::string url = apiURL + "/v1/kz/ranking/player/" + std::to_string(steamID64);
+	// Один идентификатор на запрос, включая повторный заход и переключение KZT → CKZ → KZT.
+	static u64 nextRatingRequestId = 0;
+	const u64 requestId = this->ratingRequestId = ++nextRatingRequestId;
+	std::string url = apiURL + "/v1/players/" + std::to_string(steamID64) + "/kz/summary";
 	HTTP::Request request(HTTP::Method::GET, url);
 	request.SetQuery("mode", apiMode);
-	request.SetQuery("category", "nub");
 	std::string modeStr = apiMode;
 	KZ_LOG_DEBUG(LogChannel::Profile, "Requesting rating for player %s (%llu) in mode %s.\n", this->player->GetName(), steamID64, apiMode);
-	auto onResponse = [steamID64, modeStr](HTTP::Response response)
+	auto onResponse = [steamID64, requestId, modeStr](HTTP::Response response)
 	{
+		KZPlayer *player = g_pKZPlayerManager->SteamIdToPlayer(steamID64);
+		if (!player || player->profileService->ratingRequestId != requestId)
+		{
+			return;
+		}
 		if (response.status < 200 || response.status >= 300)
 		{
 			KZ_LOG_WARN(LogChannel::Profile, "[cyb] rank_fetch_fail steam_id=%llu reason=http_%u\n", steamID64, (unsigned)response.status);
 			return;
 		}
-		KZPlayer *player = g_pKZPlayerManager->SteamIdToPlayer(steamID64);
-		if (player == nullptr)
-		{
-			return; // игрок вышел, пока запрос летел
-		}
-		// The player mode has changed since the request was made.
-		if (!KZ_STREQ(player->profileService->desiredMode, modeStr.c_str()))
-		{
-			KZ_LOG_DEBUG(LogChannel::Profile, "Player %s mode changed since request, ignoring response.\n", player->GetName());
-			return;
-		}
-		std::string body = response.Body().value_or("");
-		// Пустое тело при 200 — аномалия (обрыв/прокси), НЕ «нет очков»: молча
-		// принять его за ноль = fail-open, Master внезапно станет New.
-		if (body.empty())
+		auto rating = CybRankSummary::Parse(response.Body().value_or(""));
+		if (!rating)
 		{
 			KZ_LOG_WARN(LogChannel::Profile, "[cyb] rank_fetch_fail steam_id=%llu reason=bad_body\n", steamID64);
 			return;
 		}
-		i32 points = 0;
-		// api отвечает строкой null, если у игрока ещё нет ни одного рана — это
-		// успешно загруженный ноль очков (звание New), а не отказ.
-		if (body != "null")
+		auto &current = player->profileService->rating;
+		if (current && current->index != rating->index)
 		{
-			Json json(body);
-			f64 pointsF = 0.0;
-			if (!json.IsValid() || !json.Get("points", pointsF))
-			{
-				KZ_LOG_WARN(LogChannel::Profile, "[cyb] rank_fetch_fail steam_id=%llu reason=bad_body\n", steamID64);
-				return;
-			}
-			points = static_cast<i32>(pointsF);
+			KZ_LOG_INFO(LogChannel::Profile, "[cyb] rank_change steam_id=%llu mode=%s rank=%s points=%d\n", steamID64, modeStr.c_str(),
+						rating->name.c_str(), rating->points);
 		}
-		const i32 *thresholds = GetRankThresholds(modeStr.c_str());
-		i32 oldPoints = player->profileService->currentPoints;
-		player->profileService->currentPoints = points;
-		// Смена звания (не первая загрузка) — единственный info-лог тракта.
-		if (thresholds && oldPoints >= 0)
-		{
-			i32 oldRank = GetRankIndexForPoints(thresholds, oldPoints);
-			i32 newRank = GetRankIndexForPoints(thresholds, points);
-			if (oldRank != newRank)
-			{
-				KZ_LOG_INFO(LogChannel::Profile, "[cyb] rank_change steam_id=%llu mode=%s rank=%s points=%d\n", steamID64, modeStr.c_str(),
-							rankNames[newRank], points);
-			}
-		}
+		current = std::move(rating);
 		player->profileService->UpdateCompetitiveRank();
 		player->profileService->UpdateClantag();
 	};
@@ -499,8 +432,8 @@ void KZProfileService::RequestPersonalTag()
 
 bool KZProfileService::CanDisplayRank()
 {
-	// Haven't obtained points yet.
-	if (this->currentPoints < 0)
+	// Haven't obtained the rating yet.
+	if (!this->rating)
 	{
 		return false;
 	}
@@ -519,25 +452,18 @@ bool KZProfileService::CanDisplayRank()
 
 i32 KZProfileService::GetCurrentRankIndex()
 {
-	if (!this->CanDisplayRank())
-	{
-		return -1;
-	}
-	const i32 *thresholds = GetRankThresholds(CybReplayCommon::MapMode(this->player->modeService->GetModeShortName()));
-	if (!thresholds)
-	{
-		return -1;
-	}
-	return GetRankIndexForPoints(thresholds, this->currentPoints);
+	return this->CanDisplayRank() ? this->rating->index : -1;
 }
 
 void KZProfileService::OnRunFinished()
 {
-	f32 refreshAt = g_pKZUtils->GetServerGlobals()->realtime + RATING_RUN_FINISH_DELAY;
+	const f32 now = g_pKZUtils->GetServerGlobals()->realtime;
+	const f32 refreshAt = now + RATING_RUN_FINISH_DELAY;
 	if (this->timeToNextRatingRefresh > refreshAt)
 	{
 		this->timeToNextRatingRefresh = refreshAt;
 	}
+	this->postFinishRatingRefresh = now + RATING_RUN_FINISH_CACHE_DELAY;
 }
 
 void KZProfileService::EmitGG1Bridge()
@@ -600,12 +526,16 @@ void KZProfileService::PrintRank()
 	}
 	if (rank >= KZ_RANK_COUNT - 1)
 	{
-		this->player->languageService->PrintChat(true, false, "Rank - Info (Max)", rankColors[rank], rankNames[rank], this->currentPoints);
+		this->player->languageService->PrintChat(true, false, "Rank - Info (Max)", rankColors[rank], this->rating->name.c_str(), this->rating->points);
 		return;
 	}
-	const i32 *thresholds = GetRankThresholds(apiMode);
-	this->player->languageService->PrintChat(true, false, "Rank - Info", rankColors[rank], rankNames[rank], this->currentPoints,
-											 thresholds[rank + 1] - this->currentPoints, rankColors[rank + 1], rankNames[rank + 1]);
+	if (!this->rating->nextPoints)
+	{
+		this->player->languageService->PrintChat(true, false, "Rank - Not Loaded");
+		return;
+	}
+	this->player->languageService->PrintChat(true, false, "Rank - Info", rankColors[rank], this->rating->name.c_str(), this->rating->points,
+											 *this->rating->nextPoints - this->rating->points, rankColors[rank + 1], rankNames[rank + 1]);
 }
 
 void KZProfileService::UpdateClantag()
@@ -638,7 +568,7 @@ void KZProfileService::UpdateClantag()
 	i32 rank = this->GetCurrentRankIndex();
 	if (rank >= 0)
 	{
-		V_snprintf(this->clanTag, sizeof(this->clanTag), "%s %s", this->player->modeService->GetModeShortName(), rankNames[rank]);
+		V_snprintf(this->clanTag, sizeof(this->clanTag), "%s %s", this->player->modeService->GetModeShortName(), this->rating->name.c_str());
 	}
 	else
 	{
@@ -672,7 +602,13 @@ void KZProfileService::OnPhysicsSimulatePost()
 		this->personalTagRetryTime = 0.0f;
 		this->RequestPersonalTag();
 	}
-	if (g_pKZUtils->GetServerGlobals()->realtime >= this->timeToNextRatingRefresh)
+	const f32 now = g_pKZUtils->GetServerGlobals()->realtime;
+	const bool finishRefreshDue = this->postFinishRatingRefresh > 0.0f && now >= this->postFinishRatingRefresh;
+	if (finishRefreshDue)
+	{
+		this->postFinishRatingRefresh = 0.0f;
+	}
+	if (finishRefreshDue || now >= this->timeToNextRatingRefresh)
 	{
 		this->RequestRating();
 	}
@@ -697,7 +633,7 @@ void KZProfileService::UpdateCompetitiveRank()
 		return;
 	}
 	// Цифра в скорборде = платформенные NUB-очки режима.
-	i32 rating = this->CanDisplayRank() ? this->currentPoints : 0;
+	i32 rating = this->CanDisplayRank() ? this->rating->points : 0;
 	CCSPlayerController *controller = this->player->GetController();
 	// Пишем ТОЛЬКО по разнице (идиома kz_fov.cpp): SCHEMA-сеттер безусловно зовёт
 	// NetworkStateChanged, а метод крутится на КАЖДОМ CheckTransmit — апстрим помечал
@@ -740,7 +676,7 @@ std::string KZProfileService::GetPrefix(bool colors)
 	i32 rank = this->GetCurrentRankIndex();
 	if (rank >= 0)
 	{
-		return std::string(colors ? rankColors[rank] : "") + "[" + this->player->modeService->GetModeShortName() + " " + rankNames[rank]
+		return std::string(colors ? rankColors[rank] : "") + "[" + this->player->modeService->GetModeShortName() + " " + this->rating->name
 			   + (colors ? "]{default}" : "]");
 	}
 	else

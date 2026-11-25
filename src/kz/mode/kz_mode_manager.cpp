@@ -335,11 +335,8 @@ bool KZModeManager::SwitchToMode(KZPlayer *player, const char *modeName, bool si
 	player->SetVelocity({0, 0, 0});
 	player->jumpstatsService->InvalidateJumpstats("Externally modified");
 
-	// Очки привязаны к режиму: до ответа платформы по новому режиму звание не показываем.
-	// desiredMode тоже сбрасываем: если RequestRating ниже выйдет рано (стили/нет
-	// аутентификации), устаревший desiredMode пропустил бы летящий ответ прежнего режима.
-	player->profileService->currentPoints = -1;
-	player->profileService->desiredMode[0] = '\0';
+	// Сводка привязана к режиму. Сбрасываем звание и запрос предыдущего режима.
+	player->profileService->ResetRating();
 	player->profileService->UpdateClantag();
 	// HTTP-запрос очков и эмит моста — только живому в сессии игроку: SwitchToMode
 	// зовётся и из KZPlayer::Reset() — с дисконнекта (движковый клиент там ещё
