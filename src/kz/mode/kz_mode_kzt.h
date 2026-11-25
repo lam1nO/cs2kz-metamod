@@ -108,7 +108,7 @@ class KZTimerModeService : public KZModeService
 	// Пороги сверены с refs/gokz kztimer distance-тирами — достижимо: KZT-перф даёт до ~380
 	// спида, бхопы реально доходят до 340–360+ по дистанции.
 	// Тир Meh = 0.0 (по ТЗ «meh 0–…»), т.е. любой валидный прыжок ≥ Meh. Типы без lowpre — [1]==[0].
-	f32 distanceTiers[JUMPTYPE_COUNT - 3][2][DISTANCETIER_COUNT] = {
+	f32 distanceTiers[JUMPTYPE_COUNT - 3][2][DistanceTier_Wrecker] = {
 		// LJ — без lowpre. Wrecker 282, а не 284 (решение пользователя 09.08): порог
 		// классификации, физику и метрику дистанции не трогает.
 		{{217.0f, 265.0f, 270.0f, 275.0f, 280.0f, 282.0f}, {217.0f, 265.0f, 270.0f, 275.0f, 280.0f, 282.0f}},

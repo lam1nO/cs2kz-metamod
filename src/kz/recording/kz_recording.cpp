@@ -22,7 +22,7 @@
 #include <set>
 
 CConVar<i32> kz_replay_recording_min_jump_tier("kz_replay_recording_min_jump_tier", FCVAR_CHEAT, "Minimum jump tier to record for jumpstat replays",
-											   DistanceTier_Wrecker, true, DistanceTier_Meh, true, DistanceTier_Wrecker);
+											   DistanceTier_Wrecker, true, DistanceTier_Meh, true, DistanceTier_WickedSick);
 
 extern CSteamGameServerAPIContext g_steamAPI;
 

@@ -28,10 +28,20 @@ int main()
 			longJump ? 267.0f : 290.0f, longJump ? 270.0f : 295.0f};
 		for (int i = 0; i < 5; ++i)
 		{
-			assert(NopreDistanceTierOffset(longJump, expected[i] - 0.01f) == i);
-			assert(NopreDistanceTierOffset(longJump, expected[i]) == i + 1);
+			assert(NopreDistanceTierOffset(longJump ? NopreJumpGroup::LongJump : NopreJumpGroup::Hop, expected[i] - 0.01f) == i);
+			assert(NopreDistanceTierOffset(longJump ? NopreJumpGroup::LongJump : NopreJumpGroup::Hop, expected[i]) == i + 1);
 		}
 	}
+	assert(NopreDistanceTierOffset(NopreJumpGroup::LongJump, 274.99f) == 5);
+	assert(NopreDistanceTierOffset(NopreJumpGroup::LongJump, 275.0f) == 6);
+	assert(NopreDistanceTierOffset(NopreJumpGroup::Hop, 297.99f) == 5);
+	assert(NopreDistanceTierOffset(NopreJumpGroup::Hop, 298.0f) == 6);
+	assert(NopreDistanceTierOffset(NopreJumpGroup::WeirdJump, 292.99f) == 4);
+	assert(NopreDistanceTierOffset(NopreJumpGroup::WeirdJump, 293.0f) == 5);
+	assert(NopreDistanceTierOffset(NopreJumpGroup::WeirdJump, 295.99f) == 5);
+	assert(NopreDistanceTierOffset(NopreJumpGroup::WeirdJump, 296.0f) == 6);
+	assert(NopreDistanceTierOffset(NopreJumpGroup::Jumpbug, 294.99f) == 4);
+	assert(NopreDistanceTierOffset(NopreJumpGroup::Jumpbug, 500.0f) == 5);
 	assert(StyleKey({"LGJ", "ABH", "LGJ"}) == "ABH+LGJ");
 	assert(EncodeStyleKey(StyleKey({"NOPRE", "ABH"})) == "ABH%2BNOPRE");
 	assert(StyleKey({}).empty());

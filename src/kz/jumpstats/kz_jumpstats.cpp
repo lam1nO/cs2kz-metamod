@@ -53,7 +53,8 @@ const char *distanceTierColors[DISTANCETIER_COUNT] = {
 	"{green}",
 	"{darkred}",
 	"{gold}",
-	"{orchid}"
+	"{orchid}",
+	"{purple}" // CS2 light purple (pink), distinct from Wrecker
 };
 
 const char *distanceTierSounds[DISTANCETIER_COUNT] = {
@@ -63,7 +64,8 @@ const char *distanceTierSounds[DISTANCETIER_COUNT] = {
 	"kz.perfect",
 	"kz.godlike",
 	"kz.ownage",
-	"kz.wrecker"
+	"kz.wrecker",
+	"kz.wickedsick"
 };
 
 // clang-format on
@@ -540,7 +542,16 @@ DistanceTier GetJumpDistanceTier(KZModeService *mode, JumpType type, f32 distanc
 		{
 			return DistanceTier_None;
 		}
-		return static_cast<DistanceTier>(DistanceTier_Meh + KZ::style::NopreDistanceTierOffset(type == JumpType_LongJump, distance));
+		using KZ::style::NopreJumpGroup;
+		NopreJumpGroup group;
+		switch (type)
+		{
+			case JumpType_LongJump: group = NopreJumpGroup::LongJump; break;
+			case JumpType_WeirdJump: group = NopreJumpGroup::WeirdJump; break;
+			case JumpType_Jumpbug: group = NopreJumpGroup::Jumpbug; break;
+			default: group = NopreJumpGroup::Hop; break;
+		}
+		return static_cast<DistanceTier>(DistanceTier_Meh + KZ::style::NopreDistanceTierOffset(group, distance));
 	}
 	return mode ? mode->GetDistanceTier(type, distance, pre) : DistanceTier_None;
 }

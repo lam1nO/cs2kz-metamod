@@ -296,7 +296,7 @@ DistanceTier KZTimerModeService::GetDistanceTier(JumpType jumpType, f32 distance
 
 	// Get highest tier distance that the jump beats
 	DistanceTier tier = DistanceTier_None;
-	while (tier + 1 < DISTANCETIER_COUNT && distance >= distanceTiers[jumpType][lowpre][tier])
+	while (tier < DistanceTier_Wrecker && distance >= distanceTiers[jumpType][lowpre][tier])
 	{
 		tier = (DistanceTier)(tier + 1);
 	}

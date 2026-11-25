@@ -13,21 +13,34 @@ namespace KZ::style
 		return !nopre && onGround && !wasDucking && justJumped;
 	}
 
-	inline int NopreDistanceTierOffset(bool longJump, float distance)
+	enum class NopreJumpGroup
 	{
-		constexpr float longJumpThresholds[] = {255.0f, 261.0f, 264.0f, 267.0f, 270.0f};
-		constexpr float hopThresholds[] = {265.0f, 270.0f, 280.0f, 290.0f, 295.0f};
-		const auto &thresholds = longJump ? longJumpThresholds : hopThresholds;
+		LongJump,
+		Hop,
+		WeirdJump,
+		Jumpbug,
+	};
+
+	inline int NopreDistanceTierOffset(NopreJumpGroup group, float distance)
+	{
+		constexpr float thresholds[][5] = {
+			{255.0f, 261.0f, 264.0f, 267.0f, 270.0f}, // Long Jump
+			{265.0f, 270.0f, 280.0f, 290.0f, 295.0f}, // BH / MBH
+			{265.0f, 270.0f, 280.0f, 290.0f, 293.0f}, // Weird Jump
+			{265.0f, 270.0f, 280.0f, 290.0f, 295.0f}, // Jumpbug
+		};
+		constexpr float wickedSickThresholds[] = {275.0f, 298.0f, 296.0f};
+		const auto index = static_cast<int>(group);
 		int tier = 0;
-		for (float threshold : thresholds)
+		for (float threshold : thresholds[index])
 		{
 			if (distance < threshold)
 			{
-				break;
+				return tier;
 			}
 			++tier;
 		}
-		return tier;
+		return tier + (group != NopreJumpGroup::Jumpbug && distance >= wickedSickThresholds[index]);
 	}
 
 	inline float NoprePerfVerticalSpeed(float speed, float gravity, float jumpImpulse, bool standardTakeoff)

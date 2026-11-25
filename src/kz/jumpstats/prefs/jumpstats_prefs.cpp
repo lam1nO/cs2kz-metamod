@@ -24,6 +24,7 @@ namespace
 	const char *kTierNameKeys[DISTANCETIER_COUNT] = {
 		"Jumpstats - Tier Name None",    "Jumpstats - Tier Name Meh",    "Jumpstats - Tier Name Impressive", "Jumpstats - Tier Name Perfect",
 		"Jumpstats - Tier Name Godlike", "Jumpstats - Tier Name Ownage", "Jumpstats - Tier Name Wrecker",
+		"Jumpstats - Tier Name Wicked Sick",
 	};
 
 	// Какой из шести тир-префов стоит за пунктом Choice — приходит через tag, чтобы одна

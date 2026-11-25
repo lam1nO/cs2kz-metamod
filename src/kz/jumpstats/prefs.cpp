@@ -20,13 +20,13 @@ bool KZJumpstatsService::GetDistTierFromString(const char *tierString, DistanceT
 	}
 	if (utils::IsNumeric(tierString))
 	{
-		DistanceTier tierValue = static_cast<DistanceTier>(V_StringToInt32(tierString, -1));
+		const i32 tierValue = V_StringToInt32(tierString, -1);
 		if (tierValue < DistanceTier_None || tierValue >= DISTANCETIER_COUNT)
 		{
 			this->player->languageService->PrintChat(true, false, "Jumpstats Option - Tier Hint");
 			return false;
 		}
-		outTier = tierValue;
+		outTier = static_cast<DistanceTier>(tierValue);
 		return true;
 	}
 	if (KZ_STREQI("None", tierString))
@@ -62,6 +62,11 @@ bool KZJumpstatsService::GetDistTierFromString(const char *tierString, DistanceT
 	if (KZ_STREQI("Wrecker", tierString))
 	{
 		outTier = DistanceTier_Wrecker;
+		return true;
+	}
+	if (KZ_STREQI("WickedSick", tierString) || KZ_STREQI("Wicked Sick", tierString))
+	{
+		outTier = DistanceTier_WickedSick;
 		return true;
 	}
 	return false;
@@ -390,6 +395,7 @@ static const char *s_tierNameKeys[DISTANCETIER_COUNT] = {
 	"Jumpstats - Tier Name None",       "Jumpstats - Tier Name Meh",     "Jumpstats - Tier Name Impressive",
 	"Jumpstats - Tier Name Perfect",    "Jumpstats - Tier Name Godlike", "Jumpstats - Tier Name Ownage",
 	"Jumpstats - Tier Name Wrecker",
+	"Jumpstats - Tier Name Wicked Sick",
 };
 
 // Volume presets cycled through by the jsVolume menu item.

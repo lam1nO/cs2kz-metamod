@@ -35,6 +35,7 @@ enum DistanceTier : u8
 	DistanceTier_Godlike,
 	DistanceTier_Ownage,
 	DistanceTier_Wrecker,
+	DistanceTier_WickedSick,
 	DISTANCETIER_COUNT
 };
 

@@ -206,9 +206,14 @@ DistanceTier KZClassicModeService::GetDistanceTier(JumpType jumpType, f32 distan
 		return DistanceTier_None;
 	}
 
-	// Get highest tier distance that the jump beats
+	// Wicked Sick takes precedence where its threshold overlaps a legacy tier.
+	if (distance >= distanceTiers[jumpType][DistanceTier_Wrecker])
+	{
+		return DistanceTier_WickedSick;
+	}
+
 	DistanceTier tier = DistanceTier_None;
-	while (tier + 1 < DISTANCETIER_COUNT && distance >= distanceTiers[jumpType][tier])
+	while (tier < DistanceTier_Wrecker && distance >= distanceTiers[jumpType][tier])
 	{
 		tier = (DistanceTier)(tier + 1);
 	}
