@@ -570,6 +570,8 @@ static KHook::Return<bool> FireEventPre(IGameEventManager2 *pThis, IGameEvent *e
 				KZPlayer *player = g_pKZPlayerManager->ToPlayer(instance->GetEntityIndex());
 				if (player)
 				{
+					// После выхода из наблюдателей новый pawn должен получить хук до телепортов карты.
+					teleportHook.Add(static_cast<CBaseEntity *>(instance));
 					player->timerService->OnPlayerSpawn();
 					// Дефолтный ствол — на КАЖДОМ спавне. До этого UpdatePistol звался только
 					// из KZ::misc::JoinTeam (обёртка команды jointeam), а мимо неё пешка
@@ -1782,9 +1784,14 @@ void EntListener::OnEntitySpawned(CEntityInstance *pEntity)
 
 void EntListener::OnEntityDeleted(CEntityInstance *pEntity)
 {
-	if (KZTriggerService::IsValidTrigger(static_cast<CBaseEntity *>(pEntity)))
+	auto *entity = static_cast<CBaseEntity *>(pEntity);
+	if (KZTriggerService::IsValidTrigger(entity))
 	{
-		hooks::RemoveEntityHooks(static_cast<CBaseEntity *>(pEntity));
+		hooks::RemoveEntityHooks(entity);
+	}
+	else if (KZ_STREQI(entity->GetClassname(), "player"))
+	{
+		teleportHook.Remove(entity);
 	}
 }
 
