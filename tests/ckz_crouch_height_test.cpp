@@ -25,17 +25,18 @@ int main()
 	constexpr float gravity = 800.0f;
 	constexpr float impulse = 302.0f;
 	constexpr float standing = 298.875f;
-	assert(StandardJumpVerticalSpeed(impulse, gravity, impulse, false) == standing);
-	assert(StandardJumpVerticalSpeed(impulse, gravity, impulse, true) == impulse);
-	assert(StandardJumpVerticalSpeed(standing, gravity, impulse, false) == standing);
-	assert(StandardJumpVerticalSpeed(350.0f, gravity, impulse, false) == 350.0f);
-	assert(StandardJumpVerticalSpeed(impulse, 400.0f, impulse, false) == impulse);
-	assert(StandardJumpVerticalSpeed(impulse, gravity, 300.0f, false) == impulse);
-	assert(StandardJumpVerticalSpeed(0.0f, gravity, impulse, false) == 0.0f);
+	assert(StandardJumpVerticalSpeed(impulse, gravity, impulse, false, true) == standing);
+	assert(StandardJumpVerticalSpeed(impulse, gravity, impulse, true, true) == impulse);
+	assert(StandardJumpVerticalSpeed(impulse, gravity, impulse, false, false) == impulse); // Forced crouch without duck input.
+	assert(StandardJumpVerticalSpeed(standing, gravity, impulse, false, true) == standing);
+	assert(StandardJumpVerticalSpeed(350.0f, gravity, impulse, false, true) == 350.0f);
+	assert(StandardJumpVerticalSpeed(impulse, 400.0f, impulse, false, true) == impulse);
+	assert(StandardJumpVerticalSpeed(impulse, gravity, 300.0f, false, true) == impulse);
+	assert(StandardJumpVerticalSpeed(0.0f, gravity, impulse, false, true) == 0.0f);
 
 	// Compare the nominal vertical apex and the clearance after a 9-unit air duck.
-	const float lateDuck = StandardJumpVerticalSpeed(impulse, gravity, impulse, false);
-	const float preparedDuck = StandardJumpVerticalSpeed(impulse, gravity, impulse, true);
+	const float lateDuck = StandardJumpVerticalSpeed(impulse, gravity, impulse, false, true);
+	const float preparedDuck = StandardJumpVerticalSpeed(impulse, gravity, impulse, true, true);
 	const float lateApex = lateDuck * lateDuck / (2.0f * gravity);
 	const float preparedApex = preparedDuck * preparedDuck / (2.0f * gravity);
 	assert(lateApex < 57.0f && lateApex + 9.0f < 66.0f);

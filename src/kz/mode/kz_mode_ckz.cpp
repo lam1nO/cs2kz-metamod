@@ -146,6 +146,7 @@ void KZClassicModeService::Reset()
 	this->lastConsumedAngleChange = {};
 	this->oldDuckPressed = {};
 	this->groundedDuck.Clear();
+	this->duckInputThisCommand = false;
 	this->forcedUnduck = {};
 	this->postProcessMovementZSpeed = {};
 
@@ -241,7 +242,7 @@ void KZClassicModeService::OnStopTouchGround()
 	auto *pawn = this->player->GetPlayerPawn();
 	auto *movement = this->player->GetMoveServices();
 	if (this->player->jumped && !this->player->takeoffFromLadder && !this->player->possibleLadderHop
-		&& !KZ::style::HasNopre(this->player) && pawn->m_flWaterLevel() <= 0.5f && !(pawn->m_fFlags() & FL_BASEVELOCITY)
+		&& !KZ::style::HasNopre(this->player) && !movement->m_bDuckOverride() && pawn->m_flWaterLevel() <= 0.5f && !(pawn->m_fFlags() & FL_BASEVELOCITY)
 		&& ((pawn->m_fFlags() & FL_DUCKING) || movement->m_duckUntilOnGround() || movement->m_bDucking() || movement->m_bDucked()
 			|| movement->m_flDuckAmount() > 0.0f))
 	{
@@ -251,7 +252,7 @@ void KZClassicModeService::OnStopTouchGround()
 		{
 			const f32 gravity = KZ::mode::modeCvarRefs[MODECVAR_SV_GRAVITY]->GetFloat() * pawn->m_flActualGravityScale();
 			const f32 impulse = KZ::mode::modeCvarRefs[MODECVAR_SV_JUMP_IMPULSE]->GetFloat();
-			const f32 verticalSpeed = KZ::ckz::StandardJumpVerticalSpeed(velocity.z, gravity, impulse, groundedDuck);
+			const f32 verticalSpeed = KZ::ckz::StandardJumpVerticalSpeed(velocity.z, gravity, impulse, groundedDuck, this->duckInputThisCommand);
 			if (verticalSpeed != velocity.z)
 			{
 				velocity.z = verticalSpeed;
@@ -469,9 +470,12 @@ void KZClassicModeService::ClearFrictionSplit()
 
 void KZClassicModeService::OnSetupMove(PlayerCommand *pc)
 {
+	// Include wheel pulses that have already been released by the end of the command.
+	this->duckInputThisCommand = this->player->IsButtonPressed(IN_DUCK, true) || (pc->base().buttons_pb().buttonstate1() & IN_DUCK);
 	for (i32 j = 0; j < pc->mutable_base()->subtick_moves_size(); j++)
 	{
 		CSubtickMoveStep *subtickMove = pc->mutable_base()->mutable_subtick_moves(j);
+		this->duckInputThisCommand |= subtickMove->button() == IN_DUCK && subtickMove->pressed();
 		if (subtickMove->button() == IN_ATTACK || subtickMove->button() == IN_ATTACK2 || subtickMove->button() == IN_RELOAD)
 		{
 			continue;
