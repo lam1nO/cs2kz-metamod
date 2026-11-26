@@ -155,7 +155,7 @@ class KZClassicModeService : public KZModeService
 	u32 lastConsumedAngleChange {};
 	bool oldDuckPressed {};
 	KZ::ckz::GroundedDuckHistory groundedDuck;
-	bool duckInputThisCommand {};
+	KZ::ckz::DuckCommandInput duckCommandInput;
 	bool oldJumpPressed {};
 	bool forcedUnduck {};
 	f32 postProcessMovementZSpeed {};

@@ -146,7 +146,7 @@ void KZClassicModeService::Reset()
 	this->lastConsumedAngleChange = {};
 	this->oldDuckPressed = {};
 	this->groundedDuck.Clear();
-	this->duckInputThisCommand = false;
+	this->duckCommandInput = KZ::ckz::DuckCommandInput();
 	this->forcedUnduck = {};
 	this->postProcessMovementZSpeed = {};
 
@@ -230,7 +230,8 @@ const CVValue_t *KZClassicModeService::GetModeConVarValues()
 
 void KZClassicModeService::OnStopTouchGround()
 {
-	const bool groundedDuck = this->groundedDuck.HeldPreviousTick(this->player->currentMoveData->m_nTickCount);
+	const CMoveData *moveData = this->player->currentMoveData;
+	const bool groundedDuck = this->groundedDuck.HeldPreviousTick(moveData->m_nTickCount);
 	this->groundedDuck.Clear();
 
 	if (this->player->GetMoveType() != MOVETYPE_WALK)
@@ -252,7 +253,8 @@ void KZClassicModeService::OnStopTouchGround()
 		{
 			const f32 gravity = KZ::mode::modeCvarRefs[MODECVAR_SV_GRAVITY]->GetFloat() * pawn->m_flActualGravityScale();
 			const f32 impulse = KZ::mode::modeCvarRefs[MODECVAR_SV_JUMP_IMPULSE]->GetFloat();
-			const f32 verticalSpeed = KZ::ckz::StandardJumpVerticalSpeed(velocity.z, gravity, impulse, groundedDuck, this->duckInputThisCommand);
+			const bool duckInput = this->duckCommandInput.OccurredBy(moveData->m_flSubtickStartFraction);
+			const f32 verticalSpeed = KZ::ckz::StandardJumpVerticalSpeed(velocity.z, gravity, impulse, groundedDuck, duckInput);
 			if (verticalSpeed != velocity.z)
 			{
 				velocity.z = verticalSpeed;
@@ -471,17 +473,21 @@ void KZClassicModeService::ClearFrictionSplit()
 void KZClassicModeService::OnSetupMove(PlayerCommand *pc)
 {
 	// Include wheel pulses that have already been released by the end of the command.
-	this->duckInputThisCommand = this->player->IsButtonPressed(IN_DUCK, true) || (pc->base().buttons_pb().buttonstate1() & IN_DUCK);
+	this->duckCommandInput = KZ::ckz::DuckCommandInput(this->player->IsButtonPressed(IN_DUCK, true)
+													 || (pc->base().buttons_pb().buttonstate1() & IN_DUCK));
 	for (i32 j = 0; j < pc->mutable_base()->subtick_moves_size(); j++)
 	{
 		CSubtickMoveStep *subtickMove = pc->mutable_base()->mutable_subtick_moves(j);
-		this->duckInputThisCommand |= subtickMove->button() == IN_DUCK && subtickMove->pressed();
 		if (subtickMove->button() == IN_ATTACK || subtickMove->button() == IN_ATTACK2 || subtickMove->button() == IN_RELOAD)
 		{
 			continue;
 		}
-		float when = subtickMove->when();
-		subtickMove->set_when(when >= 0.5 ? 0.5 : 0);
+		const float when = subtickMove->when() >= 0.5f ? 0.5f : 0.0f;
+		subtickMove->set_when(when);
+		if (subtickMove->button() == IN_DUCK)
+		{
+			this->duckCommandInput.AddTransition(when, subtickMove->pressed());
+		}
 	}
 
 	// Не интерполируем серверный поворот ни до подтверждения клиентом, ни в команде подтверждения.

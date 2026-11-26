@@ -22,6 +22,20 @@ int main()
 	history.Clear();
 	assert(!history.HeldPreviousTick(103)); // New ground contact, teleport or mode reset.
 
+	DuckCommandInput laterPress(true); // The held bit reflects the end of the command.
+	laterPress.AddTransition(0.5f, true);
+	assert(!laterPress.OccurredBy(0.0f));
+	assert(laterPress.OccurredBy(0.5f)); // A press on the same subtick qualifies as input.
+	DuckCommandInput pulse;
+	pulse.AddTransition(0.0f, true);
+	pulse.AddTransition(0.0f, false);
+	assert(pulse.OccurredBy(0.0f));
+	DuckCommandInput released;
+	released.AddTransition(0.5f, false);
+	assert(released.OccurredBy(0.0f)); // Duck was held from before this command.
+	assert(!DuckCommandInput().OccurredBy(0.5f));
+	assert(DuckCommandInput(true).OccurredBy(0.0f));
+
 	constexpr float gravity = 800.0f;
 	constexpr float impulse = 302.0f;
 	constexpr float standing = 298.875f;

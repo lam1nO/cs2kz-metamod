@@ -1,6 +1,8 @@
 #pragma once
 
+#include <algorithm>
 #include <cmath>
+#include <limits>
 #include <cstdint>
 
 namespace KZ::ckz
@@ -30,6 +32,35 @@ namespace KZ::ckz
 		bool HeldPreviousTick(std::int64_t moveTick) const
 		{
 			return moveTick == tick ? heldOnPreviousTick : (moveTick == tick + 1 && heldOnTick);
+		}
+	};
+
+	class DuckCommandInput
+	{
+		bool heldAtStart {};
+		bool sawTransition {};
+		float firstPress {std::numeric_limits<float>::infinity()};
+
+	public:
+		explicit DuckCommandInput(bool held = false) : heldAtStart(held) {}
+
+		void AddTransition(float fraction, bool pressed)
+		{
+			// The command's held bit can reflect its end state. Its first transition tells us its start state.
+			if (!sawTransition)
+			{
+				heldAtStart = !pressed;
+				sawTransition = true;
+			}
+			if (pressed)
+			{
+				firstPress = std::min(firstPress, fraction);
+			}
+		}
+
+		bool OccurredBy(float fraction) const
+		{
+			return heldAtStart || firstPress <= fraction;
 		}
 	};
 
