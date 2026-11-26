@@ -242,7 +242,8 @@ void KZClassicModeService::OnStopTouchGround()
 	auto *movement = this->player->GetMoveServices();
 	if (this->player->jumped && !this->player->takeoffFromLadder && !this->player->possibleLadderHop
 		&& !KZ::style::HasNopre(this->player) && pawn->m_flWaterLevel() <= 0.5f && !(pawn->m_fFlags() & FL_BASEVELOCITY)
-		&& ((pawn->m_fFlags() & FL_DUCKING) || movement->m_bDucking() || movement->m_bDucked() || movement->m_flDuckAmount() > 0.0f))
+		&& ((pawn->m_fFlags() & FL_DUCKING) || movement->m_duckUntilOnGround() || movement->m_bDucking() || movement->m_bDucked()
+			|| movement->m_flDuckAmount() > 0.0f))
 	{
 		Vector baseVelocity;
 		this->player->GetBaseVelocity(&baseVelocity);
