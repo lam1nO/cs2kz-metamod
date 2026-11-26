@@ -123,6 +123,7 @@ public:
 		const char *cutWarn = nullptr;    // разрез не сошёлся, путь без вырезки
 	};
 
+	static void Init();
 	virtual void Reset() override;
 
 	// Смена карты. НЕ Reset: на выделенном сервере KZPlayer::Reset зовётся только с

@@ -52,6 +52,15 @@ void KZHUDService::SelectMenuSkins(bool force)
 	{
 		return;
 	}
+	if (this->trailMenuParent)
+	{
+		this->CloseLayoutMenu();
+		this->OpenLayoutMenu();
+		if (!this->menuOpen)
+		{
+			return;
+		}
+	}
 	if (this->menuPopup != MenuPopup::None)
 	{
 		this->CloseMenuPopup();

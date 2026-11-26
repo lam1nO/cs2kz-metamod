@@ -1,13 +1,59 @@
 #include "kz_beam.h"
+#include "player_trail_appearance.h"
 #include "kz/spec/kz_spec.h"
 #include "kz/noclip/kz_noclip.h"
 #include "kz/language/kz_language.h"
 #include "kz/option/kz_option.h"
 
 #include "utils/simplecmds.h"
-#include "utils/ctimer.h"
+#include "utils/gamesystem.h"
 #include "sdk/entity/cparticlesystem.h"
 #include "entitykeyvalues.h"
+#include "filesystem.h"
+
+namespace
+{
+	constexpr char StockTrail[] = "particles/ui/hud/ui_map_def_utility_trail.vpcf";
+	constexpr char PersonalTrail[] = "particles/gymstrike/beam_trail.vpcf";
+	constexpr char PersonalTrailCompiled[] = "particles/gymstrike/beam_trail.vpcf_c";
+	bool personalTrailAvailable = false;
+
+	CParticleSystem *CreateTrail(const Vector &origin, const PlayerTrailAppearance &appearance)
+	{
+		auto *beam = utils::CreateEntityByName<CParticleSystem>("info_particle_system");
+		if (!beam)
+		{
+			return nullptr;
+		}
+
+		const bool personal = personalTrailAvailable && (appearance.scale != 1.f || trailappearance::HasPersonalColor(appearance.color));
+		auto *values = new CEntityKeyValues();
+		values->SetString("effect_name", personal ? PersonalTrail : StockTrail);
+		values->SetVector("origin", origin);
+		values->SetBool("start_active", true);
+		if (personal)
+		{
+			values->SetInt("tint_cp", 16);
+			values->SetColor("tint_cp_color", appearance.ColorOr(Color(236, 108, 24, 255)));
+			values->SetInt("data_cp", 20);
+			values->SetVector("data_cp_value", Vector(appearance.scale, 0, 0));
+		}
+		beam->m_iTeamNum(CUSTOM_PARTICLE_SYSTEM_TEAM);
+		beam->DispatchSpawn(values);
+		beam->m_iTeamNum(CUSTOM_PARTICLE_SYSTEM_TEAM);
+		return beam;
+	}
+}
+
+void KZBeamService::PrecacheTrail(IEntityResourceManifest *manifest)
+{
+	manifest->AddResource(StockTrail);
+	personalTrailAvailable = g_pFullFileSystem && g_pFullFileSystem->FileExists(PersonalTrailCompiled, "GAME");
+	if (personalTrailAvailable)
+	{
+		manifest->AddResource(PersonalTrail);
+	}
+}
 
 static_global class KZOptionServiceEventListener_Beam : public KZOptionServiceEventListener
 {
@@ -15,10 +61,19 @@ static_global class KZOptionServiceEventListener_Beam : public KZOptionServiceEv
 	{
 		player->beamService->OnPlayerPreferencesLoaded();
 	}
+
+	void OnPlayerPreferenceChanged(KZPlayer *player, const char *name) override
+	{
+		if (!strcmp(name, trailappearance::BeamColor) || !strcmp(name, trailappearance::BeamWidth))
+		{
+			player->beamService->ClearTrail();
+		}
+	}
 } optionEventListener;
 
 void KZBeamService::OnPlayerPreferencesLoaded()
 {
+	this->ClearTrail();
 	this->SetBeamType(this->player->optionService->GetPreferenceInt("desiredBeamType"));
 	this->playerBeamOffset = this->player->optionService->GetPreferenceVector("beamOffset", KZBeamService::defaultOffset);
 }
@@ -99,16 +154,7 @@ void KZBeamService::Update()
 
 	if (this->target != newTarget)
 	{
-		if (this->playerBeam.Get())
-		{
-			g_pKZUtils->RemoveEntity(this->playerBeam.Get());
-		}
-		if (this->playerBeamNew.Get())
-		{
-			g_pKZUtils->RemoveEntity(this->playerBeamNew.Get());
-		}
-		this->playerBeam = {};
-		this->playerBeamNew = {};
+		this->ClearTrail();
 		this->target = newTarget;
 	}
 
@@ -147,16 +193,7 @@ void KZBeamService::UpdatePlayerBeam()
 	// clang-format on
 	if (!shouldDraw)
 	{
-		if (this->playerBeam.Get())
-		{
-			g_pKZUtils->RemoveEntity(this->playerBeam.Get());
-		}
-		if (this->playerBeamNew.Get())
-		{
-			g_pKZUtils->RemoveEntity(this->playerBeamNew.Get());
-		}
-		this->playerBeam = {};
-		this->playerBeamNew = {};
+		this->ClearTrail();
 		return;
 	}
 	Vector origin = this->target->moveDataPre.m_vecAbsOrigin;
@@ -165,53 +202,63 @@ void KZBeamService::UpdatePlayerBeam()
 	{
 		origin.z = this->target->takeoffOrigin.z;
 	}
-	CParticleSystem *beam = static_cast<CParticleSystem *>(this->playerBeam.Get());
-
+	origin += this->playerBeamOffset;
+	auto *beam = static_cast<CParticleSystem *>(this->playerBeam.Get());
 	if (!beam)
 	{
-		beam = utils::CreateEntityByName<CParticleSystem>("info_particle_system");
-
-		CEntityKeyValues *pKeyValues = new CEntityKeyValues();
-		pKeyValues->SetString("effect_name", "particles/ui/hud/ui_map_def_utility_trail.vpcf");
-		pKeyValues->SetVector("origin", origin);
-		pKeyValues->SetBool("start_active", true);
-
-		beam->m_iTeamNum(CUSTOM_PARTICLE_SYSTEM_TEAM);
-		beam->DispatchSpawn(pKeyValues);
+		const auto appearance = ReadPlayerTrailAppearance(*this->player->optionService, trailappearance::BeamColor, trailappearance::BeamWidth);
+		beam = CreateTrail(origin, appearance);
+		if (!beam)
+		{
+			return;
+		}
 		this->playerBeam = beam->GetRefEHandle();
 	}
-	origin += this->playerBeamOffset;
 	beam->Teleport(&origin, nullptr, &vec3_origin);
 
-	// Setup for the next beam because the current one will expire in 4 seconds.
-	if (beam && g_pKZUtils->GetServerGlobals()->curtime - beam->m_flStartTime().GetTime() > 3.0f)
+	// Поддерживаем непрерывность, пока следующий эмиттер набирает хвост.
+	auto *nextBeam = static_cast<CParticleSystem *>(this->playerBeamNew.Get());
+	const float age = g_pKZUtils->GetServerGlobals()->curtime - beam->m_flStartTime().GetTime();
+	if (nextBeam)
 	{
-		if (!this->playerBeamNew.Get())
-		{
-			CParticleSystem *newBeam = utils::CreateEntityByName<CParticleSystem>("info_particle_system");
-
-			CEntityKeyValues *pKeyValues = new CEntityKeyValues();
-			pKeyValues->SetString("effect_name", "particles/ui/hud/ui_map_def_utility_trail.vpcf");
-			pKeyValues->SetVector("origin", origin);
-			pKeyValues->SetBool("start_active", true);
-
-			newBeam->m_iTeamNum(CUSTOM_PARTICLE_SYSTEM_TEAM);
-			newBeam->DispatchSpawn(pKeyValues);
-			this->playerBeamNew = newBeam->GetRefEHandle();
-		}
-		else if (g_pKZUtils->GetServerGlobals()->curtime - beam->m_flStartTime().GetTime() > 3.2f)
+		nextBeam->Teleport(&origin, nullptr, &vec3_origin);
+		if (age > 3.2f)
 		{
 			g_pKZUtils->RemoveEntity(beam);
 			this->playerBeam = this->playerBeamNew;
 			this->playerBeamNew = {};
 		}
 	}
+	else if (age > 3.0f)
+	{
+		const auto appearance = ReadPlayerTrailAppearance(*this->player->optionService, trailappearance::BeamColor, trailappearance::BeamWidth);
+		if (auto *next = CreateTrail(origin, appearance))
+		{
+			this->playerBeamNew = next->GetRefEHandle();
+		}
+	}
+}
+
+void KZBeamService::ClearTrail()
+{
+	if (GameEntitySystem() && g_pKZUtils)
+	{
+		if (auto *beam = this->playerBeam.Get())
+		{
+			g_pKZUtils->RemoveEntity(beam);
+		}
+		if (auto *nextBeam = this->playerBeamNew.Get())
+		{
+			g_pKZUtils->RemoveEntity(nextBeam);
+		}
+	}
+	this->playerBeam = {};
+	this->playerBeamNew = {};
 }
 
 void KZBeamService::Reset()
 {
-	this->playerBeam = {};
-	this->playerBeamNew = {};
+	this->ClearTrail();
 	this->playerBeamOffset = KZBeamService::defaultOffset;
 	this->target = {};
 	this->validBeam = {};

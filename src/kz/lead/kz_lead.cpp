@@ -1,6 +1,7 @@
 #include "kz_lead.h"
 
 #include "cs2kz.h"
+#include "kz/beam/player_trail_appearance.h"
 #include "kz/language/kz_language.h"
 #include "kz/mode/kz_mode.h"
 // GetCyberCourseNumber/GetCourse — ключ курса, под который построен путь (см. OnPathLoaded).
@@ -254,7 +255,7 @@ namespace
 	// Копия CreateMeasureBeam (kz_measure.cpp): тот же примитив, свой цвет на отрезок.
 	// ДЕФОЛТНЫЙ путь (с 16.09.2026): наша частица. CBeam остался дорогой назад под
 	// cyb_lead_beam_entity 1 (см. конвар).
-	CEntityHandle CreateLeadParticleSegment(const Vector &start, const Vector &end, const Color &color,
+	CEntityHandle CreateLeadParticleSegment(const Vector &start, const Vector &end, const Color &color, f32 widthScale,
 										   const Vector *corner = nullptr)
 	{
 		CParticleSystem *line = utils::CreateEntityByName<CParticleSystem>("info_particle_system");
@@ -280,7 +281,8 @@ namespace
 		if (corner)
 		{
 			line->m_iTeamNum(CUSTOM_PARTICLE_SYSTEM_TEAM);
-			if (!line->SetControlPointValue(19, *corner + lift))
+			if (!line->SetControlPointValue(19, *corner + lift)
+			|| (widthScale != 1.f && !line->SetControlPointValue(20, Vector(.5f * (widthScale - 1.f), 0, 0))))
 			{
 				g_pKZUtils->RemoveEntity(line);
 				return {};
@@ -296,18 +298,26 @@ namespace
 		// (LeadCpIndexChanged), здесь он повторился бы на каждый отрезок.
 		const i32 cp1 = cyb_lead_cp1_index.Get();
 		const i32 cp2 = cyb_lead_cp2_index.Get();
-		// CP20.x offsets the existing asset radius. Explicit operator settings take precedence.
-		if (V_strcmp(effect, KZ_LEAD_PARTICLE) == 0 && cp1 != 20 && cp2 != 20)
+		const bool defaultAsset = V_strcmp(effect, KZ_LEAD_PARTICLE) == 0;
+		const auto applyControlPoint = [&](i32 index, Vector value)
 		{
-			line->SetControlPointValue(20, Vector(-0.5f, 0.0f, 0.0f));
+			if (index == 20 && defaultAsset && widthScale != 1.f)
+			{
+				value.x = trailappearance::ScaledRadiusOffset(1.f, value.x, widthScale, .25f, 9.f);
+			}
+			line->SetControlPointValue(index, value);
+		};
+		if (defaultAsset && cp1 != 20 && cp2 != 20)
+		{
+			applyControlPoint(20, Vector(-0.5f, 0.0f, 0.0f));
 		}
 		if (LeadCpIndexUsable(cp1))
 		{
-			line->SetControlPointValue(cp1, cyb_lead_cp1_value.Get());
+			applyControlPoint(cp1, cyb_lead_cp1_value.Get());
 		}
 		if (LeadCpIndexUsable(cp2) && cp2 != cp1)
 		{
-			line->SetControlPointValue(cp2, cyb_lead_cp2_value.Get());
+			applyControlPoint(cp2, cyb_lead_cp2_value.Get());
 		}
 		// Метка «наша энтити» ПОВТОРНО, уже после спавна — как на пути сущности-луча. На ней
 		// держится вся приватность этого пути: фильтр передачи (kz_quiet.cpp) прячет частицу
@@ -636,7 +646,7 @@ namespace
 	// ПУТЬ ОТКАТА (cyb_lead_beam_entity 1): отрезок — штатная сущность-луч. Доказано живьём пробником
 	// kz_beam_probe на канарейке 11.09: класс CBeam существует, поля сетевые, луч виден игроку
 	// и БЕЗ заданного материала.
-	CEntityHandle CreateLeadBeamSegment(const Vector &start, const Vector &end, const Color &color)
+	CEntityHandle CreateLeadBeamSegment(const Vector &start, const Vector &end, const Color &color, f32 widthScale)
 	{
 		CBeam *beam = utils::CreateEntityByName<CBeam>(KZ_LEAD_BEAM_CLASSNAME);
 		if (!beam)
@@ -653,7 +663,7 @@ namespace
 			}
 			return CEntityHandle();
 		}
-		const f32 width = LeadBeamWidth();
+		const f32 width = std::clamp(LeadBeamWidth() * widthScale, KZ_LEAD_BEAM_WIDTH_MIN, KZ_LEAD_BEAM_WIDTH_MAX);
 		// Ниже — РЕЦЕПТ ПРОБНИКА, повторённый целиком: порядок «поля до спавна → keyvalues →
 		// DispatchSpawn → Teleport(start) → m_vecEndPos ещё раз». Повторной записи ВСЕХ полей
 		// после спавна в рецепте нет и не было — см. пост-спавн блок ниже, где сказано, почему
@@ -724,13 +734,13 @@ namespace
 		return cyb_lead_smooth.Get() && !cyb_lead_beam_entity.Get() && (!asset || !asset[0] || V_strcmp(asset, KZ_LEAD_PARTICLE) == 0);
 	}
 
-	CEntityHandle CreateLeadSegment(const Vector &start, const Vector &end, const Color &color)
+	CEntityHandle CreateLeadSegment(const Vector &start, const Vector &end, const Color &color, f32 widthScale)
 	{
 		if (cyb_lead_beam_entity.Get())
 		{
-			return CreateLeadBeamSegment(start, end, color);
+			return CreateLeadBeamSegment(start, end, color, widthScale);
 		}
-		return CreateLeadParticleSegment(start, end, color);
+		return CreateLeadParticleSegment(start, end, color, widthScale);
 	}
 
 	// Снятие одного отрезка — ОБОИХ примитивов: сверка идёт по targetname, а он у частицы и у
@@ -1024,6 +1034,26 @@ namespace
 		pending->done = true;
 	}
 } // namespace
+
+void KZLeadService::Init()
+{
+	static class LeadAppearanceListener : public KZOptionServiceEventListener
+	{
+		void OnPlayerPreferencesLoaded(KZPlayer *player) override
+		{
+			player->leadService->RefreshSegments("preferences_loaded");
+		}
+
+		void OnPlayerPreferenceChanged(KZPlayer *player, const char *name) override
+		{
+			if (!strcmp(name, trailappearance::LeadColor) || !strcmp(name, trailappearance::LeadWidth))
+			{
+				player->leadService->RefreshSegments("appearance");
+			}
+		}
+	} listener;
+	KZOptionService::RegisterEventListener(&listener);
+}
 
 void KZLeadService::Reset()
 {
@@ -2126,6 +2156,7 @@ void KZLeadService::ApplyWindow(u32 newFrom, u32 newTo)
 		}
 	}
 
+	const auto appearance = ReadPlayerTrailAppearance(*this->player->optionService, trailappearance::LeadColor, trailappearance::LeadWidth);
 	for (u32 i = (u32)this->segments.size(); i < want; i++)
 	{
 		const u32 index = newFrom + i;
@@ -2155,21 +2186,22 @@ void KZLeadService::ApplyWindow(u32 newFrom, u32 newTo)
 				}
 			}
 		}
-		group[0] = CreateLeadSegment(straightStart, straightEnd, SegmentColor(a.onGround));
+		group[0] = CreateLeadSegment(straightStart, straightEnd, appearance.ColorOr(SegmentColor(a.onGround)), appearance.scale);
 		if (this->cornerStrip && end.pieces)
 		{
 			const Vector &entry = end.points[0], &exit = end.points[end.pieces];
-			const Color color = SegmentColor(b.onGround);
-			group[1] = CreateLeadParticleSegment(entry, exit, color, &end.points[leadgeometry::StripPieces / 2]);
+			const Color color = appearance.ColorOr(SegmentColor(b.onGround));
+			group[1] = CreateLeadParticleSegment(entry, exit, color, appearance.scale, &end.points[leadgeometry::StripPieces / 2]);
 			if (!group[1].IsValid())
 			{
-				group[1] = CreateLeadSegment(entry, exit, color);
+				group[1] = CreateLeadSegment(entry, exit, color, appearance.scale);
 			}
 		}
 		for (u32 piece = 0; !this->cornerStrip && piece < end.pieces; ++piece)
 		{
 			const bool onGround = piece < end.pieces / 2 ? a.onGround : b.onGround;
-			group[piece + 1] = CreateLeadSegment(end.points[piece], end.points[piece + 1], SegmentColor(onGround));
+			group[piece + 1] = CreateLeadSegment(end.points[piece], end.points[piece + 1],
+									   appearance.ColorOr(SegmentColor(onGround)), appearance.scale);
 		}
 		this->segments.push_back(group);
 	}

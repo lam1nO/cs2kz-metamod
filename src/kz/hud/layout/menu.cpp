@@ -170,6 +170,11 @@ const KZOptItem *KZMenuFindItemByPhrase(const char *phraseKey)
 
 #define KZ_MENU_HUD_GENERAL_SUB "Options - Sub HudGeneral"
 #define KZ_MENU_OTHER_SUB       "Options - Sub Other"
+#define KZ_MENU_TRAIL_TITLE     "Options - Trail Appearance"
+#define KZ_MENU_VISIBILITY_SUB  "Options - Menu Cat Visibility"
+
+static constexpr const char *TRAIL_PREFERENCE_KEYS[] = {"beamTrailColor", "beamTrailWidth", "leadTrailColor", "leadTrailWidth"};
+static constexpr i32 TRAIL_WIDTH_STEP = 25;
 
 struct MenuLayoutGroup
 {
@@ -196,7 +201,7 @@ static const MenuLayoutTab s_menuLayout[] = {
 		{"Options - Sub Start", {
 			{"Options - Group StartPos", {"Options - Menu Label SetStartPos", "Options - Menu Label ClearStartPos"}},
 			{"Options - Group Safeguard", {"Options - Menu Label SafeguardReset", "Options - Menu Label SafeguardTeleport"}}}},
-		{"Options - Menu Cat Visibility", {{NULL, {"Options - Menu Label HidePlayers", "Options - Menu Label HideWeapon", "Options - Menu Label HideLegs", "Options - Menu Label Beam"}}}},
+		{KZ_MENU_VISIBILITY_SUB, {{NULL, {"Options - Menu Label HidePlayers", "Options - Menu Label HideWeapon", "Options - Menu Label HideLegs", "Options - Menu Label Beam"}}}},
 		{"Options - Menu Cat Paint", {{NULL, {"Options - Menu Label ShowAllPaint", "Options - Menu Label PaintColor", "Options - Menu Label PaintSize", "Options - Menu Label ClearPaint"}}}},
 	}},
 	{KZ_MENU_HUD_CATEGORY, {
@@ -437,6 +442,23 @@ static_function const std::vector<MenuRowBinding> &GetMenuSubRows(i32 tab, i32 s
 	static_persist const std::vector<MenuRowBinding> empty;
 	const MenuSubRows *s = GetMenuSub(tab, sub);
 	return s ? s->rows : empty;
+}
+
+static_function const std::vector<MenuRowBinding> &GetTrailMenuRows()
+{
+	static const std::vector<MenuRowBinding> rows = []
+	{
+		std::vector<MenuRowBinding> result;
+		for (const char *key : TRAIL_PREFERENCE_KEYS)
+		{
+			if (const KZOptItem *item = KZMenuFindItemByPref(key))
+			{
+				result.push_back({item});
+			}
+		}
+		return result;
+	}();
+	return rows;
 }
 
 // Карточка редактора edit_open — только на «Худ» → «Общее».
@@ -699,6 +721,27 @@ static_function i32 GetItemColorEntry(const Color &current, const KZOptItem &it)
 	return entry >= 0 ? entry : MAX(0, panorama::FindColorEntry(it.cdef));
 }
 
+static_function i32 TrailColorEntry(i64 packed)
+{
+	if (packed < -0x80000000LL || packed > 0xffffffffLL || (packed & 0xff) != 255)
+	{
+		return -1;
+	}
+	const u32 rgba = static_cast<u32>(packed);
+	return panorama::FindColorEntry(Color((rgba >> 24) & 0xff, (rgba >> 16) & 0xff, (rgba >> 8) & 0xff, 255));
+}
+
+static_function i32 TrailWidthDisplay(KZPlayer *player, const KZOptItem &item)
+{
+	const f64 stored = player->optionService->GetPreferenceFloat(item.prefKey, item.idef);
+	if (stored != stored)
+	{
+		return item.idef;
+	}
+	const f64 bounded = Clamp(stored, (f64)item.lo, (f64)item.hi);
+	return (i32)(bounded / TRAIL_WIDTH_STEP + 0.5) * TRAIL_WIDTH_STEP;
+}
+
 // === Id панелей (своя static-буфер функция на каждый паттерн, как у апстрима) ================
 
 #define SLOT_ID(fn, fmt) \
@@ -722,6 +765,8 @@ SLOT_ID(SubPanel, "sub%i")
 SLOT_ID(SubVar, "d%i")
 SLOT_ID(TgPanel, "tg%i")
 SLOT_ID(StValPanel, "st%i_val")
+SLOT_ID(StDecPanel, "st%i_dec")
+SLOT_ID(StIncPanel, "st%i_inc")
 SLOT_ID(StValVar, "v%i")
 SLOT_ID(BtPanel, "bt%i")
 SLOT_ID(BtVar, "b%i")
@@ -752,6 +797,26 @@ static_function const char *SegVar(i32 row, i32 k)
 
 // === Сущность меню (своя, отдельная от this->ownedLayout) ====================================
 
+CCSCustomHudLayout *KZHUDService::SpawnMenuLayout(bool trail)
+{
+	if (g_KZPlugin.unloading || !KZHUDService::IsMHUDAvailable())
+	{
+		return nullptr;
+	}
+	CCSCustomHudLayout *layout = utils::CreateEntityByName<CCSCustomHudLayout>("custom_hud_layout");
+	if (!layout)
+	{
+		return NULL;
+	}
+	CEntityKeyValues *pKeyValues = new CEntityKeyValues();
+	pKeyValues->SetString("layout", KZ_MENU_LAYOUT);
+	char name[32];
+	V_snprintf(name, sizeof(name), trail ? "kztrails%i" : "kzmenu%i", this->player->GetPlayerSlot().Get());
+	pKeyValues->SetString("targetname", name);
+	layout->DispatchSpawn(pKeyValues);
+	return layout;
+}
+
 CCSCustomHudLayout *KZHUDService::EnsureMenuLayout(bool &created)
 {
 	created = false;
@@ -763,17 +828,11 @@ CCSCustomHudLayout *KZHUDService::EnsureMenuLayout(bool &created)
 	{
 		return (CCSCustomHudLayout *)cached;
 	}
-	CCSCustomHudLayout *layout = utils::CreateEntityByName<CCSCustomHudLayout>("custom_hud_layout");
+	CCSCustomHudLayout *layout = this->SpawnMenuLayout(false);
 	if (!layout)
 	{
-		return NULL;
+		return nullptr;
 	}
-	CEntityKeyValues *pKeyValues = new CEntityKeyValues();
-	pKeyValues->SetString("layout", KZ_MENU_LAYOUT);
-	char name[32];
-	V_snprintf(name, sizeof(name), "kzmenu%i", this->player->GetPlayerSlot().Get());
-	pKeyValues->SetString("targetname", name);
-	layout->DispatchSpawn(pKeyValues);
 	this->ownedMenuLayout = layout;
 	created = true;
 	// Диф-кэши — состояние ПРЕДЫДУЩЕЙ сущности (смена карты её не переживает): без сброса в
@@ -817,6 +876,11 @@ void KZHUDService::RecycleMenuLayoutIfFull()
 
 void KZHUDService::DestroyOwnedMenuLayout()
 {
+	this->LeaveTrailMenu();
+	for (auto &selection : this->trailPaletteSelections)
+	{
+		selection = {};
+	}
 	this->LeaveMenuSkins();
 	this->menuEmbedOn.clear();
 	if (CBaseEntity *ent = this->ownedMenuLayout.Get())
@@ -844,6 +908,81 @@ void KZHUDService::DestroyOwnedMenuLayout()
 	}
 	this->editorKeys = LayoutKeysState();
 	this->editorExtra = LayoutExtraState();
+}
+
+bool KZHUDService::CanOpenTrailMenu() const
+{
+	const MenuSubRows *sub = GetMenuSub(this->menuCategory, this->menuSub);
+	return !this->trailMenuParent && !this->menuSkins && sub && KZ_STREQ(sub->phraseKey, KZ_MENU_VISIBILITY_SUB);
+}
+
+void KZHUDService::OpenTrailMenu()
+{
+	auto *parent = static_cast<CCSCustomHudLayout *>(this->ownedMenuLayout.Get());
+	if (!parent || !this->CanOpenTrailMenu())
+	{
+		return;
+	}
+	if (!this->RotateTrailMenuLayout())
+	{
+		return;
+	}
+	this->RenderMenu();
+}
+
+void KZHUDService::LeaveTrailMenu()
+{
+	if (!this->trailMenuParent)
+	{
+		return;
+	}
+	if (auto *trail = static_cast<CCSCustomHudLayout *>(this->ownedMenuLayout.Get()))
+	{
+		trail->SetInputCaptureEnabled(this->player->GetPlayerSlot(), false);
+		g_pKZUtils->RemoveEntity(trail);
+	}
+	this->ownedMenuLayout = this->trailMenuParent->layout;
+	this->menuApplied = this->trailMenuParent->applied;
+	this->menuVars = std::move(this->trailMenuParent->vars);
+	this->trailMenuParent.reset();
+}
+
+bool KZHUDService::RotateTrailMenuLayout()
+{
+	CCSCustomHudLayout *next = this->SpawnMenuLayout(true);
+	const CPlayerSlot slot = this->player->GetPlayerSlot();
+	if (!next || !next->GetPlayerLayoutState(slot))
+	{
+		if (next)
+		{
+			g_pKZUtils->RemoveEntity(next);
+		}
+		return false;
+	}
+
+	// The packed handle is part of each click. Replace it when row/colour identities change;
+	// an old packet cannot pick a different colour even after closing and reopening its popup.
+	auto *previous = static_cast<CCSCustomHudLayout *>(this->ownedMenuLayout.Get());
+	if (previous)
+	{
+		previous->SetInputCaptureEnabled(slot, false);
+		if (this->trailMenuParent)
+		{
+			g_pKZUtils->RemoveEntity(previous);
+		}
+		else
+		{
+			this->SetMenuBoolClass(previous, "opt_root", "hidden", this->menuApplied.optHidden, true);
+			previous->GetGlobalLayoutState()->MarkFullChanged();
+			this->trailMenuParent.emplace(TrailMenuParent {this->ownedMenuLayout, this->menuApplied, std::move(this->menuVars)});
+		}
+	}
+
+	this->ownedMenuLayout = next;
+	this->menuApplied = MenuAppliedState();
+	this->menuVars.clear();
+	next->SetInputCaptureEnabled(slot, true);
+	return true;
 }
 
 // === Запись классов/переменных — диф-кэш =======================================================
@@ -960,7 +1099,22 @@ void KZHUDService::RenderMenu()
 	// Шапка (спека gs2 §1.1): заголовок слева, «Игрок <ник>» справа. Подзаголовок, бренд и режим
 	// окно больше не рисует (sub/brand_sub/mode не ставим); про мимикрию игрок узнаёт из чата при
 	// открытии (OpenLayoutMenu).
-	this->SetMenuVar(layout, "opt_root", "title", KZLanguageService::PrepareMessageWithLang(lang, "Options - Title").c_str());
+	const bool trailPage = this->trailMenuParent.has_value();
+	this->SetMenuBoolClass(layout, "opt_root", "trail-page", this->menuApplied.trailPage, trailPage);
+	this->SetMenuBoolClass(layout, "m_back", "hidden", this->menuApplied.trailBackHidden, !trailPage);
+	const bool trailEntry = this->CanOpenTrailMenu();
+	this->SetMenuBoolClass(layout, "m_trails", "hidden", this->menuApplied.trailEntryHidden, !trailEntry);
+	this->SetMenuBoolClass(layout, "opt_root", "trail-entry-visible", this->menuApplied.trailEntryVisible, trailEntry);
+	if (trailEntry)
+	{
+		this->SetMenuVar(layout, "opt_root", "trail_title", KZLanguageService::PrepareMessageWithLang(lang, KZ_MENU_TRAIL_TITLE).c_str());
+	}
+	if (trailPage)
+	{
+		this->SetMenuVar(layout, "opt_root", "trail_default", KZLanguageService::PrepareMessageWithLang(lang, "Options - Color Reset").c_str());
+	}
+	this->SetMenuVar(layout, "opt_root", "title",
+					 KZLanguageService::PrepareMessageWithLang(lang, trailPage ? KZ_MENU_TRAIL_TITLE : "Options - Title").c_str());
 	this->SetMenuVar(layout, "opt_root", "who_cap", KZLanguageService::PrepareMessageWithLang(lang, "Options - Who Caption").c_str());
 	this->SetMenuVar(layout, "opt_root", "who", this->player->GetName());
 	// Подписи переключателя — одни на все строки tg{i} (показ — классом on).
@@ -984,7 +1138,10 @@ void KZHUDService::RenderMenu()
 	}
 	this->SetMenuBoolClass(layout, "edit_open", "hidden", this->menuApplied.editOpenHidden, !heroShown);
 
-	this->RenderMenuTabs(layout);
+	if (!trailPage)
+	{
+		this->RenderMenuTabs(layout);
+	}
 	this->RenderMenuRows(layout);
 	this->RenderMenuPopups(layout);
 
@@ -1051,7 +1208,8 @@ static_function const char *GetRowTypeClass(const KZOptItem &it, i32 choiceCount
 
 void KZHUDService::RenderMenuRows(CCSCustomHudLayout *layout)
 {
-	const std::vector<MenuRowBinding> &rows = GetMenuSubRows(this->menuCategory, this->menuSub);
+	const bool trailPage = this->trailMenuParent.has_value();
+	const std::vector<MenuRowBinding> &rows = trailPage ? GetTrailMenuRows() : GetMenuSubRows(this->menuCategory, this->menuSub);
 	const char *lang = this->player->languageService->GetLanguage();
 
 	for (i32 i = 0; i < KZ_MENU_ROWS; i++)
@@ -1081,6 +1239,7 @@ void KZHUDService::RenderMenuRows(CCSCustomHudLayout *layout)
 			}
 			const char *rowType = GetRowTypeClass(it, (i32)choices.size());
 			const char *swatch = NULL;
+			const char *trailDefault = nullptr;
 			bool on = false;
 			switch (it.type)
 			{
@@ -1116,16 +1275,37 @@ void KZHUDService::RenderMenuRows(CCSCustomHudLayout *layout)
 				case KZOptItemType::Size:
 				{
 					char buf[24];
-					V_snprintf(buf, sizeof(buf), "%i%s", GetScaledDisplay(this->player, it.prefKey, it.idef, it.scale, it.storage == KZOptStorage::Float),
-							   it.unit ? it.unit : "");
+					const i32 value = trailPage ? TrailWidthDisplay(this->player, it)
+												: GetScaledDisplay(this->player, it.prefKey, it.idef, it.scale, it.storage == KZOptStorage::Float);
+					V_snprintf(buf, sizeof(buf), "%i%s", value, it.unit ? it.unit : "");
 					this->SetMenuVar(layout, StValPanel(i), StValVar(i), buf);
+					if (trailPage)
+					{
+						this->SetMenuBoolClass(layout, StDecPanel(i), "trail-limit", this->menuApplied.trailWidthMin[i], value == it.lo);
+						this->SetMenuBoolClass(layout, StIncPanel(i), "trail-limit", this->menuApplied.trailWidthMax[i], value == it.hi);
+					}
 					break;
 				}
 				case KZOptItemType::Button:
 					this->SetMenuVar(layout, BtPanel(i), BtVar(i), KZLanguageService::PrepareMessageWithLang(lang, GetMenuButtonPhrase(it)).c_str());
 					break;
 				case KZOptItemType::Color:
-					swatch = panorama::GetColorEntryBgClass(GetItemColorEntry(this->GetMHUDColorPref(it.prefKey, it.cdef), it));
+					if (trailPage)
+					{
+						const i32 entry = TrailColorEntry(this->player->optionService->GetPreferenceInt(it.prefKey));
+						if (entry < 0)
+						{
+							trailDefault = it.tag == 0 ? "trail-default-beam" : "trail-default-lead";
+						}
+						else
+						{
+							swatch = panorama::GetColorEntryBgClass(entry);
+						}
+					}
+					else
+					{
+						swatch = panorama::GetColorEntryBgClass(GetItemColorEntry(this->GetMHUDColorPref(it.prefKey, it.cdef), it));
+					}
 					break;
 				default:
 					break;
@@ -1134,6 +1314,10 @@ void KZHUDService::RenderMenuRows(CCSCustomHudLayout *layout)
 			// значение со списком-попапом, где отметки ставит сам список.
 			multi = IsMultiChoiceMenuItem(it) && (i32)choices.size() <= KZ_MENU_SEGS;
 			this->SetMenuSwapClass(layout, RowPanel(i), this->menuApplied.rowType[i], rowType);
+			if (trailPage)
+			{
+				this->SetMenuSwapClass(layout, RowPanel(i), this->menuApplied.trailDefault[i], trailDefault);
+			}
 			this->SetMenuBoolClass(layout, TgPanel(i), "on", this->menuApplied.tgOn[i], on);
 			this->SetMenuSwapClass(layout, ClPanel(i), this->menuApplied.clBg[i], swatch);
 		}
@@ -1201,28 +1385,43 @@ void KZHUDService::RenderMenuColorPopup(CCSCustomHudLayout *layout)
 	// Кнопка color_ok общая для окна и редактора: без переменной она пустая.
 	this->SetMenuVar(layout, "color_popup", "cp_ok", KZLanguageService::PrepareMessageWithLang(lang, "HUD Editor - Apply").c_str());
 
-	const i32 pending = this->menuColorPending >= 0 ? this->menuColorPending : GetItemColorEntry(this->GetMHUDColorPref(it->prefKey, it->cdef), *it);
+	const bool trail = this->trailMenuParent.has_value();
+	const TrailPaletteSelection *selection = trail ? &this->trailPaletteSelections[it->tag] : nullptr;
+	const i32 pending = trail ? TrailColorEntry(this->player->optionService->GetPreferenceInt(it->prefKey))
+							  : (this->menuColorPending >= 0 ? this->menuColorPending
+															: GetItemColorEntry(this->GetMHUDColorPref(it->prefKey, it->cdef), *it));
+	const bool defaultTrail = trail && pending < 0;
+	this->SetMenuBoolClass(layout, "color_popup", "trail-palette", this->menuApplied.trailPalette, trail);
+	this->SetMenuBoolClass(layout, "trail_color_reset", "trail-limit", this->menuApplied.trailColorResetDisabled, defaultTrail);
+	this->SetMenuBoolClass(layout, "color_cur", "trail-no-rgb", this->menuApplied.trailBeamDefault, defaultTrail && it->tag == 0);
+	this->SetMenuBoolClass(layout, "color_cur", "trail-lead-color", this->menuApplied.trailLeadDefault, defaultTrail && it->tag == 1);
 	for (i32 i = 0; i < KZ_MENU_PRESETS; i++)
 	{
 		const i32 entry = panorama::GetPresetEntry(i);
 		this->SetMenuSwapClass(layout, CpPanel(i), this->menuApplied.cpBg[i], panorama::GetColorEntryBgClass(entry));
-		this->SetMenuBoolClass(layout, CpPanel(i), "on", this->menuApplied.cpOn[i], entry == pending);
+		this->SetMenuBoolClass(layout, CpPanel(i), "on", this->menuApplied.cpOn[i], selection ? selection->preset == i : entry == pending);
 	}
 	// Оттенок — средняя яркость строки сетки (cv3); яркости — по выбранному оттенку (или первому).
-	const i32 hue = Clamp(this->menuColorHue, 0, KZ_MENU_HUES - 1);
+	const i32 selectedHue = selection ? selection->hue : this->menuColorHue;
+	const i32 hue = Clamp(selectedHue, 0, KZ_MENU_HUES - 1);
 	for (i32 h = 0; h < KZ_MENU_HUES; h++)
 	{
 		this->SetMenuSwapClass(layout, ChPanel(h), this->menuApplied.chBg[h], panorama::GetColorEntryBgClass(panorama::GetHueLumEntry(h, 3)));
-		this->SetMenuBoolClass(layout, ChPanel(h), "on", this->menuApplied.chOn[h], h == this->menuColorHue);
+		this->SetMenuBoolClass(layout, ChPanel(h), "on", this->menuApplied.chOn[h], h == selectedHue);
 	}
 	for (i32 l = 0; l < KZ_MENU_LUMS; l++)
 	{
 		const i32 entry = panorama::GetHueLumEntry(hue, l);
 		this->SetMenuSwapClass(layout, CvPanel(l), this->menuApplied.cvBg[l], panorama::GetColorEntryBgClass(entry));
-		this->SetMenuBoolClass(layout, CvPanel(l), "on", this->menuApplied.cvOn[l], this->menuColorHue >= 0 && entry == pending);
+		this->SetMenuBoolClass(layout, CvPanel(l), "on", this->menuApplied.cvOn[l], selection ? selection->tone == l : selectedHue >= 0 && entry == pending);
 	}
-	this->SetMenuSwapClass(layout, "color_cur", this->menuApplied.colorCur, panorama::GetColorEntryBgClass(pending));
-	char hex[24];
+	this->SetMenuSwapClass(layout, "color_cur", this->menuApplied.colorCur, defaultTrail ? nullptr : panorama::GetColorEntryBgClass(pending));
+	char hex[24] {};
+	if (defaultTrail)
+	{
+		this->SetMenuVar(layout, "color_popup", "chex", "");
+		return;
+	}
 	if (pending < panorama::GetSolidColorCount())
 	{
 		const Color c = panorama::GetColorEntryValue(pending);
@@ -1333,7 +1532,8 @@ void KZHUDService::SelectMenuSub(i32 sub)
 // 1 — сегмент arg, 2 — степпер на arg (±1).
 void KZHUDService::MenuRowAction(i32 rowIndex, i32 control, i32 arg)
 {
-	const std::vector<MenuRowBinding> &rows = GetMenuSubRows(this->menuCategory, this->menuSub);
+	const bool trailPage = this->trailMenuParent.has_value();
+	const std::vector<MenuRowBinding> &rows = trailPage ? GetTrailMenuRows() : GetMenuSubRows(this->menuCategory, this->menuSub);
 	const MenuRowBinding *row = rowIndex >= 0 && rowIndex < (i32)rows.size() ? &rows[rowIndex] : NULL;
 	if (!row)
 	{
@@ -1420,6 +1620,18 @@ void KZHUDService::MenuRowAction(i32 rowIndex, i32 control, i32 arg)
 			{
 				return;
 			}
+			if (trailPage)
+			{
+				const i32 current = TrailWidthDisplay(this->player, it);
+				const i32 next = Clamp(current + arg * TRAIL_WIDTH_STEP, it.lo, it.hi);
+				if (next != current)
+				{
+					this->NoteMenuAction(dupKey);
+					opts->SetPreferenceFloat(it.prefKey, (f64)next);
+					this->RenderMenu();
+				}
+				return;
+			}
 			this->NoteMenuAction(dupKey);
 			const bool isFloat = it.storage == KZOptStorage::Float;
 			const i32 cur = GetScaledDisplay(this->player, it.prefKey, it.idef, it.scale, isFloat);
@@ -1465,6 +1677,10 @@ void KZHUDService::OpenMenuPopup(MenuPopup kind, const KZOptItem *item)
 	this->menuPopupPage = 0;
 	this->menuColorPending = -1;
 	this->menuColorHue = -1;
+	if (kind == MenuPopup::Color && this->trailMenuParent)
+	{
+		this->RestoreTrailPalette(*item);
+	}
 	if (kind == MenuPopup::List && item->type == KZOptItemType::Font)
 	{
 		// Список шрифтов открывается на семействе и странице ТЕКУЩЕГО значения.
@@ -1603,6 +1819,113 @@ void KZHUDService::OpenMenuConfirm(const KZOptItem *item)
 	this->RenderLayoutUi();
 }
 
+void KZHUDService::RestoreTrailPalette(const KZOptItem &item)
+{
+	auto &selection = this->trailPaletteSelections[item.tag];
+	const i64 packed = this->player->optionService->GetPreferenceInt(item.prefKey);
+	if (selection.packed == packed)
+	{
+		return;
+	}
+	selection = {packed};
+	const i32 entry = TrailColorEntry(packed);
+	if (entry < 0)
+	{
+		return;
+	}
+	for (i32 i = 0; i < KZ_MENU_PRESETS; i++)
+	{
+		if (panorama::GetPresetEntry(i) == entry)
+		{
+			selection.preset = i;
+			return;
+		}
+	}
+	for (i32 hue = 0; hue < KZ_MENU_HUES; hue++)
+	{
+		for (i32 tone = 0; tone < KZ_MENU_LUMS; tone++)
+		{
+			if (panorama::GetHueLumEntry(hue, tone) == entry)
+			{
+				selection.hue = hue;
+				selection.tone = tone;
+				return;
+			}
+		}
+	}
+}
+
+bool KZHUDService::HandleTrailPaletteClick(const char *id)
+{
+	const KZOptItem *item = this->menuPopupTarget;
+	if (this->menuPopup != MenuPopup::Color || !item)
+	{
+		return false;
+	}
+	if (KZ_STREQ(id, "color_close") || KZ_STREQ(id, "pop_dim"))
+	{
+		if (this->RotateTrailMenuLayout())
+		{
+			this->CloseMenuPopup();
+		}
+		else
+		{
+			this->CloseLayoutMenu();
+		}
+		return true;
+	}
+
+	auto *options = this->player->optionService;
+	auto &selection = this->trailPaletteSelections[item->tag];
+	TrailPaletteSelection next;
+	i32 first = -1;
+	i32 second = -1;
+	i32 entry = -1;
+	if (ParseIndexed(id, "cp", first, second) && second < 0 && first >= 0 && first < KZ_MENU_PRESETS)
+	{
+		next.preset = first;
+		entry = panorama::GetPresetEntry(first);
+	}
+	else if (ParseIndexed(id, "ch", first, second) && second < 0 && first >= 0 && first < KZ_MENU_HUES)
+	{
+		next.hue = first;
+		next.tone = 3;
+		entry = panorama::GetHueLumEntry(next.hue, next.tone);
+	}
+	else if (ParseIndexed(id, "cv", first, second) && second < 0 && first >= 0 && first < KZ_MENU_LUMS)
+	{
+		next.hue = MAX(selection.hue, 0);
+		next.tone = first;
+		entry = panorama::GetHueLumEntry(next.hue, next.tone);
+	}
+	else if (!KZ_STREQ(id, "trail_color_reset"))
+	{
+		return false;
+	}
+
+	if (entry >= 0)
+	{
+		if (entry >= panorama::GetSolidColorCount())
+		{
+			return false;
+		}
+		next.packed = PackColorForPref(panorama::GetColorEntryValue(entry));
+	}
+
+	// The shade buttons only change identity when the effective hue changes.
+	if (MAX(next.hue, 0) != MAX(selection.hue, 0) && !this->RotateTrailMenuLayout())
+	{
+		return false;
+	}
+	selection = next;
+	if (options->GetPreferenceInt(item->prefKey) != next.packed)
+	{
+		options->SetPreferenceInt(item->prefKey, next.packed);
+	}
+	this->RenderMenu();
+	return true;
+}
+
 // Клики попапов — общие для окна и редактора. true — клик принадлежал попапу.
 bool KZHUDService::HandleMenuPopupClick(const char *id)
 {
@@ -1700,6 +2023,40 @@ bool KZHUDService::HandleMenuWindowClick(const char *id)
 		this->CloseLayoutMenu();
 		return true;
 	}
+	if (this->trailMenuParent)
+	{
+		if (KZ_STREQ(id, "m_back"))
+		{
+			this->LeaveTrailMenu();
+			this->RenderMenu();
+			if (auto *parent = static_cast<CCSCustomHudLayout *>(this->ownedMenuLayout.Get()))
+			{
+				parent->SetInputCaptureEnabled(this->player->GetPlayerSlot(), true);
+			}
+			return true;
+		}
+		if ((ParseIndexed(id, "row", a, b) || ParseIndexed(id, "cl", a, b)) && b < 0)
+		{
+			this->MenuRowAction(a, 0, 0);
+		}
+		else if (ParseIndexed(id, "st", a, b, "_dec") && b < 0)
+		{
+			this->MenuRowAction(a, 2, -1);
+		}
+		else if (ParseIndexed(id, "st", a, b, "_inc") && b < 0)
+		{
+			this->MenuRowAction(a, 2, 1);
+		}
+		return true;
+	}
+	if (KZ_STREQ(id, "m_trails"))
+	{
+		if (this->menuPopup == MenuPopup::None)
+		{
+			this->OpenTrailMenu();
+		}
+		return true;
+	}
 	if (!V_strcmp(id, "edit_open"))
 	{
 		this->OpenHudEditor();
@@ -1787,6 +2144,11 @@ void KZHUDService::OnLayoutMenuClick(uint32 packedHandle, const char *panelId)
 		{
 			this->HandleMenuPopupClick(panelId);
 		}
+		return;
+	}
+	if (this->trailMenuParent && this->menuPopup != MenuPopup::None)
+	{
+		this->HandleTrailPaletteClick(panelId);
 		return;
 	}
 	if (!this->HandleMenuPopupClick(panelId))
@@ -1914,6 +2276,7 @@ void KZHUDService::CloseLayoutMenu()
 	{
 		return;
 	}
+	this->LeaveTrailMenu();
 	this->LeaveMenuSkins();
 	// onEdit закрытия обязан прийти и на этом пути (правка Vector-пункта осела бы только в БД).
 	const KZOptItem *it = this->menuPopupTarget;
@@ -2008,4 +2371,15 @@ void KZMenuChromeMenu_Register()
 	KZ::menu::AddToggle(cat, "HUD - Menu Label MenuSounds", "menuSounds", true);
 	KZ::menu::AddToggle(cat, "HUD - Menu Label MenuPopupShift", "menuPopupShift", true);
 	KZ::menu::SetItemSubtext(cat, "HUD - Menu Label MenuPopupShift Sub");
+
+	KZOptNode *trails = KZ::menu::AddCategory(KZ_MENU_TRAIL_TITLE);
+	trails->hiddenFromMenu = true; // Доступ только через дочернюю страницу «Видимость».
+	KZ::menu::AddColor(trails, "Options - Beam Trail Color", TRAIL_PREFERENCE_KEYS[0], Color(0, 0, 0, 0), 0);
+	KZ::menu::SetItemSolidOnly(trails);
+	KZ::menu::AddSize(trails, "Options - Beam Trail Width", TRAIL_PREFERENCE_KEYS[1], 100, 50, 200);
+	KZ::menu::SetItemUnit(trails, "%");
+	KZ::menu::AddColor(trails, "Options - Lead Trail Color", TRAIL_PREFERENCE_KEYS[2], Color(0, 0, 0, 0), 1);
+	KZ::menu::SetItemSolidOnly(trails);
+	KZ::menu::AddSize(trails, "Options - Lead Trail Width", TRAIL_PREFERENCE_KEYS[3], 100, 50, 200);
+	KZ::menu::SetItemUnit(trails, "%");
 }

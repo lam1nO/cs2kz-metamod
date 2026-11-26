@@ -455,13 +455,11 @@ void KZHUDService::LayoutCleanup()
 
 bool KZHUDService::OwnsLayoutEntity(CEntityHandle handle)
 {
-	// Своих сущностей три: сам худ (ownedLayout), отдельное меню настроек (ownedMenuLayout,
-	// Task 11) и страница меню реплея
-	// спектатора (ownedReplayLayout, layout/rpmenu.cpp) — транзит (KZ::quiet) гасит всё, чего
-	// нет в этом списке, и без проверки каждой сущность игроку не долетала бы вовсе
-	// (пустые/невалидные хэндлы по-прежнему false).
+	// Сохранённый родитель дочерней страницы остаётся у того же игрока, пока его окно скрыто.
+	// KZ::quiet гасит все персональные layout-сущности вне этого списка.
 	return (this->ownedLayout.IsValid() && this->ownedLayout.ToInt() == handle.ToInt())
 		   || (this->ownedMenuLayout.IsValid() && this->ownedMenuLayout.ToInt() == handle.ToInt())
+		   || (this->trailMenuParent && this->trailMenuParent->layout.IsValid() && this->trailMenuParent->layout.ToInt() == handle.ToInt())
 		   || (this->ownedReplayLayout.IsValid() && this->ownedReplayLayout.ToInt() == handle.ToInt())
 		   || KZ::gsmenu::Owns(this->player, handle)
 		   || KZ::quickmenu::Owns(this->player, handle);

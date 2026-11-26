@@ -204,6 +204,31 @@
 		"chi"	"轨迹光束"
 		"ua"	"Промінь"
 	}
+	"Options - Trail Appearance"
+	{
+		"en"	"Trail appearance"
+		"ru"	"Оформление лучей"
+	}
+	"Options - Beam Trail Color"
+	{
+		"en"	"Beam color"
+		"ru"	"Цвет !beam"
+	}
+	"Options - Beam Trail Width"
+	{
+		"en"	"Beam width"
+		"ru"	"Толщина !beam"
+	}
+	"Options - Lead Trail Color"
+	{
+		"en"	"Lead color"
+		"ru"	"Цвет !lead"
+	}
+	"Options - Lead Trail Width"
+	{
+		"en"	"Lead width"
+		"ru"	"Толщина !lead"
+	}
 	"Options - Menu Label BeamOffset"
 	{
 		"en"	"Beam offset"
