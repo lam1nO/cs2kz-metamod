@@ -435,7 +435,8 @@ namespace
 		}
 		char rank[2048];
 		V_snprintf(rank, sizeof(rank), sql_jumptop_rank, JumpTable(nopre), modeID, jumpType, isBlock ? 1 : 0, direction, block, block, distance, distance, id,
-				   steamID64, JumpTable(nopre), modeID, jumpType, isBlock ? 1 : 0, direction);
+				   steamID64, JumpTable(nopre), modeID, jumpType, isBlock ? 1 : 0, direction, JumpTable(nopre), modeID, jumpType,
+				   isBlock ? 1 : 0, direction);
 		Transaction txn;
 		txn.queries.push_back(rank);
 		// clang-format off
@@ -445,11 +446,13 @@ namespace
 			{
 				i32 place = 0;
 				i32 total = 0;
+				bool isWorldRecord = false;
 				ISQLResult *result = queries[0]->GetResultSet();
 				if (result && result->FetchRow())
 				{
 					place = result->GetInt(0) + 1;
 					total = result->GetInt(1);
+					isWorldRecord = id != 0 && result->GetInt64(2) == id;
 				}
 				KZ_LOG_INFO(LogChannel::DB, "[cyb] jumptop_pb id=%d steam_id=%llu mode=%d type=%d dir=%d block=%d dist=%.4f map=%s place=%d total=%d\n", PublicJumpId(id, nopre),
 							steamID64, modeID, jumpType, direction, isBlock ? block : 0, distance, mapName.c_str(), place, total);
@@ -495,7 +498,7 @@ namespace
 					return;
 				}
 				// Distance and block results share this state for a single jump.
-				const bool playRecordSound = !std::exchange(qualification->announcedWorldRecord, true);
+				const bool playRecordSound = isWorldRecord && !std::exchange(qualification->announcedWorldRecord, true);
 				for (i32 i = 0; i <= MAXPLAYERS; i++)
 				{
 					KZPlayer *other = g_pKZPlayerManager->ToPlayer(i);

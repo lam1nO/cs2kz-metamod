@@ -217,8 +217,9 @@ constexpr char sql_jumptop_getpbs[] = R"(
 // Место прыжка в топе: сколько ДРУГИХ игроков имеют строку лучше (дистанционный топ — по
 // дистанции; блочный — по блоку, затем по дистанции), плюс общее число игроков в топе.
 // Ровно равная дистанция — первенство у более ранней строки (меньший ID), иначе #1 получили бы оба.
+// Для звука нужна именно выигравшая строка: личный рейтинг не сравнивает прыжок со старыми PB того же игрока.
 // Параметры: Table, Mode, JumpType, IsBlockJump, Direction, Block, Block, Distance, Distance, ID, SteamID64, Table, Mode, JumpType, IsBlockJump,
-// Direction.
+// Direction, Table, Mode, JumpType, IsBlockJump, Direction.
 constexpr char sql_jumptop_rank[] = R"(
     SELECT
         (SELECT COUNT(DISTINCT j.SteamID64) FROM %s j
@@ -227,7 +228,11 @@ constexpr char sql_jumptop_rank[] = R"(
                 AND j.SteamID64 <> %llu AND )" JUMPTOP_NOT_BANNED_SQL R"(),
         (SELECT COUNT(DISTINCT j.SteamID64) FROM %s j
             WHERE j.Mode = %d AND j.JumpType = %d AND j.IsBlockJump = %d AND )" JUMPTOP_DIRECTION_SQL R"( = %d AND j.Removed = 0
-                AND )" JUMPTOP_NOT_BANNED_SQL R"()
+                AND )" JUMPTOP_NOT_BANNED_SQL R"(),
+        (SELECT j.ID FROM %s j
+            WHERE j.Mode = %d AND j.JumpType = %d AND j.IsBlockJump = %d AND )" JUMPTOP_DIRECTION_SQL R"( = %d AND j.Removed = 0
+                AND )" JUMPTOP_NOT_BANNED_SQL R"(
+            ORDER BY j.Block DESC, j.Distance DESC, j.ID ASC LIMIT 1)
 )";
 
 // Топ: лучшая строка каждого игрока (окно по игроку), без снятых и забаненных. MySQL 8 и
