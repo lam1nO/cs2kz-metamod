@@ -4,6 +4,7 @@
 #include "kz/hud/layout/menu.h"
 #include "entityhandle.h"
 #include "sdk/entity/cparticlesystem.h"
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -1271,6 +1272,17 @@ private:
 		bool listPopupDockL {};
 		bool editOpenHidden {true};
 		bool optSkins {}; // класс skins на opt_root — открыта вкладка «Скины»
+		bool trailEntryHidden {true};
+		bool trailEntryVisible {};
+		bool trailBackHidden {true};
+		bool trailPage {};
+		const char *trailDefault[KZ_MENU_ROWS] {};
+		bool trailWidthMin[KZ_MENU_ROWS] {};
+		bool trailWidthMax[KZ_MENU_ROWS] {};
+		bool trailPalette {};
+		bool trailColorResetDisabled {};
+		bool trailBeamDefault {};
+		bool trailLeadDefault {};
 
 		bool tabHidden[KZ_MENU_TABS] {};
 		bool tabOn[KZ_MENU_TABS] {};
@@ -1368,6 +1380,28 @@ private:
 	// Последнее записанное значение каждой переменной — как у апстрима: SetDialogVariableString
 	// метит сущность на пересылку, повторная запись того же значения того не стоит.
 	std::unordered_map<std::string, std::string> menuVars;
+	struct TrailMenuParent
+	{
+		CHandle<CBaseEntity> layout;
+		MenuAppliedState applied;
+		std::unordered_map<std::string, std::string> vars;
+	};
+	std::optional<TrailMenuParent> trailMenuParent;
+	struct TrailPaletteSelection
+	{
+		i64 packed {};
+		i32 preset {-1};
+		i32 hue {-1};
+		i32 tone {-1};
+	};
+	TrailPaletteSelection trailPaletteSelections[2] {};
+	CCSCustomHudLayout *SpawnMenuLayout(bool trail);
+	bool CanOpenTrailMenu() const;
+	void OpenTrailMenu();
+	void LeaveTrailMenu();
+	bool RotateTrailMenuLayout();
+	void RestoreTrailPalette(const KZOptItem &item);
+	bool HandleTrailPaletteClick(const char *id);
 
 	CCSCustomHudLayout *EnsureMenuLayout(bool &created);
 	// Пересоздать закрытую сущность меню, если её интерн-таблицы подошли к лимиту (см. menu.h).

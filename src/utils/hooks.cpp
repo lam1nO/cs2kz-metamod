@@ -793,7 +793,7 @@ static KHook::Return<void> BuildGameSessionManifestPost(IGameSystem *pThis, cons
 	}
 	// Particle-MHUD: ассеты в нашем аддоне GYMSTRIKE-KZ (не в айтеме cs2kz) — безусловно, как луч.
 	KZHUDService::PrecacheParticles(pResourceManifest);
-	pResourceManifest->AddResource("particles/ui/hud/ui_map_def_utility_trail.vpcf");
+	KZBeamService::PrecacheTrail(pResourceManifest);
 	// Наша частица луча !lead из аддона GYMSTRIKE-KZ и стоковая рядом: cyb_lead_particle
 	// переключает их живьём, а незарегистрированный в манифесте ассет у клиента не
 	// прекешируется и не нарисуется вовсе.

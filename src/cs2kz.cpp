@@ -33,6 +33,7 @@
 #include "kz/mappingapi/kz_mappingapi.h"
 #include "kz/global/kz_global.h"
 #include "kz/beam/kz_beam.h"
+#include "kz/lead/kz_lead.h"
 #include "kz/pistol/kz_pistol.h"
 #include "kz/weapon/kz_weapon.h"
 #include "kz/prac/kz_prac.h"
@@ -179,6 +180,7 @@ bool KZPlugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool
 	KZMenuChromeMenu_Register();
 	KZLanguageService::Init();
 	KZBeamService::Init();
+	KZLeadService::Init();
 	KZPistolService::Init();
 	KZWeaponService::Init();
 	KZ::misc::Init();

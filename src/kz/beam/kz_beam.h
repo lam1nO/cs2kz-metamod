@@ -2,6 +2,8 @@
 #include "kz/kz.h"
 #include "tier1/circularbuffer.h"
 
+class IEntityResourceManifest;
+
 class KZBeamService : public KZBaseService
 {
 public:
@@ -10,7 +12,9 @@ public:
 	static void Init();
 	virtual void Reset();
 	static void UpdateBeams();
+	static void PrecacheTrail(IEntityResourceManifest *manifest);
 	void Update();
+	void ClearTrail();
 	CEntityHandle playerBeam;
 	CEntityHandle playerBeamNew;
 	static inline const Vector defaultOffset {0.0f, 0.0f, 1.75f};
