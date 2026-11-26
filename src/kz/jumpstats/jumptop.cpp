@@ -35,6 +35,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 using namespace KZ::Database;
 using KZ::jumptop::rules::IsJumpId;
@@ -380,6 +381,7 @@ namespace
 		ReplayRetention retention;
 		i32 remaining;
 		bool accepted = false;
+		bool announcedWorldRecord = false;
 		std::optional<std::vector<char>> buffer {};
 
 		void Resolve(bool saved, bool top = false)
@@ -492,6 +494,8 @@ namespace
 				{
 					return;
 				}
+				// Distance and block results share this state for a single jump.
+				const bool playRecordSound = !std::exchange(qualification->announcedWorldRecord, true);
 				for (i32 i = 0; i <= MAXPLAYERS; i++)
 				{
 					KZPlayer *other = g_pKZPlayerManager->ToPlayer(i);
@@ -502,8 +506,11 @@ namespace
 					std::string label = JumpLabel(other->languageService->GetLanguage(), jumpType, isBlock, block, distance, direction);
 					other->languageService->PrintChat(true, false, "Jumptop - New World Record", name.c_str(), label.c_str(), mapName.c_str(),
 													  mode.c_str());
-					utils::PlaySoundToClient(other->GetPlayerSlot(), "kz.holyshit",
-											 other->optionService->GetPreferenceFloat("recordVolume", 1.0f));
+					if (playRecordSound)
+					{
+						utils::PlaySoundToClient(other->GetPlayerSlot(), "kz.holyshit",
+												 other->optionService->GetPreferenceFloat("recordVolume", 1.0f));
+					}
 				}
 			},
 			[steamID64, jumpType, qualification](std::string error, int failIndex)
