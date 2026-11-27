@@ -11,6 +11,7 @@
 #include "public/steam/isteamgameserver.h"
 #include "public/steam/isteamclient.h"
 #include "map_recovery_policy.h"
+#include "workshop_fallback.h"
 #include "utils/ctimer.h"
 
 #include <filesystem>
@@ -279,6 +280,7 @@ namespace
 // новая заявка заменяет старую. Обрывы связи со Steam на флоте — секунды, изредка ~2 мин.
 constexpr f64 kTickSeconds = 1.0;
 constexpr f64 kReissueSeconds = 20.0; // карта не встала за это время — команду повторяем
+constexpr f64 kFallbackSeconds = 120.0;
 constexpr f64 kGiveUpSeconds = 180.0; // покрывает обрыв связи со Steam до трёх минут
 constexpr f64 kStallSeconds = 60.0;   // идущая закачка без прироста байт дольше — сдаёмся
 constexpr f64 kRetryNoticeSeconds = 60.0;
@@ -297,17 +299,21 @@ struct MapChangeRequest
 	int issues = 0;
 	bool steamNoticeShown = false;
 	bool fromStartup = false;
+	std::string mapNameAtRequest;
 	u64 mapAtRequest = 0;  // workshop-карта сервера в момент заявки
 	u64 lastBytes = 0;     // прогресс закачки, которую ведёт Steam
 	f64 lastProgress = 0;  // когда байты в последний раз росли (или заявка создана)
 	f64 lastRetryNotice = 0;
+	f64 fallbackUntil = 0;
 };
 
 MapChangeRequest s_req;
+KZ::misc::customchangemap::WorkshopFallback s_workshopFallback;
 
 void StartRequest(PublishedFileId_t id, bool fromStartup)
 {
 	s_failNow = nullptr;
+	s_workshopFallback.Reset();
 	s_req = {};
 	s_req.active = true;
 	s_req.id = id;
@@ -315,6 +321,7 @@ void StartRequest(PublishedFileId_t id, bool fromStartup)
 	s_req.lastProgress = s_req.since;
 	s_req.fromStartup = fromStartup;
 	s_req.mapAtRequest = g_pKZUtils->GetCurrentMapWorkshopID();
+	s_req.mapNameAtRequest = g_pKZUtils->GetCurrentMapName().Get();
 }
 
 bool s_timerStarted = false;
@@ -369,7 +376,17 @@ void Finish(const char *outcome)
 	{
 		s_startMapRetryAt = Now() + 60.0;
 	}
+	s_workshopFallback.Reset();
 	s_req = {};
+}
+
+void FinishExhausted(const char *outcome)
+{
+	if (!s_req.fromStartup)
+	{
+		KZLanguageService::PrintChatAll(true, "Mcustom - Exhausted", std::to_string(s_req.id).c_str());
+	}
+	Finish(outcome);
 }
 
 // Стартовая карта идёт `+host_workshop_map` из командной строки — раньше, чем подняты хуки и
@@ -423,7 +440,8 @@ f64 MapChangeTick()
 		return kTickSeconds;
 	}
 	// Карту сменили мимо заявки (админ, другая команда) — не тащим сервер обратно.
-	if (current != 0 && current != s_req.mapAtRequest)
+	if (KZ::misc::customchangemap::MapRequestSuperseded(
+		s_req.mapAtRequest, s_req.mapNameAtRequest, current, g_pKZUtils->GetCurrentMapName().Get()))
 	{
 		Finish("superseded_external");
 		return kTickSeconds;
@@ -448,14 +466,58 @@ f64 MapChangeTick()
 		return kTickSeconds;
 	}
 	bool stalled = now - s_req.lastProgress > kStallSeconds;
-	if (now - s_req.since > kGiveUpSeconds && (!downloading || stalled))
+	if (s_workshopFallback.Active() && now >= s_req.fallbackUntil)
 	{
-		if (!s_req.fromStartup)
+		FinishExhausted("failed_workshop_fallback_timeout");
+		return kTickSeconds;
+	}
+	using FallbackResult = KZ::misc::customchangemap::WorkshopFallback::Result;
+	switch (s_workshopFallback.Check())
+	{
+		case FallbackResult::Pending:
+			return kTickSeconds;
+		case FallbackResult::Ready:
+			if (FindCachedItem(s_req.id, nullptr))
+			{
+				KZ_LOG_INFO(LogChannel::General, "[cyb] mapchange_workshop_fallback_ready id=%llu\n", s_req.id);
+				s_req.issues++;
+				s_req.lastIssue = now;
+				s_req.fallbackUntil = now + kReissueSeconds;
+				IssueHostWorkshopMap(s_req.id);
+				return kTickSeconds;
+			}
+			KZ_LOG_WARN(LogChannel::General, "[cyb] mapchange_workshop_fallback_failed id=%llu reason=vpk_missing\n", s_req.id);
+			FinishExhausted("failed_workshop_fallback");
+			return kTickSeconds;
+		case FallbackResult::Failed:
+			FinishExhausted("failed_workshop_fallback");
+			return kTickSeconds;
+		case FallbackResult::Unavailable:
+			if (FindCachedItem(s_req.id, nullptr))
+			{
+				FinishExhausted("failed_workshop_fallback_unconfirmed");
+				return kTickSeconds;
+			}
+			s_req.fallbackUntil = 0;
+			KZ_LOG_WARN(LogChannel::General, "[cyb] mapchange_workshop_fallback_failed id=%llu reason=worker_unavailable\n", s_req.id);
+			break;
+		case FallbackResult::Idle:
+			break;
+	}
+	if (!s_req.fromStartup && s_workshopFallback.ShouldRequest(now - s_req.lastProgress)
+		&& IsSharedCacheMount() && !FindCachedItem(s_req.id, nullptr))
+	{
+		if (s_workshopFallback.Request(s_req.id))
 		{
-			// ID, а не имя: игроку предлагают повторить `!mcustom <id>`.
-			KZLanguageService::PrintChatAll(true, "Mcustom - Exhausted", std::to_string(s_req.id).c_str());
+			s_req.fallbackUntil = now + kFallbackSeconds;
+			KZ_LOG_INFO(LogChannel::General, "[cyb] mapchange_workshop_fallback_requested id=%llu\n", s_req.id);
+			return kTickSeconds;
 		}
-		Finish(!SteamLoggedOn() ? "failed_steam_offline" : downloading ? "failed_download_stalled" : "failed");
+		KZ_LOG_WARN(LogChannel::General, "[cyb] mapchange_workshop_fallback_failed id=%llu reason=worker_unavailable\n", s_req.id);
+	}
+	if (now >= s_req.since + kGiveUpSeconds && now >= s_req.fallbackUntil && (!downloading || stalled))
+	{
+		FinishExhausted(!SteamLoggedOn() ? "failed_steam_offline" : downloading ? "failed_download_stalled" : "failed");
 		return kTickSeconds;
 	}
 	if (!SteamLoggedOn() && !s_hostedMaps.count(s_req.id))
@@ -501,7 +563,7 @@ void EnsureTimer()
 	}
 }
 
-// Сбой закачки сам по себе состояние заявки не меняет (повтор — по таймеру), но EResult нужен в логе.
+// Решение о фолбэке принимается в таймере заявки, за пределами колбэка Steam.
 static_function struct CustomMapDownloadHandler
 {
 	STEAM_GAMESERVER_CALLBACK_MANUAL(CustomMapDownloadHandler, OnDownloadResult, DownloadItemResult_t, m_CallbackDownloadItemResult);
@@ -512,6 +574,10 @@ void CustomMapDownloadHandler::OnDownloadResult(DownloadItemResult_t *pParam)
 	if (s_req.active && pParam->m_nPublishedFileId == s_req.id && pParam->m_eResult != k_EResultOK)
 	{
 		KZ_LOG_WARN(LogChannel::General, "[cyb] mapchange_download_failed id=%llu eresult=%d\n", s_req.id, pParam->m_eResult);
+		if (pParam->m_eResult == k_EResultNoConnection)
+		{
+			s_workshopFallback.NoConnection();
+		}
 		// Удалена или скрыта автором: ждать бессмысленно, говорим игрокам сразу (16.10: удалённая
 		// 3809766386 отвечала 15, затем 2 — и заявка висела бы 3 минуты).
 		// Только для карт вне кэша: vpk в кэше движок возьмёт через хук и без Steam.
@@ -599,6 +665,7 @@ void KZ::misc::customchangemap::OnSteamAPIActivated()
 
 void KZ::misc::customchangemap::Cleanup()
 {
+	s_workshopFallback.Reset();
 	s_downloadHandler.m_CallbackDownloadItemResult.Unregister();
 	if (s_ugc021Hooked)
 	{

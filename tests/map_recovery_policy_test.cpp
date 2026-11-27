@@ -1,8 +1,15 @@
 #include "../src/kz/misc/map_recovery_policy.h"
 #include <cassert>
 using KZ::misc::customchangemap::ShouldRecoverStartMap;
+using KZ::misc::customchangemap::MapRequestSuperseded;
 int main()
 {
+ assert(!MapRequestSuperseded(3844450818, "kz_old", 3844450818, "kz_old"));
+ assert(!MapRequestSuperseded(3844450818, "kz_old", 0, ""));
+ assert(!MapRequestSuperseded(3844450818, "kz_old", 0, "kz_old"));
+ assert(MapRequestSuperseded(3844450818, "kz_old", 0, "de_mirage"));
+ assert(MapRequestSuperseded(0, "de_dust2", 0, "de_mirage"));
+ assert(MapRequestSuperseded(3844450818, "kz_old", 3456225822ULL, "kz_new"));
  // Стартовая отсрочка, активный !mcustom и late load не должны запускать смену.
  assert(!ShouldRecoverStartMap(true, false, 0, 44, 45, 0));
  assert(!ShouldRecoverStartMap(true, true, 0, 300, 45, 0));
