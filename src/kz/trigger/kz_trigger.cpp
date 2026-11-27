@@ -258,7 +258,8 @@ void KZTriggerService::UpdateTriggerTouchList()
 
 void KZTriggerService::EndTouchAll()
 {
-	FOR_EACH_VEC(this->triggerTrackers, i)
+	// EndTouch удаляет текущий трекер, поэтому обходим список с конца.
+	FOR_EACH_VEC_BACK(this->triggerTrackers, i)
 	{
 		CEntityHandle handle = this->triggerTrackers[i].triggerHandle;
 		CBaseTrigger *trigger = dynamic_cast<CBaseTrigger *>(GameEntitySystem()->GetEntityInstance(handle));
@@ -272,7 +273,6 @@ void KZTriggerService::EndTouchAll()
 			}
 
 			this->triggerTrackers.Remove(i);
-			i--;
 			continue;
 		}
 		this->EndTouch(trigger);

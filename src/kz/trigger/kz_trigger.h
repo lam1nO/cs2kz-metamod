@@ -45,6 +45,7 @@ public:
 		// Whether OnMappingApiTriggerStartTouchPost was fired for this tracker.
 		// This is false when the player entered the trigger without the correct filter active.
 		bool mappingApiStartedTouch {};
+		bool filterPassedOnEntry {};
 
 		// Server time
 		f32 startTouchTime {};

@@ -51,7 +51,12 @@ bool KZTriggerService::OnTriggerEndTouchPre(CBaseTrigger *trigger, TriggerTouchT
 // Mapping API stuff.
 void KZTriggerService::OnTriggerStartTouchPost(CBaseTrigger *trigger, TriggerTouchTracker &tracker)
 {
-	if (!tracker.kzTrigger || !trigger->PassesTriggerFilters(this->player->GetPlayerPawn()))
+	if (!tracker.kzTrigger)
+	{
+		return;
+	}
+	tracker.filterPassedOnEntry = trigger->PassesTriggerFilters(this->player->GetPlayerPawn());
+	if (!tracker.filterPassedOnEntry)
 	{
 		return;
 	}
@@ -65,6 +70,14 @@ void KZTriggerService::OnTriggerTouchPost(CBaseTrigger *trigger, TriggerTouchTra
 	{
 		return;
 	}
+	// На 3-м и 4-м серфах Arid метка может появиться ещё внутри объёма телепорта.
+	if (!tracker.filterPassedOnEntry && tracker.kzTrigger->type == KZTRIGGER_TELEPORT
+		&& (tracker.kzTrigger->hammerId == 914 || tracker.kzTrigger->hammerId == 918)
+		&& KZ_STREQI(g_pKZUtils->GetCurrentMapName().Get(), "kz_slide_arid"))
+	{
+		return;
+	}
+
 	bool filterPasses = trigger->PassesTriggerFilters(this->player->GetPlayerPawn());
 	if (!filterPasses)
 	{
