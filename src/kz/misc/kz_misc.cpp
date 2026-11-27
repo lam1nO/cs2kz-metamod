@@ -687,6 +687,30 @@ static_function void SanitizeMsg(const char *input, char *output, u32 size)
 	output[x] = '\0';
 }
 
+namespace ChatMute
+{
+using Gate = int (*)(u64 steamId);
+static Gate gate = nullptr;
+
+static bool Blocks(u64 steamId)
+{
+	// Without CyberPresence, leave chat delivery to the original say path.
+	return !gate || (steamId != 0 && gate(steamId) != 0);
+}
+}
+
+#if defined(__linux__)
+extern "C" __attribute__((visibility("default"))) void cyb_kz_chat_mute_gate_v1(ChatMute::Gate gate)
+{
+	ChatMute::gate = gate;
+}
+#endif
+
+bool KZ::misc::ShouldOverridePlayerChat()
+{
+	return ChatMute::gate && KZOptionService::GetOptionInt("overridePlayerChat", true);
+}
+
 void KZ::misc::ProcessConCommand(ConCommandRef cmd, const CCommandContext &ctx, const CCommand &args)
 {
 	if (!GameEntitySystem())
@@ -740,6 +764,12 @@ void KZ::misc::ProcessConCommand(ConCommandRef cmd, const CCommandContext &ctx, 
 			// arg is too short, silent (/) command, or chat-trigger (!) command —
 			// не ре-броадкастим: silent/! -команды скрыты у всех. Само `say` доезжает
 			// до CSSharp (ProcessConCommand не суперсидит), так что !maps/!mcustom работают.
+			return;
+		}
+
+		// CyberPresence still handles the original say and sends the private echo.
+		if (ChatMute::Blocks(player->GetSteamId64()))
+		{
 			return;
 		}
 

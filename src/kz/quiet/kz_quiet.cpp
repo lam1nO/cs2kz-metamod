@@ -363,7 +363,7 @@ void KZ::quiet::OnPostEvent(INetworkMessageInternal *pEvent, const CNetMessage *
 		// синонимом UM_SayText2 — компилятор ловил дубль case). Апстрим сделал так же.
 		case UM_SayText:
 		{
-			if (!KZOptionService::GetOptionInt("overridePlayerChat", true))
+			if (!KZ::misc::ShouldOverridePlayerChat())
 			{
 				return;
 			}
@@ -420,7 +420,7 @@ void KZ::quiet::OnPostEvent(INetworkMessageInternal *pEvent, const CNetMessage *
 						msg->param1().c_str(), msg->param2().c_str(), unk.field_count(), unkBuf);
 				}
 			}
-			if (!KZOptionService::GetOptionInt("overridePlayerChat", true))
+			if (!KZ::misc::ShouldOverridePlayerChat())
 			{
 				return;
 			}

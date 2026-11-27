@@ -630,7 +630,7 @@ static KHook::Return<void> DispatchConCommandPre(ICvar *pThis, ConCommandRef cmd
 		return {KHook::Action::Supersede};
 	}
 	scmd::NormalizeChatTrigger(cmd, ctx, args);
-	if (KZOptionService::GetOptionInt("overridePlayerChat", true))
+	if (KZ::misc::ShouldOverridePlayerChat())
 	{
 		KZ::misc::ProcessConCommand(cmd, ctx, args);
 	}

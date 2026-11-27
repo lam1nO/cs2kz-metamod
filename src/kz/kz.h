@@ -304,6 +304,7 @@ namespace KZ
 		// Закрыть клиенту меню выбора команды (спуф entity_killed); без пешки — повтор до 3 с.
 		// delay > 0 — первая попытка через delay секунд.
 		void CloseTeamMenu(KZPlayer *player, f32 delay = 0.0f);
+		bool ShouldOverridePlayerChat();
 		void ProcessConCommand(ConCommandRef cmd, const CCommandContext &ctx, const CCommand &args);
 		bool CheckBlockedRadioCommands(const char *cmd);
 		void OnRoundStart();
