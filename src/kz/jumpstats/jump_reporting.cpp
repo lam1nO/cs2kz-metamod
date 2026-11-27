@@ -437,8 +437,13 @@ void KZJumpstatsService::AnnounceJump(Jump *jump)
 		{
 			continue;
 		}
+		const bool personal = player == jump->GetJumpPlayer() || player->specService->GetSpectatedPlayer() == jump->GetJumpPlayer();
+		if (jump->IsJumpstatsAlwaysOnly() && (!personal || player->IsCSTV() || !player->optionService->GetPreferenceBool("jsAlways", false)))
+		{
+			continue;
+		}
 		// If the player is the one who did the jump or is spectating the jumper, we show more details in chat.
-		if (player == jump->GetJumpPlayer() || player->specService->GetSpectatedPlayer() == jump->GetJumpPlayer())
+		if (personal)
 		{
 			if (isFailstat && !player->optionService->GetPreferenceBool("jsFailstats", true))
 			{

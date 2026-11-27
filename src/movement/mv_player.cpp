@@ -283,6 +283,7 @@ void MovementPlayer::RegisterTakeoff(bool jumped, bool fromLadder, Vector *overr
 		mv = &this->moveDataPost;
 	}
 	this->takeoffFromLadder = fromLadder;
+	this->takeoffJumpstatsAlwaysOnly = false;
 	this->takeoffOrigin = overrideOrigin ? *overrideOrigin : mv->m_vecAbsOrigin;
 	this->takeoffTime = g_pKZUtils->GetGlobals()->curtime - g_pKZUtils->GetGlobals()->frametime;
 	this->takeoffVelocity = mv->m_vecVelocity;

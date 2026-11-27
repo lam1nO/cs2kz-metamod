@@ -263,6 +263,7 @@ public:
 
 	bool hitHead {};
 	bool valid = true;
+	bool jumpstatsAlwaysOnly {};
 	bool ended {};
 	// cyber: после приземления был телепорт/noclip/base velocity/вода/зона без jumpstats —
 	// следующий прыжок не продолжает цепочку (BH/MBH/WJ/JB), как в GOKZ (там такие события
@@ -351,6 +352,11 @@ public:
 	bool IsValid()
 	{
 		return this->valid && this->jumpType >= JumpType_LongJump && this->jumpType <= JumpType_Fall;
+	}
+
+	bool IsJumpstatsAlwaysOnly() const
+	{
+		return this->jumpstatsAlwaysOnly;
 	}
 
 	bool AlreadyEnded()
@@ -443,7 +449,7 @@ public:
 
 	f32 GetTakeoffEdge()
 	{
-		return this->takeoffEdge;
+		return this->IsJumpstatsAlwaysOnly() ? -1.0f : this->takeoffEdge;
 	}
 
 	f32 GetBlock()

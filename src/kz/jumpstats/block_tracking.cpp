@@ -269,7 +269,7 @@ bool Jump::GetFailOrigin(f32 planeHeight, Vector &result, i32 poseOffset)
 
 void Jump::UpdateFailstat()
 {
-	if (this->jumpType == JumpType_FullInvalid)
+	if (this->IsJumpstatsAlwaysOnly() || this->jumpType == JumpType_FullInvalid)
 	{
 		return;
 	}

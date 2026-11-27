@@ -254,13 +254,7 @@ void KZClassicModeService::OnStopTouchGround()
 			const f32 gravity = KZ::mode::modeCvarRefs[MODECVAR_SV_GRAVITY]->GetFloat() * pawn->m_flActualGravityScale();
 			const f32 impulse = KZ::mode::modeCvarRefs[MODECVAR_SV_JUMP_IMPULSE]->GetFloat();
 			const bool duckInput = this->duckCommandInput.OccurredBy(moveData->m_flSubtickStartFraction);
-			const f32 verticalSpeed = KZ::ckz::StandardJumpVerticalSpeed(velocity.z, gravity, impulse, groundedDuck, duckInput);
-			if (verticalSpeed != velocity.z)
-			{
-				velocity.z = verticalSpeed;
-				this->player->SetVelocity(velocity);
-				this->player->takeoffVelocity.z = verticalSpeed;
-			}
+			this->player->takeoffJumpstatsAlwaysOnly = KZ::ckz::InvalidCrouchTakeoff(velocity.z, gravity, impulse, groundedDuck, duckInput);
 		}
 	}
 
