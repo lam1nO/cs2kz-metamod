@@ -145,8 +145,6 @@ void KZClassicModeService::Reset()
 	this->serverAngleChange = {};
 	this->lastConsumedAngleChange = {};
 	this->oldDuckPressed = {};
-	this->groundedDuck.Clear();
-	this->duckCommandInput = KZ::ckz::DuckCommandInput();
 	this->forcedUnduck = {};
 	this->postProcessMovementZSpeed = {};
 
@@ -230,33 +228,13 @@ const CVValue_t *KZClassicModeService::GetModeConVarValues()
 
 void KZClassicModeService::OnStopTouchGround()
 {
-	const CMoveData *moveData = this->player->currentMoveData;
-	const bool groundedDuck = this->groundedDuck.HeldPreviousTick(moveData->m_nTickCount);
-	this->groundedDuck.Clear();
-
 	if (this->player->GetMoveType() != MOVETYPE_WALK)
 	{
 		return;
 	}
 	Vector velocity;
 	this->player->GetVelocity(&velocity);
-	auto *pawn = this->player->GetPlayerPawn();
-	auto *movement = this->player->GetMoveServices();
-	if (this->player->jumped && !this->player->takeoffFromLadder && !this->player->possibleLadderHop
-		&& !KZ::style::HasNopre(this->player) && !movement->m_bDuckOverride() && pawn->m_flWaterLevel() <= 0.5f && !(pawn->m_fFlags() & FL_BASEVELOCITY)
-		&& ((pawn->m_fFlags() & FL_DUCKING) || movement->m_duckUntilOnGround() || movement->m_bDucking() || movement->m_bDucked()
-			|| movement->m_flDuckAmount() > 0.0f))
-	{
-		Vector baseVelocity;
-		this->player->GetBaseVelocity(&baseVelocity);
-		if (baseVelocity.LengthSqr() < 0.001f)
-		{
-			const f32 gravity = KZ::mode::modeCvarRefs[MODECVAR_SV_GRAVITY]->GetFloat() * pawn->m_flActualGravityScale();
-			const f32 impulse = KZ::mode::modeCvarRefs[MODECVAR_SV_JUMP_IMPULSE]->GetFloat();
-			const bool duckInput = this->duckCommandInput.OccurredBy(moveData->m_flSubtickStartFraction);
-			this->player->takeoffJumpstatsAlwaysOnly = KZ::ckz::InvalidCrouchTakeoff(velocity.z, gravity, impulse, groundedDuck, duckInput);
-		}
-	}
+	f32 speed = velocity.Length2D();
 
 	f32 timeOnGround = this->player->takeoffTime - this->player->landingTime;
 	// Perf
@@ -302,14 +280,8 @@ void KZClassicModeService::OnStopTouchGround()
 	}
 }
 
-void KZClassicModeService::OnChangeMoveType(MoveType_t)
-{
-	this->groundedDuck.Clear();
-}
-
 void KZClassicModeService::OnStartTouchGround()
 {
-	this->groundedDuck.Clear();
 	// Последний воздушный шаг мог задеть низ рампы — на такеофф следующего прыжка это не тянем.
 	this->touchedSlopeLastMove = false;
 	this->SlopeFix();
@@ -466,9 +438,6 @@ void KZClassicModeService::ClearFrictionSplit()
 
 void KZClassicModeService::OnSetupMove(PlayerCommand *pc)
 {
-	// Include wheel pulses that have already been released by the end of the command.
-	this->duckCommandInput = KZ::ckz::DuckCommandInput(this->player->IsButtonPressed(IN_DUCK, true)
-													 || (pc->base().buttons_pb().buttonstate1() & IN_DUCK));
 	for (i32 j = 0; j < pc->mutable_base()->subtick_moves_size(); j++)
 	{
 		CSubtickMoveStep *subtickMove = pc->mutable_base()->mutable_subtick_moves(j);
@@ -476,12 +445,8 @@ void KZClassicModeService::OnSetupMove(PlayerCommand *pc)
 		{
 			continue;
 		}
-		const float when = subtickMove->when() >= 0.5f ? 0.5f : 0.0f;
-		subtickMove->set_when(when);
-		if (subtickMove->button() == IN_DUCK)
-		{
-			this->duckCommandInput.AddTransition(when, subtickMove->pressed());
-		}
+		float when = subtickMove->when();
+		subtickMove->set_when(when >= 0.5 ? 0.5 : 0);
 	}
 
 	// Не интерполируем серверный поворот ни до подтверждения клиентом, ни в команде подтверждения.
@@ -519,12 +484,6 @@ void KZClassicModeService::OnPlayerMove()
 
 void KZClassicModeService::OnProcessMovementPost()
 {
-	if (g_pKZUtils->GetGlobals()->frametime > 0.0f)
-	{
-		const bool onGround = this->player->GetMoveType() == MOVETYPE_WALK && (this->player->GetPlayerPawn()->m_fFlags() & FL_ONGROUND);
-		this->groundedDuck.FinishTick(this->player->currentMoveData->m_nTickCount, onGround, this->player->IsButtonPressed(IN_DUCK, true));
-	}
-
 	this->player->UpdateTriggerTouchList();
 	this->RestoreInterpolatedViewAngles();
 	this->oldDuckPressed = this->forcedUnduck || this->player->IsButtonPressed(IN_DUCK, true);
@@ -1295,7 +1254,6 @@ void KZClassicModeService::OnTeleport(const Vector *newPosition, const QAngle *n
 	if (newPosition || newVelocity)
 	{
 		this->touchedSlopeLastMove = false;
-		this->groundedDuck.Clear();
 	}
 	if (!this->player->processingMovement)
 	{
