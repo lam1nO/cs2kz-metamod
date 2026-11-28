@@ -17,7 +17,7 @@ CConVar<float>
 							 2.0f);
 
 CConVar<bool> kz_weapon_commands("kz_weapon_commands", FCVAR_NONE,
-								 "Enable weapon chat commands (!ak, !m4, !he, ...). Grenades can be held but not thrown.", true);
+								 "Enable weapon chat commands (!ak, !m4, ...) and block grenade throws.", true);
 
 // Каталог команд. weapon_taser сюда сознательно НЕ входит: это единственное, чем можно
 // достать другого игрока, а вся затея — про реквизит для себя, а не про бой.
@@ -64,13 +64,6 @@ static_global const WeaponInfo_t s_weapons[] = {
 	{ "fiveseven", "weapon_fiveseven", WeaponSlotKind::Pistol},
 	{ "cz", "weapon_cz75a", WeaponSlotKind::Pistol},
 	{ "elite", "weapon_elite", WeaponSlotKind::Pistol},
-	// гранаты — держать можно, кинуть нельзя
-	{ "he", "weapon_hegrenade", WeaponSlotKind::Grenade},
-	{ "flash", "weapon_flashbang", WeaponSlotKind::Grenade},
-	{ "smoke", "weapon_smokegrenade", WeaponSlotKind::Grenade},
-	{ "molo", "weapon_molotov", WeaponSlotKind::Grenade},
-	{ "inc", "weapon_incgrenade", WeaponSlotKind::Grenade},
-	{ "decoy", "weapon_decoy", WeaponSlotKind::Grenade},
 };
 // clang-format on
 
@@ -291,8 +284,22 @@ const WeaponInfo_t *KZWeaponService::FindByClassName(const char *className)
 
 bool KZWeaponService::IsGrenadeClassName(const char *className)
 {
-	const WeaponInfo_t *info = KZWeaponService::FindByClassName(className);
-	return info && info->slot == WeaponSlotKind::Grenade;
+	// Карта может выдать гранату. Запрет броска действует отдельно от выдачи по командам.
+	if (!className)
+	{
+		return false;
+	}
+	static constexpr const char *grenades[] = {
+		"weapon_hegrenade", "weapon_flashbang", "weapon_smokegrenade", "weapon_molotov", "weapon_incgrenade", "weapon_decoy",
+	};
+	for (const char *grenade : grenades)
+	{
+		if (KZ_STREQI(grenade, className))
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 GiveResult KZWeaponService::GiveWeapon(const WeaponInfo_t &info)
@@ -315,10 +322,7 @@ GiveResult KZWeaponService::GiveWeapon(const WeaponInfo_t &info)
 	// m_hMyWeapons дешёвый и не в горячем пути.
 	this->SyncFromHeld();
 
-	// Дедуп по ЗАПРОШЕННОМУ имени и ДО выдачи. По запрошенному — потому что движок
-	// подменяет предмет по команде (CT: weapon_molotov → weapon_incgrenade), и сверка по
-	// фактическому промахивалась бы каждый раз. До выдачи — потому что GiveNamedItem уже
-	// имеющегося оружия плодит вторую сущность в мире, и список от этого не спасает.
+	// Сверяем запрошенный classname до выдачи, чтобы не создавать вторую сущность.
 	FOR_EACH_VEC(this->givenWeapons, i)
 	{
 		if (KZ_STREQI(this->givenWeapons[i].requested.Get(), info.className))
@@ -383,8 +387,7 @@ GiveResult KZWeaponService::GiveWeapon(const WeaponInfo_t &info)
 
 GiveResult KZWeaponService::ClearSlot(WeaponSlotKind slot)
 {
-	// Гранаты не трогаем: слотов под них несколько, he+flash+smoke держатся вместе.
-	if (slot == WeaponSlotKind::Grenade || !this->player->IsAlive() || !this->player->IsInGame())
+	if (!this->player->IsAlive() || !this->player->IsInGame())
 	{
 		return GiveResult::Ok;
 	}
@@ -608,11 +611,7 @@ void KZWeaponService::RegiveGiven()
 			this->givenWeapons.Remove(i);
 			continue;
 		}
-		// ОБЯЗАТЕЛЬНО обновлять: движок подменяет предмет по КОМАНДЕ игрока, а команда с
-		// прошлой выдачи могла смениться (за T просили weapon_molotov и получали его же,
-		// после jointeam CT тот же запрос отдаёт weapon_incgrenade). Не обновив actual,
-		// мы бы разошлись с реальностью: ближайший SyncFromHeld выбросил бы запись, дедуп
-		// перестал бы её узнавать, а следующий страйп потерял бы гранату молча.
+		// После перевыдачи обновляем фактический classname и хэндл для SyncFromHeld.
 		CBaseModelEntity *entity = weapon;
 		this->givenWeapons[i].actual = entity->GetClassname();
 		this->givenWeapons[i].entity = weapon;
@@ -783,14 +782,7 @@ static_function bool GiveByCommand(CCSPlayerController *controller, const char *
 			player->languageService->PrintChat(true, false, "Weapon Give Failed");
 			return true;
 	}
-	if (info->slot == WeaponSlotKind::Grenade)
-	{
-		player->languageService->PrintChat(true, false, "Weapon Given Grenade");
-	}
-	else
-	{
-		player->languageService->PrintChat(true, false, "Weapon Given");
-	}
+	player->languageService->PrintChat(true, false, "Weapon Given");
 	return true;
 }
 
@@ -891,7 +883,7 @@ SCMD(kz_knife, SCFL_MISC | SCFL_PLAYER | SCFL_HELP)
 }
 
 // Список доступного оружия. Единственная видимая в !help команда этого сервиса.
-// Печатаем в КОНСОЛЬ: 42 строки в чат — это спам, который вытеснит всё остальное.
+// Печатаем в консоль, чтобы длинный список не вытеснял сообщения из чата.
 SCMD(kz_guns, SCFL_MISC | SCFL_PLAYER | SCFL_HELP)
 {
 	KZPlayer *player = g_pKZPlayerManager->ToPlayer(controller);
@@ -901,25 +893,16 @@ SCMD(kz_guns, SCFL_MISC | SCFL_PLAYER | SCFL_HELP)
 	}
 	player->languageService->PrintChat(true, false, "Weapon List Chat");
 	player->PrintConsole(false, false, "");
-	std::string note = player->languageService->PrepareMessage("Weapon List Grenade Note");
-	for (u32 i = 0; i < KZ_ARRAYSIZE(s_weapons); i++)
+	for (const auto &weapon : s_weapons)
 	{
-		if (s_weapons[i].slot == WeaponSlotKind::Grenade)
-		{
-			player->PrintConsole(false, false, "!%s  %s", s_weapons[i].cmd, note.c_str());
-		}
-		else
-		{
-			player->PrintConsole(false, false, "!%s", s_weapons[i].cmd);
-		}
+		player->PrintConsole(false, false, "!%s", weapon.cmd);
 	}
 	return true;
 }
 
 // Одна команда на каждую строку каталога. Имя callback'а обязано совпадать с именем
 // команды (макрос SCMD склеивает name##_callback), поэтому пишем их списком, а не циклом.
-// SCFL_HIDDEN (= 0, без категории): 42 команды в категории Misc распухли бы вчетверо
-// таблицу !help. Обнаруживаются через !guns ниже — он в !help есть.
+// SCFL_HIDDEN оставляет команды за пределами !help. Список доступен через !guns.
 #define KZ_WEAPON_CMD(shortName) \
 	SCMD(kz_##shortName, SCFL_HIDDEN) \
 	{ \
@@ -962,11 +945,5 @@ KZ_WEAPON_CMD(tec9)
 KZ_WEAPON_CMD(fiveseven)
 KZ_WEAPON_CMD(cz)
 KZ_WEAPON_CMD(elite)
-KZ_WEAPON_CMD(he)
-KZ_WEAPON_CMD(flash)
-KZ_WEAPON_CMD(smoke)
-KZ_WEAPON_CMD(molo)
-KZ_WEAPON_CMD(inc)
-KZ_WEAPON_CMD(decoy)
 
 #undef KZ_WEAPON_CMD

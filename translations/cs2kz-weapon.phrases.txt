@@ -5,11 +5,6 @@
 		"en"		"{grey}Weapon given. Press {default}G{grey} to drop it."
 		"ru"		"{grey}Оружие выдано. {default}G{grey} — выбросить."
 	}
-	"Weapon Given Grenade"
-	{
-		"en"		"{grey}Grenade given. You cannot throw it — press {default}G{grey} to drop it."
-		"ru"		"{grey}Граната выдана. Бросить её нельзя, {default}G{grey} — выбросить."
-	}
 	"Weapon List Chat"
 	{
 		"en"		"{grey}Weapon list printed to your console ({default}~{grey})."
@@ -19,11 +14,6 @@
 	{
 		"en"		"{grey}You are already carrying the maximum number of requested weapons. Drop one with {default}G{grey}."
 		"ru"		"{grey}Больше выданного оружия нести нельзя. Выбрось лишнее на {default}G{grey}."
-	}
-	"Weapon List Grenade Note"
-	{
-		"en"		"(grenade: can be held, cannot be thrown)"
-		"ru"		"(граната: держать можно, кинуть нельзя)"
 	}
 	"Command Description - kz_guns"
 	{
