@@ -392,8 +392,7 @@ void Jump::Init()
 	this->jumpType = this->player->jumpstatsService->DetermineJumpType();
 	this->originalJumpType = this->jumpType;
 
-	this->jumpstatsAlwaysOnly = this->player->takeoffJumpstatsAlwaysOnly;
-	this->valid = !this->IsJumpstatsAlwaysOnly() && KZ::style::CanRankJumps(this->GetJumpPlayer());
+	this->valid = KZ::style::CanRankJumps(this->GetJumpPlayer());
 
 	// cyber: точка отрыва с лестницы — lastValidLadderOrigin из хука LadderMove. Если лестница не была
 	// пройдена этим хуком (movetype LADDER выставлен в обход, сразу после спавна/телепорта), там (0,0,0)
@@ -758,10 +757,6 @@ void Jump::End()
 	{
 		this->CalcAlwaysEdge();
 	}
-	if (this->IsJumpstatsAlwaysOnly() && this->jumpType != JumpType_FullInvalid)
-	{
-		this->jumpType = JumpType_Invalid;
-	}
 	this->serverTick = g_pKZUtils->GetServerGlobals()->tickcount;
 	this->airtime = this->player->landingTimeActual - this->player->takeoffTime;
 }
@@ -828,10 +823,6 @@ f32 Jump::GetDistance(bool useDistbugFix, bool disableAddDist, i32 floorLevel)
 
 JumpType Jump::GetReportJumpType()
 {
-	if (this->IsJumpstatsAlwaysOnly())
-	{
-		return JumpType_Invalid;
-	}
 	if (this->IsFailstat())
 	{
 		return this->originalJumpType;
@@ -1158,16 +1149,13 @@ void KZJumpstatsService::EndJump()
 	if (!this->player->pracService->IsInPrac())
 	{
 		KZJumpstatsService::AnnounceJump(jump);
-		if (!jump->IsJumpstatsAlwaysOnly())
-		{
-			this->player->recordingService->OnJumpFinish(jump);
-		}
+		this->player->recordingService->OnJumpFinish(jump);
 	}
 	KZ::analytics::OnJumpFinish(jump);
 	this->player->anticheatService->OnJumpFinish(jump);
 	// Джамптоп — после записи прыжка (нужен UUID этого прыжка, lastJumpUUID) и после античита:
 	// детектор может забанить именно за этот прыжок, и тогда он в топ не идёт (isBanned).
-	if (!jump->IsJumpstatsAlwaysOnly() && !this->player->pracService->IsInPrac())
+	if (!this->player->pracService->IsInPrac())
 	{
 		KZ::jumptop::OnJumpFinish(this->player, jump);
 	}
