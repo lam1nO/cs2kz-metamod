@@ -238,6 +238,16 @@ bool KZTriggerService::TouchTeleportTrigger(TriggerTouchTracker tracker)
 	// Prevent the player from being teleported into the air for one tick if they were on the ground before teleporting.
 	CEntityHandle groundEntity = this->player->GetPlayerPawn()->m_hGroundEntity();
 	bool restoreGround = this->player->GetPlayerPawn()->m_fFlags & FL_ONGROUND && groundEntity.IsValid();
+	if (!isBhopTrigger && LoggingSystem_IsChannelEnabled(GetServiceChannel(LogChannel::Trigger), LS_DETAILED))
+	{
+		Vector playerOrigin;
+		this->player->GetOrigin(&playerOrigin);
+		KZ_LOG_DEBUG(LogChannel::Trigger,
+					 "mapping_api_teleport slot=%d hammer_id=%d entry_filter=%d destination=%s from=%.2f,%.2f,%.2f to=%.2f,%.2f,%.2f\n",
+					 this->player->GetPlayerSlot().Get(), tracker.kzTrigger->hammerId, tracker.filterPassedOnEntry,
+					 tracker.kzTrigger->teleport.destination, playerOrigin.x, playerOrigin.y, playerOrigin.z, finalOrigin.x, finalOrigin.y,
+					 finalOrigin.z);
+	}
 	this->player->Teleport(&finalOrigin, NULL, NULL);
 	if (restoreGround)
 	{
