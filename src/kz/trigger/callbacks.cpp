@@ -49,6 +49,26 @@ bool KZTriggerService::OnTriggerEndTouchPre(CBaseTrigger *trigger, TriggerTouchT
 }
 
 // Mapping API stuff.
+static bool RequiresTeleportFilterOnEntry(const KzTrigger &trigger)
+{
+	if (trigger.type != KZTRIGGER_TELEPORT)
+	{
+		return false;
+	}
+
+	// A nearby trigger can set the anti-resurf context while the player is still inside these teleports.
+	const auto mapName = g_pKZUtils->GetCurrentMapName();
+	if (KZ_STREQI(mapName.Get(), "kz_slide_arid"))
+	{
+		return trigger.hammerId == 903 || trigger.hammerId == 914 || trigger.hammerId == 918;
+	}
+	if (KZ_STREQI(mapName.Get(), "kz_monstrosity"))
+	{
+		return trigger.hammerId == 632 || trigger.hammerId == 638 || trigger.hammerId == 654 || trigger.hammerId == 662;
+	}
+	return false;
+}
+
 void KZTriggerService::OnTriggerStartTouchPost(CBaseTrigger *trigger, TriggerTouchTracker &tracker)
 {
 	if (!tracker.kzTrigger)
@@ -70,10 +90,7 @@ void KZTriggerService::OnTriggerTouchPost(CBaseTrigger *trigger, TriggerTouchTra
 	{
 		return;
 	}
-	// На 3-м и 4-м серфах Arid метка может появиться ещё внутри объёма телепорта.
-	if (!tracker.filterPassedOnEntry && tracker.kzTrigger->type == KZTRIGGER_TELEPORT
-		&& (tracker.kzTrigger->hammerId == 914 || tracker.kzTrigger->hammerId == 918)
-		&& KZ_STREQI(g_pKZUtils->GetCurrentMapName().Get(), "kz_slide_arid"))
+	if (!tracker.filterPassedOnEntry && RequiresTeleportFilterOnEntry(*tracker.kzTrigger))
 	{
 		return;
 	}
