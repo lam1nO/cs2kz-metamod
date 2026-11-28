@@ -1,6 +1,4 @@
 #pragma once
-
-#include "ckz_crouch_height.h"
 #include "version_gen.h"
 
 #include "kz_mode.h"
@@ -154,8 +152,6 @@ class KZClassicModeService : public KZModeService
 	bool serverAngleChange {};
 	u32 lastConsumedAngleChange {};
 	bool oldDuckPressed {};
-	KZ::ckz::GroundedDuckHistory groundedDuck;
-	KZ::ckz::DuckCommandInput duckCommandInput;
 	bool oldJumpPressed {};
 	bool forcedUnduck {};
 	f32 postProcessMovementZSpeed {};
@@ -218,7 +214,6 @@ public:
 	virtual void OnWaterMovePost() override;
 	virtual void OnStartTouchGround() override;
 	virtual void OnStopTouchGround() override;
-	virtual void OnChangeMoveType(MoveType_t oldMoveType) override;
 	virtual void OnTryPlayerMove(Vector *pFirstDest, trace_t *pFirstTrace, bool *bIsSurfing) override;
 	virtual void OnTryPlayerMovePost(Vector *pFirstDest, trace_t *pFirstTrace, bool *bIsSurfing) override;
 	virtual void OnTeleport(const Vector *newPosition, const QAngle *newAngles, const Vector *newVelocity) override;
